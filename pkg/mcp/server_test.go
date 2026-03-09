@@ -313,7 +313,7 @@ func TestAuditLogging(t *testing.T) {
 	callTool(t, s, "query_self", map[string]any{})
 
 	// Check that audit events were recorded (agent.acted with mcp.tool_call prefix).
-	page, err := deps.Store.ByType(types.MustEventType("agent.acted"), 10, types.None[types.Cursor]())
+	page, err := deps.Store.ByType(event.EventTypeAgentActed, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}

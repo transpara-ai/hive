@@ -140,8 +140,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check agent.acted events (spawn_requested).
-	actedType := types.MustEventType("agent.acted")
-	page, err := spawner.store.ByType(actedType, 10, types.None[types.Cursor]())
+	page, err := spawner.store.ByType(event.EventTypeAgentActed, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +157,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check authority.requested event.
-	authReqType := types.MustEventType("authority.requested")
-	authReqPage, err := spawner.store.ByType(authReqType, 10, types.None[types.Cursor]())
+	authReqPage, err := spawner.store.ByType(event.EventTypeAuthorityRequested, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +166,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check authority.resolved event.
-	authResType := types.MustEventType("authority.resolved")
-	authResPage, err := spawner.store.ByType(authResType, 10, types.None[types.Cursor]())
+	authResPage, err := spawner.store.ByType(event.EventTypeAuthorityResolved, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +175,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check agent.identity.created event.
-	identityType := types.MustEventType("agent.identity.created")
-	identityPage, err := spawner.store.ByType(identityType, 10, types.None[types.Cursor]())
+	identityPage, err := spawner.store.ByType(event.EventTypeAgentIdentityCreated, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +184,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check agent.lifespan.started event.
-	lifespanType := types.MustEventType("agent.lifespan.started")
-	lifespanPage, err := spawner.store.ByType(lifespanType, 10, types.None[types.Cursor]())
+	lifespanPage, err := spawner.store.ByType(event.EventTypeAgentLifespanStarted, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +193,7 @@ func TestSpawnEmitsEvents(t *testing.T) {
 	}
 
 	// Check agent.role.assigned event.
-	roleType := types.MustEventType("agent.role.assigned")
-	rolePage, err := spawner.store.ByType(roleType, 10, types.None[types.Cursor]())
+	rolePage, err := spawner.store.ByType(event.EventTypeAgentRoleAssigned, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}

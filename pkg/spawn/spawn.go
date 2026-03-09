@@ -203,7 +203,7 @@ func (s *Spawner) emitSpawnRequested(req SpawnRequest) (types.EventID, error) {
 		Action:  "spawn_requested",
 		Target:  fmt.Sprintf("%s as %s: %s", req.Name, req.Role, req.Justification),
 	}
-	ev, err := s.appendEvent("agent.acted", req.RequestedBy, content)
+	ev, err := s.appendEvent(event.EventTypeAgentActed, req.RequestedBy, content)
 	if err != nil {
 		return types.EventID{}, err
 	}
@@ -219,7 +219,7 @@ func (s *Spawner) emitAuthorityRequested(causeID types.EventID, req SpawnRequest
 		Justification: req.Justification,
 		Causes:        types.MustNonEmpty([]types.EventID{causeID}),
 	}
-	ev, err := s.appendEventAfter("authority.requested", req.RequestedBy, content, causeID)
+	ev, err := s.appendEventAfter(event.EventTypeAuthorityRequested, req.RequestedBy, content, causeID)
 	if err != nil {
 		return types.EventID{}, err
 	}
@@ -238,7 +238,7 @@ func (s *Spawner) emitAuthorityResolved(reqEventID types.EventID, res authority.
 		Resolver:  res.Resolver,
 		Reason:    reason,
 	}
-	ev, err := s.appendEventAfter("authority.resolved", s.humanID, content, reqEventID)
+	ev, err := s.appendEventAfter(event.EventTypeAuthorityResolved, s.humanID, content, reqEventID)
 	if err != nil {
 		return types.EventID{}, err
 	}
@@ -246,14 +246,14 @@ func (s *Spawner) emitAuthorityResolved(reqEventID types.EventID, res authority.
 }
 
 // emitSpawnDenied records that a spawn was denied, causally linked to the
-// authority resolution event (fix 3: explicit causal chain, not store head).
+// authority resolution event (explicit causal chain, not store head).
 func (s *Spawner) emitSpawnDenied(causeID types.EventID, reason string) error {
 	content := event.AgentActedContent{
 		AgentID: s.humanID,
 		Action:  "spawn_denied",
 		Target:  reason,
 	}
-	_, err := s.appendEventAfter("agent.acted", s.humanID, content, causeID)
+	_, err := s.appendEventAfter(event.EventTypeAgentActed, s.humanID, content, causeID)
 	return err
 }
 
@@ -265,7 +265,7 @@ func (s *Spawner) emitLifecycleEvents(actorID types.ActorID, pk types.PublicKey,
 		PublicKey: pk,
 		AgentType: string(event.ActorTypeAI),
 	}
-	identityEv, err := s.appendEventAfter("agent.identity.created", s.humanID, identityContent, causeID)
+	identityEv, err := s.appendEventAfter(event.EventTypeAgentIdentityCreated, s.humanID, identityContent, causeID)
 	if err != nil {
 		return fmt.Errorf("identity created event: %w", err)
 	}
@@ -275,7 +275,7 @@ func (s *Spawner) emitLifecycleEvents(actorID types.ActorID, pk types.PublicKey,
 		AgentID: actorID,
 		Started: types.Now(),
 	}
-	lifespanEv, err := s.appendEventAfter("agent.lifespan.started", actorID, lifespanContent, identityEv.ID())
+	lifespanEv, err := s.appendEventAfter(event.EventTypeAgentLifespanStarted, actorID, lifespanContent, identityEv.ID())
 	if err != nil {
 		return fmt.Errorf("lifespan started event: %w", err)
 	}
@@ -285,7 +285,7 @@ func (s *Spawner) emitLifecycleEvents(actorID types.ActorID, pk types.PublicKey,
 		AgentID: actorID,
 		Role:    string(req.Role),
 	}
-	_, err = s.appendEventAfter("agent.role.assigned", actorID, roleContent, lifespanEv.ID())
+	_, err = s.appendEventAfter(event.EventTypeAgentRoleAssigned, actorID, roleContent, lifespanEv.ID())
 	if err != nil {
 		return fmt.Errorf("role assigned event: %w", err)
 	}
@@ -294,7 +294,7 @@ func (s *Spawner) emitLifecycleEvents(actorID types.ActorID, pk types.PublicKey,
 }
 
 // appendEvent appends an event caused by the current head.
-func (s *Spawner) appendEvent(eventType string, source types.ActorID, content event.EventContent) (event.Event, error) {
+func (s *Spawner) appendEvent(et types.EventType, source types.ActorID, content event.EventContent) (event.Event, error) {
 	head, err := s.store.Head()
 	if err != nil {
 		return event.Event{}, fmt.Errorf("store head: %w", err)
@@ -302,15 +302,11 @@ func (s *Spawner) appendEvent(eventType string, source types.ActorID, content ev
 	if !head.IsSome() {
 		return event.Event{}, fmt.Errorf("graph not bootstrapped")
 	}
-	return s.appendEventAfter(eventType, source, content, head.Unwrap().ID())
+	return s.appendEventAfter(et, source, content, head.Unwrap().ID())
 }
 
 // appendEventAfter appends an event caused by a specific event.
-func (s *Spawner) appendEventAfter(eventType string, source types.ActorID, content event.EventContent, cause types.EventID) (event.Event, error) {
-	et, err := types.NewEventType(eventType)
-	if err != nil {
-		return event.Event{}, fmt.Errorf("event type %q: %w", eventType, err)
-	}
+func (s *Spawner) appendEventAfter(et types.EventType, source types.ActorID, content event.EventContent, cause types.EventID) (event.Event, error) {
 	ev, err := s.factory.Create(et, source, content, []types.EventID{cause}, s.convID, s.store, s.signer)
 	if err != nil {
 		return event.Event{}, fmt.Errorf("create event: %w", err)
