@@ -27,8 +27,12 @@ go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive
 
 - [Vision](docs/VISION.md) — where this is going
 - [Agent Rights](docs/AGENT-RIGHTS.md) — how agents are treated, protected, and governed
+- [Trust Dynamics](docs/TRUST.md) — concrete trust mechanics (numbers, rates, formulas)
 - [Architecture](docs/ARCHITECTURE.md) — how it's built
+- [Event Types](docs/EVENT-TYPES.md) — 92 event types, schemas, emitters, consumers
 - [Agent Tools](docs/AGENT-TOOLS.md) — MCP server and agentic loop spec
+- [Agent Dynamics](docs/AGENT-DYNAMICS.md) — inter-agent relations, learning, collaboration
+- [Operator Guide](docs/OPERATOR.md) — human operator day-to-day reference
 - [Roadmap](docs/ROADMAP.md) — what's done and what's next
 - [Audit](docs/AUDIT.md) — derivation-method doc audit and gap analysis
 

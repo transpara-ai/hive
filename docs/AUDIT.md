@@ -11,15 +11,19 @@ Derivation method applied to the hive documentation itself. Last run: 2026-03-09
 
 ## Current Documents
 
-| Doc | Purpose | Lines | Status |
-|-----|---------|-------|--------|
-| CLAUDE.md | Agent context (read at every prompt) | 198 | Solid |
-| README.md | Entry point for humans | 37 | Adequate |
-| VISION.md | Why the hive exists | 155 | Solid |
-| ARCHITECTURE.md | How it's built | 136 | Solid |
-| ROADMAP.md | What's done, what's next | 241 | Solid |
-| AGENT-RIGHTS.md | Rights, invariants, governance | 175 | Solid |
-| AGENT-TOOLS.md | MCP server, agentic loop | 206 | Solid |
+| Doc | Purpose | Status |
+|-----|---------|--------|
+| CLAUDE.md | Agent context (read at every prompt) | Solid |
+| README.md | Entry point for humans | Solid |
+| VISION.md | Why the hive exists | Solid |
+| ARCHITECTURE.md | How it's built | Solid |
+| ROADMAP.md | What's done, what's next | Solid |
+| AGENT-RIGHTS.md | Rights, invariants, governance | Solid |
+| AGENT-TOOLS.md | MCP server, agentic loop | Solid |
+| EVENT-TYPES.md | 92 event types, schemas, contracts | Solid |
+| TRUST.md | Concrete trust mechanics | Solid |
+| OPERATOR.md | Human operator guide | Solid |
+| AGENT-DYNAMICS.md | Inter-agent relations, learning, growth | Solid |
 
 ## Gaps Found
 
@@ -95,11 +99,15 @@ Unintentional redundancy:
 - Revenue model appears in VISION.md (section), ROADMAP.md (section), and CLAUDE.md (inline). All slightly different wording but consistent content. Could consolidate if it drifts, but acceptable for now.
 - Resource transparency described in both VISION.md and ROADMAP.md gap #11. VISION has the "why", ROADMAP has the "what/where". Correct separation.
 
-## Next Actions
+## Resolution
 
-1. **Now:** Add event type catalog note to ROADMAP.md Tier 1 (blocking for MCP)
-2. **Now:** Add product derivation pattern note to ROADMAP.md Tier 5
-3. **Tier 1:** Write EVENT-TYPES.md when building MCP server
-4. **Tier 2:** Write TRUST.md with concrete mechanics
-5. **Tier 2:** Write OPERATOR.md for human operators
-6. **Tier 2:** Expand inter-agent dynamics in agentic loop spec
+All 6 gaps filled (2026-03-09):
+
+1. ~~Event type catalog~~ → **EVENT-TYPES.md** (92 types across 4 domains, schemas, emitters, consumers)
+2. ~~Trust dynamics~~ → **TRUST.md** (accumulation rates, decay formula, confidence, authority transitions, recovery mechanics)
+3. ~~Human operator guide~~ → **OPERATOR.md** (day-to-day operation, approval patterns, escalation hierarchy, trust phases)
+4. ~~Inter-agent dynamics~~ → **AGENT-DYNAMICS.md** (delegation, consent, channels, compositions, conflict resolution)
+5. ~~Product derivation pattern~~ → **AGENT-DYNAMICS.md** (5-step pattern from grammar to product)
+6. ~~Agent growth model~~ → **AGENT-DYNAMICS.md** (decision tree evolution, memory, introspection, growth loop)
+
+Total docs: 11 files, ~2,300 lines. All gaps from the derivation-method audit are now addressed.
