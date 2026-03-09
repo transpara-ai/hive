@@ -91,18 +91,28 @@ Constitutional principle (requires full amendment process to change): no militar
 
 ## Roles
 
-| Role | Responsibility | Intelligence | Trust Gate |
-|------|---------------|-------------|------------|
-| CTO | Architectural oversight, escalation filtering | Opus | 0.1 (bootstrapped) |
-| Guardian | Independent integrity, halt/rollback/quarantine | Opus | 0.1 (bootstrapped) |
-| Researcher | Read URLs, extract product ideas | Sonnet | 0.3 |
-| Architect | Design systems in Code Graph | Opus | 0.3 |
-| Builder | Generate code + tests | Sonnet | 0.3 |
-| Reviewer | Code review, security audit | Opus | 0.5 |
-| Tester | Run tests, validate behavior | Sonnet | 0.3 |
-| Integrator | Assemble, deploy | Sonnet | 0.7 |
+### Bootstrap Roles (Day One)
 
-Agents can specify new roles and request permission to spawn them. The hive grows its own workforce.
+| Role | Responsibility | Intelligence | Trust Gate | Reports To |
+|------|---------------|-------------|------------|-----------|
+| CTO | Architectural oversight, escalation filtering | Opus | 0.1 | Human |
+| Guardian | Independent integrity, halt/rollback/quarantine | Opus | 0.1 | Human (directly) |
+| SysMon | System health, error detection, anomaly tracking | Haiku | 0.1 | Guardian |
+| Spawner | Identify workforce gaps, propose new agents | Sonnet | 0.5 | CTO |
+| Allocator | Resource allocation, model selection, budget enforcement | Haiku | 0.3 | CTO |
+
+### Product Pipeline
+
+| Role | Responsibility | Intelligence | Trust Gate | Reports To |
+|------|---------------|-------------|------------|-----------|
+| Researcher | Read URLs, extract product ideas | Sonnet | 0.3 | CTO |
+| Architect | Design systems via derivation method | Opus | 0.3 | CTO |
+| Builder | Generate code + tests from specs | Sonnet | 0.3 | CTO |
+| Reviewer | Code quality, security, derivation compliance | Opus | 0.5 | CTO |
+| Tester | Run tests, validate behaviour | Sonnet | 0.3 | CTO |
+| Integrator | Assemble, deploy, health check | Sonnet | 0.7 | CTO |
+
+The Spawner grows the workforce through the growth loop: something breaks → "what role should have caught that?" → if none exists, propose one → human approves. See [ROLES.md](docs/ROLES.md) for the full role architecture.
 
 ## Dev Setup
 
@@ -143,9 +153,10 @@ go run ./cmd/hive --human Matt --spec path/to/spec.cg
 
 All inference runs through **Claude CLI** (Max plan, flat rate). NOT the Anthropic API — CLI is cheaper and better for our use case. The pipeline creates `claude-cli` providers automatically.
 
-Model assignment by role:
+Model assignment by role (three tiers):
 - **Opus** (`claude-opus-4-6`): CTO, Architect, Reviewer, Guardian — high-judgment tasks
-- **Sonnet** (`claude-sonnet-4-6`): Builder, Tester, Integrator, Researcher — execution tasks
+- **Sonnet** (`claude-sonnet-4-6`): Builder, Tester, Integrator, Researcher, Spawner — execution tasks
+- **Haiku** (`claude-haiku-4-5-20251001`): SysMon, Allocator — high-volume, simple tasks
 
 ## Pipeline
 

@@ -18,6 +18,9 @@ func TestSystemPrompt(t *testing.T) {
 		{RoleReviewer, "ROLE: REVIEWER"},
 		{RoleTester, "ROLE: TESTER"},
 		{RoleIntegrator, "ROLE: INTEGRATOR"},
+		{RoleSysMon, "ROLE: SYSMON"},
+		{RoleSpawner, "ROLE: SPAWNER"},
+		{RoleAllocator, "ROLE: ALLOCATOR"},
 		{Role("unknown"), "hive agent"},
 	}
 
@@ -35,7 +38,8 @@ func TestSystemPrompt(t *testing.T) {
 func TestSystemPromptCarriesMission(t *testing.T) {
 	// Every role prompt (except unknown) must carry the soul and mission
 	roles := []Role{RoleCTO, RoleGuardian, RoleResearcher, RoleArchitect,
-		RoleBuilder, RoleReviewer, RoleTester, RoleIntegrator}
+		RoleBuilder, RoleReviewer, RoleTester, RoleIntegrator,
+		RoleSysMon, RoleSpawner, RoleAllocator}
 
 	for _, role := range roles {
 		prompt := SystemPrompt(role)
@@ -95,11 +99,27 @@ func TestSoulValues(t *testing.T) {
 	if len(reviewer) != 5 {
 		t.Errorf("Reviewer soul values = %d, want 5", len(reviewer))
 	}
+
+	sysmon := soulValues(RoleSysMon)
+	if len(sysmon) != 5 {
+		t.Errorf("SysMon soul values = %d, want 5", len(sysmon))
+	}
+
+	spawner := soulValues(RoleSpawner)
+	if len(spawner) != 5 {
+		t.Errorf("Spawner soul values = %d, want 5", len(spawner))
+	}
+
+	allocator := soulValues(RoleAllocator)
+	if len(allocator) != 5 {
+		t.Errorf("Allocator soul values = %d, want 5", len(allocator))
+	}
 }
 
 func TestPreferredModel(t *testing.T) {
 	opus := "claude-opus-4-6"
 	sonnet := "claude-sonnet-4-6"
+	haiku := "claude-haiku-4-5-20251001"
 
 	tests := []struct {
 		role Role
@@ -113,6 +133,9 @@ func TestPreferredModel(t *testing.T) {
 		{RoleTester, sonnet},
 		{RoleIntegrator, sonnet},
 		{RoleResearcher, sonnet},
+		{RoleSpawner, sonnet},
+		{RoleSysMon, haiku},
+		{RoleAllocator, haiku},
 		{Role("unknown"), sonnet},
 	}
 

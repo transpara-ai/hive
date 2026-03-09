@@ -31,6 +31,7 @@ go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive
 - [Architecture](docs/ARCHITECTURE.md) — how it's built
 - [Event Types](docs/EVENT-TYPES.md) — 92 event types, schemas, emitters, consumers
 - [Agent Tools](docs/AGENT-TOOLS.md) — MCP server and agentic loop spec
+- [Roles](docs/ROLES.md) — complete role architecture, wiring, growth loop
 - [Agent Dynamics](docs/AGENT-DYNAMICS.md) — inter-agent relations, learning, collaboration
 - [Operator Guide](docs/OPERATOR.md) — human operator day-to-day reference
 - [Roadmap](docs/ROADMAP.md) — what's done and what's next
