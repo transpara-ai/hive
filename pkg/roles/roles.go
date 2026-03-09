@@ -32,6 +32,39 @@ const (
 	RoleAllocator Role = "allocator"
 )
 
+// TrustGate returns the minimum trust score required to operate in this role.
+// An agent can't be spawned into a role until its trust reaches the gate.
+func TrustGate(role Role) float64 {
+	switch role {
+	case RoleCTO, RoleGuardian:
+		return 0.1 // bootstrap roles — low gate, human watches closely
+	case RoleSysMon:
+		return 0.1
+	case RoleResearcher, RoleArchitect, RoleBuilder, RoleTester:
+		return 0.3
+	case RoleAllocator:
+		return 0.3
+	case RoleReviewer, RoleSpawner:
+		return 0.5
+	case RoleIntegrator:
+		return 0.7 // deploys to production — highest trust required
+	default:
+		return 0.3 // safe default for unknown roles
+	}
+}
+
+// ReportsTo returns the role this role reports to.
+func ReportsTo(role Role) Role {
+	switch role {
+	case RoleGuardian:
+		return "" // reports directly to human, outside hierarchy
+	case RoleSysMon:
+		return RoleGuardian
+	default:
+		return RoleCTO
+	}
+}
+
 // PreferredModel returns the recommended model for a role.
 // Three tiers: Opus (judgment), Sonnet (execution), Haiku (volume).
 func PreferredModel(role Role) string {

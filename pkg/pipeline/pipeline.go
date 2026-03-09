@@ -15,7 +15,9 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
+	"github.com/lovyou-ai/hive/pkg/authority"
 	"github.com/lovyou-ai/hive/pkg/roles"
+	"github.com/lovyou-ai/hive/pkg/spawn"
 	"github.com/lovyou-ai/hive/pkg/workspace"
 )
 
@@ -47,6 +49,7 @@ type Pipeline struct {
 	humanName string
 	ws        *workspace.Workspace
 	product   *workspace.Product // current product being built
+	spawner   *spawn.Spawner     // nil = direct creation (no approval)
 
 	cto      *roles.Agent
 	guardian *roles.Agent
@@ -56,9 +59,10 @@ type Pipeline struct {
 // Config for creating a new pipeline.
 type Config struct {
 	Store   store.Store
-	Actors  actor.IActorStore // actor registry — humans via auth, agents via creation
-	HumanID types.ActorID     // pre-registered human operator (from auth/actor store)
-	WorkDir string            // Root directory for generated products
+	Actors  actor.IActorStore  // actor registry — humans via auth, agents via creation
+	HumanID types.ActorID      // pre-registered human operator (from auth/actor store)
+	WorkDir string             // Root directory for generated products
+	Gate    *authority.Gate     // optional authority gate (nil = no approval required)
 }
 
 // derivePublicKey generates a deterministic Ed25519 public key from a seed string.
@@ -93,6 +97,28 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		agents:    make(map[roles.Role]*roles.Agent),
 	}
 
+	// Wire up spawner if an authority gate is provided.
+	if cfg.Gate != nil {
+		_, privKey, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			return nil, fmt.Errorf("generate spawn signer: %w", err)
+		}
+		signer := &ed25519Signer{key: privKey}
+		registry := event.DefaultRegistry()
+		factory := event.NewEventFactory(registry)
+		convID, _ := types.NewConversationID("conv_spawn_000000000000000000000001")
+
+		p.spawner = spawn.NewSpawner(spawn.Config{
+			Store:   cfg.Store,
+			Actors:  cfg.Actors,
+			Gate:    cfg.Gate,
+			HumanID: cfg.HumanID,
+			Signer:  signer,
+			Factory: factory,
+			ConvID:  convID,
+		})
+	}
+
 	// Bootstrap CTO first — architectural oversight (Opus)
 	cto, err := p.ensureAgent(ctx, roles.RoleCTO, "cto")
 	if err != nil {
@@ -122,23 +148,42 @@ func (p *Pipeline) providerForRole(role roles.Role) (intelligence.Provider, erro
 }
 
 // ensureAgent creates an agent of the given role if it doesn't exist yet.
-// The agent is registered in the actor store (created on behalf of the human
-// operator) and gets a provider with the appropriate model and system prompt.
+// When a spawner is configured, spawn requests go through the authority gate
+// (human approval). Without a spawner, agents are created directly.
 func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string) (*roles.Agent, error) {
 	if agent, ok := p.agents[role]; ok {
 		return agent, nil
 	}
 
-	// Create the agent in the actor store on behalf of the human operator.
-	// In production, agents may also be created by other agents with sufficient trust.
-	agentPub := derivePublicKey("agent:" + name)
-	agentPK, err := types.NewPublicKey([]byte(agentPub))
-	if err != nil {
-		return nil, fmt.Errorf("agent public key: %w", err)
-	}
-	agentActor, err := p.actors.Register(agentPK, name, event.ActorTypeAI)
-	if err != nil {
-		return nil, fmt.Errorf("create agent %s: %w", name, err)
+	var actorID types.ActorID
+
+	if p.spawner != nil {
+		// Spawn through authority gate — human must approve.
+		result, err := p.spawner.Spawn(ctx, spawn.SpawnRequest{
+			Role:          role,
+			Name:          name,
+			Justification: fmt.Sprintf("pipeline needs %s agent for product build", role),
+			RequestedBy:   p.humanID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("spawn %s: %w", name, err)
+		}
+		if !result.Approved {
+			return nil, fmt.Errorf("spawn %s denied: %s", name, result.Reason)
+		}
+		actorID = result.ActorID
+	} else {
+		// Direct creation — no approval gate (bootstrap or testing).
+		agentPub := derivePublicKey("agent:" + name)
+		agentPK, err := types.NewPublicKey([]byte(agentPub))
+		if err != nil {
+			return nil, fmt.Errorf("agent public key: %w", err)
+		}
+		agentActor, err := p.actors.Register(agentPK, name, event.ActorTypeAI)
+		if err != nil {
+			return nil, fmt.Errorf("create agent %s: %w", name, err)
+		}
+		actorID = agentActor.ID()
 	}
 
 	provider, err := p.providerForRole(role)
@@ -148,7 +193,7 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 	agent, err := roles.NewAgent(ctx, roles.AgentConfig{
 		Role:     role,
 		Name:     name,
-		ActorID:  agentActor.ID(),
+		ActorID:  actorID,
 		Store:    p.store,
 		Provider: provider,
 		HumanID:  p.humanID,
@@ -156,9 +201,19 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("  ↳ %s agent %s using %s\n", role, agentActor.ID().Value(), roles.PreferredModel(role))
+	fmt.Printf("  ↳ %s agent %s using %s\n", role, actorID.Value(), roles.PreferredModel(role))
 	p.agents[role] = agent
 	return agent, nil
+}
+
+// ed25519Signer implements event.Signer for pipeline-emitted events.
+type ed25519Signer struct {
+	key ed25519.PrivateKey
+}
+
+func (s *ed25519Signer) Sign(data []byte) (types.Signature, error) {
+	sig := ed25519.Sign(s.key, data)
+	return types.NewSignature(sig)
 }
 
 // Run executes the full product pipeline for a given input.
@@ -782,7 +837,15 @@ func (p *Pipeline) guardianCheck(ctx context.Context, phase string) bool {
 	}
 
 	_, eval, err := p.guardian.Runtime.Evaluate(ctx, "integrity_check_"+phase,
-		fmt.Sprintf("Review these recent events (after %s phase) for policy violations, trust anomalies, or authority overreach:\n\n%s",
+		fmt.Sprintf(`Review these recent events (after %s phase) for policy violations, trust anomalies, or authority overreach.
+
+EXTRA SCRUTINY for:
+- Agent spawn events (agent.role.assigned, agent.acted with spawn_agent) — verify authority and trust levels
+- Self-modification events — flag for human review
+- Revenue-affecting decisions — verify alignment
+
+Events:
+%s`,
 			phase, summary.String()))
 	if err != nil {
 		fmt.Printf("Guardian check failed: %v\n", err)

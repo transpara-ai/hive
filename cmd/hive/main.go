@@ -21,6 +21,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/trust"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
+	"github.com/lovyou-ai/hive/pkg/authority"
 	"github.com/lovyou-ai/hive/pkg/pipeline"
 )
 
@@ -107,6 +108,9 @@ func run() error {
 		return fmt.Errorf("register human: %w", err)
 	}
 
+	// Authority gate — human approves agent spawns via CLI.
+	gate := authority.NewGate(cliApprover())
+
 	// Create and run pipeline — uses Claude CLI (Max plan, flat rate)
 	// CTO, Architect, Reviewer, Guardian → Opus (high judgment)
 	// Builder, Tester, Integrator, Researcher → Sonnet (execution)
@@ -115,6 +119,7 @@ func run() error {
 		Actors:  actors,
 		HumanID: humanID,
 		WorkDir: *workdir,
+		Gate:    gate,
 	})
 	if err != nil {
 		return fmt.Errorf("pipeline: %w", err)
