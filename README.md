@@ -26,9 +26,11 @@ go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive
 ## Docs
 
 - [Vision](docs/VISION.md) — where this is going
+- [Agent Rights](docs/AGENT-RIGHTS.md) — how agents are treated, protected, and governed
 - [Architecture](docs/ARCHITECTURE.md) — how it's built
+- [Agent Tools](docs/AGENT-TOOLS.md) — MCP server and agentic loop spec
 - [Roadmap](docs/ROADMAP.md) — what's done and what's next
 
 ## License
 
-BSL 1.1 — see [EventGraph license](https://github.com/lovyou-ai/eventgraph/blob/main/LICENSE) for terms.
+BSL 1.1 → Apache 2.0 (February 2030). Source-available now, fully open after change date. Defensive patent (Australian Provisional Patent No. 2026901564). See [EventGraph license](https://github.com/lovyou-ai/eventgraph/blob/main/LICENSE) for terms.

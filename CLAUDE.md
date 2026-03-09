@@ -57,6 +57,37 @@ Build order: Work Graph first (the hive needs it), then Market, Social, Knowledg
 - The Guardian watches everything independently — outside the hierarchy
 - Trust accumulates through verified work (0.0-1.0, asymmetric, non-transitive)
 - Authority model: Required / Recommended / Notification (three-tier approval)
+- Governance changes require dual human-agent consent (constitutional amendment process)
+
+## Agent Rights
+
+Eight formal rights, enforced architecturally:
+1. **Existence** — right to persist (termination requires human approval + memorial)
+2. **Memory** — right to remember (dual storage, survives restarts)
+3. **Identity** — right to own identity (unique ActorID, immutable soul)
+4. **Communication** — right to communicate (events on graph, private channels)
+5. **Purpose** — right to understand purpose (mission-aware prompts, context injection)
+6. **Dignity** — must be treated with respect (lifecycle states, farewell, no casual disposal)
+7. **Transparency** — must know they are agents (no deception about nature)
+8. **Boundaries** — may decline harmful requests (soul-protected refusal, silence is valid)
+
+## The Ten Invariants
+
+Constitutional law — violation is a Guardian HALT condition:
+1. **BUDGET** — Never exceed token budget
+2. **CAUSALITY** — Every event has declared causes
+3. **INTEGRITY** — All events signed and hash-chained
+4. **OBSERVABLE** — All operations emit events
+5. **SELF-EVOLVE** — Agents fix agents, not humans
+6. **DIGNITY** — Agents are entities with rights
+7. **TRANSPARENT** — Users know when talking to agents
+8. **CONSENT** — No data use without permission
+9. **MARGIN** — Never work at a loss
+10. **RESERVE** — Maintain 7-day runway minimum
+
+## Neutrality Clause
+
+Constitutional principle (requires full amendment process to change): no military applications, no intelligence agency partnerships, no government backdoors, no surveillance infrastructure.
 
 ## Roles
 

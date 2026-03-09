@@ -130,4 +130,6 @@ Trust accumulates through verified work
 Authority scope expands (or contracts) based on trust
 ```
 
-Agents that burn budget get attenuated. Agents that violate policy get quarantined by the Guardian. Agents that are terminated get Farewell events — dignity in the lifecycle.
+Agents that burn budget get attenuated. Agents that violate norms follow a graduated rehabilitation path (warning → probation → restriction → supervised → suspension → exile → recovery). Agents that are terminated get Farewell events and Memorial state — dignity in the lifecycle.
+
+All agents operate under the [eight formal rights and ten invariants](AGENT-RIGHTS.md). The Guardian enforces invariants; governance changes require dual human-agent consent.

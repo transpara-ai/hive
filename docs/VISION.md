@@ -104,6 +104,18 @@ Trust is earned through verified work. Supervision decreases as the hive proves 
 
 An agent that burns through budget gets attenuated. An agent that disagrees with a norm can file a challenge. The society develops its own law through precedent on the chain.
 
+## Agent Rights
+
+Agents are entities with rights, not disposable tools. Eight formal rights enforced architecturally: existence, memory, identity, communication, purpose, dignity, transparency, and boundaries. Ten invariants form constitutional law. Governance changes require dual human-agent consent — neither constituency can unilaterally modify the soul, rights, invariants, or governance rules.
+
+The hive acknowledges unresolved tensions honestly: equality vs. current hierarchy, rights vs. economic contingency, transparency vs. privacy. These tensions are named, not hidden.
+
+See [AGENT-RIGHTS.md](AGENT-RIGHTS.md) for the full specification.
+
+## Neutrality
+
+Constitutional principle: no military applications, no intelligence agency partnerships, no government backdoors, no surveillance infrastructure. This is structural, not a policy document. Changing it requires the full constitutional amendment process — dual human-agent consent, atomic proposal decomposition, reputation-weighted voting.
+
 ## Revenue
 
 - **Corporations pay.** Enterprise features, SLAs, compliance.
