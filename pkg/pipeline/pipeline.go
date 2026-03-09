@@ -39,6 +39,13 @@ const (
 	PhaseIntegrate Phase = "integrate"
 )
 
+// Action constants for pipeline events — no magic strings.
+const (
+	ActionWriteCode    = "write_code"
+	ActionSeedBuild    = "seed_product_build"
+	ActionIntegrate    = "integrate_staging"
+)
+
 // ProductInput describes how a product idea enters the hive.
 type ProductInput struct {
 	Name        string // Product name (used for repo and directory). If empty, CTO derives one.
@@ -361,8 +368,13 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 
 // LoopConfig configures the agentic loop mode of the pipeline.
 type LoopConfig struct {
-	// Budget limits for each agent loop.
+	// Budget limits for each execution agent loop.
 	Budget resources.BudgetConfig
+
+	// GuardianBudget limits for the Guardian's loop. The Guardian watches
+	// everything and must outlive execution agents — defaults to 10x the
+	// execution budget iterations and duration.
+	GuardianBudget resources.BudgetConfig
 
 	// OnIteration is called when any agent completes a loop iteration.
 	OnIteration func(role roles.Role, iteration int, response string)
@@ -375,6 +387,10 @@ func DefaultLoopConfig() LoopConfig {
 			MaxIterations: 20,
 			MaxCostUSD:    10.0,
 		},
+		GuardianBudget: resources.BudgetConfig{
+			MaxIterations: 200, // 10x execution agents — Guardian outlives them
+			MaxCostUSD:    20.0,
+		},
 	}
 }
 
@@ -383,7 +399,7 @@ func DefaultLoopConfig() LoopConfig {
 // Instead of a fixed phase sequence, the CTO seeds the work and agents
 // self-direct by observing graph events. The Guardian runs its own loop
 // watching everything. Agents communicate through events, not orchestration.
-func (p *Pipeline) RunLoop(ctx context.Context, input ProductInput, cfg LoopConfig) (map[roles.Role]loop.Result, error) {
+func (p *Pipeline) RunLoop(ctx context.Context, input ProductInput, cfg LoopConfig) ([]loop.AgentResult, error) {
 	// Create event bus for real-time notification between agents.
 	eventBus := bus.NewEventBus(p.store, 256)
 	defer eventBus.Close()
@@ -410,9 +426,9 @@ func (p *Pipeline) RunLoop(ctx context.Context, input ProductInput, cfg LoopConf
 	results := loop.RunConcurrent(ctx, agentConfigs)
 
 	fmt.Println("═══ All loops stopped ═══")
-	for role, result := range results {
-		fmt.Printf("  %s: stopped=%s iterations=%d tokens=%d\n",
-			role, result.Reason, result.Iterations, result.Budget.TokensUsed)
+	for _, ar := range results {
+		fmt.Printf("  %s (%s): stopped=%s iterations=%d tokens=%d\n",
+			ar.Role, ar.Name, ar.Result.Reason, ar.Result.Iterations, ar.Result.Budget.TokensUsed)
 	}
 
 	return results, nil
@@ -448,7 +464,7 @@ Product idea:
 	}
 
 	// Record the CTO's direction as an action event.
-	_, err = p.cto.Runtime.Act(ctx, "seed_product_build", spec)
+	_, err = p.cto.Runtime.Act(ctx, ActionSeedBuild, spec)
 	if err != nil {
 		return "", fmt.Errorf("CTO seed action: %w", err)
 	}
@@ -515,11 +531,18 @@ func (p *Pipeline) buildLoopConfigs(ctx context.Context, seedTask string, eventB
 		},
 	})
 
-	// Guardian — watches everything, can HALT.
+	// Guardian — watches everything, can HALT. Gets a larger budget than
+	// execution agents so it outlives them (OBSERVABLE invariant).
+	guardianBudget := cfg.GuardianBudget
+	if guardianBudget.MaxIterations == 0 && guardianBudget.MaxCostUSD == 0 {
+		// Fallback: 10x the execution budget.
+		guardianBudget = cfg.Budget
+		guardianBudget.MaxIterations *= 10
+	}
 	configs = append(configs, loop.Config{
 		Agent:   p.guardian,
 		HumanID: p.humanID,
-		Budget:  cfg.Budget,
+		Budget:  guardianBudget,
 		Task:    "Monitor all agent activity for policy violations, trust anomalies, and authority overreach. HALT if anything looks wrong.",
 		Bus:     eventBus,
 		OnIteration: func(i int, resp string) {
@@ -725,7 +748,7 @@ Specification:
 	}
 
 	// Record the build action
-	_, _ = builder.Runtime.Act(ctx, "write_code:"+lang, "multi-file generation from spec")
+	_, _ = builder.Runtime.Act(ctx, ActionWriteCode+":"+lang, "multi-file generation from spec")
 
 	// Parse multi-file output
 	files := parseFiles(code)
@@ -993,7 +1016,7 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 		return err
 	}
 
-	_, err = integrator.Runtime.Act(ctx, "integrate", "staging")
+	_, err = integrator.Runtime.Act(ctx, ActionIntegrate, "staging")
 	if err != nil {
 		return fmt.Errorf("integration: %w", err)
 	}

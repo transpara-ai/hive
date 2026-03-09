@@ -82,11 +82,14 @@ func (b *Budget) Check() error {
 			Limit:    fmt.Sprintf("%d", b.maxIterations),
 		}
 	}
-	if b.maxDuration > 0 && time.Since(b.startTime) >= b.maxDuration {
-		return &BudgetExceededError{
-			Resource: "duration",
-			Used:     time.Since(b.startTime).String(),
-			Limit:    b.maxDuration.String(),
+	if b.maxDuration > 0 {
+		elapsed := time.Since(b.startTime)
+		if elapsed >= b.maxDuration {
+			return &BudgetExceededError{
+				Resource: "duration",
+				Used:     elapsed.String(),
+				Limit:    b.maxDuration.String(),
+			}
 		}
 	}
 	return nil

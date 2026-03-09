@@ -276,25 +276,35 @@ func TestLoopWithBus(t *testing.T) {
 	eventBus := bus.NewEventBus(s, 16)
 	defer eventBus.Close()
 
+	// Channel-based synchronisation — no time.Sleep.
+	firstIterDone := make(chan struct{}, 1)
+
 	l, err := New(Config{
 		Agent:           agent,
 		HumanID:         humanID(),
 		Budget:          resources.BudgetConfig{MaxIterations: 10},
 		Bus:             eventBus,
 		QuiescenceDelay: 200 * time.Millisecond,
+		OnIteration: func(i int, _ string) {
+			if i == 1 {
+				select {
+				case firstIterDone <- struct{}{}:
+				default:
+				}
+			}
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Run loop in a goroutine and send an event after a short delay.
 	done := make(chan Result, 1)
 	go func() {
 		done <- l.Run(context.Background())
 	}()
 
-	// Wait a bit for the loop to enter quiescence wait, then publish.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for first iteration to complete (agent said IDLE), then publish event.
+	<-firstIterDone
 	otherAgent := types.MustActorID("actor_00000000000000000000000000000002")
 	mockEv := createMockEvent(t, s, otherAgent)
 	eventBus.Publish(mockEv)
@@ -321,9 +331,9 @@ func TestRunConcurrent(t *testing.T) {
 		t.Fatalf("got %d results, want 2", len(results))
 	}
 
-	for role, result := range results {
-		if result.Reason != StopTaskDone {
-			t.Errorf("%s: reason = %s, want %s", role, result.Reason, StopTaskDone)
+	for _, ar := range results {
+		if ar.Result.Reason != StopTaskDone {
+			t.Errorf("%s (%s): reason = %s, want %s", ar.Role, ar.Name, ar.Result.Reason, StopTaskDone)
 		}
 	}
 }
@@ -339,9 +349,13 @@ func TestNewLoopRequiresAgent(t *testing.T) {
 // Additional helpers
 // ════════════════════════════════════════════════════════════════════════
 
+// agentCounter generates unique actor IDs for test agents.
+var agentCounter uint32
+
 func testAgentWithRole(t *testing.T, provider intelligence.Provider, role roles.Role, name string) *roles.Agent {
 	t.Helper()
-	agentID := types.MustActorID(fmt.Sprintf("actor_000000000000000000000000000000%02d", role[0]))
+	n := atomic.AddUint32(&agentCounter, 1)
+	agentID := types.MustActorID(fmt.Sprintf("actor_000000000000000000000000000000%02d", n))
 	humanID := types.MustActorID("actor_00000000000000000000000000000099")
 
 	rt, err := intelligence.NewRuntime(context.Background(), intelligence.RuntimeConfig{

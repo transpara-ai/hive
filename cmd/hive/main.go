@@ -152,8 +152,8 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("agentic loop failed: %w", err)
 		}
-		for role, result := range results {
-			fmt.Printf("  %s: %s (%d iterations)\n", role, result.Reason, result.Iterations)
+		for _, ar := range results {
+			fmt.Printf("  %s (%s): %s (%d iterations)\n", ar.Role, ar.Name, ar.Result.Reason, ar.Result.Iterations)
 		}
 	} else {
 		// Sequential pipeline mode — fixed phase sequence

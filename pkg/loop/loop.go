@@ -161,7 +161,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 		}
 
 		// 3. CHECK stopping conditions in the response.
-		if stop := l.checkResponse(response, iteration); stop != nil {
+		if stop := l.checkResponse(ctx, response, iteration); stop != nil {
 			return *stop
 		}
 
@@ -264,12 +264,12 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, int, error) {
 }
 
 // checkResponse examines the LLM response for stopping signals.
-func (l *Loop) checkResponse(response string, iteration int) *Result {
+func (l *Loop) checkResponse(ctx context.Context, response string, iteration int) *Result {
 	upper := strings.ToUpper(response)
 
 	if strings.Contains(upper, "ESCALATE") {
 		// Record escalation event.
-		_, _ = l.agent.Runtime.Escalate(context.Background(), l.humanID,
+		_, _ = l.agent.Runtime.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, response))
 		r := l.result(StopEscalation, iteration, response)
 		return &r
@@ -282,7 +282,7 @@ func (l *Loop) checkResponse(response string, iteration int) *Result {
 
 	if strings.Contains(upper, "TASK_DONE") {
 		// Record completion.
-		_, _ = l.agent.Runtime.Learn(context.Background(),
+		_, _ = l.agent.Runtime.Learn(ctx,
 			"task completed after loop iteration "+fmt.Sprint(iteration), "loop")
 		r := l.result(StopTaskDone, iteration, response)
 		return &r
@@ -341,35 +341,41 @@ func (l *Loop) result(reason StopReason, iterations int, detail string) Result {
 	}
 }
 
+// AgentResult pairs a loop result with the agent's role and name,
+// avoiding silent data loss when multiple agents share a role.
+type AgentResult struct {
+	Role   roles.Role
+	Name   string
+	Result Result
+}
+
 // RunConcurrent runs multiple agent loops concurrently and returns when all stop.
-// Each loop runs in its own goroutine. Results are keyed by role.
-func RunConcurrent(ctx context.Context, configs []Config) map[roles.Role]Result {
-	var mu sync.Mutex
-	results := make(map[roles.Role]Result)
+// Each loop runs in its own goroutine. Returns one result per agent.
+func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
+	results := make([]AgentResult, len(configs))
 	var wg sync.WaitGroup
 
-	for _, cfg := range configs {
+	for i, cfg := range configs {
 		wg.Add(1)
-		go func(c Config) {
+		go func(idx int, c Config) {
 			defer wg.Done()
 
 			l, err := New(c)
 			if err != nil {
-				mu.Lock()
-				results[c.Agent.Role] = Result{
-					Reason: StopError,
-					Detail: err.Error(),
+				results[idx] = AgentResult{
+					Role:   c.Agent.Role,
+					Name:   c.Agent.Name,
+					Result: Result{Reason: StopError, Detail: err.Error()},
 				}
-				mu.Unlock()
 				return
 			}
 
-			r := l.Run(ctx)
-
-			mu.Lock()
-			results[c.Agent.Role] = r
-			mu.Unlock()
-		}(cfg)
+			results[idx] = AgentResult{
+				Role:   c.Agent.Role,
+				Name:   c.Agent.Name,
+				Result: l.Run(ctx),
+			}
+		}(i, cfg)
 	}
 
 	wg.Wait()
