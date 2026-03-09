@@ -149,6 +149,16 @@ go run ./cmd/hive --human Matt --spec path/to/spec.cg
 - `pkg/workspace/` — File system and git management for generated code
 - `cmd/hive/` — CLI entry point
 
+## Coding Standards
+
+Inherited from EventGraph and non-negotiable:
+
+- **No magic values** — every event type, authority level, actor type, role, edge type uses defined constants/enums. Never bare strings or numbers with implicit meaning. If a constant exists, use it. If one doesn't exist, create it. Magic values are the root of all evil — they silently bypass type checking, survive refactors unchanged, and create invisible coupling between distant code.
+- **Always-valid domain models** — validate at construction, guaranteed valid for lifetime
+- **Make illegal states unrepresentable** — constrained types, state machines, typed IDs
+- **Typed errors** — domain error types, not string messages you have to parse
+- **Explicit optionality** — `Option[T]`, no nil/zero-value-means-absent
+
 ## Intelligence
 
 All inference runs through **Claude CLI** (Max plan, flat rate). NOT the Anthropic API — CLI is cheaper and better for our use case. The pipeline creates `claude-cli` providers automatically.
