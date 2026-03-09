@@ -4,7 +4,8 @@ package pipeline
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/intelligence"
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
+	"github.com/lovyou-ai/eventgraph/go/pkg/trust"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	"github.com/lovyou-ai/hive/pkg/authority"
@@ -59,19 +61,13 @@ type Pipeline struct {
 // Config for creating a new pipeline.
 type Config struct {
 	Store   store.Store
-	Actors  actor.IActorStore  // actor registry — humans via auth, agents via creation
-	HumanID types.ActorID      // pre-registered human operator (from auth/actor store)
-	WorkDir string             // Root directory for generated products
-	Gate    *authority.Gate     // optional authority gate (nil = no approval required)
+	Actors  actor.IActorStore          // actor registry — humans via auth, agents via creation
+	Trust   *trust.DefaultTrustModel   // trust model for gate enforcement
+	HumanID types.ActorID              // pre-registered human operator (from auth/actor store)
+	WorkDir string                     // Root directory for generated products
+	Gate    *authority.Gate             // optional authority gate (nil = no approval required)
 }
 
-// derivePublicKey generates a deterministic Ed25519 public key from a seed string.
-// Used to create agents with stable, reproducible identities in the actor store.
-func derivePublicKey(seed string) ed25519.PublicKey {
-	h := sha256.Sum256([]byte(seed))
-	priv := ed25519.NewKeyFromSeed(h[:])
-	return priv.Public().(ed25519.PublicKey)
-}
 
 // New creates a pipeline and bootstraps the CTO and Guardian.
 // The human operator must already be registered in the actor store (via auth).
@@ -106,11 +102,15 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		signer := &ed25519Signer{key: privKey}
 		registry := event.DefaultRegistry()
 		factory := event.NewEventFactory(registry)
-		convID, _ := types.NewConversationID("conv_spawn_000000000000000000000001")
+		convID, err := newConversationID()
+		if err != nil {
+			return nil, fmt.Errorf("spawn conversation ID: %w", err)
+		}
 
 		p.spawner = spawn.NewSpawner(spawn.Config{
 			Store:   cfg.Store,
 			Actors:  cfg.Actors,
+			Trust:   cfg.Trust,
 			Gate:    cfg.Gate,
 			HumanID: cfg.HumanID,
 			Signer:  signer,
@@ -174,7 +174,7 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 		actorID = result.ActorID
 	} else {
 		// Direct creation — no approval gate (bootstrap or testing).
-		agentPub := derivePublicKey("agent:" + name)
+		agentPub := spawn.DerivePublicKey("agent:" + name)
 		agentPK, err := types.NewPublicKey([]byte(agentPub))
 		if err != nil {
 			return nil, fmt.Errorf("agent public key: %w", err)
@@ -214,6 +214,15 @@ type ed25519Signer struct {
 func (s *ed25519Signer) Sign(data []byte) (types.Signature, error) {
 	sig := ed25519.Sign(s.key, data)
 	return types.NewSignature(sig)
+}
+
+// newConversationID generates a unique conversation ID for this pipeline run.
+func newConversationID() (types.ConversationID, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return types.ConversationID{}, err
+	}
+	return types.NewConversationID("conv_spawn_" + hex.EncodeToString(b[:]))
 }
 
 // Run executes the full product pipeline for a given input.

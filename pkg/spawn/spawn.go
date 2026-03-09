@@ -19,6 +19,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
+	"github.com/lovyou-ai/eventgraph/go/pkg/trust"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	"github.com/lovyou-ai/hive/pkg/authority"
@@ -44,19 +45,21 @@ type SpawnResult struct {
 
 // Spawner creates new agents with authority checking and lifecycle events.
 type Spawner struct {
-	store   store.Store
-	actors  actor.IActorStore
-	gate    *authority.Gate
-	humanID types.ActorID
-	signer  event.Signer
-	factory *event.EventFactory
-	convID  types.ConversationID
+	store      store.Store
+	actors     actor.IActorStore
+	trustModel *trust.DefaultTrustModel
+	gate       *authority.Gate
+	humanID    types.ActorID
+	signer     event.Signer
+	factory    *event.EventFactory
+	convID     types.ConversationID
 }
 
 // Config for creating a Spawner.
 type Config struct {
 	Store   store.Store
 	Actors  actor.IActorStore
+	Trust   *trust.DefaultTrustModel
 	Gate    *authority.Gate
 	HumanID types.ActorID
 	Signer  event.Signer
@@ -67,13 +70,14 @@ type Config struct {
 // NewSpawner creates a Spawner.
 func NewSpawner(cfg Config) *Spawner {
 	return &Spawner{
-		store:   cfg.Store,
-		actors:  cfg.Actors,
-		gate:    cfg.Gate,
-		humanID: cfg.HumanID,
-		signer:  cfg.Signer,
-		factory: cfg.Factory,
-		convID:  cfg.ConvID,
+		store:      cfg.Store,
+		actors:     cfg.Actors,
+		trustModel: cfg.Trust,
+		gate:       cfg.Gate,
+		humanID:    cfg.HumanID,
+		signer:     cfg.Signer,
+		factory:    cfg.Factory,
+		convID:     cfg.ConvID,
 	}
 }
 
@@ -123,7 +127,7 @@ func (s *Spawner) Spawn(_ context.Context, req SpawnRequest) (SpawnResult, error
 	}
 
 	// Create the actor in the store.
-	pub := derivePublicKey("agent:" + req.Name)
+	pub := DerivePublicKey("agent:" + req.Name)
 	pk, err := types.NewPublicKey([]byte(pub))
 	if err != nil {
 		return SpawnResult{}, fmt.Errorf("public key: %w", err)
@@ -153,22 +157,38 @@ func (s *Spawner) checkTrustGate(req SpawnRequest) error {
 	if gate <= 0 {
 		return nil
 	}
+	if s.trustModel == nil {
+		return fmt.Errorf("trust gate %.2f for role %s: no trust model configured", gate, req.Role)
+	}
 
-	// For now, all bootstrap agents start at trust 0.0 and accumulate.
-	// During bootstrap (trust 0.0), only the human can spawn agents.
-	// This gate will be meaningful once trust accumulates.
-	// TODO: query trust model for requester's actual trust score.
+	requester, err := s.actors.Get(req.RequestedBy)
+	if err != nil {
+		return fmt.Errorf("trust gate: requester not found: %w", err)
+	}
+
+	metrics, err := s.trustModel.Score(nil, requester)
+	if err != nil {
+		return fmt.Errorf("trust gate: score error: %w", err)
+	}
+
+	score := metrics.Overall().Value()
+	if score < gate {
+		return fmt.Errorf("trust gate denied: requester trust %.2f < required %.2f for role %s",
+			score, gate, req.Role)
+	}
 	return nil
 }
 
 // emitSpawnRequested records that an agent spawn was requested.
+// Uses agent.acted with Action="spawn_requested" to distinguish from
+// escalation events (which have different semantics).
 func (s *Spawner) emitSpawnRequested(req SpawnRequest) (types.EventID, error) {
-	content := event.AgentEscalatedContent{
-		AgentID:   req.RequestedBy,
-		Authority: s.humanID,
-		Reason:    fmt.Sprintf("spawn %s as %s: %s", req.Name, req.Role, req.Justification),
+	content := event.AgentActedContent{
+		AgentID: req.RequestedBy,
+		Action:  "spawn_requested",
+		Target:  fmt.Sprintf("%s as %s: %s", req.Name, req.Role, req.Justification),
 	}
-	ev, err := s.appendEvent("agent.escalated", req.RequestedBy, content)
+	ev, err := s.appendEvent("agent.acted", req.RequestedBy, content)
 	if err != nil {
 		return types.EventID{}, err
 	}
@@ -177,12 +197,12 @@ func (s *Spawner) emitSpawnRequested(req SpawnRequest) (types.EventID, error) {
 
 // emitSpawnDenied records that a spawn was denied.
 func (s *Spawner) emitSpawnDenied(reqID types.EventID, reason string) error {
-	content := event.AgentRefusedContent{
+	content := event.AgentActedContent{
 		AgentID: s.humanID,
-		Action:  "spawn",
-		Reason:  reason,
+		Action:  "spawn_denied",
+		Target:  reason,
 	}
-	_, err := s.appendEvent("agent.refused", s.humanID, content)
+	_, err := s.appendEvent("agent.acted", s.humanID, content)
 	return err
 }
 
@@ -237,8 +257,9 @@ func (s *Spawner) appendEventAfter(eventType string, source types.ActorID, conte
 	return s.store.Append(ev)
 }
 
-// derivePublicKey generates a deterministic Ed25519 public key from a seed string.
-func derivePublicKey(seed string) ed25519.PublicKey {
+// DerivePublicKey generates a deterministic Ed25519 public key from a seed string.
+// Used to create agents with stable, reproducible identities in the actor store.
+func DerivePublicKey(seed string) ed25519.PublicKey {
 	h := sha256.Sum256([]byte(seed))
 	priv := ed25519.NewKeyFromSeed(h[:])
 	return priv.Public().(ed25519.PublicKey)

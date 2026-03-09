@@ -126,20 +126,29 @@ func TestSpawnEmitsEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Check that lifecycle events were emitted.
+	// Check that lifecycle events were emitted with correct actions.
 	actedType := types.MustEventType("agent.acted")
 	page, err := spawner.store.ByType(actedType, 10, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	foundSpawnAgent := false
+	foundSpawnRequested := false
 	for _, ev := range page.Items() {
-		if strings.Contains(ev.Content().EventTypeName(), "agent.acted") {
-			found = true
+		if acted, ok := ev.Content().(event.AgentActedContent); ok {
+			switch acted.Action {
+			case "spawn_agent":
+				foundSpawnAgent = true
+			case "spawn_requested":
+				foundSpawnRequested = true
+			}
 		}
 	}
-	if !found {
-		t.Error("expected agent.acted event for spawn")
+	if !foundSpawnRequested {
+		t.Error("expected agent.acted event with Action=spawn_requested")
+	}
+	if !foundSpawnAgent {
+		t.Error("expected agent.acted event with Action=spawn_agent")
 	}
 
 	roleType := types.MustEventType("agent.role.assigned")
@@ -154,14 +163,14 @@ func TestSpawnEmitsEvents(t *testing.T) {
 
 func TestSpawnDerivePublicKey(t *testing.T) {
 	// Deterministic — same seed gives same key.
-	k1 := derivePublicKey("agent:test")
-	k2 := derivePublicKey("agent:test")
+	k1 := DerivePublicKey("agent:test")
+	k2 := DerivePublicKey("agent:test")
 	if !k1.Equal(k2) {
 		t.Error("same seed should give same key")
 	}
 
 	// Different seeds give different keys.
-	k3 := derivePublicKey("agent:other")
+	k3 := DerivePublicKey("agent:other")
 	if k1.Equal(k3) {
 		t.Error("different seeds should give different keys")
 	}
@@ -190,7 +199,7 @@ func TestTrustGates(t *testing.T) {
 
 // Verify derivePublicKey produces valid Ed25519 keys.
 func TestDerivePublicKeyValid(t *testing.T) {
-	pub := derivePublicKey("agent:valid-test")
+	pub := DerivePublicKey("agent:valid-test")
 	if len(pub) != ed25519.PublicKeySize {
 		t.Errorf("key size = %d, want %d", len(pub), ed25519.PublicKeySize)
 	}

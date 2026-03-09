@@ -40,27 +40,22 @@ type Resolution struct {
 type Approver func(req Request) (approved bool, reason string)
 
 // Gate evaluates authority requests against the three-tier model.
-// Not safe for concurrent use.
+// Required-level checks call the approver synchronously — concurrent
+// Required checks with a CLI approver will interleave stdin reads.
+// The pipeline is single-threaded so this is safe in practice.
 type Gate struct {
-	mu              sync.Mutex
-	pending         map[types.EventID]Request
-	approver        Approver
-	recommendedWait time.Duration // timeout for Recommended level
+	mu       sync.Mutex
+	pending  map[types.EventID]Request
+	approver Approver
 }
 
 // NewGate creates an authority gate. The approver handles Required-level requests.
-// If approver is nil, Required requests block forever (useful for testing).
+// If approver is nil, Required requests are denied (not blocked).
 func NewGate(approver Approver) *Gate {
 	return &Gate{
-		pending:         make(map[types.EventID]Request),
-		approver:        approver,
-		recommendedWait: 15 * time.Minute,
+		pending:  make(map[types.EventID]Request),
+		approver: approver,
 	}
-}
-
-// SetRecommendedTimeout overrides the auto-approve timeout for Recommended level.
-func (g *Gate) SetRecommendedTimeout(d time.Duration) {
-	g.recommendedWait = d
 }
 
 // Check evaluates an authority request and returns its resolution.
@@ -116,38 +111,17 @@ func (g *Gate) checkRequired(req Request) Resolution {
 }
 
 func (g *Gate) checkRecommended(req Request) Resolution {
-	if g.approver != nil {
-		// Give the human a chance to respond within the timeout.
-		type result struct {
-			approved bool
-			reason   string
-		}
-		ch := make(chan result, 1)
-		go func() {
-			a, r := g.approver(req)
-			ch <- result{a, r}
-		}()
-
-		select {
-		case r := <-ch:
-			return Resolution{
-				RequestID: req.ID,
-				Approved:  r.approved,
-				Reason:    r.reason,
-			}
-		case <-time.After(g.recommendedWait):
-			return Resolution{
-				RequestID: req.ID,
-				Approved:  true,
-				Reason:    fmt.Sprintf("auto-approved after %s (recommended level)", g.recommendedWait),
-			}
-		}
-	}
-
+	// Recommended level auto-approves immediately. The action is logged
+	// for audit but does not block the pipeline. The human can review
+	// Recommended-level actions post-hoc via the event graph.
+	//
+	// We intentionally do NOT spawn a goroutine to poll the approver
+	// with a timeout — that creates goroutine leaks when the blocking
+	// CLI approver never returns within the timeout window.
 	return Resolution{
 		RequestID: req.ID,
 		Approved:  true,
-		Reason:    fmt.Sprintf("auto-approved (recommended level, no approver)"),
+		Reason:    "auto-approved (recommended level)",
 	}
 }
 

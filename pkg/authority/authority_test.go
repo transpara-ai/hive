@@ -2,7 +2,6 @@ package authority
 
 import (
 	"testing"
-	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
@@ -84,13 +83,12 @@ func TestRequiredDeniedByHuman(t *testing.T) {
 	}
 }
 
-func TestRecommendedAutoApprovesOnTimeout(t *testing.T) {
-	// Use a blocking approver that never responds.
+func TestRecommendedAutoApproves(t *testing.T) {
+	// Recommended always auto-approves — no blocking, no goroutines.
 	gate := NewGate(func(req Request) (bool, string) {
-		time.Sleep(5 * time.Second) // will be interrupted by timeout
-		return false, "too slow"
+		t.Fatal("approver should not be called for Recommended")
+		return false, ""
 	})
-	gate.SetRecommendedTimeout(50 * time.Millisecond)
 
 	req := Request{
 		ID:    testEventID(t),
@@ -99,27 +97,7 @@ func TestRecommendedAutoApprovesOnTimeout(t *testing.T) {
 	}
 	res := gate.Check(req)
 	if !res.Approved {
-		t.Fatal("recommended should auto-approve on timeout")
-	}
-}
-
-func TestRecommendedApprovedByHumanBeforeTimeout(t *testing.T) {
-	gate := NewGate(func(req Request) (bool, string) {
-		return true, "approved quickly"
-	})
-	gate.SetRecommendedTimeout(10 * time.Second)
-
-	req := Request{
-		ID:    testEventID(t),
-		Actor: testActorID(t),
-		Level: event.AuthorityLevelRecommended,
-	}
-	res := gate.Check(req)
-	if !res.Approved {
-		t.Fatal("should be approved by human")
-	}
-	if res.Reason != "approved quickly" {
-		t.Errorf("reason = %q, want %q", res.Reason, "approved quickly")
+		t.Fatal("recommended should auto-approve")
 	}
 }
 
@@ -137,9 +115,14 @@ func TestRecommendedWithoutApprover(t *testing.T) {
 }
 
 func TestPendingRequests(t *testing.T) {
-	ch := make(chan bool)
+	// Use channels for deterministic synchronization — no sleeps.
+	entered := make(chan struct{})
+	proceed := make(chan struct{})
+	done := make(chan struct{})
+
 	gate := NewGate(func(req Request) (bool, string) {
-		<-ch
+		close(entered) // signal that we're inside the approver
+		<-proceed      // wait for test to check pending
 		return true, "done"
 	})
 
@@ -149,18 +132,18 @@ func TestPendingRequests(t *testing.T) {
 			Actor: testActorID(t),
 			Level: event.AuthorityLevelRequired,
 		})
+		close(done)
 	}()
 
-	// Give the goroutine time to start.
-	time.Sleep(50 * time.Millisecond)
+	<-entered // wait for approver to be called
 
 	pending := gate.Pending()
 	if len(pending) != 1 {
 		t.Errorf("expected 1 pending, got %d", len(pending))
 	}
 
-	ch <- true // unblock
-	time.Sleep(50 * time.Millisecond)
+	close(proceed) // let the approver finish
+	<-done         // wait for Check to return
 
 	pending = gate.Pending()
 	if len(pending) != 0 {

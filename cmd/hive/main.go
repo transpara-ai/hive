@@ -117,6 +117,7 @@ func run() error {
 	p, err := pipeline.New(ctx, pipeline.Config{
 		Store:   s,
 		Actors:  actors,
+		Trust:   trustModel,
 		HumanID: humanID,
 		WorkDir: *workdir,
 		Gate:    gate,
