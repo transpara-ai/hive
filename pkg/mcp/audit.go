@@ -10,6 +10,7 @@ import (
 
 // AuditLogger emits tool-call audit events on the graph.
 // Every tool invocation is recorded so the Guardian can monitor agent activity.
+// Not safe for concurrent use — relies on the MCP server's single-threaded Run loop.
 type AuditLogger struct {
 	store   StoreAppender
 	factory *event.EventFactory

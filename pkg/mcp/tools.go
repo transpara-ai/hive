@@ -30,6 +30,9 @@ type Deps struct {
 // checking on write tools and audit logging on all tool calls.
 func RegisterAllTools(s *Server, deps Deps) {
 	// Shared signer for audit + emit events.
+	// TODO(M3): Use the agent's persistent signing key from the actor store
+	// instead of an ephemeral key. Currently signatures are structurally valid
+	// but unverifiable across restarts because the public key is not registered.
 	_, privKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		panic(fmt.Sprintf("generate MCP signer key: %v", err))
@@ -82,7 +85,10 @@ func registerReadTools(s *Server, deps Deps, audit *AuditLogger) {
 			}
 
 			if source, ok := stringArg(args, "source"); ok {
-				aid := types.MustActorID(source)
+				aid, err := types.NewActorID(source)
+				if err != nil {
+					return ErrorResult(fmt.Sprintf("invalid source actor ID: %v", err)), nil
+				}
 				p, err := deps.Store.BySource(aid, limit, types.None[types.Cursor]())
 				if err != nil {
 					return ErrorResult(fmt.Sprintf("query error: %v", err)), nil
@@ -140,7 +146,10 @@ func registerReadTools(s *Server, deps Deps, audit *AuditLogger) {
 			if !ok {
 				return ErrorResult("id is required"), nil
 			}
-			aid := types.MustActorID(id)
+			aid, err := types.NewActorID(id)
+			if err != nil {
+				return ErrorResult(fmt.Sprintf("invalid actor ID: %v", err)), nil
+			}
 			a, err := deps.Actors.Get(aid)
 			if err != nil {
 				return ErrorResult(fmt.Sprintf("not found: %v", err)), nil
@@ -162,7 +171,11 @@ func registerReadTools(s *Server, deps Deps, audit *AuditLogger) {
 		func(args map[string]any) (ToolCallResult, error) {
 			filter := actor.ActorFilter{Limit: 100}
 			if t, ok := stringArg(args, "type"); ok {
-				filter.Type = types.Some(event.ActorType(t))
+				at := event.ActorType(t)
+				if !at.IsValid() {
+					return ErrorResult(fmt.Sprintf("invalid actor type: %q (valid: Human, AI, System, Committee, RulesEngine)", t)), nil
+				}
+				filter.Type = types.Some(at)
 			}
 			if st, ok := stringArg(args, "status"); ok {
 				status, err := types.NewActorStatus(st)
@@ -196,14 +209,20 @@ func registerReadTools(s *Server, deps Deps, audit *AuditLogger) {
 				return ErrorResult("actor is required"), nil
 			}
 
-			aid := types.MustActorID(actorID)
+			aid, err := types.NewActorID(actorID)
+			if err != nil {
+				return ErrorResult(fmt.Sprintf("invalid actor ID: %v", err)), nil
+			}
 			a, err := deps.Actors.Get(aid)
 			if err != nil {
 				return ErrorResult(fmt.Sprintf("actor not found: %v", err)), nil
 			}
 
 			if fromID, ok := stringArg(args, "from"); ok {
-				fid := types.MustActorID(fromID)
+				fid, err := types.NewActorID(fromID)
+				if err != nil {
+					return ErrorResult(fmt.Sprintf("invalid from actor ID: %v", err)), nil
+				}
 				from, err := deps.Actors.Get(fid)
 				if err != nil {
 					return ErrorResult(fmt.Sprintf("from actor not found: %v", err)), nil

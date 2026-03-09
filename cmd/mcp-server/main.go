@@ -100,6 +100,23 @@ func run() error {
 		return fmt.Errorf("invalid conversation ID: %w", err)
 	}
 
+	// Validate actor IDs — fail fast if they don't exist in the store.
+	aid, err := types.NewActorID(*agentID)
+	if err != nil {
+		return fmt.Errorf("invalid agent ID: %w", err)
+	}
+	if _, err := actors.Get(aid); err != nil {
+		return fmt.Errorf("agent %s not found in actor store: %w", *agentID, err)
+	}
+
+	hid, err := types.NewActorID(*humanID)
+	if err != nil {
+		return fmt.Errorf("invalid human ID: %w", err)
+	}
+	if _, err := actors.Get(hid); err != nil {
+		return fmt.Errorf("human %s not found in actor store: %w", *humanID, err)
+	}
+
 	// Create and run MCP server.
 	server := mcp.NewServer("hive-mcp", "0.1.0")
 	mcp.RegisterAllTools(server, mcp.Deps{
@@ -107,8 +124,8 @@ func run() error {
 		Actors:  actors,
 		States:  states,
 		Trust:   trustModel,
-		AgentID: types.MustActorID(*agentID),
-		HumanID: types.MustActorID(*humanID),
+		AgentID: aid,
+		HumanID: hid,
 		ConvID:  cid,
 	})
 

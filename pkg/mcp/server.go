@@ -12,6 +12,7 @@ import (
 type Handler func(args map[string]any) (ToolCallResult, error)
 
 // Server is an MCP server that communicates over stdio.
+// The Run loop is single-threaded — handlers must not be called concurrently.
 type Server struct {
 	name     string
 	version  string
@@ -39,6 +40,7 @@ func (s *Server) RegisterTool(name, description string, schema json.RawMessage, 
 }
 
 // Run starts the server, reading JSON-RPC from stdin and writing to stdout.
+// Requests are processed sequentially in a single goroutine.
 func (s *Server) Run() error {
 	reader := bufio.NewReader(os.Stdin)
 	writer := os.Stdout
@@ -54,13 +56,17 @@ func (s *Server) Run() error {
 
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
-			s.writeError(writer, nil, -32700, "parse error")
+			if err := s.writeError(writer, nil, -32700, "parse error"); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
 			continue
 		}
 
 		resp := s.handleRequest(req)
 		if resp != nil {
-			s.writeResponse(writer, *resp)
+			if err := s.writeResponse(writer, *resp); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
 		}
 	}
 }
@@ -128,14 +134,18 @@ func (s *Server) errorResp(id json.RawMessage, code int, msg string) *Response {
 	return &Response{JSONRPC: "2.0", ID: id, Error: &RPCError{Code: code, Message: msg}}
 }
 
-func (s *Server) writeResponse(w io.Writer, resp Response) {
-	data, _ := json.Marshal(resp)
+func (s *Server) writeResponse(w io.Writer, resp Response) error {
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal response: %w", err)
+	}
 	data = append(data, '\n')
-	w.Write(data)
+	_, err = w.Write(data)
+	return err
 }
 
-func (s *Server) writeError(w io.Writer, id json.RawMessage, code int, msg string) {
-	s.writeResponse(w, Response{
+func (s *Server) writeError(w io.Writer, id json.RawMessage, code int, msg string) error {
+	return s.writeResponse(w, Response{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error:   &RPCError{Code: code, Message: msg},

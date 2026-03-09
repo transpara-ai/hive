@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
@@ -37,7 +36,7 @@ func eventMap(ev event.Event) map[string]any {
 		"conversation_id": ev.ConversationID().Value(),
 		"timestamp":       ev.Timestamp().String(),
 		"causes":          causes,
-		"content":         fmt.Sprintf("%v", ev.Content()),
+		"content":         ev.Content(),
 	}
 }
 

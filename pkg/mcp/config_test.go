@@ -45,12 +45,17 @@ func TestWriteConfig(t *testing.T) {
 		t.Errorf("command = %q", hive.Command)
 	}
 
-	// Verify args contain the DSN and IDs.
+	// Verify DSN is passed via env, not args.
+	if hive.Env["DATABASE_URL"] != "postgres://localhost/hive" {
+		t.Errorf("DATABASE_URL env = %q, want postgres://localhost/hive", hive.Env["DATABASE_URL"])
+	}
+
+	// Verify args contain the IDs but not the DSN.
 	args := hive.Args
 	found := map[string]bool{}
 	for i, a := range args {
-		if a == "--store" && i+1 < len(args) {
-			found["store"] = args[i+1] == "postgres://localhost/hive"
+		if a == "--store" {
+			t.Error("DSN should be in env, not args")
 		}
 		if a == "--agent-id" && i+1 < len(args) {
 			found["agent-id"] = args[i+1] == agentID.Value()

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
@@ -271,7 +272,7 @@ func TestAuditLogging(t *testing.T) {
 	found := false
 	for _, ev := range page.Items() {
 		content := fmt.Sprintf("%v", ev.Content())
-		if contains(content, "mcp.tool_call:query_self") {
+		if strings.Contains(content, "mcp.tool_call:query_self") {
 			found = true
 			break
 		}
@@ -290,13 +291,13 @@ func TestContextBuilder(t *testing.T) {
 	if ctx == "" {
 		t.Fatal("expected non-empty context")
 	}
-	if !contains(ctx, "Your Identity") {
+	if !strings.Contains(ctx, "Your Identity") {
 		t.Error("missing identity section")
 	}
-	if !contains(ctx, "Human Operator") {
+	if !strings.Contains(ctx, "Human Operator") {
 		t.Error("missing human section")
 	}
-	if !contains(ctx, "Recent Events") {
+	if !strings.Contains(ctx, "Recent Events") {
 		t.Error("missing events section")
 	}
 }
@@ -362,15 +363,3 @@ func callTool(t *testing.T, s *Server, name string, args map[string]any) ToolCal
 	return result
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

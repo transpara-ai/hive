@@ -29,10 +29,12 @@ func WriteConfig(dir string, mcpBinary string, dsn string, agentID types.ActorID
 			"hive": {
 				Command: mcpBinary,
 				Args: []string{
-					"--store", dsn,
 					"--agent-id", agentID.Value(),
 					"--human-id", humanID.Value(),
 					"--conv-id", convID.Value(),
+				},
+				Env: map[string]string{
+					"DATABASE_URL": dsn,
 				},
 			},
 		},

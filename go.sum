@@ -19,6 +19,8 @@ github.com/lovyou-ai/eventgraph/go v0.0.0-20260309145620-fb9c9ff7386d h1:jdpCgB9
 github.com/lovyou-ai/eventgraph/go v0.0.0-20260309145620-fb9c9ff7386d/go.mod h1:ZOEXjv/9WR4TqXSCXSnXiiHmwsjb1zsmdJGeNwqRX24=
 github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152201-0f7dc33c089e h1:e45f0biodrQJFd0f/GokXdD98MASWN8pyyghi91Df0A=
 github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152201-0f7dc33c089e/go.mod h1:ZOEXjv/9WR4TqXSCXSnXiiHmwsjb1zsmdJGeNwqRX24=
+github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152918-5602caa542f2 h1:oXgXSdBG0tkwJNNc+7qdtniW0lB8oPqm0OFKzQVnSaw=
+github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152918-5602caa542f2/go.mod h1:ZOEXjv/9WR4TqXSCXSnXiiHmwsjb1zsmdJGeNwqRX24=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

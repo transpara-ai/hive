@@ -4,7 +4,7 @@ go 1.24.1
 
 require (
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152201-0f7dc33c089e
+	github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152918-5602caa542f2
 )
 
 require (
