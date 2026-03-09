@@ -99,15 +99,17 @@ func (s *Spawner) Spawn(_ context.Context, req SpawnRequest) (SpawnResult, error
 	// Check trust gate — the requesting agent must have enough trust
 	// for the target role (unless the human is requesting directly).
 	if req.RequestedBy != s.humanID {
-		if err := s.checkTrustGate(req); err != nil {
+		if gateErr := s.checkTrustGate(req); gateErr != nil {
 			// Emit denial so the graph is complete — spawn_requested
 			// must always have a causal successor.
-			_ = s.emitSpawnDenied(reqEventID, err.Error())
+			if err := s.emitSpawnDenied(reqEventID, gateErr.Error()); err != nil {
+				return SpawnResult{}, fmt.Errorf("emit trust gate denial: %w", err)
+			}
 			return SpawnResult{
 				Role:     req.Role,
 				Name:     req.Name,
 				Approved: false,
-				Reason:   err.Error(),
+				Reason:   gateErr.Error(),
 			}, nil
 		}
 	}

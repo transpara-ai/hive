@@ -105,8 +105,10 @@ func (g *Gate) checkRequired(req Request) Resolution {
 	return Resolution{
 		RequestID: req.ID,
 		Approved:  approved,
-		Resolver:  types.ActorID{}, // filled by caller with human ID
 		Reason:    reason,
+		// Resolver left zero — the Gate doesn't know the human's ActorID.
+		// The caller (spawner) attributes the event to humanID via the
+		// fallback in emitAuthorityResolved.
 	}
 }
 

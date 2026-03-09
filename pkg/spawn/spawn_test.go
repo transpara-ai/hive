@@ -39,8 +39,12 @@ func testSpawnerWithOpts(t *testing.T, opts testSpawnerOpts) (*Spawner, types.Ac
 	s := store.NewInMemoryStore()
 	actors := actor.NewInMemoryActorStore()
 
-	// Register human.
-	humanPub, _ := types.NewPublicKey([]byte("human-key-00000000000000000000000"))
+	// Register human — use DerivePublicKey to get a valid Ed25519 key.
+	humanRawPub := DerivePublicKey("human:TestHuman")
+	humanPub, err := types.NewPublicKey([]byte(humanRawPub))
+	if err != nil {
+		t.Fatal(err)
+	}
 	humanActor, err := actors.Register(humanPub, "TestHuman", event.ActorTypeHuman)
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +255,10 @@ func TestAgentInitiatedSpawnDeniedByTrustGate(t *testing.T) {
 
 	// Register an agent actor to use as requester.
 	agentPub := DerivePublicKey("agent:some-agent")
-	agentPK, _ := types.NewPublicKey([]byte(agentPub))
+	agentPK, err := types.NewPublicKey([]byte(agentPub))
+	if err != nil {
+		t.Fatal(err)
+	}
 	agentActor, err := spawner.actors.Register(agentPK, "some-agent", event.ActorTypeAI)
 	if err != nil {
 		t.Fatal(err)
@@ -273,6 +280,23 @@ func TestAgentInitiatedSpawnDeniedByTrustGate(t *testing.T) {
 	if !strings.Contains(result.Reason, "trust model not configured") {
 		t.Errorf("expected config error in reason, got %q", result.Reason)
 	}
+
+	// Verify spawn_denied event was emitted (CAUSALITY: spawn_requested has a successor).
+	page, err := spawner.store.ByType(event.EventTypeAgentActed, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDenied := false
+	for _, ev := range page.Items() {
+		if acted, ok := ev.Content().(event.AgentActedContent); ok {
+			if acted.Action == ActionSpawnDenied {
+				foundDenied = true
+			}
+		}
+	}
+	if !foundDenied {
+		t.Error("expected spawn_denied event after trust gate rejection")
+	}
 }
 
 func TestAgentInitiatedSpawnDeniedByLowTrust(t *testing.T) {
@@ -287,7 +311,10 @@ func TestAgentInitiatedSpawnDeniedByLowTrust(t *testing.T) {
 	})
 
 	agentPub := DerivePublicKey("agent:low-trust")
-	agentPK, _ := types.NewPublicKey([]byte(agentPub))
+	agentPK, err := types.NewPublicKey([]byte(agentPub))
+	if err != nil {
+		t.Fatal(err)
+	}
 	agentActor, err := spawner.actors.Register(agentPK, "low-trust", event.ActorTypeAI)
 	if err != nil {
 		t.Fatal(err)
@@ -308,6 +335,23 @@ func TestAgentInitiatedSpawnDeniedByLowTrust(t *testing.T) {
 	}
 	if !strings.Contains(result.Reason, "trust gate denied") {
 		t.Errorf("expected trust gate denial, got %q", result.Reason)
+	}
+
+	// Verify spawn_denied event was emitted (CAUSALITY: spawn_requested has a successor).
+	page, err := spawner.store.ByType(event.EventTypeAgentActed, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDenied := false
+	for _, ev := range page.Items() {
+		if acted, ok := ev.Content().(event.AgentActedContent); ok {
+			if acted.Action == ActionSpawnDenied {
+				foundDenied = true
+			}
+		}
+	}
+	if !foundDenied {
+		t.Error("expected spawn_denied event after trust gate rejection")
 	}
 }
 

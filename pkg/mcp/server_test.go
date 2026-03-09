@@ -34,9 +34,16 @@ func testDepsWithMinTrust(t *testing.T, minTrust float64) Deps {
 	}
 
 	// Register actors — IDs are derived from public keys.
-	agentPub, _ := types.NewPublicKey([]byte("agent-key-00000000000000000000000"))
-	humanPub, _ := types.NewPublicKey([]byte("human-key-00000000000000000000000"))
-	agentActor, err := actors.Register(agentPub, "TestAgent", "AI")
+	// Keys must be exactly 32 bytes for Ed25519 public key validation.
+	agentPub, err := types.NewPublicKey([]byte("agent-key-0000000000000000000000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	humanPub, err := types.NewPublicKey([]byte("human-key-0000000000000000000000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentActor, err := actors.Register(agentPub, "TestAgent", event.ActorTypeAI)
 	if err != nil {
 		t.Fatal(err)
 	}
