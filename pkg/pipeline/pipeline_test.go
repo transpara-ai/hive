@@ -1,6 +1,9 @@
 package pipeline
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestContainsAlert(t *testing.T) {
 	tests := []struct {
@@ -60,10 +63,10 @@ func TestMain(t *testing.T) {}
 		t.Error("missing main_test.go")
 	}
 
-	if !contains(files["main.go"], "package main") {
+	if !strings.Contains(files["main.go"], "package main") {
 		t.Error("main.go missing package declaration")
 	}
-	if !contains(files["lib/util.go"], "func Helper()") {
+	if !strings.Contains(files["lib/util.go"], "func Helper()") {
 		t.Error("util.go missing Helper function")
 	}
 }
@@ -87,7 +90,7 @@ if __name__ == "__main__":
 	if len(files) != 1 {
 		t.Fatalf("parseFiles returned %d files, want 1", len(files))
 	}
-	if !contains(files["app.py"], "def main():") {
+	if !strings.Contains(files["app.py"], "def main():") {
 		t.Error("app.py missing main function")
 	}
 }
@@ -150,15 +153,3 @@ func TestExtractLanguage(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

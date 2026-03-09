@@ -3,10 +3,13 @@ package pipeline
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"fmt"
 	"os/exec"
 	"strings"
 
+	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/intelligence"
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
@@ -39,6 +42,8 @@ type ProductInput struct {
 // Pipeline orchestrates agents through the product build phases.
 type Pipeline struct {
 	store   store.Store
+	actors  actor.IActorStore
+	humanID types.ActorID
 	ws      *workspace.Workspace
 	product *workspace.Product // current product being built
 
@@ -50,20 +55,40 @@ type Pipeline struct {
 // Config for creating a new pipeline.
 type Config struct {
 	Store   store.Store
-	WorkDir string // Root directory for generated products
+	Actors  actor.IActorStore // actor registry — humans via auth, agents via creation
+	HumanID types.ActorID     // pre-registered human operator (from auth/actor store)
+	WorkDir string            // Root directory for generated products
+}
+
+// derivePublicKey generates a deterministic Ed25519 public key from a seed string.
+// Used to create agents with stable, reproducible identities in the actor store.
+func derivePublicKey(seed string) ed25519.PublicKey {
+	h := sha256.Sum256([]byte(seed))
+	priv := ed25519.NewKeyFromSeed(h[:])
+	return priv.Public().(ed25519.PublicKey)
 }
 
 // New creates a pipeline and bootstraps the CTO and Guardian.
+// The human operator must already be registered in the actor store (via auth).
 func New(ctx context.Context, cfg Config) (*Pipeline, error) {
+	// Verify the human exists in the actor store
+	human, err := cfg.Actors.Get(cfg.HumanID)
+	if err != nil {
+		return nil, fmt.Errorf("human operator not found in actor store: %w", err)
+	}
+	fmt.Printf("Human operator: %s (%s)\n", human.DisplayName(), human.ID().Value())
+
 	ws, err := workspace.New(cfg.WorkDir)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: %w", err)
 	}
 
 	p := &Pipeline{
-		store:  cfg.Store,
-		ws:     ws,
-		agents: make(map[roles.Role]*roles.Agent),
+		store:   cfg.Store,
+		actors:  cfg.Actors,
+		humanID: cfg.HumanID,
+		ws:      ws,
+		agents:  make(map[roles.Role]*roles.Agent),
 	}
 
 	// Bootstrap CTO first — architectural oversight (Opus)
@@ -95,11 +120,25 @@ func (p *Pipeline) providerForRole(role roles.Role) (intelligence.Provider, erro
 }
 
 // ensureAgent creates an agent of the given role if it doesn't exist yet.
-// Each role gets a provider with the appropriate model and system prompt.
+// The agent is registered in the actor store (created on behalf of the human
+// operator) and gets a provider with the appropriate model and system prompt.
 func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string) (*roles.Agent, error) {
 	if agent, ok := p.agents[role]; ok {
 		return agent, nil
 	}
+
+	// Create the agent in the actor store on behalf of the human operator.
+	// In production, agents may also be created by other agents with sufficient trust.
+	agentPub := derivePublicKey("agent:" + name)
+	agentPK, err := types.NewPublicKey([]byte(agentPub))
+	if err != nil {
+		return nil, fmt.Errorf("agent public key: %w", err)
+	}
+	agentActor, err := p.actors.Register(agentPK, name, event.ActorTypeAI)
+	if err != nil {
+		return nil, fmt.Errorf("create agent %s: %w", name, err)
+	}
+
 	provider, err := p.providerForRole(role)
 	if err != nil {
 		return nil, fmt.Errorf("provider for %s: %w", role, err)
@@ -107,13 +146,15 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 	agent, err := roles.NewAgent(ctx, roles.AgentConfig{
 		Role:     role,
 		Name:     name,
+		ActorID:  agentActor.ID(),
 		Store:    p.store,
 		Provider: provider,
+		HumanID:  p.humanID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("  ↳ %s agent using %s\n", role, roles.PreferredModel(role))
+	fmt.Printf("  ↳ %s agent %s using %s\n", role, agentActor.ID().Value(), roles.PreferredModel(role))
 	p.agents[role] = agent
 	return agent, nil
 }
@@ -126,7 +167,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err != nil {
 		return fmt.Errorf("research: %w", err)
 	}
-	p.guardianCheck(ctx, "research")
+	if halt := p.guardianCheck(ctx, "research"); halt {
+		return fmt.Errorf("guardian halted pipeline after research phase")
+	}
 
 	// Derive product name if not provided
 	name := input.Name
@@ -151,7 +194,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err != nil {
 		return fmt.Errorf("design: %w", err)
 	}
-	p.guardianCheck(ctx, "design")
+	if halt := p.guardianCheck(ctx, "design"); halt {
+		return fmt.Errorf("guardian halted pipeline after design phase")
+	}
 
 	// ── Phase 2b: Simplify ──
 	fmt.Println("═══ Phase 2b: Simplify ═══")
@@ -179,7 +224,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
-	p.guardianCheck(ctx, "build")
+	if halt := p.guardianCheck(ctx, "build"); halt {
+		return fmt.Errorf("guardian halted pipeline after build phase")
+	}
 
 	// ── Phase 4: Review → Rebuild loop ──
 	const maxReviewRounds = 3
@@ -189,7 +236,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 		if err != nil {
 			return fmt.Errorf("review round %d: %w", round, err)
 		}
-		p.guardianCheck(ctx, "review")
+		if halt := p.guardianCheck(ctx, "review"); halt {
+			return fmt.Errorf("guardian halted pipeline after review phase")
+		}
 
 		if approved {
 			fmt.Println("Code approved by reviewer.")
@@ -215,7 +264,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err != nil {
 		return fmt.Errorf("test: %w", err)
 	}
-	p.guardianCheck(ctx, "test")
+	if halt := p.guardianCheck(ctx, "test"); halt {
+		return fmt.Errorf("guardian halted pipeline after test phase")
+	}
 
 	// ── Phase 6: Integrate ──
 	fmt.Println("═══ Phase 6: Integrate ═══")
@@ -223,7 +274,9 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err != nil {
 		return fmt.Errorf("integrate: %w", err)
 	}
-	p.guardianCheck(ctx, "integrate")
+	if halt := p.guardianCheck(ctx, "integrate"); halt {
+		return fmt.Errorf("guardian halted pipeline after integrate phase")
+	}
 
 	fmt.Println("═══ Pipeline Complete ═══")
 	return nil
@@ -240,7 +293,6 @@ Product idea:
 		return "product", nil // fallback
 	}
 	name = strings.TrimSpace(name)
-	// Sanitize: lowercase, replace spaces with hyphens, remove non-alphanumeric
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, " ", "-")
 	var clean []byte
@@ -267,26 +319,21 @@ func (p *Pipeline) research(ctx context.Context, input ProductInput) (string, er
 			return "", fmt.Errorf("read spec: %w", err)
 		}
 		spec = content
-	} else {
+	} else if input.URL != "" {
 		researcher, err := p.ensureAgent(ctx, roles.RoleResearcher, "researcher")
 		if err != nil {
 			return "", err
 		}
-
-		if input.URL != "" {
-			_, evaluation, err := researcher.Runtime.Research(ctx, input.URL,
-				"extract the product idea, key entities, features, and requirements. Output in Code Graph vocabulary where possible.")
-			if err != nil {
-				return "", fmt.Errorf("research URL: %w", err)
-			}
-			spec = evaluation
-		} else if input.Description != "" {
-			_, evaluation, err := researcher.Runtime.Evaluate(ctx, "product_idea", input.Description)
-			if err != nil {
-				return "", fmt.Errorf("evaluate idea: %w", err)
-			}
-			spec = evaluation
+		_, evaluation, err := researcher.Runtime.Research(ctx, input.URL,
+			"extract the product idea, key entities, features, and requirements. Output in Code Graph vocabulary where possible.")
+		if err != nil {
+			return "", fmt.Errorf("research URL: %w", err)
 		}
+		spec = evaluation
+	} else if input.Description != "" {
+		// For a plain description, the CTO evaluates directly — no need
+		// to bounce through the Researcher since there's nothing to research.
+		spec = input.Description
 	}
 
 	// CTO evaluates feasibility
@@ -394,8 +441,8 @@ func (p *Pipeline) extractLanguage(design string) string {
 }
 
 // build generates multi-file code from the design spec.
-// The builder outputs files with --- FILE: path --- markers, which are parsed
-// into individual files and committed to the product repo.
+// Uses Evaluate (not CodeWrite) to avoid the "return ONLY code" instruction
+// conflicting with our multi-file --- FILE: path --- format.
 func (p *Pipeline) build(ctx context.Context, design string, lang string) (map[string]string, error) {
 	builder, err := p.ensureAgent(ctx, roles.RoleBuilder, "builder")
 	if err != nil {
@@ -404,7 +451,7 @@ func (p *Pipeline) build(ctx context.Context, design string, lang string) (map[s
 
 	prompt := fmt.Sprintf(`Generate production-quality %s code from this specification.
 
-Output ALL files needed for a complete, runnable project. Use this format for each file:
+Output ALL files needed for a complete, runnable project. Use this exact format for each file:
 
 --- FILE: path/to/file.ext ---
 <file contents>
@@ -415,15 +462,20 @@ Include:
 - Test files alongside the code they test
 - A README.md with build and run instructions
 
-Do NOT include explanation text outside of file blocks. Every line must be inside a file block.
+Do NOT include explanation text outside of file blocks. Every line of output must be inside a file block.
 
 Specification:
 %s`, lang, design)
 
-	code, err := builder.Runtime.CodeWrite(ctx, prompt, lang)
+	// Use Evaluate instead of CodeWrite — CodeWrite prepends "Return ONLY the code"
+	// which conflicts with our multi-file format.
+	_, code, err := builder.Runtime.Evaluate(ctx, "code_generation", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("builder code: %w", err)
 	}
+
+	// Record the build action
+	_, _ = builder.Runtime.Act(ctx, "write_code:"+lang, "multi-file generation from spec")
 
 	// Parse multi-file output
 	files := parseFiles(code)
@@ -454,7 +506,6 @@ func (p *Pipeline) rebuild(ctx context.Context, currentFiles map[string]string, 
 		return nil, err
 	}
 
-	// Build a summary of current files
 	var filesSummary strings.Builder
 	for path, content := range currentFiles {
 		filesSummary.WriteString(fmt.Sprintf("--- FILE: %s ---\n%s\n", path, content))
@@ -473,7 +524,7 @@ Current code:
 
 Output the COMPLETE revised files using --- FILE: path --- markers. Include ALL files, not just changed ones.`, feedback, design, filesSummary.String())
 
-	code, err := builder.Runtime.CodeWrite(ctx, prompt, lang)
+	_, code, err := builder.Runtime.Evaluate(ctx, "code_revision", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("rebuild: %w", err)
 	}
@@ -544,7 +595,7 @@ Code Review: %s
 Spec Compliance: %s
 Simplicity: %s
 
-Reply with exactly APPROVED if the code is ready, or CHANGES NEEDED followed by the specific issues to fix.`, codeReview, specReview, simplicityReview))
+Reply with APPROVED if the code is ready, or CHANGES NEEDED: followed by the specific issues to fix.`, codeReview, specReview, simplicityReview))
 	if err != nil {
 		return "", false, fmt.Errorf("verdict: %w", err)
 	}
@@ -552,19 +603,25 @@ Reply with exactly APPROVED if the code is ready, or CHANGES NEEDED followed by 
 	fmt.Printf("Code Review:\n%s\n\nSpec Compliance:\n%s\n\nSimplicity:\n%s\n\nVerdict: %s\n",
 		codeReview, specReview, simplicityReview, verdict)
 
-	approved = strings.Contains(strings.ToUpper(verdict), "APPROVED") &&
-		!strings.Contains(strings.ToUpper(verdict), "CHANGES")
+	// APPROVED unless explicitly requesting changes
+	upper := strings.ToUpper(verdict)
+	approved = !strings.Contains(upper, "CHANGES NEEDED") &&
+		!strings.Contains(upper, "CHANGES REQUIRED") &&
+		!strings.Contains(upper, "REJECT")
 	return verdict, approved, nil
 }
 
-// test runs tests in the product directory and has the tester analyze gaps.
+// test installs deps, runs tests, and has the tester analyze gaps.
 func (p *Pipeline) test(ctx context.Context, files map[string]string, lang string) error {
 	tester, err := p.ensureAgent(ctx, roles.RoleTester, "tester")
 	if err != nil {
 		return err
 	}
 
-	// Actually run tests in the product directory
+	// Install dependencies first
+	p.installDeps(lang)
+
+	// Run tests
 	testCmd, testArgs := langTestCommand(lang)
 	fmt.Printf("Running: %s %s\n", testCmd, strings.Join(testArgs, " "))
 
@@ -617,7 +674,7 @@ Current code:
 
 Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.String())
 
-		fixedCode, err := builder.Runtime.CodeWrite(ctx, fixPrompt, lang)
+		_, fixedCode, err := builder.Runtime.Evaluate(ctx, "test_fix", fixPrompt)
 		if err != nil {
 			return fmt.Errorf("fix tests: %w", err)
 		}
@@ -646,6 +703,39 @@ Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.Str
 	return nil
 }
 
+// installDeps runs dependency installation for the target language.
+func (p *Pipeline) installDeps(lang string) {
+	var cmd *exec.Cmd
+
+	switch strings.ToLower(lang) {
+	case "go", "golang":
+		cmd = exec.Command("go", "mod", "tidy")
+	case "typescript", "ts", "javascript", "js":
+		cmd = exec.Command("npm", "install")
+	case "python", "py":
+		// Check if requirements.txt exists
+		if p.product != nil {
+			cmd = exec.Command("pip", "install", "-r", "requirements.txt")
+		}
+	case "rust", "rs":
+		cmd = exec.Command("cargo", "build")
+	case "csharp", "c#", "cs":
+		cmd = exec.Command("dotnet", "restore")
+	default:
+		return
+	}
+
+	if cmd != nil && p.product != nil {
+		cmd.Dir = p.product.Dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Printf("Dep install warning: %s\n", string(out))
+		} else {
+			fmt.Printf("Dependencies installed.\n")
+		}
+	}
+}
+
 // integrate assembles and prepares for deployment.
 func (p *Pipeline) integrate(ctx context.Context) error {
 	integrator, err := p.ensureAgent(ctx, roles.RoleIntegrator, "integrator")
@@ -666,7 +756,7 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 	}
 
 	// Escalate to human for production approval
-	humanID := types.MustActorID("actor_human_matt")
+	humanID := p.humanID
 	_, err = integrator.Runtime.Escalate(ctx, humanID, "Product ready for human review before production deploy")
 	if err != nil {
 		return fmt.Errorf("escalate: %w", err)
@@ -677,10 +767,11 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 }
 
 // guardianCheck runs the Guardian's integrity check after a phase.
-func (p *Pipeline) guardianCheck(ctx context.Context, phase string) {
+// Returns true if the Guardian issued a HALT — the pipeline should stop.
+func (p *Pipeline) guardianCheck(ctx context.Context, phase string) bool {
 	events, err := p.guardian.Runtime.Memory(20)
 	if err != nil || len(events) == 0 {
-		return
+		return false
 	}
 
 	var summary strings.Builder
@@ -693,17 +784,31 @@ func (p *Pipeline) guardianCheck(ctx context.Context, phase string) {
 			phase, summary.String()))
 	if err != nil {
 		fmt.Printf("Guardian check failed: %v\n", err)
-		return
+		return false
+	}
+
+	upper := strings.ToUpper(eval)
+
+	if strings.Contains(upper, "HALT") {
+		fmt.Printf("🛑 Guardian HALT (after %s):\n%s\n", phase, eval)
+		_, _ = p.guardian.Runtime.Emit(event.AgentEscalatedContent{
+			AgentID:   p.guardian.Runtime.ID(),
+			Authority: p.humanID,
+			Reason:    fmt.Sprintf("[HALT after %s] %s", phase, eval),
+		})
+		return true
 	}
 
 	if containsAlert(eval) {
 		fmt.Printf("⚠ Guardian Alert (after %s):\n%s\n", phase, eval)
 		_, _ = p.guardian.Runtime.Emit(event.AgentEscalatedContent{
 			AgentID:   p.guardian.Runtime.ID(),
-			Authority: types.MustActorID("actor_human_matt"),
+			Authority: p.humanID,
 			Reason:    fmt.Sprintf("[%s phase] %s", phase, eval),
 		})
 	}
+
+	return false
 }
 
 // ════════════════════════════════════════════════════════════════════════

@@ -14,7 +14,9 @@ Hive is a product factory. Agents research ideas, design systems in Code Graph v
 
 ## Architecture
 
-- All agents share one event graph (one Store)
+- All agents share one event graph (one Store) and one actor store (IActorStore)
+- Every actor (human + agents) is registered in the actor store — no magic strings
+- Actor IDs are derived from deterministic key pairs, not hardcoded
 - Each agent is an `AgentRuntime` with its own identity and signing key
 - Communication is through events, not messages
 - The Guardian watches everything independently
@@ -45,13 +47,13 @@ go test ./...
 
 ```bash
 # Start the hive with a product idea (CTO derives the product name)
-go run ./cmd/hive --idea "Build a task management app with kanban boards"
+go run ./cmd/hive --human Matt --idea "Build a task management app with kanban boards"
 
 # Start from a URL with an explicit product name
-go run ./cmd/hive --name social-grammar --url "https://mattsearles2.substack.com/p/the-missing-social-grammar"
+go run ./cmd/hive --human Matt --name social-grammar --url "https://mattsearles2.substack.com/p/the-missing-social-grammar"
 
 # Start from a Code Graph spec file
-go run ./cmd/hive --spec path/to/spec.cg
+go run ./cmd/hive --human Matt --spec path/to/spec.cg
 ```
 
 Each product gets its own GitHub repo under lovyou-ai, with git commits at each phase.

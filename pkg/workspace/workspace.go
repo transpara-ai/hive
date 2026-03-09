@@ -60,13 +60,17 @@ func (w *Workspace) InitProduct(name string) (*Product, error) {
 
 	// Initialize git if not already a repo
 	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
-		if err := p.git("init"); err != nil {
+		if err := p.git("init", "-b", "main"); err != nil {
 			return nil, fmt.Errorf("git init: %w", err)
 		}
 
+		// Configure git identity for commits
+		_ = p.git("config", "user.name", "hive")
+		_ = p.git("config", "user.email", "hive@lovyou.ai")
+
 		// Try to create the GitHub repo (may already exist)
 		_ = p.gh("repo", "create", repo, "--public",
-			"--description", fmt.Sprintf("Built by hive — lovyou-ai/hive"))
+			"--description", "Built by hive — lovyou-ai/hive")
 
 		// Set remote
 		_ = p.git("remote", "add", "origin",

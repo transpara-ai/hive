@@ -47,19 +47,16 @@ type Agent struct {
 type AgentConfig struct {
 	Role     Role
 	Name     string
-	Store    store.Store       // shared graph — all agents use the same store
+	ActorID  types.ActorID         // from the actor store — no magic strings
+	Store    store.Store           // shared graph — all agents use the same store
 	Provider intelligence.Provider
+	HumanID  types.ActorID         // the human operator (from the actor store)
 }
 
 // NewAgent creates and bootstraps a hive agent with the given role.
 func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
-	actorID, err := types.NewActorID(fmt.Sprintf("actor_hive_%s", cfg.Name))
-	if err != nil {
-		return nil, fmt.Errorf("actor ID: %w", err)
-	}
-
 	rt, err := intelligence.NewRuntime(ctx, intelligence.RuntimeConfig{
-		AgentID:  actorID,
+		AgentID:  cfg.ActorID,
 		Provider: cfg.Provider,
 		Store:    cfg.Store,
 	})
@@ -68,7 +65,7 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 	}
 
 	// Boot with role-specific soul values
-	humanID := types.MustActorID("actor_human_matt")
+	humanID := cfg.HumanID
 	_, err = rt.Boot(
 		"ai",
 		cfg.Provider.Model(),
