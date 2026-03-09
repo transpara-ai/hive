@@ -1078,9 +1078,7 @@ Events:
 		return false
 	}
 
-	upper := strings.ToUpper(eval)
-
-	if strings.Contains(upper, "HALT") {
+	if loop.ContainsSignal(eval, "HALT") {
 		fmt.Printf("🛑 Guardian HALT (after %s):\n%s\n", phase, eval)
 		// NOTE: Emit is context-unaware (eventgraph Runtime.Emit doesn't take ctx).
 		// This is acceptable — the HALT event is best-effort observability, not

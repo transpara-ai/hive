@@ -398,6 +398,38 @@ func createMockEvent(t *testing.T, _ store.Store, source types.ActorID) event.Ev
 	return ev
 }
 
+func TestContainsSignal(t *testing.T) {
+	tests := []struct {
+		response string
+		signal   string
+		want     bool
+	}{
+		// Positive — standalone directives.
+		{"HALT: integrity violation", "HALT", true},
+		{"HALT", "HALT", true},
+		{"I need help. ESCALATE: authority needed", "ESCALATE", true},
+		{"All done. TASK_DONE", "TASK_DONE", true},
+		{"Line one\nHALT\nLine three", "HALT", true},
+		{"IDLE", "IDLE", true},
+		{"IDLE: nothing to do", "IDLE", true},
+		{"brought to a halt", "HALT", true}, // standalone word — bounded by space+EOF
+
+		// Negative — embedded in longer words (no word boundary).
+		{"The asphalt road was fine", "HALT", false},
+		{"An ESCALATED dispute was resolved", "ESCALATE", false},
+		{"ESCALATION required attention", "ESCALATE", false},
+		{"HALTED by the operator", "HALT", false},
+		{"HALTING the process", "HALT", false},
+		{"", "HALT", false},
+	}
+	for _, tt := range tests {
+		got := ContainsSignal(tt.response, tt.signal)
+		if got != tt.want {
+			t.Errorf("ContainsSignal(%q, %q) = %v, want %v", tt.response, tt.signal, got, tt.want)
+		}
+	}
+}
+
 type testSigner struct{}
 
 func (s *testSigner) Sign(data []byte) (types.Signature, error) {

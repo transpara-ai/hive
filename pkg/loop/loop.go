@@ -271,12 +271,12 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, int, error) {
 // from LLM narration like "brought to a halt" or "the task done by the agent".
 func (l *Loop) checkResponse(ctx context.Context, response string, iteration int) *Result {
 	// HALT is the highest priority — Guardian emergency stop.
-	if containsSignal(response, "HALT") {
+	if ContainsSignal(response, "HALT") {
 		r := l.result(StopHalt, iteration, response)
 		return &r
 	}
 
-	if containsSignal(response, "ESCALATE") {
+	if ContainsSignal(response, "ESCALATE") {
 		// Record escalation event.
 		if _, err := l.agent.Runtime.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, response)); err != nil {
@@ -286,7 +286,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 		return &r
 	}
 
-	if containsSignal(response, "TASK_DONE") {
+	if ContainsSignal(response, "TASK_DONE") {
 		// Record completion.
 		if _, err := l.agent.Runtime.Learn(ctx,
 			"task completed after loop iteration "+fmt.Sprint(iteration), "loop"); err != nil {
@@ -299,10 +299,10 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 	return nil
 }
 
-// containsSignal checks whether a signal keyword appears as a directive in the
-// response — at line start or preceded by whitespace/punctuation. This prevents
-// false positives from embedded words like "halt" in "brought to a halt".
-func containsSignal(response, signal string) bool {
+// ContainsSignal checks whether a signal keyword appears as a standalone directive
+// in the response — bounded by non-word characters on both sides. This prevents
+// false positives from embedded words like "halt" in "asphalt" or "ESCALATED".
+func ContainsSignal(response, signal string) bool {
 	upper := strings.ToUpper(response)
 	signal = strings.ToUpper(signal)
 
@@ -313,21 +313,33 @@ func containsSignal(response, signal string) bool {
 			return false
 		}
 		abs := idx + pos
-		// Valid if at start of string or preceded by newline/space/punctuation.
-		if abs == 0 || upper[abs-1] == '\n' || upper[abs-1] == ' ' || upper[abs-1] == '.' || upper[abs-1] == ':' || upper[abs-1] == '!' {
+		end := abs + len(signal)
+
+		beforeOK := abs == 0 || !isWordChar(upper[abs-1])
+		afterOK := end >= len(upper) || !isWordChar(upper[end])
+
+		if beforeOK && afterOK {
 			return true
 		}
-		idx = abs + len(signal)
+		idx = end
 		if idx >= len(upper) {
 			return false
 		}
 	}
 }
 
+// isWordChar returns true for characters that are part of a word (A-Z, 0-9).
+// Underscore is NOT a word char here — signals like "TASK_DONE" contain underscores
+// internally, so underscore must not break the match.
+func isWordChar(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+}
+
 // isQuiescent returns true if the response indicates the agent has nothing to do.
+// Uses ContainsSignal for consistency with other signal detection — requires
+// IDLE as a standalone word, not embedded in other text.
 func (l *Loop) isQuiescent(response string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(response))
-	return upper == "IDLE" || strings.HasPrefix(upper, "IDLE")
+	return ContainsSignal(response, "IDLE")
 }
 
 // onEvent is called by the bus when a new event arrives.
