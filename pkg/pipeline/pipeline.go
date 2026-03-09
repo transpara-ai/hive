@@ -29,6 +29,7 @@ const (
 
 // ProductInput describes how a product idea enters the hive.
 type ProductInput struct {
+	Name        string // Product name (used for repo and directory)
 	URL         string // Read from URL (Substack post, docs, etc.)
 	Description string // Natural language description
 	SpecFile    string // Path to a Code Graph spec file
@@ -39,6 +40,7 @@ type Pipeline struct {
 	store    store.Store
 	provider intelligence.Provider
 	ws       *workspace.Workspace
+	product  *workspace.Product // current product being built
 
 	cto      *roles.Agent
 	guardian *roles.Agent
@@ -115,6 +117,18 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 
 // Run executes the full product pipeline for a given input.
 func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
+	// Initialize product repo
+	name := input.Name
+	if name == "" {
+		name = "product"
+	}
+	product, err := p.ws.InitProduct(name)
+	if err != nil {
+		return fmt.Errorf("init product: %w", err)
+	}
+	p.product = product
+	fmt.Printf("Product repo: %s → %s\n", product.Dir, product.Repo)
+
 	fmt.Println("═══ Phase 1: Research ═══")
 	spec, err := p.research(ctx, input)
 	if err != nil {
@@ -206,7 +220,7 @@ func (p *Pipeline) design(ctx context.Context, spec string) (string, error) {
 		return "", err
 	}
 
-	prompt := fmt.Sprintf("%s\n\nDesign the full system architecture. Output a complete Code Graph spec with entities, states, views, layouts, queries, commands, triggers, and constraints.\n\n%s",
+	prompt := fmt.Sprintf("%s\n\nDesign the full system architecture. Output a complete Code Graph spec. Remember: derive complexity from simple compositions. Each view should have the minimal elements needed — if a view feels heavy, decompose it. Elegant, simple, beautiful.\n\n%s",
 		roles.SystemPrompt(roles.RoleArchitect), spec)
 
 	_, design, err := architect.Runtime.Evaluate(ctx, "architecture", prompt)
@@ -214,9 +228,9 @@ func (p *Pipeline) design(ctx context.Context, spec string) (string, error) {
 		return "", fmt.Errorf("architect design: %w", err)
 	}
 
-	// CTO reviews the architecture
+	// CTO reviews the architecture — check for derivation and minimalism
 	_, review, err := p.cto.Runtime.Evaluate(ctx, "architecture_review",
-		fmt.Sprintf("Review this architecture. Is it sound? Any gaps?\n\n%s", design))
+		fmt.Sprintf("Review this architecture. Check: Are views minimal? Is complexity derived from composition rather than accumulated? Are there any bloated entities or views that should be decomposed? Is it elegant and simple?\n\n%s", design))
 	if err != nil {
 		return "", fmt.Errorf("CTO review design: %w", err)
 	}
@@ -240,14 +254,15 @@ func (p *Pipeline) build(ctx context.Context, design string) (string, error) {
 		return "", fmt.Errorf("builder code: %w", err)
 	}
 
-	// Write code to workspace
-	productDir := p.ws.ProductDir("current")
-	err = p.ws.WriteFile(productDir+"/main.go", code)
-	if err != nil {
+	// Write code to product repo and commit
+	if err := p.product.WriteFile("main.go", code); err != nil {
 		return "", fmt.Errorf("write code: %w", err)
 	}
+	if err := p.product.Commit("feat: initial code generation from spec"); err != nil {
+		return "", fmt.Errorf("commit code: %w", err)
+	}
 
-	fmt.Printf("Code generated: %d bytes\n", len(code))
+	fmt.Printf("Code generated and committed: %d bytes\n", len(code))
 	return code, nil
 }
 
@@ -304,6 +319,13 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 	_, err = integrator.Runtime.Act(ctx, "integrate", "staging")
 	if err != nil {
 		return fmt.Errorf("integration: %w", err)
+	}
+
+	// Push to GitHub
+	if err := p.product.Push(); err != nil {
+		fmt.Printf("Push failed (may need manual push): %v\n", err)
+	} else {
+		fmt.Printf("Pushed to https://github.com/%s\n", p.product.Repo)
 	}
 
 	// Escalate to human for production approval

@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	name := flag.String("name", "", "Product name (used for repo and directory)")
 	idea := flag.String("idea", "", "Product idea (natural language description)")
 	url := flag.String("url", "", "URL to research for product idea")
 	spec := flag.String("spec", "", "Path to Code Graph spec file")
@@ -60,6 +61,7 @@ func main() {
 	}
 
 	input := pipeline.ProductInput{
+		Name:        *name,
 		URL:         *url,
 		Description: *idea,
 		SpecFile:    *spec,
