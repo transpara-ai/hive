@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor/pgactor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
@@ -49,37 +51,52 @@ func main() {
 		dsn = os.Getenv("DATABASE_URL")
 	}
 
-	s, err := openStore(ctx, dsn)
+	// Open shared pool for Postgres, or nil for in-memory.
+	var pool *pgxpool.Pool
+	if dsn != "" {
+		fmt.Printf("Postgres: %s\n", dsn)
+		var err error
+		pool, err = pgxpool.New(ctx, dsn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "postgres: %v\n", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+	}
+
+	s, err := openStore(ctx, pool)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "store: %v\n", err)
 		os.Exit(1)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "store close: %v\n", err)
+		}
+	}()
 
-	// Actor store — Postgres when DSN provided, in-memory otherwise.
-	actors, actorCloser, err := openActorStore(ctx, dsn)
+	// Actor store — Postgres when pool provided, in-memory otherwise.
+	actors, err := openActorStore(ctx, pool)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "actor store: %v\n", err)
 		os.Exit(1)
 	}
-	if actorCloser != nil {
-		defer actorCloser()
-	}
 
 	// State store — durable KV for primitive state, trust, agent memory.
-	states, stateCloser, err := openStateStore(ctx, dsn)
+	states, err := openStateStore(ctx, pool)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "state store: %v\n", err)
 		os.Exit(1)
 	}
-	if stateCloser != nil {
-		defer stateCloser()
-	}
 
 	// Trust model — load persisted state if available.
+	// Only save trust on exit if load succeeded, to avoid overwriting real data
+	// with an empty model after a transient DB error.
 	trustModel := trust.NewDefaultTrustModel()
+	trustLoaded := true
 	if err := loadTrust(trustModel, states); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load trust state: %v\n", err)
+		trustLoaded = false
 	}
 
 	// Bootstrap: register the human operator in the actor store.
@@ -115,9 +132,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Persist trust state for next run.
-	if err := saveTrust(trustModel, states); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save trust state: %v\n", err)
+	// Persist trust state for next run (only if load succeeded — avoids
+	// overwriting real data with empty model after a transient DB error).
+	if trustLoaded {
+		if err := saveTrust(trustModel, states); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save trust state: %v\n", err)
+		}
 	}
 
 	// Print summary
@@ -126,50 +146,37 @@ func main() {
 	fmt.Printf("Agents active: %d\n", len(p.Agents()))
 }
 
-// openStore creates a Store from a DSN.
-// Empty DSN → in-memory. postgres:// → PostgresStore.
-func openStore(ctx context.Context, dsn string) (store.Store, error) {
-	if dsn == "" {
+// openStore creates a Store from a shared pool.
+// nil pool → in-memory. Non-nil → PostgresStore (shared pool).
+func openStore(ctx context.Context, pool *pgxpool.Pool) (store.Store, error) {
+	if pool == nil {
 		fmt.Println("Store: in-memory")
 		return store.NewInMemoryStore(), nil
 	}
-
-	// Postgres (docker-compose locally, Neon in production)
-	fmt.Printf("Store: postgres (%s)\n", dsn)
-	return pgstore.NewPostgresStore(ctx, dsn)
+	fmt.Println("Store: postgres")
+	return pgstore.NewPostgresStoreFromPool(ctx, pool)
 }
 
-// openActorStore creates an IActorStore from a DSN.
-// Empty DSN → in-memory. postgres:// → PostgresActorStore.
-// Returns a closer function for Postgres (nil for in-memory).
-func openActorStore(ctx context.Context, dsn string) (actor.IActorStore, func(), error) {
-	if dsn == "" {
+// openActorStore creates an IActorStore from a shared pool.
+// nil pool → in-memory. Non-nil → PostgresActorStore (shared pool).
+func openActorStore(ctx context.Context, pool *pgxpool.Pool) (actor.IActorStore, error) {
+	if pool == nil {
 		fmt.Println("Actor store: in-memory")
-		return actor.NewInMemoryActorStore(), nil, nil
+		return actor.NewInMemoryActorStore(), nil
 	}
-
 	fmt.Println("Actor store: postgres")
-	s, err := pgactor.NewPostgresActorStore(ctx, dsn)
-	if err != nil {
-		return nil, nil, err
-	}
-	return s, func() { s.Close() }, nil
+	return pgactor.NewPostgresActorStoreFromPool(ctx, pool)
 }
 
-// openStateStore creates an IStateStore from a DSN.
-// Empty DSN → in-memory. postgres:// → PostgresStateStore.
-func openStateStore(ctx context.Context, dsn string) (statestore.IStateStore, func(), error) {
-	if dsn == "" {
+// openStateStore creates an IStateStore from a shared pool.
+// nil pool → in-memory. Non-nil → PostgresStateStore (shared pool).
+func openStateStore(ctx context.Context, pool *pgxpool.Pool) (statestore.IStateStore, error) {
+	if pool == nil {
 		fmt.Println("State store: in-memory")
-		return statestore.NewInMemoryStateStore(), nil, nil
+		return statestore.NewInMemoryStateStore(), nil
 	}
-
 	fmt.Println("State store: postgres")
-	s, err := pgstate.NewPostgresStateStore(ctx, dsn)
-	if err != nil {
-		return nil, nil, err
-	}
-	return s, func() { s.Close() }, nil
+	return pgstate.NewPostgresStateStoreFromPool(ctx, pool)
 }
 
 const trustStateScope = "trust"
