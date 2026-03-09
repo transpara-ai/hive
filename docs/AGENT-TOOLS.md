@@ -6,7 +6,7 @@ How agents get tools, use them, and act autonomously.
 
 ### Layer 1: MCP Server (the hands)
 
-An MCP (Model Context Protocol) server written in Go that exposes the event graph, actor store, and workspace as tools Claude CLI can call during reasoning.
+An MCP (Model Context Protocol) server written in Go that exposes the event graph, actor store, trust model, and agent identity as tools Claude CLI can call during reasoning.
 
 When an agent reasons, it can call these tools mid-thought — Claude CLI handles the tool-call loop internally (call tool → get result → continue reasoning → call another tool → ...).
 
@@ -16,34 +16,35 @@ When an agent reasons, it can call these tools mid-thought — Claude CLI handle
 
 | Tool | Description | Reads/Writes |
 |------|-------------|-------------|
-| `query_events` | Query events by type, source, time range, limit | Read |
+| `query_events` | Query events by type, source, limit | Read |
 | `get_event` | Get a single event by ID with full detail | Read |
 | `get_actor` | Look up an actor by ID | Read |
 | `list_actors` | List actors with filters (type, status) | Read |
-| `get_trust` | Get trust score between two actors | Read |
-| `emit_event` | Record an event on the graph | Write |
-| `read_file` | Read a file from the workspace | Read |
-| `write_file` | Write a file to the workspace (stages in git) | Write |
-| `list_files` | List files in a product directory | Read |
-| `run_command` | Execute a shell command (sandboxed) | Write |
-| `query_self` | Get own actor info, trust level, authority scope | Read |
-| `query_human` | Get human operator info and preferences | Read |
+| `get_trust` | Get trust score for an actor or between two actors | Read |
+| `emit_event` | Record an event on the graph (authority-checked) | Write |
+| `query_self` | Get own actor info, trust level, trend | Read |
+| `query_human` | Get human operator info | Read |
 
-Write tools require appropriate authority. The Guardian monitors all tool use.
+**Not exposed (Claude CLI has these natively):** `read_file`, `write_file`, `list_files`, `run_command`. Claude CLI provides Read, Write, Edit, Bash, Glob, and Grep tools out of the box — duplicating them in the MCP server would confuse the agent with two ways to do the same thing.
+
+**Authority:** Write tools (emit_event) are authority-checked. The agent's trust score must meet a minimum threshold. Suspended agents cannot write.
+
+**Audit:** Every tool call (read and write) emits an `agent.acted` event with action prefix `mcp.tool_call:` so the Guardian can monitor all tool usage.
 
 **Architecture:**
 
 ```
 Pipeline (Go)
   │
-  ├── spawns Claude CLI with MCP config
+  ├── writes .mcp.json with hive MCP server config
+  ├── spawns Claude CLI with --mcp-config
   │     │
   │     ├── Claude CLI spawns MCP server (Go binary)
   │     │     │
-  │     │     ├── query_events → store.Query()
-  │     │     ├── get_actor → actors.Get()
-  │     │     ├── emit_event → runtime.Emit()
-  │     │     ├── read_file → workspace.ReadFile()
+  │     │     ├── query_events → store.ByType/BySource/Recent
+  │     │     ├── get_actor → actors.Get
+  │     │     ├── emit_event → factory.Create + store.Append (authority-checked)
+  │     │     ├── query_self → actors.Get(self) + trust.Score
   │     │     └── ... other tools
   │     │
   │     └── Claude reasons, calls tools, gets results, continues
@@ -51,7 +52,9 @@ Pipeline (Go)
   └── observes events on the graph
 ```
 
-The MCP server and the pipeline share the same Store and IActorStore instances. The MCP server is a thin adapter — it translates MCP JSON-RPC calls into Go method calls on the store/actors/workspace.
+The MCP server shares the same Postgres pool as the pipeline. It's a thin adapter — translating MCP JSON-RPC calls into Go method calls on the store/actors/trust.
+
+**Context injection:** Before each prompt, a `ContextBuilder` injects orientation context: the agent's identity, human operator, other actors with trust scores, and recent events. This gives agents basic awareness without tool calls.
 
 ### Layer 2: Agentic Loop (the brain)
 
@@ -109,12 +112,12 @@ The AgentRuntime already has `RunTask` (Observe → Evaluate → Decide → Act 
 3. Architect agent enters its loop:
    - OBSERVE: picks up the task from the graph
    - REASON: "I need to design a Code Graph spec"
-   - ACT: uses `read_file` to check existing specs, emits design
+   - ACT: uses Claude's native Read/Write to check existing specs, emits design
    - REFLECT: "Is this minimal? Let me simplify"
    - ACT: revises the design
 4. Builder agent enters its loop:
    - OBSERVE: picks up the approved design
-   - ACT: uses `write_file` to generate code, `run_command` to test
+   - ACT: uses Claude's native Write/Bash to generate code and test
    - REFLECT: "Tests failing" → fixes → retests
 5. Guardian watches all events continuously, halts if needed
 
@@ -133,73 +136,49 @@ When an agent lacks a tool or skill:
 
 This is how the hive grows its own capabilities. The MCP server's tool list isn't static — agents can extend it.
 
-## Implementation Plan
+## Implementation
 
-### Phase 1: MCP Server (Tier 1.5)
-
-Build the MCP server as a Go binary in `cmd/mcp-server/`:
+### Files
 
 ```
+pkg/mcp/
+├── protocol.go     — JSON-RPC 2.0 types (Request, Response, Tool, etc.)
+├── server.go       — stdio transport, tool registry, dispatch
+├── tools.go        — tool definitions + handlers (read, self, write)
+├── format.go       — event/actor/trust JSON serialization
+├── authority.go    — trust-based authority checking for write tools
+├── audit.go        — audit logging (every tool call → event on graph)
+├── context.go      — context injection (identity, actors, events)
+├── config.go       — .mcp.json writer for Claude CLI
+├── server_test.go  — 12 tests
+└── config_test.go  — 1 test
+
 cmd/mcp-server/
-├── main.go          — stdio transport, JSON-RPC handler
-├── tools.go         — tool definitions (name, description, schema)
-└── handlers.go      — tool implementations (calls to store/actors/workspace)
+└── main.go         — binary entry point (Postgres, stores, trust, flags)
 ```
 
-Wire into the claude-cli provider:
-- Add `MCPConfig` field to intelligence.Config
-- Write `.mcp.json` before spawning Claude CLI
-- Pass `--mcp-config` or let Claude CLI discover from `.mcp.json`
+### Wiring into Claude CLI
 
-### Phase 2: Context Injection (immediate, before MCP)
+The pipeline writes `.mcp.json` before spawning Claude CLI:
 
-Before MCP is built, improve context injection — before each prompt, inject:
-- Recent events (last 20, already done via Memory)
-- Actor list (who exists, their roles and trust levels)
-- Pending tasks (what needs doing)
-- Own identity (who am I, what's my authority scope)
-
-This gives agents awareness without tool-use. MCP replaces and extends this.
-
-### Phase 3: Agentic Loop (Tier 2)
-
-Extend AgentRuntime with a `Loop` method:
-
-```go
-func (r *AgentRuntime) Loop(ctx context.Context, opts LoopConfig) error {
-    for i := 0; i < opts.MaxIterations; i++ {
-        // 1. Observe
-        events, _ := r.Memory(opts.ObserveWindow)
-
-        // 2. Reason + Act (Claude handles tool calls via MCP)
-        _, response, err := r.Evaluate(ctx, "loop_iteration",
-            buildLoopPrompt(events, opts))
-
-        // 3. Reflect — check if work is done
-        if isQuiescent(response) || shouldEscalate(response) {
-            break
-        }
+```json
+{
+  "mcpServers": {
+    "hive": {
+      "command": "/path/to/mcp-server",
+      "args": ["--store", "postgres://...", "--agent-id", "actor_...", "--human-id", "actor_...", "--conv-id", "conv_..."]
     }
-    return nil
+  }
 }
 ```
 
-The key insight: Claude CLI + MCP handles steps 2-3 internally (reason, call tools, get results, continue). The Go loop handles the outer cycle (observe new events, kick off next iteration, check stopping conditions).
-
-### Phase 4: Self-Extending Tools (Tier 4)
-
-Agents can add new MCP tools:
-1. Agent writes a new tool handler in Go
-2. Submits as PR to lovyou-ai/hive (or a plugins repo)
-3. Guardian reviews for safety
-4. Human approves
-5. MCP server reloads with new tools
+The `intelligence.Config` has `MCPConfigPath` — the claude-cli provider passes `--mcp-config <path>` automatically.
 
 ## Security
 
-- **Read tools** require actor authentication (the agent's ActorID)
-- **Write tools** require authority checks (is this agent authorized to emit this event type?)
-- **run_command** is sandboxed — limited to the product workspace, no network access without approval
+- **Read tools** are unrestricted — any agent can query the graph
+- **Write tools** require authority checks (trust threshold, not suspended)
+- **Agent ID injection** — emit_event always uses the authenticated agent's ID, preventing impersonation
+- **Audit trail** — every tool call emits an event, visible to the Guardian
 - **Self-modification tools** always require human approval (Required authority level)
-- **Guardian monitors all tool calls** via events on the graph
 - **Budget limits** prevent runaway tool use (max iterations, max tokens, max cost per loop)
