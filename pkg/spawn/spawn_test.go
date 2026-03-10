@@ -355,6 +355,61 @@ func TestAgentInitiatedSpawnDeniedByLowTrust(t *testing.T) {
 	}
 }
 
+func TestSpawnLifecycleEventIDsMonotonic(t *testing.T) {
+	spawner, humanID := testSpawner(t, func(req authority.Request) (bool, string) {
+		return true, "approved"
+	})
+
+	_, err := spawner.Spawn(context.Background(), SpawnRequest{
+		Role:          roles.RoleBuilder,
+		Name:          "test-monotonic",
+		Justification: "testing monotonic IDs",
+		RequestedBy:   humanID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the three lifecycle events and verify their UUIDv7 timestamps
+	// are strictly increasing: identity < lifespan < role.
+	identityPage, err := spawner.store.ByType(event.EventTypeAgentIdentityCreated, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identityPage.Items()) == 0 {
+		t.Fatal("expected agent.identity.created event")
+	}
+
+	lifespanPage, err := spawner.store.ByType(event.EventTypeAgentLifespanStarted, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lifespanPage.Items()) == 0 {
+		t.Fatal("expected agent.lifespan.started event")
+	}
+
+	rolePage, err := spawner.store.ByType(event.EventTypeAgentRoleAssigned, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rolePage.Items()) == 0 {
+		t.Fatal("expected agent.role.assigned event")
+	}
+
+	identityMS := identityPage.Items()[0].ID().TimestampMS()
+	lifespanMS := lifespanPage.Items()[0].ID().TimestampMS()
+	roleMS := rolePage.Items()[0].ID().TimestampMS()
+
+	if identityMS >= lifespanMS {
+		t.Errorf("identity.created timestamp (%d) should be strictly before lifespan.started (%d)",
+			identityMS, lifespanMS)
+	}
+	if lifespanMS >= roleMS {
+		t.Errorf("lifespan.started timestamp (%d) should be strictly before role.assigned (%d)",
+			lifespanMS, roleMS)
+	}
+}
+
 // Verify DerivePublicKey produces valid Ed25519 keys.
 func TestDerivePublicKeyValid(t *testing.T) {
 	pub := DerivePublicKey("agent:valid-test")
