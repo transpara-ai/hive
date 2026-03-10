@@ -151,6 +151,7 @@ func run() error {
 		Gate:         gate,
 		SkipGuardian:  *skipGuardian,
 		SkipSimplify:  *skipSimplify,
+		AutoApprove:   *autoApprove,
 		ReviewerModel: *reviewerModel,
 	})
 	if err != nil {

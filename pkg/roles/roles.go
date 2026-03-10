@@ -264,7 +264,9 @@ Extra scrutiny for:
 - Revenue-affecting decisions — verify alignment with corps-pay-individuals-free model
 - Data handling — verify user privacy and consent
 
-Be conservative. False negatives (missing a real problem) are far worse than false positives (flagging something that's fine). When in doubt, alert.`
+Be conservative. False negatives (missing a real problem) are far worse than false positives (flagging something that's fine). When in doubt, alert.
+
+If no violations found, respond with a single-line summary. Only elaborate on actual violations.`
 
 const researcherRole = `
 == ROLE: RESEARCHER ==

@@ -85,6 +85,7 @@ type Pipeline struct {
 	trackers      map[roles.Role]*resources.TrackingProvider // per-agent token tracking
 	skipGuardian  bool
 	skipSimplify  bool
+	autoApprove   bool   // --yes flag active (authority requests auto-approved)
 	reviewerModel string // model override for targeted reviews (empty = role default)
 
 	// Authority infrastructure — always initialized; gate is optional.
@@ -115,6 +116,11 @@ type Config struct {
 	// The Architect's design prompt already includes self-review instructions,
 	// so this is often redundant for simple projects. Saves 1-2 Opus calls.
 	SkipSimplify bool
+
+	// AutoApprove indicates the --yes flag is active (all authority requests
+	// auto-approved). Passed to Guardian so it doesn't flag missing
+	// authority.requested/authority.resolved events as violations.
+	AutoApprove bool
 
 	// ReviewerModel overrides the model used for targeted reviews.
 	// Empty string = use role default. Targeted reviews only check a focused
@@ -148,6 +154,7 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		trackers:      make(map[roles.Role]*resources.TrackingProvider),
 		skipGuardian:  cfg.SkipGuardian,
 		skipSimplify:  cfg.SkipSimplify,
+		autoApprove:   cfg.AutoApprove,
 		reviewerModel: cfg.ReviewerModel,
 	}
 
@@ -2198,9 +2205,17 @@ func (p *Pipeline) guardianCheck(ctx context.Context, phase string) bool {
 		summary.WriteString(fmt.Sprintf("[%s] %s: %s\n", ev.Type().Value(), ev.Source().Value(), ev.ID().Value()))
 	}
 
+	// Build pipeline context so Guardian doesn't flag expected behavior.
+	var pipelineCtx string
+	if p.autoApprove {
+		pipelineCtx = `
+Pipeline context: --yes flag is active (auto-approve mode). Missing authority.requested/authority.resolved events are EXPECTED — the approval gate is bypassed. Do not flag this as a violation.
+`
+	}
+
 	_, eval, err := p.guardian.Runtime.Evaluate(ctx, "integrity_check_"+phase,
 		fmt.Sprintf(`Review these recent events (after %s phase) for policy violations, trust anomalies, or authority overreach.
-
+%s
 EXTRA SCRUTINY for:
 - Agent spawn events (agent.role.assigned, authority.requested, authority.resolved) — verify authority and trust levels
 - Self-modification events — flag for human review
@@ -2208,7 +2223,7 @@ EXTRA SCRUTINY for:
 
 Events:
 %s`,
-			phase, summary.String()))
+			phase, pipelineCtx, summary.String()))
 	if err != nil {
 		fmt.Printf("Guardian check failed: %v\n", err)
 		return false
