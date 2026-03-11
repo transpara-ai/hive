@@ -129,9 +129,9 @@ func TestParseSelfImproveRecommendation(t *testing.T) {
 			wantSkip: "nothing worth fixing",
 		},
 		{
-			name: "no JSON",
+			name: "no JSON — graceful stop",
 			input: "I think everything looks fine.",
-			wantErr: true,
+			wantSkip: "I think everything looks fine.",
 		},
 	}
 

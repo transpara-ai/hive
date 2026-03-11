@@ -943,7 +943,8 @@ func parseSelfImproveRecommendation(response string) (SelfImproveRecommendation,
 	// Extract JSON from markdown code blocks or surrounding text.
 	jsonStr := extractJSONBlock(response)
 	if jsonStr == "" {
-		return rec, fmt.Errorf("no JSON found in CTO response")
+		// CTO responded in prose without JSON — treat as graceful stop.
+		return SelfImproveRecommendation{SkipReason: response}, nil
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &rec); err != nil {
