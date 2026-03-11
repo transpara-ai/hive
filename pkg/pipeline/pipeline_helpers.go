@@ -99,6 +99,16 @@ func (p *Pipeline) guardianCheckModel() string {
 	return "claude-sonnet-4-6"
 }
 
+// architectDesignModel returns the model to use for Architect design and simplify calls.
+// Defaults to Sonnet — spec-writing and simplification are structured generation tasks,
+// not deep architectural reasoning.
+func (p *Pipeline) architectDesignModel() string {
+	if p.architectModel != "" {
+		return p.architectModel
+	}
+	return "claude-sonnet-4-6"
+}
+
 // containsAlert checks if the Guardian's evaluation contains an alert directive.
 // Uses line-start matching (via ContainsSignal) to avoid false positives from
 // prose like "NO VIOLATIONS DETECTED".

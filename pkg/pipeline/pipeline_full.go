@@ -449,8 +449,7 @@ Product idea:
 // design creates a full Code Graph spec from the product idea.
 // The Architect self-reviews for minimality — no separate CTO review call needed.
 func (p *Pipeline) design(ctx context.Context, spec string) (string, error) {
-	architect, err := p.ensureAgent(ctx, roles.RoleArchitect, "architect")
-	if err != nil {
+	if _, err := p.ensureAgent(ctx, roles.RoleArchitect, "architect"); err != nil {
 		return "", err
 	}
 
@@ -469,18 +468,25 @@ LANGUAGE: go
 Product idea:
 %s`, spec)
 
-	_, design, err := architect.Runtime.Evaluate(ctx, "architecture", prompt)
+	// Fresh provider per call — avoids context accumulation across design phases.
+	rawProvider, err := p.providerForRoleWithModel(roles.RoleArchitect, p.architectDesignModel())
+	if err != nil {
+		return "", fmt.Errorf("architect provider: %w", err)
+	}
+	architectTracker := resources.NewTrackingProvider(rawProvider)
+	p.trackers[roles.RoleArchitect] = architectTracker
+
+	resp, err := architectTracker.Reason(ctx, prompt, nil)
 	if err != nil {
 		return "", fmt.Errorf("architect design: %w", err)
 	}
 
-	return design, nil
+	return resp.Content(), nil
 }
 
 // simplify reviews the Code Graph spec and reduces it to its minimal form.
 func (p *Pipeline) simplify(ctx context.Context, design string) (string, error) {
-	architect, err := p.ensureAgent(ctx, roles.RoleArchitect, "architect")
-	if err != nil {
+	if _, err := p.ensureAgent(ctx, roles.RoleArchitect, "architect"); err != nil {
 		return "", err
 	}
 
@@ -488,7 +494,15 @@ func (p *Pipeline) simplify(ctx context.Context, design string) (string, error) 
 	current := design
 
 	for round := 1; round <= maxRounds; round++ {
-		_, analysis, err := architect.Runtime.Evaluate(ctx, "simplify",
+		// Fresh provider per round — avoids context accumulation across simplify passes.
+		rawProvider, err := p.providerForRoleWithModel(roles.RoleArchitect, p.architectDesignModel())
+		if err != nil {
+			return "", fmt.Errorf("architect provider (round %d): %w", round, err)
+		}
+		architectTracker := resources.NewTrackingProvider(rawProvider)
+		p.trackers[roles.RoleArchitect] = architectTracker
+
+		resp, err := architectTracker.Reason(ctx,
 			fmt.Sprintf(`Review this Code Graph spec for simplification. Apply ALL simplifications in ONE pass.
 
 - Can any View be composed from fewer elements? Any redundant or derivable?
@@ -499,10 +513,11 @@ If you find simplifications, output the COMPLETE REVISED spec.
 If already minimal, respond with exactly: MINIMAL
 
 Current spec:
-%s`, current))
+%s`, current), nil)
 		if err != nil {
 			return "", fmt.Errorf("simplify round %d: %w", round, err)
 		}
+		analysis := resp.Content()
 
 		upper := strings.ToUpper(strings.TrimSpace(analysis))
 		if upper == "MINIMAL" || strings.HasPrefix(upper, "MINIMAL") {

@@ -82,6 +82,7 @@ type Pipeline struct {
 	builderModel   string // model override for targeted builds (empty = role default)
 	ctoModel       string // model override for self-improve CTO analysis (empty = role default)
 	guardianModel  string // model override for Guardian integrity checks (empty = Sonnet default)
+	architectModel string // model override for Architect design and simplify calls (empty = Sonnet default)
 
 	// Authority infrastructure — always initialized; gate is optional.
 	gate    *authority.Gate
@@ -137,6 +138,11 @@ type Config struct {
 	// Empty string = use Sonnet default. Guardian's task is a binary HALT/pass
 	// classification — read phase events, emit HALT or pass. No deep reasoning needed.
 	GuardianModel string
+
+	// ArchitectModel overrides the model used for Architect design and simplify calls.
+	// Empty string = use Sonnet default. Spec-writing and simplification are structured
+	// generation tasks — same reasoning as the CTO Understand switch that saved ~$1.60/run.
+	ArchitectModel string
 }
 
 
@@ -170,6 +176,7 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		builderModel:   cfg.BuilderModel,
 		ctoModel:       cfg.CTOModel,
 		guardianModel:  cfg.GuardianModel,
+		architectModel: cfg.ArchitectModel,
 	}
 
 	// Always initialize event infrastructure — needed for OBSERVABLE invariant

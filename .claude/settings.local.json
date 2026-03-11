@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(docker info:*)",
+      "Bash(go run:*)",
+      "Bash(which go.exe 2>/dev/null || where go 2>/dev/null; export PATH=\"$PATH:/c/Program Files/Go/bin:/c/Users/matt_/go/bin\" && go version)",
+      "Read(//c/Program Files/Go/**)",
+      "Read(//c/Users/matt_/go/**)",
+      "Read(//c/Users/matt_/scoop/**)",
+      "Read(//c/tools/go/**)",
+      "Bash(cmd.exe /c \"where go\" 2>/dev/null)",
+      "Bash(cmd.exe /c \"go version\" 2>&1)"
+    ]
+  }
+}
