@@ -23,6 +23,12 @@ const selfImproveIterationTimeout = 15 * time.Minute
 // in summarizeTelemetry(). Older runs get a one-line summary to cap CTO input tokens.
 const telemetryDetailRunLimit = 3
 
+// maxTelemetryRuns caps the total number of run summaries sent to the CTO.
+// Older runs beyond this limit are dropped entirely — the one-liner format
+// already strips most signal from older runs, so dropping them has negligible
+// impact on recommendation quality while cutting CTO input tokens significantly.
+const maxTelemetryRuns = 20
+
 // SelfImproveRecommendation is the CTO's structured response from telemetry analysis.
 type SelfImproveRecommendation struct {
 	Description  string   `json:"description"`
@@ -193,13 +199,14 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 }
 
 // selfImproveCTOModel returns the model to use for self-improve CTO analysis.
-// Defaults to Sonnet — the task is structured JSON output from telemetry data
+// Defaults to Haiku — the task is structured JSON output from telemetry data
 // (identify one improvement, list files, output JSON), not deep architectural reasoning.
+// Use --cto-model claude-sonnet-4-6 to escalate if recommendation quality drops.
 func (p *Pipeline) selfImproveCTOModel() string {
 	if p.ctoModel != "" {
 		return p.ctoModel
 	}
-	return "claude-sonnet-4-6"
+	return "claude-haiku-4-5-20251001"
 }
 
 // filterSelfImproveFiles returns a filtered copy of files containing only
@@ -242,6 +249,12 @@ func truncateLines(s string, n int) string {
 func summarizeTelemetry(results []PipelineResult) string {
 	if len(results) == 0 {
 		return "No telemetry data available (first run)."
+	}
+
+	// Cap to the most recent maxTelemetryRuns runs — older entries add tokens
+	// with negligible signal value given the one-liner format already strips detail.
+	if len(results) > maxTelemetryRuns {
+		results = results[len(results)-maxTelemetryRuns:]
 	}
 
 	var sb strings.Builder

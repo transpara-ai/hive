@@ -47,7 +47,7 @@ func run() error {
 	skipSimplify := flag.Bool("skip-simplify", false, "Skip the simplification loop after design (dev/testing only)")
 	reviewerModel := flag.String("reviewer-model", "", "Override model for targeted reviews (default: claude-sonnet-4-6)")
 	builderModel := flag.String("builder-model", "", "Override model for targeted builds (default: claude-sonnet-4-6)")
-	ctoModel := flag.String("cto-model", "", "Override model for self-improve CTO analysis (default: claude-sonnet-4-6)")
+	ctoModel := flag.String("cto-model", "", "Override model for self-improve CTO analysis (default: claude-haiku-4-5-20251001)")
 	guardianModel := flag.String("guardian-model", "", "Override model for Guardian integrity checks (default: claude-sonnet-4-6)")
 	architectModel := flag.String("architect-model", "", "Override model for architect design and simplify calls (default: claude-sonnet-4-6)")
 	selfImprove := flag.Bool("self-improve", false, "Self-improvement mode: analyze telemetry + codebase and apply fixes")

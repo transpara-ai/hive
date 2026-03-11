@@ -150,12 +150,12 @@ func TestLangTestCommand(t *testing.T) {
 }
 
 func TestSelfImproveCTOModelDefault(t *testing.T) {
-	// selfImproveCTOModel defaults to Sonnet — the task is structured JSON output
+	// selfImproveCTOModel defaults to Haiku — the task is structured JSON output
 	// from telemetry data, not deep architectural reasoning.
 	p := &Pipeline{ctoModel: ""}
 	model := p.selfImproveCTOModel()
-	if model != "claude-sonnet-4-6" {
-		t.Errorf("default self-improve CTO model = %q, want %q", model, "claude-sonnet-4-6")
+	if model != "claude-haiku-4-5-20251001" {
+		t.Errorf("default self-improve CTO model = %q, want %q", model, "claude-haiku-4-5-20251001")
 	}
 }
 
