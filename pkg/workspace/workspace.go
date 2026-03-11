@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Workspace manages directories and files for hive-generated products.
@@ -293,16 +294,16 @@ func (p *Product) HeadCommit() (string, error) {
 
 // CreateBranch creates and checks out a new branch.
 // If the branch already exists (e.g., from a previous self-improve run whose PR
-// was never merged), it deletes and recreates it so the pipeline gets a clean base.
+// was never merged), it falls back to a timestamped name to avoid collisions.
+// This is more robust than delete+recreate when the existing branch is the
+// current branch or has uncommitted changes that block deletion.
 func (p *Product) CreateBranch(name string) error {
 	if err := p.git("checkout", "-b", name); err == nil {
 		return nil
 	}
-	// Branch may already exist — delete and recreate.
-	if err := p.git("branch", "-D", name); err != nil {
-		return fmt.Errorf("branch %q exists and cannot be deleted: %w", name, err)
-	}
-	return p.git("checkout", "-b", name)
+	// Branch already exists — use a timestamped fallback name.
+	fallback := fmt.Sprintf("%s-%d", name, time.Now().Unix())
+	return p.git("checkout", "-b", fallback)
 }
 
 // CurrentBranch returns the current branch name.
