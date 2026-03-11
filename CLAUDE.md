@@ -95,8 +95,8 @@ Constitutional principle (requires full amendment process to change): no militar
 
 | Role | Responsibility | Intelligence | Trust Gate | Reports To |
 |------|---------------|-------------|------------|-----------|
-| CTO | Architectural oversight, escalation filtering | Opus | 0.1 | Human |
-| Guardian | Independent integrity, halt/rollback/quarantine | Opus | 0.1 | Human (directly) |
+| CTO | Architectural oversight, escalation filtering | Sonnet | 0.1 | Human |
+| Guardian | Independent integrity, halt/rollback/quarantine | Sonnet | 0.1 | Human (directly) |
 | SysMon | System health, error detection, anomaly tracking | Haiku | 0.1 | Guardian |
 | Spawner | Identify workforce gaps, propose new agents | Sonnet | 0.5 | CTO |
 | Allocator | Resource allocation, model selection, budget enforcement | Haiku | 0.3 | CTO |
@@ -106,9 +106,9 @@ Constitutional principle (requires full amendment process to change): no militar
 | Role | Responsibility | Intelligence | Trust Gate | Reports To |
 |------|---------------|-------------|------------|-----------|
 | Researcher | Read URLs, extract product ideas | Sonnet | 0.3 | CTO |
-| Architect | Design systems via derivation method | Opus | 0.3 | CTO |
-| Builder | Generate code + tests from specs | Opus | 0.3 | CTO |
-| Reviewer | Code quality, security, derivation compliance | Opus | 0.5 | CTO |
+| Architect | Design systems via derivation method | Sonnet | 0.3 | CTO |
+| Builder | Generate code + tests from specs | Sonnet | 0.3 | CTO |
+| Reviewer | Code quality, security, derivation compliance | Sonnet | 0.5 | CTO |
 | Tester | Run tests, validate behaviour | Sonnet | 0.3 | CTO |
 | Integrator | Assemble, deploy, health check | Sonnet | 0.7 | CTO |
 
@@ -183,9 +183,8 @@ See `docs/CODING-STANDARDS.md` for full details. The cardinal rules:
 
 All inference runs through **Claude CLI** (Max plan, flat rate). NOT the Anthropic API — CLI is cheaper and better for our use case. The pipeline creates `claude-cli` providers automatically.
 
-Model assignment by role (three tiers):
-- **Opus** (`claude-opus-4-6`): CTO, Architect, Reviewer, Guardian, Builder — high-judgment tasks and code generation
-- **Sonnet** (`claude-sonnet-4-6`): Tester, Integrator, Researcher, Spawner — execution tasks
+Model assignment by role (two tiers):
+- **Sonnet** (`claude-sonnet-4-6`): CTO, Guardian, Architect, Builder, Reviewer, Tester, Integrator, Researcher, Spawner — all judgment and execution tasks
 - **Haiku** (`claude-haiku-4-5-20251001`): SysMon, Allocator — high-volume, simple tasks
 
 ## Pipeline Modes

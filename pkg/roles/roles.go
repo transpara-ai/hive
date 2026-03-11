@@ -70,18 +70,21 @@ func ReportsTo(role Role) Role {
 }
 
 // PreferredModel returns the recommended model for a role.
-// Three tiers: Opus (judgment), Sonnet (execution), Haiku (volume).
+// Two active tiers: Sonnet (all judgment + execution), Haiku (volume).
+// Panics on unknown roles so new Role constants surface mis-assignments early.
 func PreferredModel(role Role) string {
 	switch role {
-	// Judgment roles — high-stakes decisions, architectural reasoning
-	case RoleCTO, RoleArchitect, RoleGuardian:
-		return "claude-opus-4-6"
 	// Volume roles — high-frequency, simple tasks
 	case RoleSysMon, RoleAllocator:
 		return "claude-haiku-4-5-20251001"
-	// Execution roles — everything else
-	default:
+	// All other roles — judgment and execution tasks
+	case RoleCTO, RoleGuardian, RoleArchitect, RoleBuilder, RoleReviewer,
+		RoleTester, RoleIntegrator, RoleResearcher, RoleSpawner:
 		return "claude-sonnet-4-6"
+	default:
+		// Unknown role — panic to surface future mis-assignments at development time.
+		// When adding a new Role constant, add it to the appropriate case above.
+		panic(fmt.Sprintf("PreferredModel: unknown role %q — add it to the switch", role))
 	}
 }
 

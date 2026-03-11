@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestPreferredModelUnknownPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("PreferredModel(unknown) should panic but did not")
+		}
+	}()
+	PreferredModel(Role("unknown"))
+}
+
 func TestSystemPrompt(t *testing.T) {
 	tests := []struct {
 		role Role
@@ -117,7 +126,6 @@ func TestSoulValues(t *testing.T) {
 }
 
 func TestPreferredModel(t *testing.T) {
-	opus := "claude-opus-4-6"
 	sonnet := "claude-sonnet-4-6"
 	haiku := "claude-haiku-4-5-20251001"
 
@@ -125,10 +133,10 @@ func TestPreferredModel(t *testing.T) {
 		role Role
 		want string
 	}{
-		{RoleCTO, opus},
-		{RoleArchitect, opus},
+		{RoleCTO, sonnet},
+		{RoleArchitect, sonnet},
 		{RoleReviewer, sonnet},
-		{RoleGuardian, opus},
+		{RoleGuardian, sonnet},
 		{RoleBuilder, sonnet},
 		{RoleTester, sonnet},
 		{RoleIntegrator, sonnet},
@@ -136,7 +144,7 @@ func TestPreferredModel(t *testing.T) {
 		{RoleSpawner, sonnet},
 		{RoleSysMon, haiku},
 		{RoleAllocator, haiku},
-		{Role("unknown"), sonnet},
+		// unknown role panics — tested separately via TestPreferredModelUnknownPanics
 	}
 
 	for _, tt := range tests {
