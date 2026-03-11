@@ -149,6 +149,25 @@ func TestLangTestCommand(t *testing.T) {
 	}
 }
 
+func TestSelfImproveCTOModelDefault(t *testing.T) {
+	// selfImproveCTOModel defaults to Sonnet — the task is structured JSON output
+	// from telemetry data, not deep architectural reasoning.
+	p := &Pipeline{ctoModel: ""}
+	model := p.selfImproveCTOModel()
+	if model != "claude-sonnet-4-6" {
+		t.Errorf("default self-improve CTO model = %q, want %q", model, "claude-sonnet-4-6")
+	}
+}
+
+func TestSelfImproveCTOModelOverride(t *testing.T) {
+	// Config.CTOModel propagates to pipeline and overrides the default.
+	p := &Pipeline{ctoModel: "claude-opus-4-6"}
+	model := p.selfImproveCTOModel()
+	if model != "claude-opus-4-6" {
+		t.Errorf("overridden self-improve CTO model = %q, want %q", model, "claude-opus-4-6")
+	}
+}
+
 func TestReviewerModelDefault(t *testing.T) {
 	// reviewTargeted uses Sonnet by default for targeted reviews (not the
 	// reviewer role's default Opus). Verify via reviewerModel selection logic:

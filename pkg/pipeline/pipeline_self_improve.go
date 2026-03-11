@@ -66,7 +66,7 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 		// prior conversation as input context (each prompt already contains full
 		// telemetry + codebase, so prior messages are pure waste).
 		fmt.Println("CTO analyzing telemetry + codebase...")
-		model := roles.PreferredModel(roles.RoleCTO)
+		model := p.selfImproveCTOModel()
 		rawProvider, err := p.providerForRoleWithModel(roles.RoleCTO, model)
 		if err != nil {
 			return fmt.Errorf("CTO provider: %w", err)
@@ -148,6 +148,16 @@ Respond with ONLY a JSON object (no markdown, no explanation outside the JSON):
 
 	fmt.Println("\n═══ Self-Improve: Session Complete ═══")
 	return nil
+}
+
+// selfImproveCTOModel returns the model to use for self-improve CTO analysis.
+// Defaults to Sonnet — the task is structured JSON output from telemetry data
+// (identify one improvement, list files, output JSON), not deep architectural reasoning.
+func (p *Pipeline) selfImproveCTOModel() string {
+	if p.ctoModel != "" {
+		return p.ctoModel
+	}
+	return "claude-sonnet-4-6"
 }
 
 // summarizeTelemetry builds a human-readable summary of past pipeline runs for the CTO.

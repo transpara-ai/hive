@@ -80,6 +80,7 @@ type Pipeline struct {
 	autoApprove   bool   // --yes flag active (authority requests auto-approved)
 	reviewerModel string // model override for targeted reviews (empty = role default)
 	builderModel  string // model override for targeted builds (empty = role default)
+	ctoModel      string // model override for self-improve CTO analysis (empty = role default)
 
 	// Authority infrastructure — always initialized; gate is optional.
 	gate    *authority.Gate
@@ -124,6 +125,12 @@ type Config struct {
 	// Empty string = use role default (Sonnet). Targeted builds are CTO-directed
 	// with small, well-scoped modifications — Sonnet handles these well.
 	BuilderModel string
+
+	// CTOModel overrides the model used for self-improve CTO analysis.
+	// Empty string = use Sonnet default. The task is structured JSON output
+	// from telemetry data — identify one improvement, list files, output JSON.
+	// Deep architectural reasoning is not required.
+	CTOModel string
 }
 
 
@@ -155,6 +162,7 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		autoApprove:   cfg.AutoApprove,
 		reviewerModel: cfg.ReviewerModel,
 		builderModel:  cfg.BuilderModel,
+		ctoModel:      cfg.CTOModel,
 	}
 
 	// Always initialize event infrastructure — needed for OBSERVABLE invariant
