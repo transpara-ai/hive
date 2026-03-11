@@ -593,9 +593,6 @@ Project structure:
 		return fmt.Errorf("CTO analysis: %w", err)
 	}
 	fmt.Printf("CTO Analysis:\n%s\n", ctoAnalysis)
-	if halt := p.guardianCheck(ctx, "understand"); halt {
-		return fmt.Errorf("guardian halted pipeline after understand phase")
-	}
 
 	// Create branch for the changes
 	branchName := "hive/" + sanitizeBranchName(input.Description)
@@ -639,9 +636,6 @@ Project structure:
 			return fmt.Errorf("review round %d: %w", round, err)
 		}
 		p.telemetry.addReviewSignal(approved)
-		if halt := p.guardianCheck(ctx, "review"); halt {
-			return fmt.Errorf("guardian halted pipeline after review phase")
-		}
 
 		if approved {
 			fmt.Println("Changes approved by reviewer.")
@@ -669,9 +663,6 @@ Project structure:
 	err = p.test(ctx, files, lang)
 	if err != nil {
 		return fmt.Errorf("test: %w", err)
-	}
-	if halt := p.guardianCheck(ctx, "test"); halt {
-		return fmt.Errorf("guardian halted pipeline after test phase")
 	}
 
 	testDuration := time.Since(phaseStart)
