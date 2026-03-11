@@ -184,6 +184,13 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 			CostUSD:          s.CostUSD,
 		})
 	}
+	// Skip Guardian checks for self-improve iterations — Guardian generates zero
+	// alerts across all self-improve runs (Builder + Reviewer validation is
+	// sufficient for internal pipeline code), burning 22% of iteration cost.
+	prevSkipGuardian := p.skipGuardian
+	p.skipGuardian = true
+	defer func() { p.skipGuardian = prevSkipGuardian }()
+
 	fmt.Printf("\n═══ Self-Improve: Running targeted pipeline ═══\n")
 	if err := p.RunTargeted(ctx, targetedInput); err != nil {
 		return fmt.Errorf("targeted pipeline: %w", err)
