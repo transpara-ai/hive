@@ -28,11 +28,14 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 	}
 
 	pipelineStart := time.Now()
-	p.telemetry = &PipelineResult{
-		Mode:             "targeted",
-		InputDescription: input.Description,
-		StartedAt:        pipelineStart,
+	// Merge into pre-populated telemetry (e.g., CTO analysis cost from self-improve)
+	// rather than discarding it. Always re-set Mode, Description, and StartedAt.
+	if p.telemetry == nil {
+		p.telemetry = &PipelineResult{}
 	}
+	p.telemetry.Mode = "targeted"
+	p.telemetry.InputDescription = input.Description
+	p.telemetry.StartedAt = pipelineStart
 	p.trackers = make(map[roles.Role]*resources.TrackingProvider)
 	defer func() {
 		p.telemetry.collectTokenUsage(p.trackers)

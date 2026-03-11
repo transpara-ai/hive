@@ -154,11 +154,26 @@ Respond with ONLY a JSON object (no markdown, no explanation outside the JSON):
 	fmt.Printf("Expected impact: %s\n", rec.ExpectedImpact)
 	fmt.Printf("Files to change: %v\n", rec.FilesToChange)
 
-	// Step 6: Run targeted pipeline with the recommendation
+	// Step 6: Run targeted pipeline with the recommendation.
+	// Pre-populate p.telemetry with CTO analysis cost so RunTargeted includes it —
+	// the targeted pipeline resets p.trackers on entry, losing ctoTracker.
 	targetedInput := ProductInput{
 		RepoPath:    input.RepoPath,
 		Description: rec.Description,
 		CTOAnalysis: fmt.Sprintf("Description: %s\nFiles to change: %v\nExpected impact: %s", rec.Description, rec.FilesToChange, rec.ExpectedImpact),
+	}
+	if s := ctoTracker.Snapshot(); s.TokensUsed > 0 {
+		p.telemetry = &PipelineResult{}
+		p.telemetry.TokenUsage = append(p.telemetry.TokenUsage, RoleTokenUsage{
+			Role:             "cto_analysis",
+			Model:            ctoTracker.Model(),
+			InputTokens:      s.InputTokens,
+			OutputTokens:     s.OutputTokens,
+			TotalTokens:      s.TokensUsed,
+			CacheReadTokens:  s.CacheReadTokens,
+			CacheWriteTokens: s.CacheWriteTokens,
+			CostUSD:          s.CostUSD,
+		})
 	}
 	fmt.Printf("\n═══ Self-Improve: Running targeted pipeline ═══\n")
 	if err := p.RunTargeted(ctx, targetedInput); err != nil {
