@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/lovyou-ai/hive/pkg/roles"
 	"github.com/lovyou-ai/hive/pkg/workspace"
 )
 
@@ -60,10 +62,20 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 		// Step 3: Build telemetry summary for CTO
 		telemetrySummary := summarizeTelemetry(telemetryResults)
 
-		// Step 4: CTO analysis
+		// Step 4: CTO analysis — fresh provider per iteration to avoid accumulating
+		// prior conversation as input context (each prompt already contains full
+		// telemetry + codebase, so prior messages are pure waste).
 		fmt.Println("CTO analyzing telemetry + codebase...")
-		_, ctoResponse, err := p.cto.Runtime.Evaluate(ctx, "self_improve_analysis",
-			fmt.Sprintf(`You are analyzing this codebase and its pipeline telemetry to identify the single highest-impact improvement.
+		model := roles.PreferredModel(roles.RoleCTO)
+		rawProvider, err := p.providerForRoleWithModel(roles.RoleCTO, model)
+		if err != nil {
+			return fmt.Errorf("CTO provider: %w", err)
+		}
+		ctoTracker := resources.NewTrackingProvider(rawProvider)
+		p.trackers[roles.RoleCTO] = ctoTracker
+		fmt.Printf("  ↳ self-improve CTO analysis using %s\n", model)
+
+		ctoPrompt := fmt.Sprintf(`You are analyzing this codebase and its pipeline telemetry to identify the single highest-impact improvement.
 
 TELEMETRY DATA (from past pipeline runs):
 %s
@@ -87,10 +99,13 @@ Respond with ONLY a JSON object (no markdown, no explanation outside the JSON):
   "expected_impact": "cost/time/quality improvement expected",
   "priority": "high|medium|low",
   "skip_reason": "if nothing is worth fixing, explain why here; otherwise empty string"
-}`, telemetrySummary, fileListing, keyContext))
+}`, telemetrySummary, fileListing, keyContext)
+
+		ctoResp, err := ctoTracker.Reason(ctx, ctoPrompt, nil)
 		if err != nil {
 			return fmt.Errorf("CTO self-improve analysis: %w", err)
 		}
+		ctoResponse := ctoResp.Content()
 
 		// Step 5: Parse recommendation
 		rec, err := parseSelfImproveRecommendation(ctoResponse)
