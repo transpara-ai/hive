@@ -841,6 +841,12 @@ Respond with ONLY a JSON object (no markdown, no explanation outside the JSON):
 			return fmt.Errorf("self-improve iteration %d: %w", iteration, err)
 		}
 
+		// Sync local main with remote after merge so the next iteration
+		// branches from the up-to-date main, not the stale pre-merge state.
+		if err := product.SyncMain(); err != nil {
+			return fmt.Errorf("sync main after iteration %d: %w", iteration, err)
+		}
+
 		fmt.Printf("═══ Self-Improve: Iteration %d complete ═══\n", iteration)
 	}
 

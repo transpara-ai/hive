@@ -307,6 +307,19 @@ func (p *Product) CurrentBranch() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// SyncMain checks out the main branch and pulls the latest from the remote.
+// This ensures the local main is up-to-date after a PR merge, so the next
+// iteration branches from the correct base.
+func (p *Product) SyncMain() error {
+	if err := p.git("checkout", "main"); err != nil {
+		return fmt.Errorf("checkout main: %w", err)
+	}
+	if err := p.git("pull", "origin", "main"); err != nil {
+		return fmt.Errorf("pull main: %w", err)
+	}
+	return nil
+}
+
 // PushBranch pushes the current branch to the remote.
 func (p *Product) PushBranch() error {
 	branch, err := p.CurrentBranch()
