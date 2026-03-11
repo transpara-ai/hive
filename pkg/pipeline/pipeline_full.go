@@ -253,17 +253,25 @@ func (p *Pipeline) seedWork(ctx context.Context, input ProductInput) (string, er
 	}
 
 	// CTO evaluates and seeds direction.
-	_, evaluation, err := p.cto.Runtime.Evaluate(ctx, "seed_direction",
-		fmt.Sprintf(`You are seeding a product build. Evaluate this idea and emit clear direction for the team.
+	// Fresh provider per call — avoids context accumulation across pipeline phases.
+	rawProvider, err := p.providerForRole(roles.RoleCTO)
+	if err != nil {
+		return "", fmt.Errorf("CTO provider: %w", err)
+	}
+	ctoTracker := resources.NewTrackingProvider(rawProvider)
+	p.trackers[roles.RoleCTO] = ctoTracker
+
+	ctoResp, err := ctoTracker.Reason(ctx, fmt.Sprintf(`You are seeding a product build. Evaluate this idea and emit clear direction for the team.
 
 What needs building? What's the architecture? What should the Builder do first?
 Be specific and actionable — other agents will read your events and self-direct.
 
 Product idea:
-%s`, spec))
+%s`, spec), nil)
 	if err != nil {
 		return "", fmt.Errorf("CTO seed: %w", err)
 	}
+	evaluation := ctoResp.Content()
 
 	// Record the CTO's direction as an action event.
 	_, err = p.cto.Runtime.Act(ctx, ActionSeedBuild, spec)
@@ -414,17 +422,25 @@ func (p *Pipeline) research(ctx context.Context, input ProductInput) (spec strin
 	}
 
 	// CTO evaluates feasibility and derives a product name in one call.
-	_, ctoEval, err = p.cto.Runtime.Evaluate(ctx, "feasibility",
-		fmt.Sprintf(`Evaluate this product idea for feasibility. What agents are needed? What's the build sequence? Key risks?
+	// Fresh provider per call — avoids context accumulation across pipeline phases.
+	rawProvider, err := p.providerForRole(roles.RoleCTO)
+	if err != nil {
+		return "", "", fmt.Errorf("CTO provider: %w", err)
+	}
+	ctoTracker := resources.NewTrackingProvider(rawProvider)
+	p.trackers[roles.RoleCTO] = ctoTracker
+
+	ctoResp, err := ctoTracker.Reason(ctx, fmt.Sprintf(`Evaluate this product idea for feasibility. What agents are needed? What's the build sequence? Key risks?
 
 On the LAST LINE of your response, output ONLY a kebab-case product name (2-4 words, lowercase, no special characters) like:
 NAME: my-product-name
 
 Product idea:
-%s`, spec))
+%s`, spec), nil)
 	if err != nil {
 		return "", "", fmt.Errorf("CTO evaluate: %w", err)
 	}
+	ctoEval = ctoResp.Content()
 
 	fmt.Printf("CTO Assessment:\n%s\n", ctoEval)
 	return spec, ctoEval, nil
