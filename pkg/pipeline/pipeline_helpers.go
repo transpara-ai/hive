@@ -235,14 +235,23 @@ func buildFileListing(files map[string]string) string {
 
 // extractKeyFiles returns the content of project-level context files
 // (CLAUDE.md, README, etc.) that help the CTO understand the project
-// without needing the full codebase.
+// without needing the full codebase. Each file is capped at 60 lines —
+// the CTO only needs to identify which files to change, not read full docs.
 func extractKeyFiles(files map[string]string) string {
+	const maxLines = 60
 	keyNames := []string{"CLAUDE.md", "README.md", "README", "SPEC.md", "ARCHITECTURE.md"}
 	var b strings.Builder
 	for _, name := range keyNames {
-		if content, ok := files[name]; ok {
-			b.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", name, content))
+		content, ok := files[name]
+		if !ok {
+			continue
 		}
+		lines := strings.Split(content, "\n")
+		if len(lines) > maxLines {
+			content = strings.Join(lines[:maxLines], "\n") +
+				fmt.Sprintf("\n... [truncated: %d lines omitted]", len(lines)-maxLines)
+		}
+		b.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", name, content))
 	}
 	return b.String()
 }
