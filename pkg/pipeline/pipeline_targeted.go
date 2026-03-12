@@ -674,7 +674,7 @@ func (p *Pipeline) openPR(ctx context.Context, product *workspace.Product, branc
 		cmd.Dir = product.Dir
 		out, err := cmd.CombinedOutput()
 		if err == nil {
-			prURL := strings.TrimSpace(string(out))
+			prURL := lastNonEmptyLine(string(out))
 			fmt.Printf("PR created: %s\n", prURL)
 			return prURL, nil
 		}
@@ -718,6 +718,20 @@ func (p *Pipeline) mergePR(ctx context.Context, product *workspace.Product, prUR
 		}
 	}
 	return lastErr
+}
+
+// lastNonEmptyLine returns the last non-empty trimmed line from s.
+// gh pr create may emit warnings (e.g. "Warning: 1 uncommitted change") before
+// the PR URL — taking the last non-empty line gives us the URL without the
+// warning text.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // isTransientGHError returns true if the gh CLI output suggests a transient
