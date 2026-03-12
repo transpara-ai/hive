@@ -8,6 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -60,7 +62,8 @@ func run() error {
 		return fmt.Errorf("--human is required (the name of the human operator)")
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Resolve store DSN: flag > DATABASE_URL env > in-memory
 	dsn := *storeDSN
