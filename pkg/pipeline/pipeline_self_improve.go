@@ -73,10 +73,8 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 		iterationStart := time.Now()
 		p.emitPhaseStarted(PhaseSelfImprove, iteration)
 
-		err := p.runSelfImproveIteration(ctx, iteration, input)
-		for _, t := range p.trackers {
-			totalCost += t.Snapshot().CostUSD
-		}
+		iterCost, err := p.runSelfImproveIteration(ctx, iteration, input)
+		totalCost += iterCost
 
 		if err != nil {
 			if err == errSelfImproveStop {
@@ -109,8 +107,9 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 var errSelfImproveStop = fmt.Errorf("CTO says nothing worth fixing")
 
 // runSelfImproveIteration runs a single self-improve iteration with a timeout.
+// Returns the total cost incurred (CTO analysis + targeted pipeline) and an error.
 // Returns errSelfImproveStop if the CTO says nothing is worth fixing.
-func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration int, input ProductInput) error {
+func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration int, input ProductInput) (float64, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, selfImproveIterationTimeout)
 	defer cancel()
 
@@ -118,7 +117,7 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	// changes, delete stale hive/* branches, and sync main with remote.
 	product, err := workspace.OpenRepo(input.RepoPath)
 	if err != nil {
-		return fmt.Errorf("open repo for cleanup: %w", err)
+		return 0, fmt.Errorf("open repo for cleanup: %w", err)
 	}
 	if err := product.CleanupForIteration(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cleanup failed: %v (continuing anyway)\n", err)
@@ -128,7 +127,7 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	// Step 1: Read telemetry
 	telemetryResults, err := ReadTelemetry(input.RepoPath)
 	if err != nil {
-		return fmt.Errorf("read telemetry: %w", err)
+		return 0, fmt.Errorf("read telemetry: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Telemetry: %d past run(s) found.\n", len(telemetryResults))
 	p.emitProgress(PhaseSelfImprove, "telemetry: %d past run(s) found", len(telemetryResults))
@@ -138,7 +137,7 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	// total input bounded while giving the CTO visibility across all packages.
 	existingFiles, err := product.ReadSourceFiles()
 	if err != nil {
-		return fmt.Errorf("read source files: %w", err)
+		return 0, fmt.Errorf("read source files: %w", err)
 	}
 	pipelineFiles := filterSelfImproveFiles(existingFiles)
 	fileListing := buildFileListing(pipelineFiles)
@@ -155,7 +154,7 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	model := p.selfImproveCTOModel()
 	rawProvider, err := p.providerForRoleWithModel(roles.RoleCTO, model)
 	if err != nil {
-		return fmt.Errorf("CTO provider: %w", err)
+		return 0, fmt.Errorf("CTO provider: %w", err)
 	}
 	ctoTracker := resources.NewTrackingProvider(rawProvider)
 	p.trackers[roles.RoleCTO] = ctoTracker
@@ -190,15 +189,16 @@ IMPORTANT constraints:
 Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences", "files_to_change": ["path/to/file"], "expected_impact": "1 sentence", "priority": "high|medium|low", "skip_reason": "if nothing is worth fixing, explain why here; otherwise empty string"}. No preamble, no explanation, no code blocks, no markdown.`, telemetrySummary, fileListing, keyContext)
 
 	ctoResp, err := ctoTracker.Reason(ctx, ctoPrompt, nil)
+	ctoCost := ctoTracker.Snapshot().CostUSD
 	if err != nil {
-		return fmt.Errorf("CTO self-improve analysis: %w", err)
+		return ctoCost, fmt.Errorf("CTO self-improve analysis: %w", err)
 	}
 	ctoResponse := ctoResp.Content()
 
 	// Step 5: Parse recommendation
 	rec, err := parseSelfImproveRecommendation(ctoResponse)
 	if err != nil {
-		return fmt.Errorf("parse CTO recommendation: %w", err)
+		return ctoCost, fmt.Errorf("parse CTO recommendation: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "CTO recommendation (priority=%s): %s\n", rec.Priority, rec.Description)
@@ -206,12 +206,12 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 	if rec.SkipReason != "" {
 		fmt.Fprintf(os.Stderr, "CTO says nothing worth fixing: %s\n", rec.SkipReason)
 		p.emitOutput("cto", "recommendation", fmt.Sprintf("nothing worth fixing: %s", rec.SkipReason))
-		return errSelfImproveStop
+		return ctoCost, errSelfImproveStop
 	}
 	if rec.Description == "" {
 		fmt.Fprintln(os.Stderr, "CTO returned empty recommendation — stopping.")
 		p.emitOutput("cto", "recommendation", "empty recommendation — stopping")
-		return errSelfImproveStop
+		return ctoCost, errSelfImproveStop
 	}
 
 	fmt.Fprintf(os.Stderr, "Expected impact: %s\n", rec.ExpectedImpact)
@@ -258,16 +258,25 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 
 	fmt.Fprintf(os.Stderr, "\n═══ Self-Improve: Running targeted pipeline ═══\n")
 	if err := p.RunTargeted(ctx, targetedInput); err != nil {
-		return fmt.Errorf("targeted pipeline: %w", err)
+		iterCost := ctoCost
+		for _, t := range p.trackers {
+			iterCost += t.Snapshot().CostUSD
+		}
+		return iterCost, fmt.Errorf("targeted pipeline: %w", err)
+	}
+
+	iterCost := ctoCost
+	for _, t := range p.trackers {
+		iterCost += t.Snapshot().CostUSD
 	}
 
 	// Sync local main with remote after merge so the next iteration
 	// branches from the up-to-date main, not the stale pre-merge state.
 	if err := product.SyncMain(); err != nil {
-		return fmt.Errorf("sync main: %w", err)
+		return iterCost, fmt.Errorf("sync main: %w", err)
 	}
 
-	return nil
+	return iterCost, nil
 }
 
 // selfImproveCTOModel returns the model to use for self-improve CTO analysis.
