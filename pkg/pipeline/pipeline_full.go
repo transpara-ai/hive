@@ -879,7 +879,8 @@ Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.Str
 				}
 			}
 			if len(fixedFiles) > 0 {
-				if err := p.product.Commit("fix: address failing tests"); err != nil {
+				_ = p.product.StageAll()
+				if err := p.product.CommitIfStaged("fix: address failing tests"); err != nil {
 					return fmt.Errorf("commit test fix: %w", err)
 				}
 			}

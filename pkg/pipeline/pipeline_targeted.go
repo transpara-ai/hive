@@ -634,7 +634,8 @@ Output ONLY the files that need further changes using --- FILE: path --- markers
 			return nil, fmt.Errorf("write %s: %w", path, err)
 		}
 	}
-	if err := p.product.Commit("fix: address reviewer feedback"); err != nil {
+	_ = p.product.StageAll()
+	if err := p.product.CommitIfStaged("fix: address reviewer feedback"); err != nil {
 		return nil, fmt.Errorf("commit revision: %w", err)
 	}
 
