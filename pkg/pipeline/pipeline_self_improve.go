@@ -131,10 +131,15 @@ PROJECT STRUCTURE:
 
 Look for:
 - Recurring Guardian alerts (same alert across multiple runs = wasted spend)
-- High-cost roles (is Guardian worth the spend? which roles dominate cost?)
 - Slow phases (which phases take disproportionate time?)
-- Reviewer friction patterns (CHANGES NEEDED signals that are false alarms)
 - Code quality issues visible in the codebase itself
+- Missing error handling or robustness gaps
+- Opportunities to reduce complexity or remove dead code
+
+IMPORTANT constraints:
+- Token variance between runs is NORMAL — larger changes use more tokens. Do NOT recommend "fixing context bloat" or "reducing builder tokens" unless you see a clear code bug causing it.
+- Do NOT recommend changes that are already implemented. Check the codebase before recommending.
+- If skip_reason is empty, your recommendation MUST describe a concrete code change, not a diagnosis task.
 
 Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences", "files_to_change": ["path/to/file"], "expected_impact": "1 sentence", "priority": "high|medium|low", "skip_reason": "if nothing is worth fixing, explain why here; otherwise empty string"}. No preamble, no explanation, no code blocks, no markdown.`, telemetrySummary, fileListing, keyContext)
 
