@@ -338,9 +338,11 @@ Do NOT add unnecessary changes beyond what's requested.`, lang, changeReq, ctoAn
 				fmt.Printf("warning: write_code action event failed: %v\n", err)
 			}
 
-			// Stage and commit whatever the builder changed
+			// Stage and commit whatever the builder changed.
+			// CommitIfStaged returns nil when nothing was staged — the builder
+			// correctly determined the change was already implemented.
 			_ = p.product.StageAll()
-			if commitErr := p.product.Commit(fmt.Sprintf("feat: %s", truncate(changeReq, 60))); commitErr != nil {
+			if commitErr := p.product.CommitIfStaged(fmt.Sprintf("feat: %s", truncate(changeReq, 60))); commitErr != nil {
 				return nil, fmt.Errorf("commit changes: %w", commitErr)
 			}
 

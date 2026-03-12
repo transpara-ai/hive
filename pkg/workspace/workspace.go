@@ -170,6 +170,24 @@ func (p *Product) Commit(message string) error {
 		"--author", "hive <hive@lovyou.ai>")
 }
 
+// CommitIfStaged commits staged changes if any exist, or does nothing if
+// nothing is staged. Returns nil when there is nothing to commit — this is
+// success, not an error (the builder correctly determined no changes were needed).
+func (p *Product) CommitIfStaged(message string) error {
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = p.Dir
+	err := cmd.Run()
+	if err == nil {
+		// Exit code 0 — nothing staged, nothing to commit.
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		// Exit code 1 — staged changes exist, commit them.
+		return p.Commit(message)
+	}
+	return fmt.Errorf("git diff --cached: %w", err)
+}
+
 // Push pushes to the product's remote.
 func (p *Product) Push() error {
 	return p.git("push", "-u", "origin", "main")
