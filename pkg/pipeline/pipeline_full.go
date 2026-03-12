@@ -831,7 +831,9 @@ Preserve existing code style and conventions.`, lang, testResult)
 				if stageErr := p.product.StageAll(); stageErr != nil {
 					return fmt.Errorf("stage test fix: %w", stageErr)
 				}
-				if commitErr := p.product.Commit("fix: address failing tests"); commitErr != nil {
+				// CommitIfStaged returns nil when nothing was staged — the builder
+				// may have already committed the fix internally via Operate.
+				if commitErr := p.product.CommitIfStaged("fix: address failing tests"); commitErr != nil {
 					return fmt.Errorf("commit test fix: %w", commitErr)
 				}
 				fixed = true
