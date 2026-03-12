@@ -179,6 +179,19 @@ See `docs/CODING-STANDARDS.md` for full details. The cardinal rules:
 
 All inference runs through **Claude CLI** (Max plan, flat rate). NOT the Anthropic API — CLI is cheaper and better for our use case. The pipeline creates `claude-cli` providers automatically.
 
+### Authentication
+
+The CLI authenticates via OAuth token stored in `~/.claude/.credentials.json`. To rotate a token:
+
+1. Generate a new OAuth token from your Max plan account
+2. Replace the `accessToken` value in `~/.claude/.credentials.json`
+
+Token format: `sk-ant-oat01-...` (OAuth access token). The `refreshToken` and other fields remain unchanged. The hive's `claude-cli` provider inherits whatever auth Claude Code already has — no separate credentials needed.
+
+**Never commit `.credentials.json` or tokens to the repo.**
+
+### Model Assignment
+
 Model assignment by role (two tiers):
 - **Sonnet** (`claude-sonnet-4-6`): CTO, Guardian, Architect, Builder, Reviewer, Tester, Integrator, Researcher, Spawner — all judgment and execution tasks
 - **Haiku** (`claude-haiku-4-5-20251001`): SysMon, Allocator — high-volume, simple tasks

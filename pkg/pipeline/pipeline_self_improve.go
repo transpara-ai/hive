@@ -408,18 +408,9 @@ func extractJSONBlock(s string) string {
 	if start == -1 {
 		return ""
 	}
-	// Find matching closing brace.
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return s[start : i+1]
-			}
-		}
+	end := strings.LastIndex(s[start:], "}")
+	if end == -1 {
+		return ""
 	}
-	return ""
+	return s[start : start+end+1]
 }
