@@ -172,6 +172,18 @@ Project structure:
 		return p.failPhase("Modify", fmt.Errorf("guardian halted pipeline after modify phase"))
 	}
 
+	// If the builder made no commits, the change is already implemented — skip
+	// review, test, and PR creation (gh pr create would fail with "no commits
+	// between main and hive/..." when HEAD equals the branch base).
+	headCommit, err := product.HeadCommit()
+	if err != nil {
+		return p.failPhase("Modify", fmt.Errorf("get head commit after modify: %w", err))
+	}
+	if headCommit == baseCommit {
+		fmt.Println("Builder made no commits — change is already implemented. Skipping review, test, and PR.")
+		return nil
+	}
+
 	modifyDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Modify", modifyDuration})
 	p.telemetry.addPhaseTiming("Modify", modifyDuration)
