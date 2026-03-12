@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -40,8 +41,15 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 	defer func() {
 		p.telemetry.collectTokenUsage(p.trackers)
 		writeTelemetry(p.telemetryBaseDir(), p.telemetry)
+		dur := time.Since(pipelineStart)
+		count, _ := p.store.Count()
+		p.emitRunCompleted("targeted", count, len(p.Agents()), dur,
+			p.telemetry.PRURL, p.telemetry.Merged,
+			p.telemetry.FailedPhase, p.telemetry.FailureReason,
+			p.telemetry.totalCost())
 		p.telemetry = nil
 	}()
+	p.emitRunStarted("targeted", input.Description)
 	type phaseTiming struct {
 		name     string
 		duration time.Duration
@@ -54,10 +62,12 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 		return p.failPhase("Context Load", fmt.Errorf("open repo: %w", err))
 	}
 	p.product = product
-	fmt.Printf("Repo: %s\n", product.Dir)
+	fmt.Fprintf(os.Stderr, "Repo: %s\n", product.Dir)
+	p.emitProgress(Phase("context-load"), "repo: %s", product.Dir)
 
 	// ── Phase 1: Context Load ──
-	fmt.Println("═══ Phase 1: Context Load ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 1: Context Load ═══")
+	p.emitPhaseStarted(Phase("context-load"), 0)
 	phaseStart := time.Now()
 	var existingFiles map[string]string
 	if input.ContextFiles != nil {
@@ -65,19 +75,22 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 		// passes pipeline-scoped files to avoid sending the full codebase to
 		// the Builder, preventing context bloat from unrelated packages).
 		existingFiles = input.ContextFiles
-		fmt.Printf("Using %d pre-filtered source files (context scoped by caller).\n", len(existingFiles))
+		fmt.Fprintf(os.Stderr, "Using %d pre-filtered source files (context scoped by caller).\n", len(existingFiles))
+		p.emitProgress(Phase("context-load"), "using %d pre-filtered source files (context scoped by caller)", len(existingFiles))
 	} else {
 		var err error
 		existingFiles, err = product.ReadSourceFiles()
 		if err != nil {
 			return p.failPhase("Context Load", fmt.Errorf("read source files: %w", err))
 		}
-		fmt.Printf("Loaded %d source files.\n", len(existingFiles))
+		fmt.Fprintf(os.Stderr, "Loaded %d source files.\n", len(existingFiles))
+		p.emitProgress(Phase("context-load"), "loaded %d source files", len(existingFiles))
 	}
 
 	gitLog, _ := product.GitLog(10)
 	if gitLog != "" {
-		fmt.Printf("Recent history:\n%s\n", gitLog)
+		fmt.Fprintf(os.Stderr, "Recent history:\n%s\n", gitLog)
+		p.emitProgress(Phase("context-load"), "recent history:\n%s", gitLog)
 	}
 
 	// Build a lightweight file listing for CTO (not full contents)
@@ -85,7 +98,8 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 
 	// Detect language from existing files
 	lang := detectLanguage(existingFiles)
-	fmt.Printf("Detected language: %s\n", lang)
+	fmt.Fprintf(os.Stderr, "Detected language: %s\n", lang)
+	p.emitProgress(Phase("context-load"), "detected language: %s", lang)
 
 	// Include key context files (CLAUDE.md, README, etc.) for CTO — not the full codebase
 	keyContext := extractKeyFiles(existingFiles)
@@ -93,15 +107,19 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 	contextLoadDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Context Load", contextLoadDuration})
 	p.telemetry.addPhaseTiming("Context Load", contextLoadDuration)
+	p.emitPhaseCompleted(Phase("context-load"), contextLoadDuration, 0)
 
 	// ── Phase 2: Understand ──
-	fmt.Println("═══ Phase 2: Understand ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 2: Understand ═══")
+	p.emitPhaseStarted(Phase("understand"), 0)
 	phaseStart = time.Now()
 	var ctoAnalysis string
 	if input.CTOAnalysis != "" {
 		ctoAnalysis = input.CTOAnalysis
-		fmt.Println("Using pre-computed CTO analysis (skipped Understand).")
-		fmt.Printf("CTO Analysis:\n%s\n", ctoAnalysis)
+		fmt.Fprintln(os.Stderr, "Using pre-computed CTO analysis (skipped Understand).")
+		p.emitProgress(Phase("understand"), "using pre-computed CTO analysis (skipped Understand)")
+		fmt.Fprintf(os.Stderr, "CTO Analysis:\n%s\n", ctoAnalysis)
+		p.emitOutput("cto", "analysis", ctoAnalysis)
 	} else {
 		model := p.selfImproveCTOModel()
 		rawProvider, err := p.providerForRoleWithModel(roles.RoleCTO, model)
@@ -110,7 +128,8 @@ func (p *Pipeline) RunTargeted(ctx context.Context, input ProductInput) error {
 		}
 		ctoTracker := resources.NewTrackingProvider(rawProvider)
 		p.trackers[roles.RoleCTO] = ctoTracker
-		fmt.Printf("  ↳ targeted understand using %s\n", model)
+		fmt.Fprintf(os.Stderr, "  ↳ targeted understand using %s\n", model)
+		p.emitProgress(Phase("understand"), "targeted understand using %s", model)
 
 		ctoPrompt := fmt.Sprintf(`Analyze this change request. Be BRIEF — the Builder reads files itself.
 
@@ -134,13 +153,15 @@ Project structure:
 			return p.failPhase("Understand", fmt.Errorf("CTO analysis: %w", err))
 		}
 		ctoAnalysis = ctoResp.Content()
-		fmt.Printf("CTO Analysis:\n%s\n", ctoAnalysis)
+		fmt.Fprintf(os.Stderr, "CTO Analysis:\n%s\n", ctoAnalysis)
+		p.emitOutput("cto", "analysis", ctoAnalysis)
 	}
 
 	// Early-exit if the CTO analysis identifies no relevant files — the change
 	// is already implemented or cannot be mapped to specific files.
 	if len(parseRelevantFiles(ctoAnalysis)) == 0 {
-		fmt.Println("CTO analysis identified no relevant files — change may already be implemented. Skipping.")
+		fmt.Fprintln(os.Stderr, "CTO analysis identified no relevant files — change may already be implemented. Skipping.")
+		p.emitProgress(Phase("understand"), "CTO analysis identified no relevant files — change may already be implemented, skipping")
 		return nil
 	}
 
@@ -149,7 +170,8 @@ Project structure:
 	if err := product.CreateBranch(branchName); err != nil {
 		return p.failPhase("Understand", fmt.Errorf("create branch: %w", err))
 	}
-	fmt.Printf("Branch: %s\n", branchName)
+	fmt.Fprintf(os.Stderr, "Branch: %s\n", branchName)
+	p.emitProgress(Phase("understand"), "branch: %s", branchName)
 
 	// Capture base commit before building — reviewer diffs against this.
 	baseCommit, err := product.HeadCommit()
@@ -160,9 +182,11 @@ Project structure:
 	understandDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Understand", understandDuration})
 	p.telemetry.addPhaseTiming("Understand", understandDuration)
+	p.emitPhaseCompleted(Phase("understand"), understandDuration, 0)
 
 	// ── Phase 3: Modify ──
-	fmt.Println("═══ Phase 3: Modify ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 3: Modify ═══")
+	p.emitPhaseStarted(Phase("modify"), 0)
 	phaseStart = time.Now()
 	files, err := p.modify(ctx, existingFiles, ctoAnalysis, input.Description, lang)
 	if err != nil {
@@ -179,23 +203,28 @@ Project structure:
 	if err != nil {
 		return p.failPhase("Modify", fmt.Errorf("get head commit after modify: %w", err))
 	}
-	if headCommit == baseCommit {
-		fmt.Println("Builder made no commits — change is already implemented. Skipping review, test, and PR.")
-		return nil
-	}
 
 	modifyDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Modify", modifyDuration})
 	p.telemetry.addPhaseTiming("Modify", modifyDuration)
+	p.emitPhaseCompleted(Phase("modify"), modifyDuration, 0)
+
+	if headCommit == baseCommit {
+		fmt.Fprintln(os.Stderr, "Builder made no commits — change is already implemented. Skipping review, test, and PR.")
+		p.emitProgress(Phase("modify"), "builder made no commits — change is already implemented, skipping review, test, and PR")
+		return nil
+	}
 
 	// ── Phase 4: Review ──
 	phaseStart = time.Now()
 	if p.skipReviewer {
-		fmt.Println("═══ Phase 4: Review (skipped) ═══")
+		fmt.Fprintln(os.Stderr, "═══ Phase 4: Review (skipped) ═══")
+		p.emitProgress(PhaseReview, "review skipped")
 	} else {
 		const maxReviewRounds = 3
 		for round := 1; round <= maxReviewRounds; round++ {
-			fmt.Printf("═══ Phase 4: Review (round %d) ═══\n", round)
+			fmt.Fprintf(os.Stderr, "═══ Phase 4: Review (round %d) ═══\n", round)
+			p.emitPhaseStarted(PhaseReview, round)
 			feedback, approved, err := p.reviewTargeted(ctx, baseCommit, ctoAnalysis, input.Description, lang)
 			if err != nil {
 				return p.failPhase("Review", fmt.Errorf("review round %d: %w", round, err))
@@ -203,16 +232,19 @@ Project structure:
 			p.telemetry.addReviewSignal(approved)
 
 			if approved {
-				fmt.Println("Changes approved by reviewer.")
+				fmt.Fprintln(os.Stderr, "Changes approved by reviewer.")
+				p.emitProgress(PhaseReview, "changes approved by reviewer")
 				break
 			}
 
 			if round == maxReviewRounds {
-				fmt.Println("Max review rounds reached — proceeding with current code.")
+				fmt.Fprintln(os.Stderr, "Max review rounds reached — proceeding with current code.")
+				p.emitWarning(PhaseReview, "max review rounds reached — proceeding with current code")
 				break
 			}
 
-			fmt.Printf("═══ Phase 4b: Revise from feedback (round %d) ═══\n", round)
+			fmt.Fprintf(os.Stderr, "═══ Phase 4b: Revise from feedback (round %d) ═══\n", round)
+			p.emitProgress(PhaseReview, "revising from feedback (round %d)", round)
 			files, err = p.revise(ctx, files, feedback, input.Description, lang)
 			if err != nil {
 				return p.failPhase("Review", fmt.Errorf("revise round %d: %w", round, err))
@@ -222,9 +254,11 @@ Project structure:
 	reviewDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Review", reviewDuration})
 	p.telemetry.addPhaseTiming("Review", reviewDuration)
+	p.emitPhaseCompleted(PhaseReview, reviewDuration, 0)
 
 	// ── Phase 5: Test ──
-	fmt.Println("═══ Phase 5: Test ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 5: Test ═══")
+	p.emitPhaseStarted(PhaseTest, 0)
 	phaseStart = time.Now()
 	err = p.test(ctx, files, lang)
 	if err != nil {
@@ -234,27 +268,33 @@ Project structure:
 	testDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"Test", testDuration})
 	p.telemetry.addPhaseTiming("Test", testDuration)
+	p.emitPhaseCompleted(PhaseTest, testDuration, 0)
 
 	// ── Phase 6: PR ──
-	fmt.Println("═══ Phase 6: PR ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 6: PR ═══")
+	p.emitPhaseStarted(Phase("pr"), 0)
 	phaseStart = time.Now()
 	prURL, prErr := p.openPR(ctx, product, branchName, input.Description, ctoAnalysis)
 	if prErr != nil {
-		fmt.Printf("PR creation failed (may need manual push): %v\n", prErr)
+		fmt.Fprintf(os.Stderr, "PR creation failed (may need manual push): %v\n", prErr)
+		p.emitWarning(Phase("pr"), "PR creation failed (may need manual push): %v", prErr)
 		return prErr
 	}
 	p.telemetry.PRURL = prURL
 	prDuration := time.Since(phaseStart)
 	timings = append(timings, phaseTiming{"PR", prDuration})
 	p.telemetry.addPhaseTiming("PR", prDuration)
+	p.emitPhaseCompleted(Phase("pr"), prDuration, 0)
 
 	// ── Phase 7: Merge ──
 	if prURL != "" {
-		fmt.Println("═══ Phase 7: Merge ═══")
+		fmt.Fprintln(os.Stderr, "═══ Phase 7: Merge ═══")
+		p.emitPhaseStarted(PhaseMerge, 0)
 		phaseStart = time.Now()
 		integrator, mergeErr := p.ensureAgent(ctx, roles.RoleIntegrator, "integrator")
 		if mergeErr != nil {
-			fmt.Printf("Merge phase skipped (integrator unavailable): %v\n", mergeErr)
+			fmt.Fprintf(os.Stderr, "Merge phase skipped (integrator unavailable): %v\n", mergeErr)
+			p.emitWarning(PhaseMerge, "merge phase skipped (integrator unavailable): %v", mergeErr)
 		} else {
 			approved := true
 			if p.gate != nil {
@@ -262,33 +302,37 @@ Project structure:
 			}
 			if approved {
 				if err := p.mergePR(ctx, product, prURL); err != nil {
-					fmt.Printf("PR merge failed (may need manual merge): %v\n", err)
+					fmt.Fprintf(os.Stderr, "PR merge failed (may need manual merge): %v\n", err)
+					p.emitWarning(PhaseMerge, "PR merge failed (may need manual merge): %v", err)
 				} else {
 					p.telemetry.Merged = true
 					if _, err := integrator.Runtime.Act(ctx, ActionMergePR, prURL); err != nil {
-						fmt.Printf("warning: merge_pr action event failed: %v\n", err)
+						fmt.Fprintf(os.Stderr, "warning: merge_pr action event failed: %v\n", err)
+						p.emitWarning(PhaseMerge, "merge_pr action event failed: %v", err)
 					}
 				}
 			} else {
-				fmt.Println("PR merge skipped — approval denied.")
+				fmt.Fprintln(os.Stderr, "PR merge skipped — approval denied.")
+				p.emitProgress(PhaseMerge, "PR merge skipped — approval denied")
 			}
 		}
 		mergeDuration := time.Since(phaseStart)
 		timings = append(timings, phaseTiming{"Merge", mergeDuration})
 		p.telemetry.addPhaseTiming("Merge", mergeDuration)
+		p.emitPhaseCompleted(PhaseMerge, mergeDuration, 0)
 	}
 
-	fmt.Println("═══ Pipeline Complete ═══")
+	fmt.Fprintln(os.Stderr, "═══ Pipeline Complete ═══")
 	p.PrintTokenSummary()
 
 	totalDuration := time.Since(pipelineStart)
-	fmt.Println("\n═══ Timing Summary ═══")
-	fmt.Printf("  %-16s %s\n", "Phase", "Duration")
-	fmt.Printf("  %-16s %s\n", "─────", "────────")
+	fmt.Fprintln(os.Stderr, "\n═══ Timing Summary ═══")
+	fmt.Fprintf(os.Stderr, "  %-16s %s\n", "Phase", "Duration")
+	fmt.Fprintf(os.Stderr, "  %-16s %s\n", "─────", "────────")
 	for _, t := range timings {
-		fmt.Printf("  %-16s %s\n", t.name, t.duration.Round(time.Millisecond))
+		fmt.Fprintf(os.Stderr, "  %-16s %s\n", t.name, t.duration.Round(time.Millisecond))
 	}
-	fmt.Printf("  %-16s %s\n", "TOTAL", totalDuration.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "  %-16s %s\n", "TOTAL", totalDuration.Round(time.Millisecond))
 	return nil
 }
 
@@ -310,7 +354,8 @@ func (p *Pipeline) modify(ctx context.Context, existingFiles map[string]string, 
 	}
 	tracker := resources.NewTrackingProvider(rawProvider)
 	p.trackers[roles.RoleBuilder] = tracker
-	fmt.Printf("  ↳ targeted build using %s\n", model)
+	fmt.Fprintf(os.Stderr, "  ↳ targeted build using %s\n", model)
+	p.emitProgress(Phase("modify"), "targeted build using %s", model)
 
 	// Try agentic mode first — builder reads/writes files directly
 	{
@@ -343,11 +388,13 @@ Do NOT add unnecessary changes beyond what's requested.`, lang, changeReq, ctoAn
 			Instruction: instruction,
 		})
 		if err == nil {
-			fmt.Printf("Builder (agentic): %s\n", truncate(result.Summary, 200))
+			fmt.Fprintf(os.Stderr, "Builder (agentic): %s\n", truncate(result.Summary, 200))
+			p.emitOutput("builder", "modification", truncate(result.Summary, 200))
 
 			// Record the action event
 			if _, err := builder.Runtime.Act(ctx, writeCodeAction(lang), "agentic modification"); err != nil {
-				fmt.Printf("warning: write_code action event failed: %v\n", err)
+				fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", err)
+				p.emitWarning(Phase("modify"), "write_code action event failed: %v", err)
 			}
 
 			// Stage and commit whatever the builder changed.
@@ -366,7 +413,8 @@ Do NOT add unnecessary changes beyond what's requested.`, lang, changeReq, ctoAn
 			return updatedFiles, nil
 		}
 		// If Operate isn't supported, fall through to text mode
-		fmt.Printf("Agentic mode unavailable (%v), falling back to text mode.\n", err)
+		fmt.Fprintf(os.Stderr, "Agentic mode unavailable (%v), falling back to text mode.\n", err)
+		p.emitWarning(Phase("modify"), "agentic mode unavailable (%v), falling back to text mode", err)
 	}
 
 	// Fallback: text-based modify — filter to relevant files to reduce token usage.
@@ -388,7 +436,8 @@ Do NOT add unnecessary changes beyond what's requested.`, lang, changeReq, ctoAn
 		}
 		if len(filtered) > 0 {
 			filteredFiles = filtered
-			fmt.Printf("  ↳ text mode: %d/%d files (filtered by CTO analysis)\n", len(filteredFiles), len(existingFiles))
+			fmt.Fprintf(os.Stderr, "  ↳ text mode: %d/%d files (filtered by CTO analysis)\n", len(filteredFiles), len(existingFiles))
+			p.emitProgress(Phase("modify"), "text mode: %d/%d files (filtered by CTO analysis)", len(filteredFiles), len(existingFiles))
 		}
 	}
 
@@ -430,7 +479,8 @@ CRITICAL OUTPUT FORMAT RULES:
 	}
 
 	if _, err := builder.Runtime.Act(ctx, writeCodeAction(lang), "targeted modification"); err != nil {
-		fmt.Printf("warning: write_code action event failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", err)
+		p.emitWarning(Phase("modify"), "write_code action event failed: %v", err)
 	}
 
 	changedFiles := parseFiles(code)
@@ -459,7 +509,8 @@ CRITICAL OUTPUT FORMAT RULES:
 		return nil, fmt.Errorf("commit changes: %w", err)
 	}
 
-	fmt.Printf("Modified %d files, committed.\n", len(changedFiles))
+	fmt.Fprintf(os.Stderr, "Modified %d files, committed.\n", len(changedFiles))
+	p.emitProgress(Phase("modify"), "modified %d files, committed", len(changedFiles))
 	return merged, nil
 }
 
@@ -507,7 +558,8 @@ func (p *Pipeline) reviewTargeted(ctx context.Context, baseCommit string, ctoAna
 	// Wrap in tracking so token usage appears in the summary.
 	tracker := resources.NewTrackingProvider(rawProvider)
 	p.trackers[roles.RoleReviewer] = tracker
-	fmt.Printf("  ↳ targeted review using %s\n", model)
+	fmt.Fprintf(os.Stderr, "  ↳ targeted review using %s\n", model)
+	p.emitProgress(PhaseReview, "targeted review using %s", model)
 
 	prompt := fmt.Sprintf(`Review this diff to a %s codebase. Be CONCISE — no tables, no headers.
 
@@ -534,7 +586,8 @@ End with: APPROVED or CHANGES NEEDED: <specific blocking issues>`, lang, changeR
 	}
 	review := resp.Content()
 
-	fmt.Printf("Review:\n%s\n", review)
+	fmt.Fprintf(os.Stderr, "Review:\n%s\n", review)
+	p.emitOutput("reviewer", "review", review)
 
 	return review, detectApproval(review), nil
 }
@@ -558,7 +611,8 @@ func (p *Pipeline) revise(ctx context.Context, files map[string]string, feedback
 		}
 		tracker = resources.NewTrackingProvider(rawProvider)
 		p.trackers[roles.RoleBuilder] = tracker
-		fmt.Printf("  ↳ targeted revision using %s\n", model)
+		fmt.Fprintf(os.Stderr, "  ↳ targeted revision using %s\n", model)
+		p.emitProgress(PhaseReview, "targeted revision using %s", model)
 	}
 
 	// Try agentic mode
@@ -577,11 +631,13 @@ Read the current code, apply the fixes, and run tests to verify they pass.`, lan
 			Instruction: instruction,
 		})
 		if err == nil {
-			fmt.Printf("Builder (agentic revision): %s\n", truncate(result.Summary, 200))
+			fmt.Fprintf(os.Stderr, "Builder (agentic revision): %s\n", truncate(result.Summary, 200))
+			p.emitOutput("builder", "modification", truncate(result.Summary, 200))
 
 			// Record the action event
 			if _, actErr := builder.Runtime.Act(ctx, writeCodeAction(lang), "agentic revision"); actErr != nil {
-				fmt.Printf("warning: write_code action event failed: %v\n", actErr)
+				fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", actErr)
+				p.emitWarning(PhaseReview, "write_code action event failed: %v", actErr)
 			}
 
 			_ = p.product.StageAll()
@@ -595,7 +651,8 @@ Read the current code, apply the fixes, and run tests to verify they pass.`, lan
 			}
 			return updatedFiles, nil
 		}
-		fmt.Printf("Agentic mode unavailable (%v), falling back to text mode.\n", err)
+		fmt.Fprintf(os.Stderr, "Agentic mode unavailable (%v), falling back to text mode.\n", err)
+		p.emitWarning(PhaseReview, "agentic mode unavailable (%v), falling back to text mode", err)
 	}
 
 	// Fallback: text-based revise
@@ -628,7 +685,8 @@ Output ONLY the files that need further changes using --- FILE: path --- markers
 	}
 
 	if _, err := builder.Runtime.Act(ctx, writeCodeAction(lang), "text revision"); err != nil {
-		fmt.Printf("warning: write_code action event failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", err)
+		p.emitWarning(PhaseReview, "write_code action event failed: %v", err)
 	}
 
 	revisedFiles := parseFiles(code)
@@ -651,7 +709,8 @@ Output ONLY the files that need further changes using --- FILE: path --- markers
 		return nil, fmt.Errorf("commit revision: %w", err)
 	}
 
-	fmt.Printf("Revised %d files from feedback, committed.\n", len(revisedFiles))
+	fmt.Fprintf(os.Stderr, "Revised %d files from feedback, committed.\n", len(revisedFiles))
+	p.emitProgress(PhaseReview, "revised %d files from feedback, committed", len(revisedFiles))
 	return files, nil
 }
 
@@ -675,14 +734,16 @@ func (p *Pipeline) openPR(ctx context.Context, product *workspace.Product, branc
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			prURL := lastNonEmptyLine(string(out))
-			fmt.Printf("PR created: %s\n", prURL)
+			fmt.Fprintf(os.Stderr, "PR created: %s\n", prURL)
+			p.emitProgress(Phase("pr"), "PR created: %s", prURL)
 			return prURL, nil
 		}
 		lastErr = fmt.Errorf("gh pr create: %s: %w", string(out), err)
 		if !isTransientGHError(string(out)) {
 			return "", lastErr
 		}
-		fmt.Printf("PR creation attempt %d failed (transient), retrying in %ds...\n", attempt, attempt*5)
+		fmt.Fprintf(os.Stderr, "PR creation attempt %d failed (transient), retrying in %ds...\n", attempt, attempt*5)
+		p.emitWarning(Phase("pr"), "PR creation attempt %d failed (transient), retrying in %ds", attempt, attempt*5)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -702,7 +763,8 @@ func (p *Pipeline) mergePR(ctx context.Context, product *workspace.Product, prUR
 		cmd.Dir = product.Dir
 		out, err := cmd.CombinedOutput()
 		if err == nil {
-			fmt.Printf("PR merged: %s\n", strings.TrimSpace(string(out)))
+			fmt.Fprintf(os.Stderr, "PR merged: %s\n", strings.TrimSpace(string(out)))
+			p.emitProgress(PhaseMerge, "PR merged: %s", strings.TrimSpace(string(out)))
 			return nil
 		}
 		lastErr = fmt.Errorf("gh pr merge: %s: %w", string(out), err)
@@ -710,7 +772,8 @@ func (p *Pipeline) mergePR(ctx context.Context, product *workspace.Product, prUR
 		if !isTransientGHError(outStr) && !strings.Contains(outStr, "Base branch was modified") {
 			return lastErr
 		}
-		fmt.Printf("PR merge attempt %d failed (transient), retrying in %ds...\n", attempt, attempt*5)
+		fmt.Fprintf(os.Stderr, "PR merge attempt %d failed (transient), retrying in %ds...\n", attempt, attempt*5)
+		p.emitWarning(PhaseMerge, "PR merge attempt %d failed (transient), retrying in %ds", attempt, attempt*5)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -753,7 +816,8 @@ func (p *Pipeline) requestMergeApproval(prURL string) bool {
 	action := fmt.Sprintf("%s: %s", ActionMergePR, prURL)
 	reqEventID, err := p.emitAuthorityRequested(action, "PR passed review and tests — requesting merge approval")
 	if err != nil {
-		fmt.Printf("warning: authority.requested event failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: authority.requested event failed: %v\n", err)
+		p.emitWarning(PhaseMerge, "authority.requested event failed: %v", err)
 		// Fall through — still check the gate for human approval.
 		// Use a zero EventID; the gate doesn't depend on it.
 	}
@@ -771,7 +835,8 @@ func (p *Pipeline) requestMergeApproval(prURL string) bool {
 	// Emit authority.resolved — causally linked to authority.requested.
 	if reqEventID != (types.EventID{}) {
 		if _, err := p.emitAuthorityResolved(reqEventID, resolution); err != nil {
-			fmt.Printf("warning: authority.resolved event failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: authority.resolved event failed: %v\n", err)
+			p.emitWarning(PhaseMerge, "authority.resolved event failed: %v", err)
 		}
 	}
 

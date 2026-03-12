@@ -53,7 +53,34 @@ func run() error {
 	guardianModel := flag.String("guardian-model", "", "Override model for Guardian integrity checks (default: claude-sonnet-4-6)")
 	architectModel := flag.String("architect-model", "", "Override model for architect design and simplify calls (default: claude-sonnet-4-6)")
 	selfImprove := flag.Bool("self-improve", false, "Self-improvement mode: analyze telemetry + codebase and apply fixes")
+	query := flag.String("query", "", "Query pipeline events from the graph (optional filter: phase, progress, output, warning, telemetry)")
+	queryMode := flag.Bool("q", false, "Shorthand for --query (show all pipeline events)")
 	flag.Parse()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Query mode — read events from graph and exit.
+	if *queryMode || *query != "" {
+		dsn := *storeDSN
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+		if dsn == "" {
+			return fmt.Errorf("--query requires --store or DATABASE_URL")
+		}
+		pool, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			return fmt.Errorf("postgres: %w", err)
+		}
+		defer pool.Close()
+		s, err := openStore(ctx, pool)
+		if err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		defer s.Close()
+		return queryPipelineEvents(s, *query)
+	}
 
 	if *idea == "" && *url == "" && *spec == "" && !*selfImprove {
 		return fmt.Errorf("usage: hive --human name [--store postgres://...] [--name product-name] --idea 'description' | --url 'https://...' | --spec path/to/spec.cg | --repo path --idea 'change' | --self-improve")
@@ -61,9 +88,6 @@ func run() error {
 	if *human == "" {
 		return fmt.Errorf("--human is required (the name of the human operator)")
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	// Resolve store DSN: flag > DATABASE_URL env > in-memory
 	dsn := *storeDSN
@@ -74,7 +98,7 @@ func run() error {
 	// Open shared pool for Postgres, or nil for in-memory.
 	var pool *pgxpool.Pool
 	if dsn != "" {
-		fmt.Printf("Postgres: %s\n", dsn)
+		fmt.Fprintf(os.Stderr, "Postgres: %s\n", dsn)
 		var err error
 		pool, err = pgxpool.New(ctx, dsn)
 		if err != nil {
@@ -136,9 +160,9 @@ func run() error {
 	// Authority gate — human approves agent spawns via CLI.
 	var approver authority.Approver
 	if *autoApprove {
-		fmt.Println("Auto-approve: ON (all authority requests auto-approved)")
+		fmt.Fprintln(os.Stderr, "Auto-approve: ON (all authority requests auto-approved)")
 		approver = func(req authority.Request) (bool, string) {
-			fmt.Printf("  [auto-approved] %s\n", req.Action)
+			fmt.Fprintf(os.Stderr, "  [auto-approved] %s\n", req.Action)
 			return true, "auto-approved (--yes flag)"
 		}
 	} else {
@@ -179,7 +203,7 @@ func run() error {
 
 	if *selfImprove {
 		// Self-improvement mode — analyze telemetry and apply fixes
-		fmt.Println("Mode: self-improve")
+		fmt.Fprintln(os.Stderr, "Mode: self-improve")
 		if input.RepoPath == "" {
 			input.RepoPath = "."
 		}
@@ -188,19 +212,19 @@ func run() error {
 		}
 	} else if *repo != "" {
 		// Targeted mode — modify existing code
-		fmt.Println("Mode: targeted (modify existing code)")
+		fmt.Fprintln(os.Stderr, "Mode: targeted (modify existing code)")
 		if err := p.RunTargeted(ctx, input); err != nil {
 			return fmt.Errorf("targeted pipeline failed: %w", err)
 		}
 	} else if *loopMode {
 		// Agentic loop mode — concurrent self-directing agents
-		fmt.Println("Mode: agentic loop (concurrent)")
+		fmt.Fprintln(os.Stderr, "Mode: agentic loop (concurrent)")
 		results, err := p.RunLoop(ctx, input, pipeline.DefaultLoopConfig())
 		if err != nil {
 			return fmt.Errorf("agentic loop failed: %w", err)
 		}
 		for _, ar := range results {
-			fmt.Printf("  %s (%s): %s (%d iterations)\n", ar.Role, ar.Name, ar.Result.Reason, ar.Result.Iterations)
+			fmt.Fprintf(os.Stderr, "  %s (%s): %s (%d iterations)\n", ar.Role, ar.Name, ar.Result.Reason, ar.Result.Iterations)
 		}
 	} else {
 		// Sequential pipeline mode — fixed phase sequence
@@ -219,8 +243,8 @@ func run() error {
 
 	// Print summary
 	count, _ := s.Count()
-	fmt.Printf("\nEvents recorded: %d\n", count)
-	fmt.Printf("Agents active: %d\n", len(p.Agents()))
+	fmt.Fprintf(os.Stderr, "\nEvents recorded: %d\n", count)
+	fmt.Fprintf(os.Stderr, "Agents active: %d\n", len(p.Agents()))
 	return nil
 }
 
@@ -228,10 +252,10 @@ func run() error {
 // nil pool → in-memory. Non-nil → PostgresStore (shared pool).
 func openStore(ctx context.Context, pool *pgxpool.Pool) (store.Store, error) {
 	if pool == nil {
-		fmt.Println("Store: in-memory")
+		fmt.Fprintln(os.Stderr, "Store: in-memory")
 		return store.NewInMemoryStore(), nil
 	}
-	fmt.Println("Store: postgres")
+	fmt.Fprintln(os.Stderr, "Store: postgres")
 	return pgstore.NewPostgresStoreFromPool(ctx, pool)
 }
 
@@ -239,10 +263,10 @@ func openStore(ctx context.Context, pool *pgxpool.Pool) (store.Store, error) {
 // nil pool → in-memory. Non-nil → PostgresActorStore (shared pool).
 func openActorStore(ctx context.Context, pool *pgxpool.Pool) (actor.IActorStore, error) {
 	if pool == nil {
-		fmt.Println("Actor store: in-memory")
+		fmt.Fprintln(os.Stderr, "Actor store: in-memory")
 		return actor.NewInMemoryActorStore(), nil
 	}
-	fmt.Println("Actor store: postgres")
+	fmt.Fprintln(os.Stderr, "Actor store: postgres")
 	return pgactor.NewPostgresActorStoreFromPool(ctx, pool)
 }
 
@@ -250,10 +274,10 @@ func openActorStore(ctx context.Context, pool *pgxpool.Pool) (actor.IActorStore,
 // nil pool → in-memory. Non-nil → PostgresStateStore (shared pool).
 func openStateStore(ctx context.Context, pool *pgxpool.Pool) (statestore.IStateStore, error) {
 	if pool == nil {
-		fmt.Println("State store: in-memory")
+		fmt.Fprintln(os.Stderr, "State store: in-memory")
 		return statestore.NewInMemoryStateStore(), nil
 	}
-	fmt.Println("State store: postgres")
+	fmt.Fprintln(os.Stderr, "State store: postgres")
 	return pgstate.NewPostgresStateStoreFromPool(ctx, pool)
 }
 
@@ -292,7 +316,7 @@ func bootstrapGraph(s store.Store, humanID types.ActorID) error {
 		return nil // already bootstrapped
 	}
 
-	fmt.Println("Bootstrapping event graph...")
+	fmt.Fprintln(os.Stderr, "Bootstrapping event graph...")
 	registry := event.DefaultRegistry()
 	bsFactory := event.NewBootstrapFactory(registry)
 
@@ -306,7 +330,7 @@ func bootstrapGraph(s store.Store, humanID types.ActorID) error {
 	if _, err := s.Append(bootstrap); err != nil {
 		return fmt.Errorf("append genesis event: %w", err)
 	}
-	fmt.Println("Event graph bootstrapped.")
+	fmt.Fprintln(os.Stderr, "Event graph bootstrapped.")
 	return nil
 }
 

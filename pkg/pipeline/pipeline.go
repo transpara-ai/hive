@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
@@ -159,7 +160,7 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("human operator not found in actor store: %w", err)
 	}
-	fmt.Printf("Human operator: %s (%s)\n", human.DisplayName(), human.ID().Value())
+	fmt.Fprintf(os.Stderr, "Human operator: %s (%s)\n", human.DisplayName(), human.ID().Value())
 
 	ws, err := workspace.New(cfg.WorkDir)
 	if err != nil {
@@ -191,6 +192,7 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 	// break INTEGRITY (signature verification requires knowing the key).
 	signer := deriveSignerFromID(cfg.HumanID)
 	registry := event.DefaultRegistry()
+	registerPipelineEvents(registry)
 	factory := event.NewEventFactory(registry)
 	convID, err := newConversationID()
 	if err != nil {
@@ -233,7 +235,8 @@ func New(ctx context.Context, cfg Config) (*Pipeline, error) {
 		}
 		p.guardian = guardian
 	} else {
-		fmt.Println("  ↳ Guardian: SKIPPED (--skip-guardian)")
+		fmt.Fprintln(os.Stderr, "  ↳ Guardian: SKIPPED (--skip-guardian)")
+		p.emitProgress("", "Guardian: SKIPPED (--skip-guardian)")
 	}
 
 	return p, nil
@@ -350,7 +353,8 @@ func (p *Pipeline) ensureAgent(ctx context.Context, role roles.Role, name string
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("  ↳ %s agent %s using %s\n", role, actorID.Value(), model)
+	fmt.Fprintf(os.Stderr, "  ↳ %s agent %s using %s\n", role, actorID.Value(), model)
+	p.emitAgentSpawned(string(role), actorID.Value(), model)
 	p.agents[role] = agent
 	return agent, nil
 }

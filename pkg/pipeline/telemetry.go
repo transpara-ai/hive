@@ -80,6 +80,15 @@ type RoleTokenUsage struct {
 	CostUSD          float64 `json:"cost_usd"`
 }
 
+// totalCost sums CostUSD across all role token entries.
+func (r *PipelineResult) totalCost() float64 {
+	var total float64
+	for _, u := range r.TokenUsage {
+		total += u.CostUSD
+	}
+	return total
+}
+
 // addPhaseTiming records a phase's duration.
 func (r *PipelineResult) addPhaseTiming(phase string, d time.Duration) {
 	r.PhaseTimings = append(r.PhaseTimings, PhaseTimingEntry{Phase: phase, Duration: d})
@@ -185,7 +194,7 @@ func writeTelemetry(baseDir string, result *PipelineResult) {
 
 	dir := filepath.Join(baseDir, ".hive", "telemetry")
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("warning: telemetry dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: telemetry dir: %v\n", err)
 		return
 	}
 
@@ -195,16 +204,16 @@ func writeTelemetry(baseDir string, result *PipelineResult) {
 
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		fmt.Printf("warning: telemetry marshal: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: telemetry marshal: %v\n", err)
 		return
 	}
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		fmt.Printf("warning: telemetry write: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: telemetry write: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Telemetry written: %s\n", path)
+	fmt.Fprintf(os.Stderr, "Telemetry written: %s\n", path)
 }
 
 // UnmarshalJSON for PhaseTimingEntry — decode duration from milliseconds.
@@ -241,12 +250,12 @@ func ReadTelemetry(baseDir string) ([]PipelineResult, error) {
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			fmt.Printf("warning: read telemetry file %s: %v\n", entry.Name(), err)
+			fmt.Fprintf(os.Stderr, "warning: read telemetry file %s: %v\n", entry.Name(), err)
 			continue
 		}
 		var result PipelineResult
 		if err := json.Unmarshal(data, &result); err != nil {
-			fmt.Printf("warning: parse telemetry file %s: %v\n", entry.Name(), err)
+			fmt.Fprintf(os.Stderr, "warning: parse telemetry file %s: %v\n", entry.Name(), err)
 			continue
 		}
 		results = append(results, result)

@@ -44,7 +44,8 @@ Events:
 
 	rawProvider, err := p.providerForRoleWithModel(roles.RoleGuardian, p.guardianCheckModel())
 	if err != nil {
-		fmt.Printf("Guardian check failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Guardian check failed: %v\n", err)
+		p.emitWarning("", "Guardian check failed: %v", err)
 		return false
 	}
 	tracker := resources.NewTrackingProvider(rawProvider)
@@ -55,13 +56,15 @@ Events:
 	// is still real spend and should appear in telemetry.
 	p.telemetry.accumulateGuardianUsage(tracker)
 	if err != nil {
-		fmt.Printf("Guardian check failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Guardian check failed: %v\n", err)
+		p.emitWarning("", "Guardian check failed: %v", err)
 		return false
 	}
 	eval := resp.Content()
 
 	if loop.ContainsSignal(eval, "HALT") {
-		fmt.Printf("🛑 Guardian HALT (after %s):\n%s\n", phase, eval)
+		fmt.Fprintf(os.Stderr, "Guardian HALT (after %s):\n%s\n", phase, eval)
+		p.emitWarning(Phase(phase), "Guardian HALT: %s", eval)
 		// NOTE: Emit is context-unaware (eventgraph Runtime.Emit doesn't take ctx).
 		// This is acceptable — the HALT event is best-effort observability, not
 		// control flow. The pipeline stops regardless of whether the event persists.
@@ -70,13 +73,14 @@ Events:
 			Authority: p.humanID,
 			Reason:    fmt.Sprintf("[HALT after %s] %s", phase, eval),
 		}); err != nil {
-			fmt.Printf("warning: HALT escalation event failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: HALT escalation event failed: %v\n", err)
 		}
 		return true
 	}
 
 	if containsAlert(eval) {
-		fmt.Printf("⚠ Guardian Alert (after %s):\n%s\n", phase, eval)
+		fmt.Fprintf(os.Stderr, "Guardian Alert (after %s):\n%s\n", phase, eval)
+		p.emitWarning(Phase(phase), "Guardian Alert: %s", eval)
 		if p.telemetry != nil {
 			p.telemetry.addGuardianAlert(fmt.Sprintf("[%s phase] %s", phase, eval))
 		}
@@ -85,7 +89,7 @@ Events:
 			Authority: p.humanID,
 			Reason:    fmt.Sprintf("[%s phase] %s", phase, eval),
 		}); err != nil {
-			fmt.Printf("warning: alert escalation event failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: alert escalation event failed: %v\n", err)
 		}
 	}
 
@@ -606,10 +610,10 @@ func langTestCommand(lang string) (string, []string) {
 
 // PrintTokenSummary prints per-agent token usage from tracking providers.
 func (p *Pipeline) PrintTokenSummary() {
-	fmt.Println("\n═══ Token Usage Summary ═══")
-	fmt.Printf("  %-12s %-8s %8s %8s %8s %10s %10s %10s\n",
+	fmt.Fprintln(os.Stderr, "\n═══ Token Usage Summary ═══")
+	fmt.Fprintf(os.Stderr, "  %-12s %-8s %8s %8s %8s %10s %10s %10s\n",
 		"Role", "Model", "Input", "Output", "Total", "CacheRead", "CacheWrite", "Cost")
-	fmt.Printf("  %-12s %-8s %8s %8s %8s %10s %10s %10s\n",
+	fmt.Fprintf(os.Stderr, "  %-12s %-8s %8s %8s %8s %10s %10s %10s\n",
 		"────", "─────", "─────", "──────", "─────", "─────────", "──────────", "────")
 
 	var totalIn, totalOut, totalTokens, totalCacheRead, totalCacheWrite int
@@ -617,9 +621,10 @@ func (p *Pipeline) PrintTokenSummary() {
 
 	for role, tracker := range p.trackers {
 		s := tracker.Snapshot()
-		fmt.Printf("  %-12s %-8s %8d %8d %8d %10d %10d %10s\n",
+		fmt.Fprintf(os.Stderr, "  %-12s %-8s %8d %8d %8d %10d %10d %10s\n",
 			role, tracker.Model(), s.InputTokens, s.OutputTokens, s.TokensUsed,
 			s.CacheReadTokens, s.CacheWriteTokens, fmt.Sprintf("$%.4f", s.CostUSD))
+		p.emitTelemetryEntry(string(role), tracker.Model(), s.InputTokens, s.OutputTokens, s.TokensUsed, s.CacheReadTokens, s.CacheWriteTokens, s.CostUSD)
 		totalIn += s.InputTokens
 		totalOut += s.OutputTokens
 		totalTokens += s.TokensUsed
@@ -628,7 +633,7 @@ func (p *Pipeline) PrintTokenSummary() {
 		totalCost += s.CostUSD
 	}
 
-	fmt.Printf("  %-12s %-8s %8d %8d %8d %10d %10d %10s\n",
+	fmt.Fprintf(os.Stderr, "  %-12s %-8s %8d %8d %8d %10d %10d %10s\n",
 		"TOTAL", "", totalIn, totalOut, totalTokens,
 		totalCacheRead, totalCacheWrite, fmt.Sprintf("$%.4f", totalCost))
 }
@@ -638,15 +643,15 @@ func printTokenSummary(results []loop.AgentResult) {
 	var totalIn, totalOut, totalCacheRead, totalCacheWrite, totalTokens int
 	var totalCost float64
 
-	fmt.Println("\n═══ Token Usage Summary ═══")
-	fmt.Printf("  %-12s %8s %8s %8s %10s %10s %10s\n",
+	fmt.Fprintln(os.Stderr, "\n═══ Token Usage Summary ═══")
+	fmt.Fprintf(os.Stderr, "  %-12s %8s %8s %8s %10s %10s %10s\n",
 		"Role", "Input", "Output", "Total", "CacheRead", "CacheWrite", "Cost")
-	fmt.Printf("  %-12s %8s %8s %8s %10s %10s %10s\n",
+	fmt.Fprintf(os.Stderr, "  %-12s %8s %8s %8s %10s %10s %10s\n",
 		"────", "─────", "──────", "─────", "─────────", "──────────", "────")
 
 	for _, ar := range results {
 		b := ar.Result.Budget
-		fmt.Printf("  %-12s %8d %8d %8d %10d %10d %10s\n",
+		fmt.Fprintf(os.Stderr, "  %-12s %8d %8d %8d %10d %10d %10s\n",
 			ar.Role, b.InputTokens, b.OutputTokens, b.TokensUsed,
 			b.CacheReadTokens, b.CacheWriteTokens, fmt.Sprintf("$%.4f", b.CostUSD))
 		totalIn += b.InputTokens
@@ -657,7 +662,7 @@ func printTokenSummary(results []loop.AgentResult) {
 		totalCost += b.CostUSD
 	}
 
-	fmt.Printf("  %-12s %8d %8d %8d %10d %10d %10s\n",
+	fmt.Fprintf(os.Stderr, "  %-12s %8d %8d %8d %10d %10d %10s\n",
 		"TOTAL", totalIn, totalOut, totalTokens,
 		totalCacheRead, totalCacheWrite, fmt.Sprintf("$%.4f", totalCost))
 }

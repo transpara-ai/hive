@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,11 +27,19 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	defer func() {
 		p.telemetry.collectTokenUsage(p.trackers)
 		writeTelemetry(p.telemetryBaseDir(), p.telemetry)
+		dur := time.Since(pipelineStart)
+		count, _ := p.store.Count()
+		p.emitRunCompleted("full", count, len(p.Agents()), dur,
+			p.telemetry.PRURL, p.telemetry.Merged,
+			p.telemetry.FailedPhase, p.telemetry.FailureReason,
+			p.telemetry.totalCost())
 		p.telemetry = nil
 	}()
+	p.emitRunStarted("full", input.Description)
 
 	// ── Phase 1: Research ──
-	fmt.Println("═══ Phase 1: Research ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 1: Research ═══")
+	p.emitPhaseStarted(PhaseResearch, 1)
 	phaseStart := time.Now()
 	spec, ctoEval, err := p.research(ctx, input)
 	if err != nil {
@@ -53,10 +62,12 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 		return p.failPhase("Research", fmt.Errorf("init product: %w", err))
 	}
 	p.product = product
-	fmt.Printf("Product repo: %s → %s\n", product.Dir, product.Repo)
+	fmt.Fprintf(os.Stderr, "Product repo: %s → %s\n", product.Dir, product.Repo)
+	p.emitProgress(PhaseResearch, "Product repo: %s → %s", product.Dir, product.Repo)
 
 	// ── Phase 2: Design ──
-	fmt.Println("═══ Phase 2: Design ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 2: Design ═══")
+	p.emitPhaseStarted(PhaseDesign, 1)
 	phaseStart = time.Now()
 	design, err := p.design(ctx, spec)
 	if err != nil {
@@ -68,13 +79,15 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 
 	// ── Phase 2b: Simplify ──
 	if !p.skipSimplify {
-		fmt.Println("═══ Phase 2b: Simplify ═══")
+		fmt.Fprintln(os.Stderr, "═══ Phase 2b: Simplify ═══")
+		p.emitProgress(PhaseDesign, "simplification pass started")
 		design, err = p.simplify(ctx, design)
 		if err != nil {
 			return p.failPhase("Simplify", fmt.Errorf("simplify: %w", err))
 		}
 	} else {
-		fmt.Println("═══ Phase 2b: Simplify — SKIPPED ═══")
+		fmt.Fprintln(os.Stderr, "═══ Phase 2b: Simplify — SKIPPED ═══")
+		p.emitProgress(PhaseDesign, "simplification skipped")
 	}
 	p.telemetry.addPhaseTiming("Design", time.Since(phaseStart))
 
@@ -85,14 +98,17 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	if err := p.product.Commit("docs: Code Graph specification"); err != nil {
 		return p.failPhase("Design", fmt.Errorf("commit spec: %w", err))
 	}
-	fmt.Println("Spec committed to product repo.")
+	fmt.Fprintln(os.Stderr, "Spec committed to product repo.")
+	p.emitProgress(PhaseDesign, "spec committed to product repo")
 
 	// Extract language from the design
 	lang := p.extractLanguage(design)
-	fmt.Printf("Target language: %s\n", lang)
+	fmt.Fprintf(os.Stderr, "Target language: %s\n", lang)
+	p.emitProgress(PhaseDesign, "target language: %s", lang)
 
 	// ── Phase 3: Build ──
-	fmt.Println("═══ Phase 3: Build ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 3: Build ═══")
+	p.emitPhaseStarted(PhaseBuild, 1)
 	phaseStart = time.Now()
 	files, err := p.build(ctx, design, lang)
 	if err != nil {
@@ -107,7 +123,8 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	phaseStart = time.Now()
 	const maxReviewRounds = 3
 	for round := 1; round <= maxReviewRounds; round++ {
-		fmt.Printf("═══ Phase 4: Review (round %d) ═══\n", round)
+		fmt.Fprintf(os.Stderr, "═══ Phase 4: Review (round %d) ═══\n", round)
+		p.emitPhaseStarted(PhaseReview, round)
 		feedback, approved, err := p.review(ctx, files, design, lang)
 		if err != nil {
 			return p.failPhase("Review", fmt.Errorf("review round %d: %w", round, err))
@@ -118,17 +135,20 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 		}
 
 		if approved {
-			fmt.Println("Code approved by reviewer.")
+			fmt.Fprintln(os.Stderr, "Code approved by reviewer.")
+			p.emitProgress(PhaseReview, "code approved by reviewer")
 			break
 		}
 
 		if round == maxReviewRounds {
-			fmt.Println("Max review rounds reached — proceeding with current code.")
+			fmt.Fprintln(os.Stderr, "Max review rounds reached — proceeding with current code.")
+			p.emitWarning(PhaseReview, "max review rounds reached — proceeding with current code")
 			break
 		}
 
 		// Rebuild with reviewer feedback
-		fmt.Printf("═══ Phase 4b: Rebuild from feedback (round %d) ═══\n", round)
+		fmt.Fprintf(os.Stderr, "═══ Phase 4b: Rebuild from feedback (round %d) ═══\n", round)
+		p.emitProgress(PhaseReview, "rebuilding from feedback (round %d)", round)
 		files, err = p.rebuild(ctx, files, feedback, design, lang)
 		if err != nil {
 			return p.failPhase("Review", fmt.Errorf("rebuild round %d: %w", round, err))
@@ -137,7 +157,8 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	p.telemetry.addPhaseTiming("Review", time.Since(phaseStart))
 
 	// ── Phase 5: Test ──
-	fmt.Println("═══ Phase 5: Test ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 5: Test ═══")
+	p.emitPhaseStarted(PhaseTest, 1)
 	phaseStart = time.Now()
 	err = p.test(ctx, files, lang)
 	if err != nil {
@@ -149,7 +170,8 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 	}
 
 	// ── Phase 6: Integrate ──
-	fmt.Println("═══ Phase 6: Integrate ═══")
+	fmt.Fprintln(os.Stderr, "═══ Phase 6: Integrate ═══")
+	p.emitPhaseStarted(PhaseIntegrate, 1)
 	phaseStart = time.Now()
 	err = p.integrate(ctx)
 	if err != nil {
@@ -160,7 +182,8 @@ func (p *Pipeline) Run(ctx context.Context, input ProductInput) error {
 		return p.failPhase("Integrate", fmt.Errorf("guardian halted pipeline after integrate phase"))
 	}
 
-	fmt.Println("═══ Pipeline Complete ═══")
+	fmt.Fprintln(os.Stderr, "═══ Pipeline Complete ═══")
+	p.emitProgress(Phase(""), "pipeline complete")
 	p.PrintTokenSummary()
 	return nil
 }
@@ -204,7 +227,8 @@ func (p *Pipeline) RunLoop(ctx context.Context, input ProductInput, cfg LoopConf
 	defer eventBus.Close()
 
 	// Seed: CTO evaluates the idea and emits initial direction.
-	fmt.Println("═══ Seeding: CTO evaluates idea ═══")
+	fmt.Fprintln(os.Stderr, "═══ Seeding: CTO evaluates idea ═══")
+	p.emitProgress(Phase(""), "seeding: CTO evaluates idea")
 	seedTask, err := p.seedWork(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("seed work: %w", err)
@@ -217,19 +241,23 @@ func (p *Pipeline) RunLoop(ctx context.Context, input ProductInput, cfg LoopConf
 	}
 
 	// Run all agent loops concurrently.
-	fmt.Printf("═══ Starting %d agent loops ═══\n", len(agentConfigs))
+	fmt.Fprintf(os.Stderr, "═══ Starting %d agent loops ═══\n", len(agentConfigs))
+	p.emitProgress(Phase(""), "starting %d agent loops", len(agentConfigs))
 	for _, c := range agentConfigs {
-		fmt.Printf("  ↳ %s loop starting\n", c.Agent.Role)
+		fmt.Fprintf(os.Stderr, "  ↳ %s loop starting\n", c.Agent.Role)
+		p.emitProgress(Phase(""), "%s loop starting", c.Agent.Role)
 	}
 
 	results := loop.RunConcurrent(ctx, agentConfigs)
 
-	fmt.Println("═══ All loops stopped ═══")
+	fmt.Fprintln(os.Stderr, "═══ All loops stopped ═══")
+	p.emitProgress(Phase(""), "all loops stopped")
 	for _, ar := range results {
 		b := ar.Result.Budget
-		fmt.Printf("  %s (%s): stopped=%s iterations=%d tokens=%d (in=%d out=%d cache_read=%d cache_write=%d) cost=$%.4f\n",
+		fmt.Fprintf(os.Stderr, "  %s (%s): stopped=%s iterations=%d tokens=%d (in=%d out=%d cache_read=%d cache_write=%d) cost=$%.4f\n",
 			ar.Role, ar.Name, ar.Result.Reason, ar.Result.Iterations,
 			b.TokensUsed, b.InputTokens, b.OutputTokens, b.CacheReadTokens, b.CacheWriteTokens, b.CostUSD)
+		p.emitTelemetryEntry(string(ar.Role), ar.Name, b.InputTokens, b.OutputTokens, b.TokensUsed, b.CacheReadTokens, b.CacheWriteTokens, b.CostUSD)
 	}
 	printTokenSummary(results)
 
@@ -279,7 +307,8 @@ Product idea:
 		return "", fmt.Errorf("CTO seed action: %w", err)
 	}
 
-	fmt.Printf("CTO direction:\n%s\n", evaluation)
+	fmt.Fprintf(os.Stderr, "CTO direction:\n%s\n", evaluation)
+	p.emitOutput("cto", "direction", evaluation)
 	return evaluation, nil
 }
 
@@ -388,12 +417,12 @@ func extractName(ctoEval string) string {
 			}
 			if len(clean) > 0 {
 				result := string(clean)
-				fmt.Printf("CTO named product: %s\n", result)
+				fmt.Fprintf(os.Stderr, "CTO named product: %s\n", result)
 				return result
 			}
 		}
 	}
-	fmt.Println("CTO did not provide a product name — using default.")
+	fmt.Fprintln(os.Stderr, "CTO did not provide a product name — using default.")
 	return "product"
 }
 
@@ -442,7 +471,8 @@ Product idea:
 	}
 	ctoEval = ctoResp.Content()
 
-	fmt.Printf("CTO Assessment:\n%s\n", ctoEval)
+	fmt.Fprintf(os.Stderr, "CTO Assessment:\n%s\n", ctoEval)
+	p.emitOutput("cto", "analysis", ctoEval)
 	return spec, ctoEval, nil
 }
 
@@ -521,15 +551,18 @@ Current spec:
 
 		upper := strings.ToUpper(strings.TrimSpace(analysis))
 		if upper == "MINIMAL" || strings.HasPrefix(upper, "MINIMAL") {
-			fmt.Printf("Simplification complete after %d round(s) — spec is minimal.\n", round)
+			fmt.Fprintf(os.Stderr, "Simplification complete after %d round(s) — spec is minimal.\n", round)
+			p.emitProgress(PhaseDesign, "simplification complete after %d round(s) — spec is minimal", round)
 			return current, nil
 		}
 
-		fmt.Printf("Simplification round %d applied.\n", round)
+		fmt.Fprintf(os.Stderr, "Simplification round %d applied.\n", round)
+		p.emitProgress(PhaseDesign, "simplification round %d applied", round)
 		current = analysis
 	}
 
-	fmt.Printf("Simplification capped at %d rounds.\n", maxRounds)
+	fmt.Fprintf(os.Stderr, "Simplification capped at %d rounds.\n", maxRounds)
+	p.emitWarning(PhaseDesign, "simplification capped at %d rounds", maxRounds)
 	return current, nil
 }
 
@@ -589,7 +622,8 @@ Specification:
 	}
 	buildTracker := resources.NewTrackingProvider(buildProvider)
 	p.trackers[roles.RoleBuilder] = buildTracker
-	fmt.Printf("  ↳ build using %s\n", buildModel)
+	fmt.Fprintf(os.Stderr, "  ↳ build using %s\n", buildModel)
+	p.emitProgress(PhaseBuild, "build using %s", buildModel)
 
 	buildResp, err := buildTracker.Reason(ctx, prompt, nil)
 	if err != nil {
@@ -599,7 +633,8 @@ Specification:
 
 	// Record the build action
 	if _, err := builder.Runtime.Act(ctx, writeCodeAction(lang), "multi-file generation from spec"); err != nil {
-		fmt.Printf("warning: write_code action event failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", err)
+		p.emitWarning(PhaseBuild, "write_code action event failed: %v", err)
 	}
 
 	// Parse multi-file output
@@ -623,7 +658,8 @@ Specification:
 		return nil, fmt.Errorf("commit code: %w", err)
 	}
 
-	fmt.Printf("Generated %d files, committed.\n", len(files))
+	fmt.Fprintf(os.Stderr, "Generated %d files, committed.\n", len(files))
+	p.emitProgress(PhaseBuild, "generated %d files, committed", len(files))
 	return files, nil
 }
 
@@ -654,7 +690,8 @@ Output the COMPLETE revised files using --- FILE: path --- markers. Include ALL 
 	}
 	rebuildTracker := resources.NewTrackingProvider(rebuildProvider)
 	p.trackers[roles.RoleBuilder] = rebuildTracker
-	fmt.Printf("  ↳ rebuild using %s\n", rebuildModel)
+	fmt.Fprintf(os.Stderr, "  ↳ rebuild using %s\n", rebuildModel)
+	p.emitProgress(PhaseReview, "rebuild using %s", rebuildModel)
 
 	rebuildResp, err := rebuildTracker.Reason(ctx, prompt, nil)
 	if err != nil {
@@ -679,7 +716,8 @@ Output the COMPLETE revised files using --- FILE: path --- markers. Include ALL 
 		return nil, fmt.Errorf("commit rebuild: %w", err)
 	}
 
-	fmt.Printf("Rebuilt %d files from feedback, committed.\n", len(files))
+	fmt.Fprintf(os.Stderr, "Rebuilt %d files from feedback, committed.\n", len(files))
+	p.emitProgress(PhaseReview, "rebuilt %d files from feedback, committed", len(files))
 	return files, nil
 }
 
@@ -702,7 +740,8 @@ func (p *Pipeline) review(ctx context.Context, files map[string]string, design s
 	}
 	reviewTracker := resources.NewTrackingProvider(reviewProvider)
 	p.trackers[roles.RoleReviewer] = reviewTracker
-	fmt.Printf("  ↳ review using %s\n", reviewModel)
+	fmt.Fprintf(os.Stderr, "  ↳ review using %s\n", reviewModel)
+	p.emitProgress(PhaseReview, "review using %s", reviewModel)
 
 	reviewPrompt := fmt.Sprintf(`Review this %s code comprehensively. Cover ALL of the following in ONE response:
 
@@ -733,7 +772,8 @@ Code:
 	}
 	review := reviewResp.Content()
 
-	fmt.Printf("Review:\n%s\n", review)
+	fmt.Fprintf(os.Stderr, "Review:\n%s\n", review)
+	p.emitOutput("reviewer", "review", review)
 
 	approved = detectApproval(review)
 	return review, approved, nil
@@ -747,7 +787,8 @@ func (p *Pipeline) test(ctx context.Context, files map[string]string, lang strin
 
 	// Run tests
 	testCmd, testArgs := langTestCommand(lang)
-	fmt.Printf("Running: %s %s\n", testCmd, strings.Join(testArgs, " "))
+	fmt.Fprintf(os.Stderr, "Running: %s %s\n", testCmd, strings.Join(testArgs, " "))
+	p.emitProgress(PhaseTest, "running: %s %s", testCmd, strings.Join(testArgs, " "))
 
 	moduleDir := findModuleDir(p.product.Dir, lang)
 	cmd := exec.Command(testCmd, testArgs...)
@@ -756,11 +797,13 @@ func (p *Pipeline) test(ctx context.Context, files map[string]string, lang strin
 
 	testResult := string(testOutput)
 	if testErr == nil {
-		fmt.Printf("Tests passed:\n%s\n", testResult)
+		fmt.Fprintf(os.Stderr, "Tests passed:\n%s\n", testResult)
+		p.emitProgress(PhaseTest, "tests passed")
 		return nil // No need for tester analysis or builder fixes.
 	}
 
-	fmt.Printf("Tests failed:\n%s\n", testResult)
+	fmt.Fprintf(os.Stderr, "Tests failed:\n%s\n", testResult)
+	p.emitWarning(PhaseTest, "tests failed")
 
 	// Tests failed — spawn the tester agent (side effect: registers agent in actor store).
 	if _, err := p.ensureAgent(ctx, roles.RoleTester, "tester"); err != nil {
@@ -780,7 +823,8 @@ func (p *Pipeline) test(ctx context.Context, files map[string]string, lang strin
 	}
 	testerTracker := resources.NewTrackingProvider(testerProvider)
 	p.trackers[roles.RoleTester] = testerTracker
-	fmt.Printf("  ↳ test analysis using %s\n", testerModel)
+	fmt.Fprintf(os.Stderr, "  ↳ test analysis using %s\n", testerModel)
+	p.emitProgress(PhaseTest, "test analysis using %s", testerModel)
 
 	testerResp, err := testerTracker.Reason(ctx, fmt.Sprintf(`Tests are failing. Analyze the failures and identify root causes.
 
@@ -794,11 +838,13 @@ Code:
 	}
 	testEval := testerResp.Content()
 
-	fmt.Printf("Test Analysis:\n%s\n", testEval)
+	fmt.Fprintf(os.Stderr, "Test Analysis:\n%s\n", testEval)
+	p.emitOutput("tester", "analysis", testEval)
 
 	// Have the builder fix the failures.
 	{
-		fmt.Println("Attempting to fix failing tests...")
+		fmt.Fprintln(os.Stderr, "Attempting to fix failing tests...")
+		p.emitProgress(PhaseTest, "attempting to fix failing tests")
 		builder, err := p.ensureAgent(ctx, roles.RoleBuilder, "builder")
 		if err != nil {
 			return err
@@ -823,10 +869,12 @@ Preserve existing code style and conventions.`, lang, testResult)
 				Instruction: instruction,
 			})
 			if opErr == nil {
-				fmt.Printf("Builder (agentic fix): %s\n", truncate(result.Summary, 200))
+				fmt.Fprintf(os.Stderr, "Builder (agentic fix): %s\n", truncate(result.Summary, 200))
+				p.emitOutput("builder", "analysis", truncate(result.Summary, 200))
 
 				if _, actErr := builder.Runtime.Act(ctx, writeCodeAction(lang), "agentic test fix"); actErr != nil {
-					fmt.Printf("warning: write_code action event failed: %v\n", actErr)
+					fmt.Fprintf(os.Stderr, "warning: write_code action event failed: %v\n", actErr)
+					p.emitWarning(PhaseTest, "write_code action event failed: %v", actErr)
 				}
 
 				if stageErr := p.product.StageAll(); stageErr != nil {
@@ -839,7 +887,8 @@ Preserve existing code style and conventions.`, lang, testResult)
 				}
 				fixed = true
 			} else {
-				fmt.Printf("Agentic mode unavailable (%v), falling back to text mode.\n", opErr)
+				fmt.Fprintf(os.Stderr, "Agentic mode unavailable (%v), falling back to text mode.\n", opErr)
+				p.emitWarning(PhaseTest, "agentic mode unavailable (%v), falling back to text mode", opErr)
 			}
 		}
 
@@ -863,7 +912,8 @@ Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.Str
 			}
 			fixTracker := resources.NewTrackingProvider(fixProvider)
 			p.trackers[roles.RoleBuilder] = fixTracker
-			fmt.Printf("  ↳ test fix using %s\n", fixModel)
+			fmt.Fprintf(os.Stderr, "  ↳ test fix using %s\n", fixModel)
+			p.emitProgress(PhaseTest, "test fix using %s", fixModel)
 
 			fixResp, err := fixTracker.Reason(ctx, fixPrompt, nil)
 			if err != nil {
@@ -891,10 +941,12 @@ Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.Str
 		cmd2.Dir = moduleDir
 		retryOutput, retryErr := cmd2.CombinedOutput()
 		if retryErr != nil {
-			fmt.Printf("Tests still failing after fix attempt:\n%s\n", string(retryOutput))
+			fmt.Fprintf(os.Stderr, "Tests still failing after fix attempt:\n%s\n", string(retryOutput))
+			p.emitWarning(PhaseTest, "tests still failing after fix attempt")
 			return fmt.Errorf("tests still failing after fix attempt")
 		}
-		fmt.Printf("Tests now passing:\n%s\n", string(retryOutput))
+		fmt.Fprintf(os.Stderr, "Tests now passing:\n%s\n", string(retryOutput))
+		p.emitProgress(PhaseTest, "tests now passing")
 	}
 
 	return nil
@@ -926,9 +978,11 @@ func (p *Pipeline) installDeps(lang string) {
 		cmd.Dir = findModuleDir(p.product.Dir, lang)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			fmt.Printf("Dep install warning: %s\n", string(out))
+			fmt.Fprintf(os.Stderr, "Dep install warning: %s\n", string(out))
+			p.emitWarning(PhaseBuild, "dep install warning: %s", string(out))
 		} else {
-			fmt.Printf("Dependencies installed.\n")
+			fmt.Fprintf(os.Stderr, "Dependencies installed.\n")
+			p.emitProgress(PhaseBuild, "dependencies installed")
 		}
 	}
 }
@@ -947,9 +1001,11 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 
 	// Push to GitHub
 	if err := p.product.Push(); err != nil {
-		fmt.Printf("Push failed (may need manual push): %v\n", err)
+		fmt.Fprintf(os.Stderr, "Push failed (may need manual push): %v\n", err)
+		p.emitWarning(PhaseIntegrate, "push failed (may need manual push): %v", err)
 	} else {
-		fmt.Printf("Pushed to https://github.com/%s\n", p.product.Repo)
+		fmt.Fprintf(os.Stderr, "Pushed to https://github.com/%s\n", p.product.Repo)
+		p.emitProgress(PhaseIntegrate, "pushed to https://github.com/%s", p.product.Repo)
 	}
 
 	// Escalate to human for production approval
@@ -959,6 +1015,7 @@ func (p *Pipeline) integrate(ctx context.Context) error {
 		return fmt.Errorf("escalate: %w", err)
 	}
 
-	fmt.Println("Product assembled and ready for human review.")
+	fmt.Fprintln(os.Stderr, "Product assembled and ready for human review.")
+	p.emitProgress(PhaseIntegrate, "product assembled and ready for human review")
 	return nil
 }

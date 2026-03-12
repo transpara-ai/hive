@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -56,9 +57,19 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 		return fmt.Errorf("RunSelfImprove requires RepoPath")
 	}
 
+	pipelineStart := time.Now()
+	p.emitRunStarted("self-improve", input.Description)
+	defer func() {
+		dur := time.Since(pipelineStart)
+		count, _ := p.store.Count()
+		p.emitRunCompleted("self-improve", count, len(p.Agents()), dur,
+			"", false, "", "", 0)
+	}()
+
 	consecutiveFailures := 0
 	for iteration := 1; iteration <= maxSelfImproveIterations; iteration++ {
-		fmt.Printf("\n═══ Self-Improve: Iteration %d/%d ═══\n", iteration, maxSelfImproveIterations)
+		fmt.Fprintf(os.Stderr, "\n═══ Self-Improve: Iteration %d/%d ═══\n", iteration, maxSelfImproveIterations)
+		p.emitPhaseStarted(PhaseSelfImprove, iteration)
 
 		if err := p.runSelfImproveIteration(ctx, iteration, input); err != nil {
 			if err == errSelfImproveStop {
@@ -68,16 +79,18 @@ func (p *Pipeline) RunSelfImprove(ctx context.Context, input ProductInput) error
 			if consecutiveFailures >= maxConsecutiveFailures {
 				return fmt.Errorf("self-improve iteration %d: %w (aborting after %d consecutive failures)", iteration, err, consecutiveFailures)
 			}
-			fmt.Printf("Warning: iteration %d failed (%v) — skipping to next iteration (%d/%d consecutive failures)\n",
+			fmt.Fprintf(os.Stderr, "Warning: iteration %d failed (%v) — skipping to next iteration (%d/%d consecutive failures)\n",
+				iteration, err, consecutiveFailures, maxConsecutiveFailures)
+			p.emitWarning(PhaseSelfImprove, "iteration %d failed (%v) — skipping to next iteration (%d/%d consecutive failures)",
 				iteration, err, consecutiveFailures, maxConsecutiveFailures)
 			continue
 		}
 
 		consecutiveFailures = 0
-		fmt.Printf("═══ Self-Improve: Iteration %d complete ═══\n", iteration)
+		fmt.Fprintf(os.Stderr, "═══ Self-Improve: Iteration %d complete ═══\n", iteration)
 	}
 
-	fmt.Println("\n═══ Self-Improve: Session Complete ═══")
+	fmt.Fprintln(os.Stderr, "\n═══ Self-Improve: Session Complete ═══")
 	return nil
 }
 
@@ -98,7 +111,8 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 		return fmt.Errorf("open repo for cleanup: %w", err)
 	}
 	if err := product.CleanupForIteration(); err != nil {
-		fmt.Printf("Warning: cleanup failed: %v (continuing anyway)\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: cleanup failed: %v (continuing anyway)\n", err)
+		p.emitWarning(PhaseSelfImprove, "cleanup failed: %v (continuing anyway)", err)
 	}
 
 	// Step 1: Read telemetry
@@ -106,7 +120,8 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	if err != nil {
 		return fmt.Errorf("read telemetry: %w", err)
 	}
-	fmt.Printf("Telemetry: %d past run(s) found.\n", len(telemetryResults))
+	fmt.Fprintf(os.Stderr, "Telemetry: %d past run(s) found.\n", len(telemetryResults))
+	p.emitProgress(PhaseSelfImprove, "telemetry: %d past run(s) found", len(telemetryResults))
 
 	// Step 2: Load codebase context for CTO analysis.
 	// Filter to .go source files (no tests) with per-file truncation to keep
@@ -125,7 +140,8 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	// Step 4: CTO analysis — fresh provider per iteration to avoid accumulating
 	// prior conversation as input context (each prompt already contains full
 	// telemetry + codebase, so prior messages are pure waste).
-	fmt.Println("CTO analyzing telemetry + codebase...")
+	fmt.Fprintln(os.Stderr, "CTO analyzing telemetry + codebase...")
+	p.emitProgress(PhaseSelfImprove, "CTO analyzing telemetry + codebase")
 	model := p.selfImproveCTOModel()
 	rawProvider, err := p.providerForRoleWithModel(roles.RoleCTO, model)
 	if err != nil {
@@ -133,7 +149,8 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 	}
 	ctoTracker := resources.NewTrackingProvider(rawProvider)
 	p.trackers[roles.RoleCTO] = ctoTracker
-	fmt.Printf("  ↳ self-improve CTO analysis using %s\n", model)
+	fmt.Fprintf(os.Stderr, "  ↳ self-improve CTO analysis using %s\n", model)
+	p.emitProgress(PhaseSelfImprove, "self-improve CTO analysis using %s", model)
 
 	ctoPrompt := fmt.Sprintf(`You are the CTO of a self-improving AI agent system. Analyze this codebase and telemetry to identify the single highest-impact improvement.
 
@@ -174,18 +191,23 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 		return fmt.Errorf("parse CTO recommendation: %w", err)
 	}
 
-	fmt.Printf("CTO recommendation (priority=%s): %s\n", rec.Priority, rec.Description)
+	fmt.Fprintf(os.Stderr, "CTO recommendation (priority=%s): %s\n", rec.Priority, rec.Description)
+	p.emitOutput("cto", "recommendation", fmt.Sprintf("priority=%s: %s", rec.Priority, rec.Description))
 	if rec.SkipReason != "" {
-		fmt.Printf("CTO says nothing worth fixing: %s\n", rec.SkipReason)
+		fmt.Fprintf(os.Stderr, "CTO says nothing worth fixing: %s\n", rec.SkipReason)
+		p.emitOutput("cto", "recommendation", fmt.Sprintf("nothing worth fixing: %s", rec.SkipReason))
 		return errSelfImproveStop
 	}
 	if rec.Description == "" {
-		fmt.Println("CTO returned empty recommendation — stopping.")
+		fmt.Fprintln(os.Stderr, "CTO returned empty recommendation — stopping.")
+		p.emitOutput("cto", "recommendation", "empty recommendation — stopping")
 		return errSelfImproveStop
 	}
 
-	fmt.Printf("Expected impact: %s\n", rec.ExpectedImpact)
-	fmt.Printf("Files to change: %v\n", rec.FilesToChange)
+	fmt.Fprintf(os.Stderr, "Expected impact: %s\n", rec.ExpectedImpact)
+	p.emitOutput("cto", "analysis", fmt.Sprintf("expected impact: %s", rec.ExpectedImpact))
+	fmt.Fprintf(os.Stderr, "Files to change: %v\n", rec.FilesToChange)
+	p.emitOutput("cto", "analysis", fmt.Sprintf("files to change: %v", rec.FilesToChange))
 
 	// Step 6: Run targeted pipeline with the recommendation.
 	// Pre-populate p.telemetry with CTO analysis cost so RunTargeted includes it —
@@ -224,7 +246,7 @@ Respond with ONLY a JSON object: {"description": "what to change, 1-2 sentences"
 	p.skipReviewer = true
 	defer func() { p.skipReviewer = prevSkipReviewer }()
 
-	fmt.Printf("\n═══ Self-Improve: Running targeted pipeline ═══\n")
+	fmt.Fprintf(os.Stderr, "\n═══ Self-Improve: Running targeted pipeline ═══\n")
 	if err := p.RunTargeted(ctx, targetedInput); err != nil {
 		return fmt.Errorf("targeted pipeline: %w", err)
 	}
