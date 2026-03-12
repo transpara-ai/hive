@@ -828,8 +828,12 @@ Preserve existing code style and conventions.`, lang, testResult)
 					fmt.Printf("warning: write_code action event failed: %v\n", actErr)
 				}
 
-				_ = p.product.StageAll()
-				_ = p.product.Commit("fix: address failing tests")
+				if stageErr := p.product.StageAll(); stageErr != nil {
+					return fmt.Errorf("stage test fix: %w", stageErr)
+				}
+				if commitErr := p.product.Commit("fix: address failing tests"); commitErr != nil {
+					return fmt.Errorf("commit test fix: %w", commitErr)
+				}
 				fixed = true
 			} else {
 				fmt.Printf("Agentic mode unavailable (%v), falling back to text mode.\n", opErr)
@@ -872,7 +876,9 @@ Output ALL files using --- FILE: path --- markers.`, testResult, codeSummary.Str
 				}
 			}
 			if len(fixedFiles) > 0 {
-				_ = p.product.Commit("fix: address failing tests")
+				if err := p.product.Commit("fix: address failing tests"); err != nil {
+					return fmt.Errorf("commit test fix: %w", err)
+				}
 			}
 		}
 
