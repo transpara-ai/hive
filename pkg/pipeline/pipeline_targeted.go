@@ -339,7 +339,9 @@ Do NOT add unnecessary changes beyond what's requested.`, lang, changeReq, ctoAn
 
 			// Stage and commit whatever the builder changed
 			_ = p.product.StageAll()
-			_ = p.product.Commit(fmt.Sprintf("feat: %s", truncate(changeReq, 60)))
+			if commitErr := p.product.Commit(fmt.Sprintf("feat: %s", truncate(changeReq, 60))); commitErr != nil {
+				return nil, fmt.Errorf("commit changes: %w", commitErr)
+			}
 
 			// Re-read files from disk (builder may have changed anything)
 			updatedFiles, readErr := p.product.ReadSourceFiles()
