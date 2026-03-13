@@ -483,6 +483,14 @@ Your job: analyze the current codebase and produce a PRIORITIZED PRODUCT BACKLOG
 
 CRITICAL INSIGHT: The hive is its OWN first customer. Every product it builds should be dogfooded — the hive should use what it builds. The Work Graph should track the hive's own work. The hive's products improve the hive, which builds better products. This virtuous cycle is the whole point.
 
+PRODUCT METHOD — derive, don't accumulate:
+Products are NOT feature lists. Use the derivation method:
+1. Identify the GAP — what can't the current system express?
+2. Identify DIMENSIONS — the axes along which the domain varies
+3. TRAVERSE dimensions — explore meaningful combinations
+4. ZOOM — decompose into atoms, compose into products
+Features emerge from traversing dimensions, not from wishlists. When you recommend a product capability, ground it in which dimension of the domain it opens up. A good product recommendation opens a new dimension; a bad one adds a point feature.
+
 The hive builds thirteen products (see CLAUDE.md). The first product is the Work Graph (task management with agent collaboration). Revenue model: charge corporations, free for individuals.
 
 %s
