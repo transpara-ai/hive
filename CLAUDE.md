@@ -44,7 +44,7 @@ Revenue model: charge corporations, free for individuals. Hosted persistence for
 
 **Resource transparency is a core principle.** Every resource — money, tokens, compute time, human hours, agent cycles — is an event on the graph with causal links. Anyone can trace any resource from source to impact. The hive's goal grows with its revenue — from software products to research, charity, housing, whatever humans need most.
 
-Build order: Work Graph first (the hive needs it), then Market, Social, Knowledge, Alignment. Each product is derived using the [derivation method](https://github.com/lovyou-ai/eventgraph/blob/main/docs/derivation-method.md).
+Build order: Work Graph first (the hive needs it), then Mind (the hive needs to learn from experience), then Market, Social, Knowledge, Alignment. The Mind comes before Market/Social because reputation and relationships require judgment that only accumulated experience provides. Each product is derived using the [derivation method](https://github.com/lovyou-ai/eventgraph/blob/main/docs/derivation-method.md).
 
 ## Architecture
 
