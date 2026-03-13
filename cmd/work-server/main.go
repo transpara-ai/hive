@@ -131,6 +131,7 @@ func run() error {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", srv.health)
 	mux.HandleFunc("POST /tasks", srv.auth(srv.createTask))
 	mux.HandleFunc("GET /tasks", srv.auth(srv.listTasks))
 	mux.HandleFunc("GET /tasks/{id}", srv.auth(srv.getTask))
@@ -141,7 +142,7 @@ func run() error {
 
 	addr := ":" + port
 	fmt.Fprintf(os.Stderr, "work-server listening on %s\n", addr)
-	httpSrv := &http.Server{Addr: addr, Handler: mux}
+	httpSrv := &http.Server{Addr: addr, Handler: corsMiddleware(mux)}
 	go func() {
 		<-ctx.Done()
 		httpSrv.Shutdown(context.Background()) //nolint:errcheck
@@ -158,6 +159,26 @@ type server struct {
 	store   store.Store
 	humanID types.ActorID
 	apiKey  string
+}
+
+// health handles GET /health — used by Fly.io and load balancers to check liveness.
+func (sv *server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// corsMiddleware adds Access-Control-Allow-Origin headers so the REST API can be
+// called directly from web browsers. Handles preflight OPTIONS requests.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // auth is middleware that validates the Authorization: Bearer <key> header.
