@@ -498,7 +498,9 @@ Produce a prioritized list of 3-5 product recommendations. For each:
 - SUCCESS: how we know it works (user-visible criteria)
 - SCOPE: what's in, what's explicitly out
 
-Focus on user value. Tests, refactoring, and internal improvements are the CTO's domain — you focus on what users see and need. Be specific and actionable.`, codeContext.String())
+Focus on user value. Tests, refactoring, and internal improvements are the CTO's domain — you focus on what users see and need. Be specific and actionable.
+
+IMPORTANT: Keep your response under 1500 characters. Be concise — bullet points, not paragraphs. The CTO needs priorities, not a thesis.`, codeContext.String())
 
 	pmCtx, pmCancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer pmCancel()
@@ -513,6 +515,11 @@ Focus on user value. Tests, refactoring, and internal improvements are the CTO's
 	pmOutput := resp.Content()
 	fmt.Fprintf(os.Stderr, "PM priorities: %s\n", truncate(pmOutput, 200))
 	p.emitOutput("pm", "priorities", pmOutput)
+	// Truncate for CTO injection — the full codebase already fills most of
+	// the context window, so PM priorities must be concise.
+	if len(pmOutput) > 2000 {
+		pmOutput = pmOutput[:2000] + "\n[PM output truncated for CTO context]"
+	}
 	return pmOutput
 }
 
