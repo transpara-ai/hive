@@ -459,6 +459,13 @@ func (p *Product) CreateWorktree(name string) (*Product, error) {
 		}
 	}
 
+	// Fix go.mod replace directives that use relative paths. The worktree
+	// lives in a temp dir, so "../sibling" paths won't resolve. Rewrite
+	// them to absolute paths based on the source repo's location.
+	if err := fixGoModReplace(dir, p.Dir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not fix go.mod replace directives: %v\n", err)
+	}
+
 	return wt, nil
 }
 
@@ -492,6 +499,48 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, data, info.Mode())
 	})
+}
+
+// fixGoModReplace rewrites relative replace directives in go.mod to absolute
+// paths. In a worktree at /tmp/..., "../eventgraph/go" doesn't resolve, so we
+// rewrite it to the absolute path relative to the source repo.
+func fixGoModReplace(worktreeDir, sourceDir string) error {
+	gomod := filepath.Join(worktreeDir, "go.mod")
+	data, err := os.ReadFile(gomod)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no go.mod, nothing to fix
+		}
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	changed := false
+	for i, line := range lines {
+		// Match: replace module => ../relative/path
+		if !strings.HasPrefix(strings.TrimSpace(line), "replace ") {
+			continue
+		}
+		parts := strings.SplitN(line, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		target := strings.TrimSpace(parts[1])
+		if !strings.HasPrefix(target, ".") {
+			continue // already absolute or a module version
+		}
+		// Resolve relative to source repo, then make absolute.
+		abs := filepath.Join(sourceDir, target)
+		abs = filepath.Clean(abs)
+		abs = filepath.ToSlash(abs) // go.mod uses forward slashes
+		lines[i] = parts[0] + "=> " + abs
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(gomod, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 // RemoveWorktree removes this product's worktree directory and prunes the
