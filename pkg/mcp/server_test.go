@@ -386,6 +386,243 @@ func TestUnknownMethod(t *testing.T) {
 	}
 }
 
+func TestWorkCreateTask(t *testing.T) {
+	deps := testDeps(t)
+	s := NewServer("test", "0.0.1")
+	RegisterAllTools(s, deps)
+
+	// Missing title → error result (not an RPC error).
+	result := callTool(t, s, "work_create_task", map[string]any{})
+	if !result.IsError {
+		t.Error("expected error for missing title")
+	}
+
+	// Valid title → returns id and title.
+	result = callTool(t, s, "work_create_task", map[string]any{
+		"title":       "Fix the auth bug",
+		"description": "login fails on mobile",
+	})
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	var task map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &task); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if _, ok := task["id"]; !ok {
+		t.Error("missing id in result")
+	}
+	if task["title"] != "Fix the auth bug" {
+		t.Errorf("title = %v, want %q", task["title"], "Fix the auth bug")
+	}
+}
+
+func TestWorkListTasks(t *testing.T) {
+	deps := testDeps(t)
+	s := NewServer("test", "0.0.1")
+	RegisterAllTools(s, deps)
+
+	// Empty graph → empty array.
+	result := callTool(t, s, "work_list_tasks", map[string]any{})
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	var tasks []map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &tasks); err != nil {
+		t.Fatalf("parse empty response: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+
+	// Create a task and list again.
+	callTool(t, s, "work_create_task", map[string]any{"title": "List Me"})
+
+	result = callTool(t, s, "work_list_tasks", map[string]any{})
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &tasks); err != nil {
+		t.Fatalf("parse populated response: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0]["title"] != "List Me" {
+		t.Errorf("title = %v, want %q", tasks[0]["title"], "List Me")
+	}
+}
+
+func TestWorkAssignTask(t *testing.T) {
+	deps := testDeps(t)
+	s := NewServer("test", "0.0.1")
+	RegisterAllTools(s, deps)
+
+	// Create a task to assign.
+	result := callTool(t, s, "work_create_task", map[string]any{"title": "Assign Me"})
+	if result.IsError {
+		t.Fatalf("create task failed: %s", result.Content[0].Text)
+	}
+	var task map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &task); err != nil {
+		t.Fatal(err)
+	}
+	taskID := task["id"].(string)
+
+	// No assignee specified → defaults to calling agent.
+	result = callTool(t, s, "work_assign_task", map[string]any{"task_id": taskID})
+	if result.IsError {
+		t.Fatalf("self-assign failed: %s", result.Content[0].Text)
+	}
+	var assignment map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &assignment); err != nil {
+		t.Fatal(err)
+	}
+	if assignment["assignee"] != deps.AgentID.Value() {
+		t.Errorf("self-assign: assignee = %v, want %v", assignment["assignee"], deps.AgentID.Value())
+	}
+
+	// Explicit assignee → uses the provided actor ID.
+	result = callTool(t, s, "work_assign_task", map[string]any{
+		"task_id":  taskID,
+		"assignee": deps.HumanID.Value(),
+	})
+	if result.IsError {
+		t.Fatalf("explicit assign failed: %s", result.Content[0].Text)
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &assignment); err != nil {
+		t.Fatal(err)
+	}
+	if assignment["assignee"] != deps.HumanID.Value() {
+		t.Errorf("explicit assign: assignee = %v, want %v", assignment["assignee"], deps.HumanID.Value())
+	}
+}
+
+func TestWorkCompleteTask(t *testing.T) {
+	deps := testDeps(t)
+	s := NewServer("test", "0.0.1")
+	RegisterAllTools(s, deps)
+
+	createTask := func(title string) string {
+		t.Helper()
+		r := callTool(t, s, "work_create_task", map[string]any{"title": title})
+		if r.IsError {
+			t.Fatalf("create task %q failed: %s", title, r.Content[0].Text)
+		}
+		var task map[string]any
+		if err := json.Unmarshal([]byte(r.Content[0].Text), &task); err != nil {
+			t.Fatal(err)
+		}
+		return task["id"].(string)
+	}
+
+	// Complete without summary.
+	taskID := createTask("Complete Me")
+	result := callTool(t, s, "work_complete_task", map[string]any{"task_id": taskID})
+	if result.IsError {
+		t.Fatalf("complete without summary failed: %s", result.Content[0].Text)
+	}
+	var completion map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &completion); err != nil {
+		t.Fatal(err)
+	}
+	if completion["task_id"] != taskID {
+		t.Errorf("task_id = %v, want %v", completion["task_id"], taskID)
+	}
+	if completion["completed_by"] != deps.AgentID.Value() {
+		t.Errorf("completed_by = %v, want %v", completion["completed_by"], deps.AgentID.Value())
+	}
+
+	// Complete with summary.
+	taskID2 := createTask("Complete With Summary")
+	result = callTool(t, s, "work_complete_task", map[string]any{
+		"task_id": taskID2,
+		"summary": "shipped in PR #42",
+	})
+	if result.IsError {
+		t.Fatalf("complete with summary failed: %s", result.Content[0].Text)
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &completion); err != nil {
+		t.Fatal(err)
+	}
+	if completion["summary"] != "shipped in PR #42" {
+		t.Errorf("summary = %v, want %q", completion["summary"], "shipped in PR #42")
+	}
+}
+
+func TestWorkQueryTasks(t *testing.T) {
+	deps := testDeps(t)
+	s := NewServer("test", "0.0.1")
+	RegisterAllTools(s, deps)
+
+	// No tasks → empty array.
+	result := callTool(t, s, "work_query_tasks", map[string]any{})
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	var tasks []map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &tasks); err != nil {
+		t.Fatalf("parse empty response: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+
+	// Create two tasks.
+	createAndGetID := func(title string) string {
+		t.Helper()
+		r := callTool(t, s, "work_create_task", map[string]any{"title": title})
+		if r.IsError {
+			t.Fatalf("create %q failed: %s", title, r.Content[0].Text)
+		}
+		var task map[string]any
+		if err := json.Unmarshal([]byte(r.Content[0].Text), &task); err != nil {
+			t.Fatal(err)
+		}
+		return task["id"].(string)
+	}
+	taskAID := createAndGetID("Task A")
+	createAndGetID("Task B")
+
+	// No filter → all tasks returned.
+	result = callTool(t, s, "work_query_tasks", map[string]any{})
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &tasks); err != nil {
+		t.Fatalf("parse all-tasks response: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	// Assign Task A to the human operator.
+	r := callTool(t, s, "work_assign_task", map[string]any{
+		"task_id":  taskAID,
+		"assignee": deps.HumanID.Value(),
+	})
+	if r.IsError {
+		t.Fatalf("assign failed: %s", r.Content[0].Text)
+	}
+
+	// Assignee filter → only Task A matches.
+	result = callTool(t, s, "work_query_tasks", map[string]any{
+		"assignee": deps.HumanID.Value(),
+	})
+	if result.IsError {
+		t.Fatalf("assignee filter failed: %s", result.Content[0].Text)
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &tasks); err != nil {
+		t.Fatalf("parse filtered response: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task for human assignee, got %d", len(tasks))
+	}
+	if tasks[0]["title"] != "Task A" {
+		t.Errorf("title = %v, want %q", tasks[0]["title"], "Task A")
+	}
+}
+
 // callTool invokes a tool on the server and returns the result.
 func callTool(t *testing.T, s *Server, name string, args map[string]any) ToolCallResult {
 	t.Helper()
