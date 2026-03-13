@@ -20,6 +20,7 @@ func TestPreferredModelMatchesCLAUDEMd(t *testing.T) {
 	roleByName := map[string]Role{
 		"CTO":        RoleCTO,
 		"Guardian":   RoleGuardian,
+		"PM":         RolePM,
 		"SysMon":     RoleSysMon,
 		"Spawner":    RoleSpawner,
 		"Allocator":  RoleAllocator,
@@ -91,6 +92,7 @@ func TestSystemPrompt(t *testing.T) {
 		role Role
 		want string // substring that should be present
 	}{
+		{RolePM, "ROLE: PM"},
 		{RoleCTO, "ROLE: CTO"},
 		{RoleGuardian, "ROLE: GUARDIAN"},
 		{RoleResearcher, "ROLE: RESEARCHER"},
@@ -118,7 +120,7 @@ func TestSystemPrompt(t *testing.T) {
 
 func TestSystemPromptCarriesMission(t *testing.T) {
 	// Every role prompt (except unknown) must carry the soul and mission
-	roles := []Role{RoleCTO, RoleGuardian, RoleResearcher, RoleArchitect,
+	roles := []Role{RolePM, RoleCTO, RoleGuardian, RoleResearcher, RoleArchitect,
 		RoleBuilder, RoleReviewer, RoleTester, RoleIntegrator,
 		RoleSysMon, RoleSpawner, RoleAllocator}
 
@@ -159,6 +161,11 @@ func TestSoulValues(t *testing.T) {
 	base := soulValues(Role("unknown"))
 	if len(base) != 3 {
 		t.Errorf("base soul values = %d, want 3", len(base))
+	}
+
+	pm := soulValues(RolePM)
+	if len(pm) != 5 {
+		t.Errorf("PM soul values = %d, want 5", len(pm))
 	}
 
 	cto := soulValues(RoleCTO)
@@ -205,6 +212,7 @@ func TestPreferredModel(t *testing.T) {
 		role Role
 		want string
 	}{
+		{RolePM, sonnet},
 		{RoleCTO, sonnet},
 		{RoleArchitect, sonnet},
 		{RoleReviewer, sonnet},

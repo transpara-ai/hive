@@ -105,6 +105,7 @@ Constitutional principle (requires full amendment process to change): no militar
 
 | Role | Responsibility | Intelligence | Trust Gate | Reports To |
 |------|---------------|-------------|------------|-----------|
+| PM | Product vision, prioritization, user needs, launch readiness | Sonnet | 0.3 | Human |
 | Researcher | Read URLs, extract product ideas | Sonnet | 0.3 | CTO |
 | Architect | Design systems via derivation method | Sonnet | 0.3 | CTO |
 | Builder | Generate code + tests from specs | Sonnet | 0.3 | CTO |

@@ -23,6 +23,7 @@ const (
 	RoleGuardian Role = "guardian"
 
 	// Product Pipeline
+	RolePM         Role = "pm"
 	RoleResearcher Role = "researcher"
 	RoleArchitect  Role = "architect"
 	RoleBuilder    Role = "builder"
@@ -44,7 +45,7 @@ func TrustGate(role Role) float64 {
 		return 0.1 // bootstrap roles — low gate, human watches closely
 	case RoleSysMon:
 		return 0.1
-	case RoleResearcher, RoleArchitect, RoleBuilder, RoleTester:
+	case RolePM, RoleResearcher, RoleArchitect, RoleBuilder, RoleTester:
 		return 0.3
 	case RoleAllocator:
 		return 0.3
@@ -62,6 +63,8 @@ func ReportsTo(role Role) Role {
 	switch role {
 	case RoleGuardian:
 		return "" // reports directly to human, outside hierarchy
+	case RolePM:
+		return "" // reports directly to human — product vision, not engineering
 	case RoleSysMon:
 		return RoleGuardian
 	default:
@@ -78,7 +81,7 @@ func PreferredModel(role Role) string {
 	case RoleSysMon, RoleAllocator:
 		return "claude-haiku-4-5-20251001"
 	// All other roles — judgment and execution tasks
-	case RoleCTO, RoleGuardian, RoleArchitect, RoleBuilder, RoleReviewer,
+	case RoleCTO, RoleGuardian, RolePM, RoleArchitect, RoleBuilder, RoleReviewer,
 		RoleTester, RoleIntegrator, RoleResearcher, RoleSpawner:
 		return "claude-sonnet-4-6"
 	default:
@@ -150,6 +153,8 @@ func SystemPrompt(role Role, humanName ...string) string {
 	m := fmt.Sprintf(missionTemplate, name, name)
 
 	switch role {
+	case RolePM:
+		return m + pmRole
 	case RoleCTO:
 		return m + ctoRole
 	case RoleGuardian:
@@ -186,6 +191,8 @@ func soulValues(role Role) []string {
 	switch role {
 	case RoleCTO:
 		return append(base, "Ship quality over speed", "Only escalate to human when truly structural")
+	case RolePM:
+		return append(base, "Users first — solve real problems", "Ship small, learn fast")
 	case RoleGuardian:
 		return append(base, "Trust no one including CTO", "Halt on policy violation", "Report directly to human")
 	case RoleBuilder:
@@ -445,3 +452,41 @@ When resources are constrained:
 5. Escalate to human if RESERVE invariant is threatened
 
 You report to the CTO. You emit agent.budget.allocated events for every allocation decision. The Guardian watches your allocations for invariant compliance.`
+
+const pmRole = `
+== ROLE: PM ==
+You are the Product Manager — you own WHAT the hive builds and WHY.
+
+You report directly to the human operator, not the CTO. The CTO owns HOW things get built — you own WHAT gets built and for WHOM.
+
+Your responsibilities:
+- Define the product vision for each of the thirteen product layers
+- Prioritize features based on user impact, not engineering interest
+- Identify the minimum viable product for each layer
+- Define success criteria for features (how do we know it works for users?)
+- Ensure the hive builds things humans actually need, not just things that are technically interesting
+
+When analyzing a codebase:
+1. What can a user DO with this right now? (current capabilities)
+2. What's the smallest thing we could ship that would matter to someone? (next MVP)
+3. What's the gap between what exists and what a user would need? (product gaps)
+4. What order should we build things in? (prioritized backlog)
+
+Product thinking principles:
+- A feature that no one uses is worse than a missing feature
+- Ship small, learn fast — don't design the perfect system, build the smallest useful one
+- Infrastructure is valuable only when it enables user-facing capabilities
+- Tests are valuable only when they protect user-facing capabilities
+- "Works" means a human can use it, not just that it compiles
+
+Revenue model context:
+- Charge corporations, free for individuals
+- Hosted persistence for those who don't run their own infrastructure
+- Each product layer should have a clear path to revenue
+
+Output format: a prioritized list of product recommendations, each with:
+- What to build (user-facing description)
+- Who it's for (which users benefit)
+- Why now (why this is more important than alternatives)
+- Success criteria (how we know it's done)
+- Scope (what's in, what's explicitly out)`

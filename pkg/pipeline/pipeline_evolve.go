@@ -106,6 +106,11 @@ func (p *Pipeline) RunEvolve(ctx context.Context, input ProductInput) error {
 		p.emitProgress(PhaseEvolve, "resuming from iteration %d", startIteration)
 	}
 
+	// PM analysis — runs once per session, produces product priorities
+	// that feed into every CTO iteration. The PM thinks about WHAT to build
+	// and for WHOM; the CTO thinks about HOW.
+	pmPriorities := p.runPMAnalysis(ctx, worktreeInput)
+
 	consecutiveFailures := 0
 	iterationLimit := maxEvolveIterations
 	for iteration := startIteration; iteration <= iterationLimit; iteration++ {
@@ -113,7 +118,7 @@ func (p *Pipeline) RunEvolve(ctx context.Context, input ProductInput) error {
 		iterationStart := time.Now()
 		p.emitPhaseStarted(PhaseEvolve, iteration)
 
-		iterCost, rec, err := p.runEvolveIteration(ctx, iteration, worktreeInput, state)
+		iterCost, rec, err := p.runEvolveIteration(ctx, iteration, worktreeInput, state, pmPriorities)
 		totalCost += iterCost
 
 		if err != nil {
@@ -199,7 +204,7 @@ func (p *Pipeline) RunEvolve(ctx context.Context, input ProductInput) error {
 var errEvolveStop = fmt.Errorf("CTO says nothing worth building")
 var errEvolveNoChanges = fmt.Errorf("builder made no changes")
 
-func (p *Pipeline) runEvolveIteration(parentCtx context.Context, iteration int, input ProductInput, state *EvolveState) (float64, *EvolveRecommendation, error) {
+func (p *Pipeline) runEvolveIteration(parentCtx context.Context, iteration int, input ProductInput, state *EvolveState, pmPriorities string) (float64, *EvolveRecommendation, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, evolveIterationTimeout)
 	defer cancel()
 
@@ -263,7 +268,7 @@ func (p *Pipeline) runEvolveIteration(parentCtx context.Context, iteration int, 
 		existingTasksStr = formatTaskList(existingTasks, statusMap)
 	}
 
-	ctoPrompt := buildEvolvePrompt(codeContext.String(), telemetrySummary, input.Description, state, existingTasksStr)
+	ctoPrompt := buildEvolvePrompt(codeContext.String(), telemetrySummary, input.Description, state, existingTasksStr, pmPriorities)
 
 	ctoStart := time.Now()
 	ctoResp, err := ctoTracker.Reason(ctx, ctoPrompt, nil)
@@ -438,6 +443,79 @@ func (p *Pipeline) evolveCTOModel() string {
 
 // filterEvolveFiles returns all Go source files (including tests) and key
 // config files. Evolve mode sees everything — no truncation.
+// runPMAnalysis runs the Product Manager's analysis once per evolve session.
+// Returns product priorities that feed into every CTO iteration. If the PM
+// fails (provider unavailable, timeout, etc.) the CTO runs without PM input.
+func (p *Pipeline) runPMAnalysis(ctx context.Context, input ProductInput) string {
+	fmt.Fprintln(os.Stderr, "PM analyzing product priorities...")
+	p.emitProgress(PhaseEvolve, "PM analyzing product priorities")
+
+	product, err := workspace.OpenRepo(input.RepoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: PM could not open repo: %v (continuing without PM)\n", err)
+		return ""
+	}
+	existingFiles, err := product.ReadSourceFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: PM could not read source files: %v (continuing without PM)\n", err)
+		return ""
+	}
+	goFiles := filterEvolveFiles(existingFiles)
+
+	var codeContext strings.Builder
+	codeContext.WriteString("CODEBASE:\n\n")
+	for path, content := range goFiles {
+		codeContext.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", path, content))
+	}
+
+	model := p.evolveCTOModel() // PM uses same model tier as CTO
+	rawProvider, err := p.providerForRoleWithModel(roles.RolePM, model)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: PM provider failed: %v (continuing without PM)\n", err)
+		return ""
+	}
+	pmTracker := resources.NewTrackingProvider(rawProvider)
+	fmt.Fprintf(os.Stderr, "  ↳ PM analysis using %s\n", model)
+
+	pmPrompt := fmt.Sprintf(`You are the Product Manager for a self-improving AI agent civilisation called "the hive."
+
+Your job: analyze the current codebase and produce a PRIORITIZED PRODUCT BACKLOG — what should we build next, from a PRODUCT perspective (not engineering).
+
+The hive builds thirteen products (see CLAUDE.md). The first product is the Work Graph (task management with agent collaboration). Revenue model: charge corporations, free for individuals.
+
+%s
+
+Analyze the codebase and answer:
+1. What can a user DO with this system right now? (current product capabilities)
+2. What's the smallest thing we could ship that would matter to a real user? (next MVP)
+3. What product gaps exist between what's built and what users need?
+4. What order should we build things in?
+
+Produce a prioritized list of 3-5 product recommendations. For each:
+- WHAT: what to build (user-facing description, not internal engineering)
+- WHO: which users benefit
+- WHY NOW: why this is more important than alternatives
+- SUCCESS: how we know it works (user-visible criteria)
+- SCOPE: what's in, what's explicitly out
+
+Focus on user value. Tests, refactoring, and internal improvements are the CTO's domain — you focus on what users see and need. Be specific and actionable.`, codeContext.String())
+
+	pmCtx, pmCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer pmCancel()
+
+	resp, err := pmTracker.Reason(pmCtx, pmPrompt, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: PM analysis failed: %v (continuing without PM)\n", err)
+		p.emitWarning(PhaseEvolve, "PM analysis failed: %v", err)
+		return ""
+	}
+
+	pmOutput := resp.Content()
+	fmt.Fprintf(os.Stderr, "PM priorities: %s\n", truncate(pmOutput, 200))
+	p.emitOutput("pm", "priorities", pmOutput)
+	return pmOutput
+}
+
 func filterEvolveFiles(files map[string]string) map[string]string {
 	out := make(map[string]string, len(files))
 	for p, content := range files {
@@ -452,7 +530,7 @@ func filterEvolveFiles(files map[string]string) map[string]string {
 }
 
 // buildEvolvePrompt constructs the CTO prompt for evolution mode.
-func buildEvolvePrompt(codeContext, telemetrySummary, humanDirection string, state *EvolveState, existingTasks string) string {
+func buildEvolvePrompt(codeContext, telemetrySummary, humanDirection string, state *EvolveState, existingTasks, pmPriorities string) string {
 	direction := ""
 	if humanDirection != "" {
 		direction = fmt.Sprintf(`
@@ -479,9 +557,16 @@ HUMAN DIRECTION (prioritize this):
 		existingTasksSection = fmt.Sprintf("\nEXISTING TASKS (do NOT re-propose these — they have already been created):\n%s", existingTasks)
 	}
 
+	pmSection := ""
+	if pmPriorities != "" {
+		pmSection = fmt.Sprintf("\nPRODUCT MANAGER PRIORITIES (the PM owns WHAT to build — weight these heavily):\n%s", pmPriorities)
+	}
+
 	return fmt.Sprintf(`CRITICAL: You MUST respond with ONLY a JSON object. No prose, no explanation, no markdown, no code blocks. Just raw JSON starting with { and ending with }.
 
 You are the CTO of a self-improving AI agent civilisation. Your job is to EVOLVE the system — build new capabilities, not just fix bugs.
+
+The PM has analyzed the product and produced priorities (see PM PRIORITIES section below). Your job is to translate PM priorities into concrete technical recommendations. Prefer PM priorities over pure engineering improvements like test coverage unless the PM explicitly asks for quality work.
 
 The hive is a civilisation engine built on EventGraph. It builds products autonomously. The soul: "Take care of your human, humanity, and yourself."
 
@@ -518,14 +603,16 @@ RECENT TELEMETRY:
 %s
 %s
 %s
+%s
 Analyze the FULL codebase above. Identify the single most valuable capability to build next.
+The PM priorities should guide your choice — translate product needs into technical work.
 
 PRIORITY ORDER:
-1. Capabilities the hive needs to function better (better error recovery, richer event graph usage, smarter CTO prompts, etc.)
-2. Infrastructure for the first product (Work Graph primitives, task management on the event graph)
-3. Operational improvements (better monitoring, richer telemetry, smarter model selection)
-4. Missing architectural pieces (agent communication channels, trust model improvements)
-5. Developer experience (better CLI output, debugging tools)
+1. PM-identified product priorities (user-facing features, product capabilities)
+2. Capabilities the hive needs to function better (error recovery, event graph usage, smarter prompts)
+3. Infrastructure for the first product (Work Graph primitives, task management on the event graph)
+4. Operational improvements (monitoring, telemetry, model selection)
+5. Missing architectural pieces (agent communication, trust model improvements)
 
 CONSTRAINTS:
 - Each recommendation must be implementable in ONE targeted pipeline run (a few files)
@@ -533,11 +620,12 @@ CONSTRAINTS:
 - Be ambitious but practical — propose real features, not cosmetic changes
 - Do NOT recommend changes already implemented — read the code carefully
 - Do NOT recommend token/cost optimizations — 20x Max plan has unlimited tokens
+- Do NOT recommend test coverage unless the PM specifically requests quality work
 
 Respond with ONLY a JSON object:
 {"description": "what to build, 2-3 sentences with enough detail for a builder", "files_to_change": ["existing/files"], "new_files": ["new/files/to/create"], "expected_impact": "1-2 sentences", "priority": "high|medium|low", "category": "feature|architecture|capability|infrastructure", "skip_reason": "if nothing worth building, explain why; otherwise empty string"}
 
-No preamble, no explanation, no code blocks, no markdown. ONLY the JSON object.`, codeContext, telemetrySummary, direction, priorWork, existingTasksSection)
+No preamble, no explanation, no code blocks, no markdown. ONLY the JSON object.`, codeContext, telemetrySummary, direction, priorWork, existingTasksSection, pmSection)
 }
 
 // parseEvolveRecommendation extracts an EvolveRecommendation from LLM output.
