@@ -11,7 +11,7 @@
 // Endpoints:
 //
 //	POST /tasks                    create a task
-//	GET  /tasks                    list tasks (?open=true, ?priority=high)
+//	GET  /tasks                    list tasks (?open=true, ?priority=high, ?assignee=<actor_id>)
 //	GET  /tasks/{id}               get full task details (title, description, priority, status, assignee, blocked)
 //	GET  /tasks/{id}/status        get task status
 //	GET  /tasks/{id}/events        get audit trail (ordered work.task.* events for this task)
@@ -234,42 +234,65 @@ func (sv *server) createTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // listTasks handles GET /tasks
-// Query params: ?open=true, ?priority=high
+// Query params: ?open=true, ?priority=high, ?assignee=<actor_id>
 func (sv *server) listTasks(w http.ResponseWriter, r *http.Request) {
 	openOnly := r.URL.Query().Get("open") == "true"
 	priorityFilter := r.URL.Query().Get("priority")
+	assigneeFilter := r.URL.Query().Get("assignee")
 
-	var tasks []work.Task
-	var err error
-	if openOnly {
-		tasks, err = sv.ts.ListOpen()
-	} else {
-		tasks, err = sv.ts.List(100)
-	}
+	summaries, err := sv.ts.ListSummaries(100)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list tasks: "+err.Error())
 		return
 	}
 
-	if priorityFilter != "" {
-		p := work.TaskPriority(priorityFilter)
-		filtered := make([]work.Task, 0, len(tasks))
-		for _, t := range tasks {
-			if t.Priority == p {
-				filtered = append(filtered, t)
+	if openOnly {
+		filtered := make([]work.TaskSummary, 0, len(summaries))
+		for _, s := range summaries {
+			if s.Status != work.StatusCompleted && !s.Blocked {
+				filtered = append(filtered, s)
 			}
 		}
-		tasks = filtered
+		summaries = filtered
 	}
 
-	items := make([]map[string]any, 0, len(tasks))
-	for _, t := range tasks {
+	if assigneeFilter != "" {
+		aid, err := types.NewActorID(assigneeFilter)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid assignee: "+err.Error())
+			return
+		}
+		filtered := make([]work.TaskSummary, 0, len(summaries))
+		for _, s := range summaries {
+			if s.Assignee == aid {
+				filtered = append(filtered, s)
+			}
+		}
+		summaries = filtered
+	}
+
+	if priorityFilter != "" {
+		p := work.TaskPriority(priorityFilter)
+		filtered := make([]work.TaskSummary, 0, len(summaries))
+		for _, s := range summaries {
+			if s.Task.Priority == p {
+				filtered = append(filtered, s)
+			}
+		}
+		summaries = filtered
+	}
+
+	items := make([]map[string]any, 0, len(summaries))
+	for _, s := range summaries {
 		items = append(items, map[string]any{
-			"id":          t.ID.Value(),
-			"title":       t.Title,
-			"description": t.Description,
-			"priority":    string(t.Priority),
-			"created_by":  t.CreatedBy.Value(),
+			"id":          s.Task.ID.Value(),
+			"title":       s.Task.Title,
+			"description": s.Task.Description,
+			"priority":    string(s.Task.Priority),
+			"created_by":  s.Task.CreatedBy.Value(),
+			"status":      string(s.Status),
+			"assignee":    s.Assignee.Value(),
+			"blocked":     s.Blocked,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": items})

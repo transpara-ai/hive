@@ -29,6 +29,15 @@ type Task struct {
 	Priority    TaskPriority
 }
 
+// TaskSummary extends Task with computed state fields for efficient list views.
+// Status, Assignee, and Blocked are populated by ListSummaries using batch store scans.
+type TaskSummary struct {
+	Task
+	Status   TaskStatus
+	Assignee types.ActorID // zero value if unassigned
+	Blocked  bool
+}
+
 // TaskStore creates and queries tasks as auditable events on the shared graph.
 type TaskStore struct {
 	store   store.Store
@@ -399,4 +408,79 @@ func (ts *TaskStore) GetPriority(taskID types.EventID) (TaskPriority, error) {
 		return DefaultPriority, nil
 	}
 	return c.Priority, nil
+}
+
+// batchStatus enriches a slice of Tasks with computed Status, Assignee, and Blocked
+// fields using three batch store scans rather than N per-task queries.
+func (ts *TaskStore) batchStatus(tasks []Task) ([]TaskSummary, error) {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+
+	// Scan 1: completed events → completedIDs set.
+	completedPage, err := ts.store.ByType(EventTypeTaskCompleted, 1000, types.None[types.Cursor]())
+	if err != nil {
+		return nil, fmt.Errorf("fetch completed events: %w", err)
+	}
+	completedIDs := make(map[types.EventID]bool, len(completedPage.Items()))
+	for _, ev := range completedPage.Items() {
+		if c, ok := ev.Content().(TaskCompletedContent); ok {
+			completedIDs[c.TaskID] = true
+		}
+	}
+
+	// Scan 2: assigned events (newest-first) → current assignee per task.
+	assignedPage, err := ts.store.ByType(EventTypeTaskAssigned, 1000, types.None[types.Cursor]())
+	if err != nil {
+		return nil, fmt.Errorf("fetch assigned events: %w", err)
+	}
+	assigneeMap := make(map[types.EventID]types.ActorID, len(assignedPage.Items()))
+	for _, ev := range assignedPage.Items() {
+		if c, ok := ev.Content().(TaskAssignedContent); ok {
+			if _, seen := assigneeMap[c.TaskID]; !seen {
+				assigneeMap[c.TaskID] = c.AssignedTo
+			}
+		}
+	}
+
+	// Scan 3: dependency events → blocked set (reuses completedIDs from scan 1).
+	depPage, err := ts.store.ByType(EventTypeTaskDependencyAdded, 1000, types.None[types.Cursor]())
+	if err != nil {
+		return nil, fmt.Errorf("fetch dependency events: %w", err)
+	}
+	blockedMap := make(map[types.EventID]bool)
+	for _, ev := range depPage.Items() {
+		if c, ok := ev.Content().(TaskDependencyContent); ok {
+			if !completedIDs[c.DependsOnID] {
+				blockedMap[c.TaskID] = true
+			}
+		}
+	}
+
+	summaries := make([]TaskSummary, 0, len(tasks))
+	for _, t := range tasks {
+		status := StatusPending
+		if completedIDs[t.ID] {
+			status = StatusCompleted
+		} else if _, assigned := assigneeMap[t.ID]; assigned {
+			status = StatusAssigned
+		}
+		summaries = append(summaries, TaskSummary{
+			Task:     t,
+			Status:   status,
+			Assignee: assigneeMap[t.ID],
+			Blocked:  blockedMap[t.ID],
+		})
+	}
+	return summaries, nil
+}
+
+// ListSummaries returns up to limit tasks with Status, Assignee, and Blocked
+// populated via three batch store scans (rather than N per-task queries).
+func (ts *TaskStore) ListSummaries(limit int) ([]TaskSummary, error) {
+	tasks, err := ts.List(limit)
+	if err != nil {
+		return nil, err
+	}
+	return ts.batchStatus(tasks)
 }
