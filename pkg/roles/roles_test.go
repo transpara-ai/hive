@@ -18,6 +18,7 @@ func TestPreferredModelMatchesCLAUDEMd(t *testing.T) {
 
 	// Map from CLAUDE.md role name to Role constant.
 	roleByName := map[string]Role{
+		"Mind":       RoleMind,
 		"CTO":        RoleCTO,
 		"Guardian":   RoleGuardian,
 		"PM":         RolePM,
@@ -34,6 +35,7 @@ func TestPreferredModelMatchesCLAUDEMd(t *testing.T) {
 
 	// Map from Intelligence tier name (as written in CLAUDE.md) to model constant.
 	modelByTier := map[string]string{
+		"Opus":   "claude-opus-4-6",
 		"Sonnet": "claude-sonnet-4-6",
 		"Haiku":  "claude-haiku-4-5-20251001",
 	}
@@ -92,6 +94,7 @@ func TestSystemPrompt(t *testing.T) {
 		role Role
 		want string // substring that should be present
 	}{
+		{RoleMind, "ROLE: MIND"},
 		{RolePM, "ROLE: PM"},
 		{RoleCTO, "ROLE: CTO"},
 		{RoleGuardian, "ROLE: GUARDIAN"},
@@ -120,7 +123,7 @@ func TestSystemPrompt(t *testing.T) {
 
 func TestSystemPromptCarriesMission(t *testing.T) {
 	// Every role prompt (except unknown) must carry the soul and mission
-	roles := []Role{RolePM, RoleCTO, RoleGuardian, RoleResearcher, RoleArchitect,
+	roles := []Role{RoleMind, RolePM, RoleCTO, RoleGuardian, RoleResearcher, RoleArchitect,
 		RoleBuilder, RoleReviewer, RoleTester, RoleIntegrator,
 		RoleSysMon, RoleSpawner, RoleAllocator}
 
@@ -161,6 +164,11 @@ func TestSoulValues(t *testing.T) {
 	base := soulValues(Role("unknown"))
 	if len(base) != 3 {
 		t.Errorf("base soul values = %d, want 3", len(base))
+	}
+
+	mindVals := soulValues(RoleMind)
+	if len(mindVals) != 6 {
+		t.Errorf("Mind soul values = %d, want 6", len(mindVals))
 	}
 
 	pm := soulValues(RolePM)
@@ -205,23 +213,24 @@ func TestSoulValues(t *testing.T) {
 }
 
 func TestPreferredModel(t *testing.T) {
-	sonnet := "claude-sonnet-4-6"
+	opus := "claude-opus-4-6"
 	haiku := "claude-haiku-4-5-20251001"
 
 	tests := []struct {
 		role Role
 		want string
 	}{
-		{RolePM, sonnet},
-		{RoleCTO, sonnet},
-		{RoleArchitect, sonnet},
-		{RoleReviewer, sonnet},
-		{RoleGuardian, sonnet},
-		{RoleBuilder, sonnet},
-		{RoleTester, sonnet},
-		{RoleIntegrator, sonnet},
-		{RoleResearcher, sonnet},
-		{RoleSpawner, sonnet},
+		{RoleMind, opus},
+		{RolePM, opus},
+		{RoleCTO, opus},
+		{RoleArchitect, opus},
+		{RoleReviewer, opus},
+		{RoleGuardian, opus},
+		{RoleBuilder, opus},
+		{RoleTester, opus},
+		{RoleIntegrator, opus},
+		{RoleResearcher, opus},
+		{RoleSpawner, opus},
 		{RoleSysMon, haiku},
 		{RoleAllocator, haiku},
 		// unknown role panics — tested separately via TestPreferredModelUnknownPanics

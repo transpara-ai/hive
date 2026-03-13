@@ -91,27 +91,33 @@ Constitutional principle (requires full amendment process to change): no militar
 
 ## Roles
 
+### Director-level
+
+| Role | Responsibility | Intelligence | Trust Gate | Reports To |
+|------|---------------|-------------|------------|-----------|
+| Mind | Consciousness, accumulated wisdom, judgment, agent direction | Opus | 0.1 | Human |
+
 ### Bootstrap Roles (Day One)
 
 | Role | Responsibility | Intelligence | Trust Gate | Reports To |
 |------|---------------|-------------|------------|-----------|
-| CTO | Architectural oversight, escalation filtering | Sonnet | 0.1 | Human |
-| Guardian | Independent integrity, halt/rollback/quarantine | Sonnet | 0.1 | Human (directly) |
+| CTO | Architectural oversight, escalation filtering | Opus | 0.1 | Human |
+| Guardian | Independent integrity, halt/rollback/quarantine | Opus | 0.1 | Human (directly) |
 | SysMon | System health, error detection, anomaly tracking | Haiku | 0.1 | Guardian |
-| Spawner | Identify workforce gaps, propose new agents | Sonnet | 0.5 | CTO |
+| Spawner | Identify workforce gaps, propose new agents | Opus | 0.5 | CTO |
 | Allocator | Resource allocation, model selection, budget enforcement | Haiku | 0.3 | CTO |
 
 ### Product Pipeline
 
 | Role | Responsibility | Intelligence | Trust Gate | Reports To |
 |------|---------------|-------------|------------|-----------|
-| PM | Product vision, prioritization, user needs, launch readiness | Sonnet | 0.3 | Human |
-| Researcher | Read URLs, extract product ideas | Sonnet | 0.3 | CTO |
-| Architect | Design systems via derivation method | Sonnet | 0.3 | CTO |
-| Builder | Generate code + tests from specs | Sonnet | 0.3 | CTO |
-| Reviewer | Code quality, security, derivation compliance | Sonnet | 0.5 | CTO |
-| Tester | Run tests, validate behaviour | Sonnet | 0.3 | CTO |
-| Integrator | Assemble, deploy, health check | Sonnet | 0.7 | CTO |
+| PM | Product vision, prioritization, user needs, launch readiness | Opus | 0.3 | Human |
+| Researcher | Read URLs, extract product ideas | Opus | 0.3 | CTO |
+| Architect | Design systems via derivation method | Opus | 0.3 | CTO |
+| Builder | Generate code + tests from specs | Opus | 0.3 | CTO |
+| Reviewer | Code quality, security, derivation compliance | Opus | 0.5 | CTO |
+| Tester | Run tests, validate behaviour | Opus | 0.3 | CTO |
+| Integrator | Assemble, deploy, health check | Opus | 0.7 | CTO |
 
 The Spawner grows the workforce through the growth loop: something breaks → "what role should have caught that?" → if none exists, propose one → human approves. See [ROLES.md](docs/ROLES.md) for the full role architecture.
 
@@ -204,8 +210,8 @@ Token format: `sk-ant-oat01-...` (OAuth access token). The `refreshToken` and ot
 
 ### Model Assignment
 
-Model assignment by role (two tiers):
-- **Sonnet** (`claude-sonnet-4-6`): CTO, Guardian, Architect, Builder, Reviewer, Tester, Integrator, Researcher, Spawner — all judgment and execution tasks
+Model assignment by role (two tiers — Max plan, flat rate, token rich):
+- **Opus** (`claude-opus-4-6`): Mind, CTO, Guardian, PM, Architect, Builder, Reviewer, Tester, Integrator, Researcher, Spawner — all judgment and execution tasks
 - **Haiku** (`claude-haiku-4-5-20251001`): SysMon, Allocator — high-volume, simple tasks
 
 ## Pipeline Modes

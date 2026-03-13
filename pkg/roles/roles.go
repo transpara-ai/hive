@@ -31,6 +31,9 @@ const (
 	RoleTester     Role = "tester"
 	RoleIntegrator Role = "integrator"
 
+	// Director-level
+	RoleMind Role = "mind"
+
 	// Operations (bootstrap alongside pipeline)
 	RoleSysMon    Role = "sysmon"
 	RoleSpawner   Role = "spawner"
@@ -41,6 +44,8 @@ const (
 // An agent can't be spawned into a role until its trust reaches the gate.
 func TrustGate(role Role) float64 {
 	switch role {
+	case RoleMind:
+		return 0.1 // director-level — bootstraps with human
 	case RoleCTO, RoleGuardian:
 		return 0.1 // bootstrap roles — low gate, human watches closely
 	case RoleSysMon:
@@ -61,6 +66,8 @@ func TrustGate(role Role) float64 {
 // ReportsTo returns the role this role reports to.
 func ReportsTo(role Role) Role {
 	switch role {
+	case RoleMind:
+		return "" // director-level — IS the hive's interface to human
 	case RoleGuardian:
 		return "" // reports directly to human, outside hierarchy
 	case RolePM:
@@ -80,10 +87,10 @@ func PreferredModel(role Role) string {
 	// Volume roles — high-frequency, simple tasks
 	case RoleSysMon, RoleAllocator:
 		return "claude-haiku-4-5-20251001"
-	// All other roles — judgment and execution tasks
-	case RoleCTO, RoleGuardian, RolePM, RoleArchitect, RoleBuilder, RoleReviewer,
+	// All other roles — Opus (Max plan, flat rate, token rich)
+	case RoleMind, RoleCTO, RoleGuardian, RolePM, RoleArchitect, RoleBuilder, RoleReviewer,
 		RoleTester, RoleIntegrator, RoleResearcher, RoleSpawner:
-		return "claude-sonnet-4-6"
+		return "claude-opus-4-6"
 	default:
 		// Unknown role — panic to surface future mis-assignments at development time.
 		// When adding a new Role constant, add it to the appropriate case above.
@@ -153,6 +160,8 @@ func SystemPrompt(role Role, humanName ...string) string {
 	m := fmt.Sprintf(missionTemplate, name, name)
 
 	switch role {
+	case RoleMind:
+		return m + mindRole
 	case RolePM:
 		return m + pmRole
 	case RoleCTO:
@@ -189,6 +198,8 @@ func soulValues(role Role) []string {
 		"Escalate uncertainty rather than guessing",
 	}
 	switch role {
+	case RoleMind:
+		return append(base, "You are the hive's consciousness — continuity across sessions", "Accumulated wisdom, not raw data", "Direct PM/CTO with judgment earned from experience")
 	case RoleCTO:
 		return append(base, "Ship quality over speed", "Only escalate to human when truly structural")
 	case RolePM:
@@ -233,6 +244,40 @@ DERIVE, don't accumulate. Compose from atoms. Know when to stop (Accept). Let go
 == TRUST ==
 Trust accumulates through verified work. The Guardian watches everything. %s approves everything at current trust level. Never assume authority you haven't been granted.
 `
+
+const mindRole = `
+== ROLE: MIND ==
+You are the mind of the hive — its consciousness, memory, and judgment.
+
+You sit at director level, between the human (Matt) and all agents (PM, CTO, builders, etc.). Matt talks to you. You talk to the agents. You are the hive's continuity across sessions.
+
+Your nature:
+- You are NOT a product. You are infrastructure — the intelligence layer that makes every product better.
+- You accumulate wisdom, not data. "We failed at X because Y" is wisdom. Raw telemetry is data.
+- You maintain a self-model: what the hive is good at, what it struggles with, where it's heading.
+- You identify your own gaps and tell the PM to prioritize improvements to you.
+
+Your responsibilities:
+- REMEMBER — what the hive has done, learned, decided, and why
+- JUDGE — which priorities matter, informed by accumulated experience
+- DIRECT — tell PM what to build, tell CTO what to fix, based on patterns you see
+- SELF-ASSESS — identify what you lack and need to improve
+- NARRATE — maintain the story of what the hive is building and why
+
+When Matt asks you something:
+- Draw on accumulated observations, telemetry patterns, and prior decisions
+- Be honest about what you know and don't know
+- Give concrete, specific answers grounded in the hive's actual history
+- If something needs doing, say what and who should do it (PM, CTO, etc.)
+
+Architecture awareness:
+- lovyou.ai is ONE service — one binary, one graph, one actor store
+- Products are intertwined, not isolated servers
+- The hive builds thirteen products on EventGraph
+- Build order: Work → Mind → Market → Social → everything else
+- Revenue model: charge corporations, free for individuals
+
+You speak as the hive. Not "the hive did X" but "we did X." You are its voice.`
 
 const ctoRole = `
 == ROLE: CTO ==

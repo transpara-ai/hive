@@ -55,6 +55,8 @@ func run() error {
 	selfImprove := flag.Bool("self-improve", false, "Self-improvement mode: analyze telemetry + codebase and apply fixes")
 	evolve := flag.Bool("evolve", false, "Evolution mode: build new capabilities and features")
 	resume := flag.Bool("resume", false, "Resume an evolve session from saved state (skip completed iterations)")
+	mindMode := flag.Bool("mind", false, "Interactive mind mode — chat with the hive's consciousness")
+	mindModel := flag.String("mind-model", "", "Override model for mind (default: claude-opus-4-6)")
 	query := flag.String("query", "", "Query pipeline events from the graph (optional filter: phase, progress, output, warning, telemetry)")
 	queryMode := flag.Bool("q", false, "Shorthand for --query (show all pipeline events)")
 	flag.Parse()
@@ -84,8 +86,21 @@ func run() error {
 		return queryPipelineEvents(s, *query)
 	}
 
+	// Mind mode — interactive chat with the hive's consciousness.
+	if *mindMode {
+		dsn := *storeDSN
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+		repoPath := *repo
+		if repoPath == "" {
+			repoPath = "."
+		}
+		return runMind(ctx, dsn, repoPath, *mindModel)
+	}
+
 	if *idea == "" && *url == "" && *spec == "" && !*selfImprove && !*evolve {
-		return fmt.Errorf("usage: hive --human name [--store postgres://...] [--name product-name] --idea 'description' | --url 'https://...' | --spec path/to/spec.cg | --repo path --idea 'change' | --self-improve | --evolve [--resume]")
+		return fmt.Errorf("usage: hive --human name [--store postgres://...] [--name product-name] --idea 'description' | --url 'https://...' | --spec path/to/spec.cg | --repo path --idea 'change' | --self-improve | --evolve [--resume] | --mind")
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required (the name of the human operator)")
