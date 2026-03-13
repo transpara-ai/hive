@@ -29,13 +29,14 @@ var (
 	EventTypeTaskCompleted       = types.MustEventType("work.task.completed")
 	EventTypeTaskDependencyAdded = types.MustEventType("work.task.dependency.added")
 	EventTypeTaskPrioritySet     = types.MustEventType("work.task.priority.set")
+	EventTypeTaskComment         = types.MustEventType("work.task.comment")
 )
 
 // allWorkEventTypes returns all work event types for registration.
 func allWorkEventTypes() []types.EventType {
 	return []types.EventType{
 		EventTypeTaskCreated, EventTypeTaskAssigned, EventTypeTaskCompleted,
-		EventTypeTaskDependencyAdded, EventTypeTaskPrioritySet,
+		EventTypeTaskDependencyAdded, EventTypeTaskPrioritySet, EventTypeTaskComment,
 	}
 }
 
@@ -99,6 +100,16 @@ type TaskPrioritySetContent struct {
 
 func (c TaskPrioritySetContent) EventTypeName() string { return "work.task.priority.set" }
 
+// CommentContent is emitted when a freeform note is added to a task.
+type CommentContent struct {
+	workContent
+	TaskID   types.EventID `json:"TaskID"`
+	Body     string        `json:"Body"`
+	AuthorID types.ActorID `json:"AuthorID"`
+}
+
+func (c CommentContent) EventTypeName() string { return "work.task.comment" }
+
 // RegisterEventTypes registers work content unmarshalers for Postgres
 // deserialization. Call this before querying work events from the store.
 func RegisterEventTypes() {
@@ -107,6 +118,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("work.task.completed", event.Unmarshal[TaskCompletedContent])
 	event.RegisterContentUnmarshaler("work.task.dependency.added", event.Unmarshal[TaskDependencyContent])
 	event.RegisterContentUnmarshaler("work.task.priority.set", event.Unmarshal[TaskPrioritySetContent])
+	event.RegisterContentUnmarshaler("work.task.comment", event.Unmarshal[CommentContent])
 }
 
 // RegisterWithRegistry registers all work event types with the given registry

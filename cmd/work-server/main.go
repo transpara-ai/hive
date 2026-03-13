@@ -15,9 +15,11 @@
 //	GET  /tasks                    list tasks (?open=true, ?priority=high, ?assignee=<actor_id>)
 //	GET  /tasks/{id}               get full task details (title, description, priority, status, assignee, blocked)
 //	GET  /tasks/{id}/status        get task status
-//	GET  /tasks/{id}/events        get audit trail (ordered work.task.* events for this task)
+//	GET  /tasks/{id}/events        get audit trail (ordered work.task.* events for this task, including comments)
 //	POST /tasks/{id}/assign        assign task (body: {"assignee":"..."})
 //	POST /tasks/{id}/complete      complete task (body: {"summary":"..."})
+//	POST /tasks/{id}/comment       add a comment (body: {"body":"..."})
+//	GET  /tasks/{id}/comments      list comments for a task
 package main
 
 import (
@@ -287,6 +289,8 @@ func run() error {
 	mux.HandleFunc("GET /tasks/{id}/events", srv.auth(srv.getTaskEvents))
 	mux.HandleFunc("POST /tasks/{id}/assign", srv.auth(srv.assignTask))
 	mux.HandleFunc("POST /tasks/{id}/complete", srv.auth(srv.completeTask))
+	mux.HandleFunc("POST /tasks/{id}/comment", srv.auth(srv.addComment))
+	mux.HandleFunc("GET /tasks/{id}/comments", srv.auth(srv.listComments))
 
 	addr := ":" + port
 	fmt.Fprintf(os.Stderr, "work-server listening on %s\n", addr)
@@ -561,6 +565,69 @@ func (sv *server) completeTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// addComment handles POST /tasks/{id}/comment
+// Body: {"body":"..."}
+func (sv *server) addComment(w http.ResponseWriter, r *http.Request) {
+	taskID, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.Body == "" {
+		writeErr(w, http.StatusBadRequest, "body is required")
+		return
+	}
+	causes, err := sv.currentCauses()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "get causes: "+err.Error())
+		return
+	}
+	convID, err := newConversationID()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "conversation id: "+err.Error())
+		return
+	}
+	if err := sv.ts.AddComment(taskID, body.Body, sv.humanID, causes, convID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "add comment: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"task_id": taskID.Value(),
+		"status":  "commented",
+	})
+}
+
+// listComments handles GET /tasks/{id}/comments
+// Returns all comments for the task in chronological order.
+func (sv *server) listComments(w http.ResponseWriter, r *http.Request) {
+	taskID, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	comments, err := sv.ts.ListComments(taskID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list comments: "+err.Error())
+		return
+	}
+	items := make([]map[string]any, 0, len(comments))
+	for _, c := range comments {
+		items = append(items, map[string]any{
+			"id":        c.ID.Value(),
+			"task_id":   c.TaskID.Value(),
+			"body":      c.Body,
+			"author_id": c.AuthorID.Value(),
+			"timestamp": c.Timestamp.String(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": taskID.Value(), "comments": items})
+}
+
 // getTask handles GET /tasks/{id}
 // Returns full task details: title, description, priority, status, assignee, blocked.
 func (sv *server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -645,6 +712,7 @@ func (sv *server) getTaskEvents(w http.ResponseWriter, r *http.Request) {
 		work.EventTypeTaskCompleted,
 		work.EventTypeTaskDependencyAdded,
 		work.EventTypeTaskPrioritySet,
+		work.EventTypeTaskComment,
 	} {
 		page, err := sv.store.ByType(et, 1000, types.None[types.Cursor]())
 		if err != nil {
@@ -685,6 +753,8 @@ func taskIDFromContent(content any) types.EventID {
 	case work.TaskDependencyContent:
 		return c.TaskID
 	case work.TaskPrioritySetContent:
+		return c.TaskID
+	case work.CommentContent:
 		return c.TaskID
 	}
 	return types.EventID{}

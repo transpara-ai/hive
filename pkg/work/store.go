@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
@@ -36,6 +37,15 @@ type TaskSummary struct {
 	Status   TaskStatus
 	Assignee types.ActorID // zero value if unassigned
 	Blocked  bool
+}
+
+// CommentEvent holds the data from a work.task.comment event.
+type CommentEvent struct {
+	ID        types.EventID
+	TaskID    types.EventID
+	Body      string
+	AuthorID  types.ActorID
+	Timestamp time.Time
 }
 
 // TaskStore creates and queries tasks as auditable events on the shared graph.
@@ -483,4 +493,54 @@ func (ts *TaskStore) ListSummaries(limit int) ([]TaskSummary, error) {
 		return nil, err
 	}
 	return ts.batchStatus(tasks)
+}
+
+// AddComment records a work.task.comment event on the graph, attaching a
+// freeform note authored by author to the given task.
+func (ts *TaskStore) AddComment(
+	taskID types.EventID,
+	body string,
+	author types.ActorID,
+	causes []types.EventID,
+	convID types.ConversationID,
+) error {
+	if body == "" {
+		return fmt.Errorf("body is required")
+	}
+	content := CommentContent{
+		TaskID:   taskID,
+		Body:     body,
+		AuthorID: author,
+	}
+	ev, err := ts.factory.Create(EventTypeTaskComment, author, content, causes, convID, ts.store, ts.signer)
+	if err != nil {
+		return fmt.Errorf("create comment event: %w", err)
+	}
+	if _, err := ts.store.Append(ev); err != nil {
+		return fmt.Errorf("append comment event: %w", err)
+	}
+	return nil
+}
+
+// ListComments returns all comments for the given task in chronological order.
+func (ts *TaskStore) ListComments(taskID types.EventID) ([]CommentEvent, error) {
+	page, err := ts.store.ByType(EventTypeTaskComment, 1000, types.None[types.Cursor]())
+	if err != nil {
+		return nil, fmt.Errorf("fetch comment events: %w", err)
+	}
+	var comments []CommentEvent
+	for _, ev := range page.Items() {
+		c, ok := ev.Content().(CommentContent)
+		if !ok || c.TaskID != taskID {
+			continue
+		}
+		comments = append(comments, CommentEvent{
+			ID:        ev.ID(),
+			TaskID:    c.TaskID,
+			Body:      c.Body,
+			AuthorID:  c.AuthorID,
+			Timestamp: ev.Timestamp().Value(),
+		})
+	}
+	return comments, nil
 }
