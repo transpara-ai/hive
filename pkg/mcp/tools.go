@@ -618,13 +618,14 @@ func registerWorkTools(s *Server, deps Deps, audit *AuditLogger, authCheck *Auth
 		wrappedAddDep,
 	)
 
-	// work_query_tasks — query tasks, optionally filtered by assignee (read, audit-only)
+	// work_query_tasks — query tasks, optionally filtered by assignee or open status (read, audit-only)
 	regTool(s, audit, "work_query_tasks",
-		"Query work tasks. Without filters, lists all tasks. With assignee, returns tasks assigned to that actor.",
+		"Query work tasks. With open=true, returns only actionable (unblocked, incomplete) tasks. With assignee, returns tasks assigned to that actor. Without filters, lists all tasks.",
 		mustSchema(`{
 			"type": "object",
 			"properties": {
 				"assignee": {"type": "string", "description": "Filter by assignee actor ID (omit to list all tasks)"},
+				"open":     {"type": "boolean", "description": "If true, return only open (unblocked, incomplete) tasks via ListOpen"},
 				"limit":    {"type": "integer", "description": "Max tasks to return when listing all (default 20, max 100)"}
 			}
 		}`),
@@ -646,6 +647,19 @@ func registerWorkTools(s *Server, deps Deps, audit *AuditLogger, authCheck *Auth
 				tasks, err := ts.GetByAssignee(assignee)
 				if err != nil {
 					return ErrorResult(fmt.Sprintf("query tasks: %v", err)), nil
+				}
+				items := make([]map[string]any, 0, len(tasks))
+				for _, t := range tasks {
+					items = append(items, taskToMap(t))
+				}
+				data, _ := json.MarshalIndent(items, "", "  ")
+				return TextResult(string(data)), nil
+			}
+
+			if openOnly, ok := args["open"].(bool); ok && openOnly {
+				tasks, err := ts.ListOpen()
+				if err != nil {
+					return ErrorResult(fmt.Sprintf("list open tasks: %v", err)), nil
 				}
 				items := make([]map[string]any, 0, len(tasks))
 				for _, t := range tasks {

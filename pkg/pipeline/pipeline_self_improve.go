@@ -180,7 +180,13 @@ func (p *Pipeline) runSelfImproveIteration(parentCtx context.Context, iteration 
 		fmt.Fprintf(os.Stderr, "Warning: list tasks failed: %v (continuing)\n", listErr)
 		p.emitWarning(PhaseSelfImprove, "list tasks failed: %v", listErr)
 	} else {
-		existingTasksStr = formatTaskList(existingTasks)
+		statusMap := make(map[types.EventID]work.TaskStatus, len(existingTasks))
+		for _, t := range existingTasks {
+			if status, sErr := ts.GetStatus(t.ID); sErr == nil {
+				statusMap[t.ID] = status
+			}
+		}
+		existingTasksStr = formatTaskList(existingTasks, statusMap)
 	}
 
 	// Step 5: CTO analysis — fresh provider per iteration to avoid accumulating
