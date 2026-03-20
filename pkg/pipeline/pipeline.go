@@ -476,21 +476,22 @@ func (p *Pipeline) ctoCause() types.EventID {
 }
 
 // recordTrust records verified work for an agent after a successful phase.
+// Uses the agent's own last event as evidence — not a global store query,
+// which would credit the wrong agent in a multi-agent pipeline.
 // Best-effort — logs a warning on failure, never blocks the pipeline.
 func (p *Pipeline) recordTrust(ctx context.Context, a *hiveagent.Agent, phase string) {
 	if p.trustModel == nil || a == nil {
 		return
 	}
-	// Use the agent's most recent event as evidence of the work.
 	lastID := a.LastEvent()
 	if lastID.IsZero() {
 		return
 	}
-	page, err := p.store.ByType(types.MustEventType("agent.evaluated"), 1, types.None[types.Cursor]())
-	if err != nil || len(page.Items()) == 0 {
+	ev, err := p.store.Get(lastID)
+	if err != nil {
 		return
 	}
-	if err := a.RecordVerifiedWork(ctx, p.trustModel, page.Items()[0]); err != nil {
+	if err := a.RecordVerifiedWork(ctx, p.trustModel, ev); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: trust update for %s after %s failed: %v\n", a.Role(), phase, err)
 	}
 }

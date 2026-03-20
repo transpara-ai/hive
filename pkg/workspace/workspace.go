@@ -146,8 +146,14 @@ func (w *Workspace) ListFiles(productName string) ([]string, error) {
 }
 
 // WriteProductFile writes a file into a product's directory and stages it.
+// Rejects paths that escape the product directory (e.g. "../../../etc/passwd").
 func (p *Product) WriteFile(relPath string, content string) error {
-	full := filepath.Join(p.Dir, relPath)
+	full := filepath.Clean(filepath.Join(p.Dir, relPath))
+	// Ensure the resolved path is within the product directory.
+	absDir := filepath.Clean(p.Dir)
+	if !strings.HasPrefix(full, absDir+string(filepath.Separator)) && full != absDir {
+		return fmt.Errorf("path traversal rejected: %s resolves outside product directory", relPath)
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
@@ -313,18 +319,21 @@ func (p *Product) HeadCommit() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// CreateBranch creates and checks out a new branch.
-// If the branch already exists (e.g., from a previous self-improve run whose PR
-// was never merged), it falls back to a timestamped name to avoid collisions.
-// This is more robust than delete+recreate when the existing branch is the
-// current branch or has uncommitted changes that block deletion.
-func (p *Product) CreateBranch(name string) error {
+// CreateBranch creates and checks out a new branch, returning the actual
+// branch name used. If the branch already exists (e.g., from a previous
+// self-improve run whose PR was never merged), it falls back to a timestamped
+// name to avoid collisions. The caller must use the returned name — it may
+// differ from the requested name.
+func (p *Product) CreateBranch(name string) (string, error) {
 	if err := p.git("checkout", "-b", name); err == nil {
-		return nil
+		return name, nil
 	}
-	// Branch already exists — use a timestamped fallback name.
+	// Branch may already exist — try a timestamped fallback name.
 	fallback := fmt.Sprintf("%s-%d", name, time.Now().Unix())
-	return p.git("checkout", "-b", fallback)
+	if err := p.git("checkout", "-b", fallback); err != nil {
+		return "", fmt.Errorf("create branch %s (and fallback %s): %w", name, fallback, err)
+	}
+	return fallback, nil
 }
 
 // CurrentBranch returns the current branch name.

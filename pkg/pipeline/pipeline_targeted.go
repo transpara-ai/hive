@@ -171,8 +171,8 @@ Project structure:
 	}
 
 	// Create branch for the changes
-	branchName := "hive/" + sanitizeBranchName(input.Description)
-	if err := product.CreateBranch(branchName); err != nil {
+	branchName, err := product.CreateBranch("hive/" + sanitizeBranchName(input.Description))
+	if err != nil {
 		return p.failPhase("Understand", fmt.Errorf("create branch: %w", err))
 	}
 	fmt.Fprintf(os.Stderr, "Branch: %s\n", branchName)

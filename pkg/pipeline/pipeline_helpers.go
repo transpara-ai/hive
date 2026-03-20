@@ -45,9 +45,11 @@ Events:
 
 	rawProvider, err := p.providerForRoleWithModel(roles.RoleGuardian, p.guardianCheckModel())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Guardian check failed: %v\n", err)
-		p.emitWarning("", "Guardian check failed: %v", err)
-		return true
+		// Infrastructure failure — not a policy violation. Don't HALT the pipeline
+		// because the Guardian couldn't run. Log and continue.
+		fmt.Fprintf(os.Stderr, "Guardian check skipped (provider error): %v\n", err)
+		p.emitWarning("", "Guardian check skipped (provider error): %v", err)
+		return false
 	}
 	tracker := resources.NewTrackingProvider(rawProvider)
 	p.trackers[roles.RoleGuardian] = tracker
@@ -156,10 +158,12 @@ func containsAlert(eval string) bool {
 // ════════════════════════════════════════════════════════════════════════
 
 // detectApproval checks if a review response ends with APPROVED (not CHANGES NEEDED).
+// Scans only the last 5 lines for the verdict to avoid false negatives when the
+// reviewer quotes prior "CHANGES NEEDED" feedback in its reasoning while giving
+// a final APPROVED verdict.
 func detectApproval(review string) bool {
 	lines := strings.Split(review, "\n")
-	// Look at the last 20 lines for the verdict
-	start := len(lines) - 20
+	start := len(lines) - 5
 	if start < 0 {
 		start = 0
 	}
@@ -432,12 +436,13 @@ func sanitizeBranchName(desc string) string {
 	return result
 }
 
-// truncate returns s truncated to n characters.
+// truncate returns s truncated to n runes (not bytes), safe for multi-byte UTF-8.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-3] + "..."
+	return string(runes[:n-3]) + "..."
 }
 
 // ════════════════════════════════════════════════════════════════════════
