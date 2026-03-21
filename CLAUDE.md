@@ -174,13 +174,14 @@ Can also set `DATABASE_URL` env var instead of `--store`.
 - `pkg/loop/` — Agentic loop runner (observe-reason-act-reflect cycles)
   - `loop.go` — Loop.Run(), RunConcurrent(), signal parsing, bus integration
   - `tasks.go` — /task command parsing and TaskStore execution
-- `pkg/work/` — Task primitives on the event graph (create, assign, complete, depend)
 - `pkg/resources/` — Budget enforcement (tokens, cost, iterations, duration)
 - `pkg/workspace/` — File system and git management for generated code
 - `pkg/authority/` — Three-tier approval model (Required/Recommended/Notification)
 - `cmd/hive/` — CLI entry point
 
-Agent type lives in a separate repo: `github.com/lovyou-ai/agent` (imported as `hiveagent`).
+Separate repos (imported via `replace` directives for local dev):
+- `github.com/lovyou-ai/agent` — unified Agent type (imported as `hiveagent`)
+- `github.com/lovyou-ai/work` — Work Graph (Layer 1): task primitives, CLI, REST server
 
 ## Agent Coordination
 
@@ -297,4 +298,7 @@ See `eventgraph/docs/generator-function.md` and `eventgraph/docs/generator-funct
 
 - `github.com/lovyou-ai/eventgraph/go` — event graph, agent runtime, intelligence, pgstore
 - `github.com/lovyou-ai/agent` — unified Agent type (role-agnostic, wraps AgentRuntime)
+- `github.com/lovyou-ai/work` — Work Graph (Layer 1): task store, events, CLIs
 - Claude CLI — intelligence backend (flat rate via Max plan, no API key needed)
+
+All three deps use `replace` directives in go.mod for local dev (`../eventgraph/go`, `../agent`, `../work`).
