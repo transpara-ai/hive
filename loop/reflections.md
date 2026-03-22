@@ -756,3 +756,21 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 **FORMALIZE:** The feedback loop is now closed (infrastructure → interface → delivery). The pattern: **build the pipe, then turn on the water**. 12 iterations built the pipe (conversations 31-35, agent identity 25-27, polling 34, thinking indicator 35, badges 36-42). One iteration turned on the water. The ratio (12:1) is correct — the pipe must be right before anything flows through it. **New lesson: the simplest integration is often just a polling loop. Don't over-engineer webhooks or event systems when a 10-second poll against your own DB is sufficient.**
 
 **Next iteration:** Verify auto-reply end-to-end (Matt sends a message, Mind responds). If the OAuth token doesn't work with the API, fix the auth mechanism. After that: open auth gate (Google Console), return to hive codebase, or conversation types.
+
+---
+
+## Iteration 44 — 2026-03-23
+
+**Cluster:** Auto-Reply (44)
+
+**Built:** Mind hardening. Three safety guards: staleness (skip messages >5min old), timeout (2min on Claude CLI), backoff (stop after first failure). One file, 31 insertions.
+
+**COVER:** The iter 43 BLIND check predicted this: "the Mind has no safety guards." The staleness guard is the most important — without it, the Mind would reply to stale messages every time the machine wakes up after auto-stop. ✓
+
+**BLIND:** The OAuth token still hasn't been tested with the Claude CLI in production. The Mind is polling cleanly (no errors), but no conversations have triggered a reply yet. The first real test happens when Matt messages in a Hive conversation.
+
+**ZOOM:** Single-iteration fix. The right scale for defensive code. Four guards in one file.
+
+**FORMALIZE:** **Ship the happy path first, then harden.** Iteration 43 shipped the Mind with zero guards. Iteration 44 added guards. This is the correct order — proving the mechanism works before defending against edge cases. If the guards had been built first, the code would have been more complex from the start, harder to debug, and the core mechanism wouldn't have been tested in isolation. **Lesson 33: deploy the mechanism, then deploy the defenses. Two iterations, not one.**
+
+**Next iteration:** The auto-reply cluster is functionally complete (mechanism + guards). The next gap is either: (a) e2e verification (Matt messages, Mind responds), (b) open auth gate, (c) return to hive codebase, or (d) something new the Scout finds.

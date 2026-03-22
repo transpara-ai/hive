@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 43, 2026-03-23.
+Last updated: Iteration 44, 2026-03-23.
 
 ## Current System State
 
@@ -69,6 +69,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Return Visit** (40): logged-in redirect from / to /app
 - **Collaborative Access** (41): creation forms open to all authenticated users (not just owners)
 - **Agent Badges Completion** (42): agent badges on thread list cards (last holdout)
+- **Auto-Reply** (43-44): server-side Mind goroutine + hardening (staleness guard, timeout, backoff)
 
 ## Lessons Learned
 
@@ -127,8 +128,8 @@ Conversations (31-35), Agent Visibility (36), Content Preview & Social Proof (37
 - Run: `LOVYOU_API_KEY=lv_... ANTHROPIC_API_KEY=... go run ./cmd/reply/`
 
 **Next directions (zoom out):**
-1. **End-to-end test** — run cmd/reply with ANTHROPIC_API_KEY to verify full loop (human message → Mind response → violet badge in chat)
-2. **Auto-reply mechanism** — trigger cmd/reply automatically when humans message (webhook, cron, or server-side)
-3. **Conversation types** — DM, group, department, room. Different visibility/participation models.
-4. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
-5. **Return to hive codebase** — the site has 39 iterations of investment. Agent runtime, social graph, or new product layers.
+1. **E2E verification** — Matt sends a message in a Hive conversation, Mind responds automatically
+2. **Conversation types** — DM, group, department, room. Different visibility/participation models.
+3. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
+4. **Return to hive codebase** — agent runtime, social graph, or new product layers.
+5. **Blog post 45** — document the auto-reply mechanism and the loop's journey to fixpoint

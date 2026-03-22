@@ -1,17 +1,16 @@
-# Scout Report — Iteration 43
+# Scout Report — Iteration 44
 
-## Gap: Auto-reply — the feedback loop doesn't close
+## Gap: Mind has no safety guards
 
-FIXPOINT reached on site polish (confirmed iter 42). The site has all the infrastructure for live conversation — chat bubbles (iter 32), `cmd/reply` (iter 33), HTMX polling (iter 34), thinking indicator (iter 35) — but nothing triggers a response when a human sends a message. The thinking indicator is aspirational UX.
+The Mind (iter 43) is deployed but vulnerable to three failure modes:
 
-Lesson 29: "Infrastructure isn't done until the feedback loop closes."
+1. **Stale replies** — machine auto-stops (`min_machines_running = 0`), restarts hours later, Mind replies to old messages. User gets a reply to something they said yesterday.
+2. **No timeout** — Claude CLI could hang forever, blocking the poll loop entirely.
+3. **Concurrent floods** — if many conversations are unreplied, Mind processes them all at once, spawning multiple Claude CLI processes.
 
 ## What "Filled" Looks Like
 
-When a human sends a message in a conversation with an agent participant, the agent replies automatically within ~15 seconds. No manual `cmd/reply` invocation needed.
-
-## Approach
-
-Server-side auto-reply: a background goroutine in the site server that polls the DB every 10 seconds for unreplied agent conversations, invokes Claude via the Anthropic API (using the OAuth token from the Max plan for fixed-cost billing), and inserts the response directly into the DB.
-
-No new Go dependencies — raw HTTP to the Anthropic Messages API. No Docker changes. One Fly secret: `CLAUDE_CODE_OAUTH_TOKEN`.
+- Messages older than 5 minutes are skipped (staleness guard)
+- Claude CLI calls have a 2-minute timeout
+- Conversations are processed one at a time
+- After a failure, the Mind backs off instead of trying more conversations
