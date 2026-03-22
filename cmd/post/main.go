@@ -73,6 +73,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Sync loop state to the Mind.
+	if err := syncMindState(apiKey, baseURL, string(state)); err != nil {
+		fmt.Fprintf(os.Stderr, "sync mind state: %v\n", err)
+		// Non-fatal — post succeeded.
+	}
+
 	fmt.Printf("posted iteration %s to %s/app/hive/feed\n", iteration, baseURL)
 }
 
@@ -115,6 +121,28 @@ func ensureSpace(apiKey, baseURL string) error {
 	}
 
 	fmt.Println("created hive space")
+	return nil
+}
+
+func syncMindState(apiKey, baseURL, state string) error {
+	payload, _ := json.Marshal(map[string]string{
+		"key":   "loop_state",
+		"value": state,
+	})
+	req, _ := http.NewRequest("PUT", baseURL+"/api/mind-state", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, b)
+	}
 	return nil
 }
 
