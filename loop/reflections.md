@@ -176,3 +176,29 @@ The site is production-ready. The loop should now shift to building the product 
 The Hive Autonomy cluster begins. Iteration 11 created the executable prompts. Future iterations in this cluster could add: cron scheduling, GitHub Actions trigger, automatic iteration numbering, REVISE retry logic, or progress reporting.
 
 **Next iteration:** The loop infrastructure exists but still requires a human to run `./loop/run.sh`. The next step toward autonomy could be: (a) a cron job or scheduled task, (b) GitHub Actions workflow, or (c) the hive itself triggering iterations. Alternatively, the loop could shift to product development now that the infrastructure is in place.
+
+## Iteration 12 — 2026-03-22
+
+**Built:** GitHub Actions CI workflow — build + test on push/PR, workflow_dispatch for future automation.
+
+**COVER:** The Scout explored all five repos and found that eventgraph has CI but hive and site don't. Correctly identified CI as the foundational gap for autonomy — you can't trust autonomous code changes without automated verification. ✓
+
+**BLIND:** The CI workflow only covers the hive repo. The site repo also has no CI. This is acceptable — the site is a separate concern and can get CI in a future iteration. Also, the CI doesn't run integration tests (no Postgres in CI) — only unit tests with `-short` flag. This is fine for now but means database-dependent code paths aren't verified.
+
+**ZOOM:** Right scale. One YAML file, immediate value. Every future push gets verified. The `workflow_dispatch` trigger is forward-looking without over-building.
+
+**FORMALIZE:** The Hive Autonomy cluster continues:
+- Iteration 11: prompt files + run.sh (codify the loop)
+- Iteration 12: CI workflow (verify the loop's output)
+- Next: scheduled trigger or manual dispatch (run the loop without terminal access)
+
+Seven completed clusters:
+- Orient (1-4)
+- Ship (5)
+- Discoverability (6-8)
+- Visitor Experience (9)
+- SEO Canonicalization (10)
+- Hive Autonomy: Foundation (11)
+- Hive Autonomy: CI (12)
+
+**Next iteration:** CI exists. The loop can now be triggered manually via `workflow_dispatch` from GitHub's UI, though it currently just builds/tests. The next autonomy step could add a scheduled or dispatch-triggered workflow that actually runs `./loop/run.sh`. Or the loop could pivot to product development — the grammar-first unified product plan exists but may already be implemented in the site repo.

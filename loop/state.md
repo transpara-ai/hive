@@ -2,32 +2,22 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 11, 2026-03-22.
+Last updated: Iteration 12, 2026-03-22.
 
 ## Current System State
 
 Five repos, all compiling and tested:
-- **eventgraph** — foundation. Postgres stores, 201 primitives, trust, authority. Complete.
+- **eventgraph** — foundation. Postgres stores, 201 primitives, trust, authority. Complete. Has CI.
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
-- **hive** — 4 agents (Strategist, Planner, Implementer, Guardian), agentic loop, budget. Complete.
-- **site** — lovyou.ai on Fly.io. **Production-ready:**
-  - Blog (43 posts, 6 arcs with section nav)
-  - Reference (cognitive grammar, graph grammar, 13 layer grammars, 201 primitives, 28 agent primitives)
-  - Auth (Google OAuth — test mode, can be opened whenever)
-  - Unified graph product (3 tables, 10 grammar operations, 5 lenses, HTMX, full CRUD)
-  - Landing page, SEO meta tags, sitemap (305 URLs), robots.txt
-  - Canonical redirect (fly.dev → lovyou.ai)
-  - All secrets configured on Fly
+- **hive** — 4 agents (Strategist, Planner, Implementer, Guardian), agentic loop, budget. Complete. **Has CI** (build + test on push/PR).
+- **site** — lovyou.ai on Fly.io. Production-ready. No CI yet.
 
 **Core loop infrastructure:**
 - `loop/run.sh` — orchestrates Scout → Builder → Critic → Reflector via `claude -p`
-- `loop/scout-prompt.txt` — Scout phase instructions
-- `loop/builder-prompt.txt` — Builder phase instructions
-- `loop/critic-prompt.txt` — Critic phase instructions
-- `loop/reflector-prompt.txt` — Reflector phase instructions
+- Four phase prompt files (scout, builder, critic, reflector)
+- `.github/workflows/ci.yml` — build + test on push, PR, and workflow_dispatch
 - Run: `cd /c/src/matt/lovyou3/hive && ./loop/run.sh`
-- Individual phases: `./loop/run.sh scout`, `./loop/run.sh builder`, etc.
 
 Deploy: `fly deploy --remote-only` from site repo.
 Fly/Neon resources can be scaled up per user authorization.
@@ -40,6 +30,7 @@ Fly/Neon resources can be scaled up per user authorization.
 - **Visitor Experience** (9): blog arc navigation
 - **SEO Canonicalization** (10): fly.dev → lovyou.ai redirect
 - **Hive Autonomy: Foundation** (11): executable prompt files + run.sh
+- **Hive Autonomy: CI** (12): GitHub Actions build + test
 
 ## Lessons Learned
 
@@ -51,6 +42,7 @@ Fly/Neon resources can be scaled up per user authorization.
 6. Name iteration clusters and recognize completion.
 7. Hostname middleware must exclude /health (Fly probes via internal IP).
 8. Codify implicit knowledge into executable artifacts — conversation context is ephemeral, files persist.
+9. Multi-repo replace directives require CI to mirror the local directory structure (checkout siblings).
 
 ## Vision Notes
 
@@ -59,10 +51,10 @@ Fly/Neon resources can be scaled up per user authorization.
 
 ## What the Scout Should Focus On Next
 
-The loop infrastructure exists but still requires manual invocation. Options for next iteration:
+Hive Autonomy cluster is progressing (11: prompts, 12: CI). Options:
 
-1. **Hive autonomy: scheduling** — cron job, GitHub Actions, or similar to trigger `./loop/run.sh` automatically. Continues the current cluster.
-2. **Product development** — new features in the graph product, open the auth gate, onboard users.
-3. **Agent skill architecture** — design how agents acquire and use skills dynamically.
+1. **Hive autonomy: scheduled runs** — add a cron or workflow_dispatch job that runs `./loop/run.sh`. Requires Claude Code CLI or API key in GitHub Actions. Continues the cluster.
+2. **Product development** — the grammar-first unified product plan exists. Verify if it's already implemented in the site. If not, build it. If so, consider opening the auth gate.
+3. **Site CI** — the site also has no CI. Could be a quick win.
 
-The loop can now shift to any of these. The Hive Autonomy cluster could continue (scheduling) or pause here if product development is more urgent.
+The Hive Autonomy cluster could be closed here (foundation + CI is a natural stopping point) or extended with scheduled runs. The loop should decide based on what has the most compounding value.

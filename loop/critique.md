@@ -1,26 +1,28 @@
-# Critique — Iteration 11
+# Critique — Iteration 12
 
 ## Verdict: APPROVED
 
 ## Trace
 
-1. Scout identified that CORE-LOOP.md references executable prompt files that don't exist
-2. Builder created all five files (4 prompts + run.sh)
-3. Prompt content matches the loop structure in CORE-LOOP.md and the patterns established over 10 iterations
-4. run.sh orchestrates phases correctly with proper error handling
+1. Scout identified no CI as the foundational gap for hive autonomy
+2. Builder created `.github/workflows/ci.yml` with multi-repo checkout
+3. Directory structure matches go.mod replace directives (`../agent`, `../eventgraph/go`, `../work`)
+4. Build and tests verified locally before committing
 
-Sound chain. The gap was real, the fix is direct.
+Sound chain. The gap is real, the fix is minimal, the structure is correct.
 
 ## Audit
 
-**Correctness:** Each prompt file captures the full phase instruction set. The Scout prompt reads state.md first (lesson from iteration 1). The Builder prompt includes deploy instructions. The Critic prompt includes TRACE + AUDIT. The Reflector prompt includes all four assessments. ✓
+**Correctness:** The checkout paths produce the exact sibling directory structure that the replace directives expect. `hive/` at `$GITHUB_WORKSPACE/hive`, siblings at `$GITHUB_WORKSPACE/{agent,eventgraph,work}`. Relative paths resolve correctly. ✓
 
-**Breakage:** No existing code modified. New files only. ✓
+**Breakage:** No existing files modified. New workflow only. ✓
 
-**Simplicity:** Five files, minimal shell script. No over-engineering. ✓
+**Simplicity:** 42 lines. Single job, six steps. No matrix, no caching tricks, no conditional logic. ✓
 
-**Limitation:** The TODO in run.sh (line 54: "if critique says REVISE, run builder+critic again") is not implemented. This means the loop can't self-correct within an iteration. Acceptable for now — the loop has never needed a REVISE cycle in 11 iterations.
+**Risk:** Cross-repo checkout requires `GITHUB_TOKEN` to have access to all four repos. If repos are public, this works by default. If any are private, a PAT with cross-repo access would be needed. The repos appear to be public (eventgraph already has CI). Will be verified on first push.
+
+**workflow_dispatch:** Included as a trigger but not yet used for loop automation. Good forward-thinking without over-building.
 
 ## Observation
 
-This is infrastructure for future autonomy. The next step would be making the loop triggerable without a human (cron, GitHub Actions, or similar). But the prompt files alone are valuable — they codify institutional knowledge that was previously only in conversation context.
+CI is the verification layer the loop needs. Now the loop's output (code changes) gets automatically checked. The next autonomy step could be: a scheduled workflow that runs `./loop/run.sh`, or a workflow_dispatch that accepts a phase parameter.

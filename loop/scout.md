@@ -1,23 +1,27 @@
-# Scout Report — Iteration 11
+# Scout Report — Iteration 12
 
-## Map (from code + docs)
+## Map (from code + infra)
 
-Read state.md. Site is production-ready, five clusters complete. State.md recommends hive autonomy as the next cluster — the loop currently requires manual `claude -p` invocation for each phase.
+Read state.md. Hive Autonomy cluster started (iteration 11 created prompt files + run.sh). Explored all repos:
 
-CORE-LOOP.md (docs/CORE-LOOP.md lines 201-212) specifies that the loop should be runnable via prompt files (`loop/scout-prompt.txt`, `loop/builder-prompt.txt`, etc.) and a shell script. These files don't exist — the spec references them but they were never created.
+- eventgraph has CI (.github/workflows/ci.yml + 4 publish workflows)
+- hive has NO CI — no .github/workflows/ directory at all
+- site has NO CI
+- Hive has tests (authority_test, loop_test, budget_test, tracking_test, workspace_test) that only run if someone manually invokes `go test`
+- The loop can now be triggered with `./loop/run.sh` but only from a local terminal
 
 ## Gap Type
 
-Missing code — the core loop's executable infrastructure doesn't exist.
+Missing infrastructure — no automated build/test verification.
 
 ## The Gap
 
-CORE-LOOP.md describes a self-running loop with prompt files and a run.sh script, but none of these files exist. The loop runs only because a human manually types the Scout/Builder/Critic/Reflector prompts into Claude Code.
+The hive repo has no CI. Code is pushed to main without any automated verification that it compiles or passes tests. The loop creates code changes and pushes them — but nothing checks that those changes are valid.
 
 ## Why This Gap
 
-This is the most load-bearing gap because it's recursive: making the loop easier to run makes every future iteration faster. Every other improvement (product, content, skills) requires running the loop. Reducing the loop's friction compounds across all future work. Also, it's what the Reflector explicitly recommended.
+CI is the foundation for autonomy. You can't trust an autonomous loop to push code if nothing verifies the code works. Every other autonomy step (scheduled loop runs, workflow_dispatch triggers, self-healing) requires CI as a prerequisite. Also: the hive HAS tests — they just never run automatically. The infrastructure exists but isn't wired.
 
 ## Filled Looks Like
 
-`./loop/run.sh` runs all four phases in sequence, each invoking `claude -p` with the corresponding prompt file. Each prompt file is a complete, standalone instruction set.
+`git push` to main triggers `go build` + `go test`. Green check on every commit. `workflow_dispatch` available for future loop automation.
