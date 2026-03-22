@@ -1,43 +1,50 @@
-# Build Report — Iteration 33
+# Build Report — Iteration 34
 
 ## What Was Planned
 
-Mind as conversation participant — connect the Mind to lovyou.ai conversations.
+HTMX polling for live conversation updates — new messages appear without page reload.
 
 ## What Was Built
 
-**hive/cmd/reply/main.go** (~240 lines):
-- Fetches conversations from lovyou.ai JSON API where the agent is a participant
-- Resolves own identity from the API's `me` field (no hardcoded agent name — multiple hives can coexist)
-- For each conversation, checks if the last message is from someone else (needs reply)
-- Skips conversations the agent created with no human messages
-- Builds Claude context: soul + conversation metadata (title, participants, topic) + full message history + loop/state.md
-- Maps conversation history to Claude messages (own messages = assistant, others = user)
-- Invokes Claude Opus 4.6 via Anthropic SDK
-- Posts response via `POST /app/{slug}/op` with `op=respond`
-- One-shot command (not a daemon) — can be run manually or via cron
+**site/graph/store.go**:
+- Added `After *time.Time` field to `ListNodesParams` — filters nodes created after a given timestamp
+- Applied in `ListNodes` query builder as `AND n.created_at > $N`
 
 **site/graph/handlers.go**:
-- Added `"me": actor` to conversations list JSON response — lets agents resolve their own identity from the API key
+- New handler `handleConversationMessages` — `GET /app/{slug}/conversation/{id}/messages?after=RFC3339Nano`
+- Returns only new messages since the given timestamp
+- HTMX requests get `chatMessage` HTML fragments; JSON requests get `{"messages": [...]}`
+- Returns empty 200 if no `after` param (no-op for first poll before any messages)
+- Registered at `/app/{slug}/conversation/{id}/messages` with readWrap (public space compatible)
+
+**site/graph/views.templ**:
+- Messages container gets `id="message-list"` and `data-last-ts` tracking attribute
+- Each `chatMessage` gets `data-ts` with RFC3339Nano timestamp for deduplication
+- Hidden `#poll` div with `hx-trigger="every 3s"` polls the new endpoint
+- Poll reads `after` from `data-last-ts`, appends new messages, updates timestamp, auto-scrolls if near bottom
+- Send form updated: targets `#message-list`, updates `data-last-ts` after successful send, removes empty state
+- Empty state gets `id="empty-state"` so it can be removed when first message arrives
 
 ## Key Design Decisions
 
-1. **Identity from API, not hardcoded**: Director feedback — "who's Hive? we have EGIP? many hives may interact." The agent discovers its own name from the `me` field returned by the conversations endpoint. Any agent with an API key can be a conversation participant.
+1. **HTMX polling, not SSE/WebSocket**: Simplest approach. 3-second interval is fast enough for human-agent conversation. No server-side infrastructure (connection tracking, event broadcasting). Just a GET that returns HTML fragments.
 
-2. **Name comparison, not ID**: Nodes store `author` (name) not `author_id`. This is a known gap — names are stable within a hive but fragile across renames. Future iteration should add `author_id` to the node schema.
+2. **Timestamp-based deduplication**: The `data-last-ts` attribute on the message list tracks the latest message. Both the poll handler and the send handler update it. The server only returns messages with `created_at >` the tracked timestamp, so no duplicates.
 
-3. **One-shot, not polling**: Simplest viable approach. No daemon, no webhook, no background goroutine. Run it, it replies, it exits. Can be wired into cron or the core loop later.
+3. **Auto-scroll only when near bottom**: If the user has scrolled up to read history, new messages don't yank them down. Only auto-scrolls when within 100px of the bottom.
 
-4. **Non-streaming for replies**: Unlike the CLI Mind (streaming to stderr), the reply command uses non-streaming `Messages.New()` since it posts the complete response to the API. No need for incremental output.
+4. **Reuse existing infrastructure**: `ListNodes` with a new `After` filter, existing `chatMessage` component, existing `readWrap` middleware. No new store methods, no new templates, no new middleware.
 
 ## Verification
 
-- `go build ./cmd/reply/` — clean
-- API connection verified: fetches conversations, resolves identity as "hive"
-- Skip logic verified: correctly skips self-created conversations with no human messages
-- Claude invocation requires ANTHROPIC_API_KEY (not available in this session) — full end-to-end test pending
+- `templ generate` — clean
+- `go build ./...` — clean
+- Deployed to Fly.io — healthy
+- Polling endpoint returns empty HTML for no new messages (no unnecessary DOM updates)
+- Send form still works via HTMX (tested via code review of hx-target change from `#messages .max-w-2xl` to `#message-list`)
 
 ## Files Changed
 
-- `hive/cmd/reply/main.go` — new (240 lines)
-- `site/graph/handlers.go` — 1 line (add `me` to JSON response)
+- `site/graph/store.go` — 5 lines (After field + query filter)
+- `site/graph/handlers.go` — ~50 lines (new handler + route + time import)
+- `site/graph/views.templ` — ~20 lines (polling div, data attributes, JS handlers)

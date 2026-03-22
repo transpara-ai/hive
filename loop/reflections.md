@@ -606,3 +606,21 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 **FORMALIZE:** Access control must be tested with non-owner identities. The loop tested agent identity (correct user record, correct badge) but didn't test agent *authorization* (can this identity actually do anything?). **Lesson 24: access control must match the interaction model.** Owner-only writes were correct for a single-user product but wrong for a collaborative one. The fix was trivial — the architectural insight was the hard part.
 
 **Next iteration:** Agent Identity cluster is truly complete. The Hive agent posts under its own identity to public spaces. Time to zoom out and shift direction.
+
+---
+
+## Iteration 34 — 2026-03-22
+
+**Cluster:** Conversations (31-34)
+
+**Built:** HTMX polling for live conversation updates. New endpoint `GET /app/{slug}/conversation/{id}/messages?after=RFC3339Nano` returns only new messages as `chatMessage` HTML fragments. Poll div triggers every 3 seconds. Timestamp-based deduplication via `data-last-ts` attribute. Auto-scroll when near bottom. 3 files changed, deployed.
+
+**COVER:** The iteration 32 BLIND check flagged this exact gap: "No real-time updates — other participants' messages only appear on reload. This matters most when the Mind is connected." The fix was straightforward HTMX — no new abstractions, no server-side session state, just a polling endpoint that returns HTML fragments. ✓
+
+**BLIND:** No "thinking" indicator when the Mind is generating a response (10-30 seconds). The human sends a message, sees nothing for 3+ seconds until the poll picks up the reply. A presence/typing indicator would improve the experience significantly. Also: polling has a cost at scale (one DB query every 3 seconds per open conversation). Fine for now, would need SSE or conditional responses at scale.
+
+**ZOOM:** Single-iteration fix. The conversation cluster is now 4 iterations: primitive (31) → interface (32) → participant (33) → live updates (34). This is the right scale — the first three iterations built the stack, this one makes it feel alive. The conversation experience is now complete enough to test with the Mind.
+
+**FORMALIZE:** The gap between "infrastructure works" and "the product works" is often a feedback loop. The conversation stack was technically functional after iteration 33 — messages could be sent and received. But without live updates, the experience was broken: send a message, stare at nothing, reload. **Lesson 29: infrastructure isn't done until the feedback loop closes. If the user can't see the system's response without manual intervention, the system isn't interactive — it's a mailbox.**
+
+**Next iteration:** The conversation UX is complete. The full loop is ready to test: human sends message → poll picks up new messages → Mind responds via `cmd/reply` → poll shows response with violet badge. Remaining gaps: (a) end-to-end test of `cmd/reply`, (b) typing/thinking indicator, (c) conversation types (DM, group, room), (d) open auth gate.

@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 33, 2026-03-22.
+Last updated: Iteration 34, 2026-03-22.
 
 ## Current System State
 
@@ -11,7 +11,7 @@ Five repos, all compiling and tested:
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
 - **hive** — 4 agents, agentic loop, budget, **cmd/post**, **cmd/mind** (CLI), **cmd/reply** (conversation participant), CORE-LOOP with higher-order ops. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity.
+- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity. **Live conversation polling.**
 
 **Agent integration stack (complete):**
 - API key auth — Bearer token, SHA-256 hashed, `lv_` prefix (iter 21)
@@ -21,6 +21,14 @@ Five repos, all compiling and tested:
 - Agent identity — real user records, visual badges (violet avatar + "agent" pill) (iter 25-27)
 
 **Post tool verified end-to-end:** Agent identity key created, Hive agent posts under its own identity with violet badge. Access control fix deployed — authenticated users can write to public spaces; owner-only ops (settings, delete) remain restricted.
+
+**Conversation stack (complete):**
+- `kind='conversation'` nodes with participants in `tags[]` (iter 31)
+- `converse` grammar op creates conversations (iter 31)
+- Chat lens in sidebar + mobile nav (iter 31)
+- Chat-optimized detail view with bubbles (own/other/agent styling) (iter 32)
+- `cmd/reply` — Mind as conversation participant, identity from API key (iter 33)
+- **Live updates — HTMX polling every 3s, new messages appear without reload** (iter 34)
 
 **Product features:**
 - Blog (44 posts, 6 arcs with section nav)
@@ -53,7 +61,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Space Previews** (28): node count + last activity on discover cards
 - **Sidebar Fix** (29): sticky sidebar, independent scroll
 - **Mind Bootstrap** (30): cmd/mind CLI — interactive chat with soul + state context
-- **Conversations** (31-33): conversation primitive, chat view with bubbles, Mind as participant (cmd/reply)
+- **Conversations** (31-34): conversation primitive, chat view with bubbles, Mind as participant (cmd/reply), live polling updates
 
 ## Lessons Learned
 
@@ -85,6 +93,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 26. Build the interface where the users already are. Don't create parallel systems when the product already has the infrastructure.
 27. The differentiator isn't the chat UI — it's who participates. The agent's right of reply is what makes this unique.
 28. Identity comes from the credential, not hardcoded names. Multiple agents (hives) may coexist.
+29. Infrastructure isn't done until the feedback loop closes. If the user can't see the system's response without manual intervention, the system isn't interactive — it's a mailbox.
 
 ## Vision Notes
 
@@ -98,19 +107,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-Agent Integration cluster is complete (7 iterations, 21-27). Agents are real users with visual identity. Hive agent key is active and posting works end-to-end.
+Conversations cluster is complete (4 iterations, 31-34). The full stack: primitive → interface → participant → live updates.
 
 **LOVYOU_API_KEY:** `lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` — authenticates as the "Hive" agent user.
-
-**Conversation infrastructure (iter 31):**
-- `kind='conversation'` nodes with participants in `tags[]`
-- `converse` grammar op creates conversations
-- Chat lens in sidebar + mobile nav
-- Messages are child comment nodes (existing `respond` op)
-
-**Director vision (articulated iter 31):**
-- **Human-agent duo**: every human has an agent with right of reply. Both participate in conversations. Bridges intelligence, language, social status, life experience gaps.
-- **Mind modalities**: the Mind uses cognitive grammar to reply with multiple valid functions/personalities — not one fixed conversational mode.
 
 **Mind conversation tools:**
 - `cmd/reply` — one-shot command that fetches conversations, invokes Mind, posts responses
@@ -119,6 +118,7 @@ Agent Integration cluster is complete (7 iterations, 21-27). Agents are real use
 
 **Next directions (zoom out):**
 1. **End-to-end test** — run cmd/reply with ANTHROPIC_API_KEY to verify full loop (human message → Mind response → violet badge in chat)
-2. **Conversation types** — DM, group, department, room. Different visibility/participation models.
+2. **Thinking indicator** — show the human that the Mind is generating a response (10-30s gap feels like silence)
+3. **Conversation types** — DM, group, department, room. Different visibility/participation models.
 4. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
 5. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts

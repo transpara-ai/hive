@@ -1,30 +1,31 @@
-# Critique — Iteration 33
+# Critique — Iteration 34
 
-## Verdict: APPROVED (with noted gaps)
+## Verdict: APPROVED
 
 ## Trace
 
-1. Scout identified: Mind can't participate in conversations (the critical differentiator gap)
-2. Builder created cmd/reply — one-shot command that reads conversations and invokes Mind
-3. Director feedback caught hardcoded "isHive" — fixed to use identity from API
-4. Director questioned name vs ID comparison — noted as known gap (nodes lack author_id)
-5. API integration verified: identity resolution, conversation fetching, skip logic all work
-6. Full end-to-end test blocked by missing ANTHROPIC_API_KEY in session
+1. Scout identified: no live updates in chat — human sends message, has to reload to see Mind's reply
+2. Builder added HTMX polling with `hx-trigger="every 3s"` on a new messages endpoint
+3. Existing `ListNodes` extended with `After` filter — no new store methods needed
+4. `chatMessage` component reused — new messages render identically to initial load
+5. Timestamp tracking prevents duplicates between polling and user-sent messages
+6. Deployed and healthy
 
 ## Audit
 
 **Correctness:**
-- Identity resolved from API, not hardcoded. ✓
-- Conversation history mapped correctly to Claude messages (own=assistant, others=user). ✓
-- Handles edge cases: no conversations, self-created with no messages, already responded. ✓
-- Soul + conversation context + state.md in system prompt. ✓
+- Timestamp comparison uses `created_at >` (strict), not `>=`. Messages created at exactly the tracked timestamp won't be re-fetched. ✓
+- `data-last-ts` initialized from `lastMessageTS()` — uses last message time or current time for empty conversations. ✓
+- Poll and send form both update `data-last-ts` after inserting new messages. No duplication path. ✓
+- Auto-scroll respects user position (100px threshold). ✓
+- Empty state removed on first message from either poll or send. ✓
 
 **Gaps:**
-- **No end-to-end test**: ANTHROPIC_API_KEY not available. The Claude invocation + response posting path is untested.
-- **Name comparison is fragile**: Nodes store `author` (name) not `author_id`. Works within a stable hive but breaks on user renames.
-- **No real-time**: One-shot command, not a listener. User sends a message, then must manually run `cmd/reply` (or wait for cron). The conversation view has no auto-refresh.
-- **No deduplication**: If run twice while same message is "unread," it will reply twice.
+- **3-second latency**: Not truly real-time. Acceptable for async human-agent conversation. Would feel slow for human-human chat. Future iteration could reduce interval or switch to SSE.
+- **Polling cost**: Every 3 seconds, a DB query runs even when nothing changed. Fine for low traffic. Would need optimization (ETag, conditional response, or SSE) at scale.
+- **No "typing" indicator**: When the Mind is generating a response (can take 10-30 seconds), the human has no feedback that a response is coming. Future iteration could add a "thinking" presence indicator.
+- **RFC3339Nano precision**: If two messages are created within the same nanosecond (impossible in practice), one could be missed. Not a real concern.
 
 ## DUAL
 
-The integration is structurally sound but untested end-to-end. The identity fix (from hardcoded to API-resolved) was caught by the director — shows the value of the feedback loop. The name-vs-ID gap is a schema issue that should be tracked for a future iteration.
+The implementation is minimal and correct. Three files changed, one new endpoint, zero new abstractions. The polling pattern is standard HTMX — nothing clever, nothing fragile. The key insight was using `data-last-ts` as the coordination mechanism between the send form and the polling div, preventing the duplicate message problem without server-side session state.
