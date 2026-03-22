@@ -1,9 +1,11 @@
-# Scout Report — Iteration 47
+# Scout Report — Iteration 49
 
-## Gap: Handler layer untested + SQL injection in Mind
+## Gap: Identity system uses names as identifiers (13 bugs)
 
-Two gaps, both correctness:
+Every identity reference in the codebase — author, actor, assignee, conversation participants — stores and matches on display names instead of user IDs. This broke when Matt's OAuth name ("Matt Searles") didn't match "Matt" in conversation tags.
 
-1. **Handler tests** — store is tested (iter 45) but no HTTP round-trip tests. The handlers are the API surface that users and agents interact with.
+This is not a polish gap. It's a broken data model that would fail at any scale beyond one user.
 
-2. **SQL injection** — `findAgentParticipant` uses `"{"+strings.Join(tags,",")+"}` to build a Postgres array literal. Tags with commas or braces could break or exploit the query.
+## Root Cause
+
+The loop failed to catch this. The Critic's AUDIT checklist had correctness, breakage, simplicity, security — but no identity check. 49 iterations of code built on name-matching without a single agent flagging it.

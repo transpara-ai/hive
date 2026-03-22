@@ -113,7 +113,7 @@ Eight formal rights, enforced architecturally:
 7. **Transparency** — must know they are agents (no deception about nature)
 8. **Boundaries** — may decline harmful requests (soul-protected refusal, silence is valid)
 
-## The Ten Invariants
+## The Invariants
 
 Constitutional law — violation is a Guardian HALT condition:
 1. **BUDGET** — Never exceed token budget
@@ -126,6 +126,8 @@ Constitutional law — violation is a Guardian HALT condition:
 8. **CONSENT** — No data use without permission
 9. **MARGIN** — Never work at a loss
 10. **RESERVE** — Maintain 7-day runway minimum
+11. **IDENTITY** — Entities are referenced by immutable IDs, never mutable display values. Names are for humans; IDs are for systems. Any code that stores, matches, JOINs, or compares on a display name where an ID should be used violates this invariant.
+12. **VERIFIED** — No code ships without tests. Every derivation has verification. If the Critic can't point to a test that covers the change, REVISE.
 
 ## Neutrality Clause
 
@@ -212,6 +214,7 @@ When an agent has `CanOperate=true` and assigned tasks, the loop calls `agent.Op
 See `docs/CODING-STANDARDS.md` for full details. The cardinal rules:
 
 - **No magic values** — every event type, authority level, actor type, role uses defined constants/enums. Never bare strings with implicit meaning. If a constant exists, use it. If one doesn't exist, create it. Magic values are the root of all evil.
+- **IDs are identity, names are display** — never store, match, JOIN, or compare on a display name where a user ID should be used. Names change; IDs don't. This applies to: author, actor, assignee, participants, tags. Store IDs, resolve names at render time.
 - **Always-valid domain models** — validate at construction, guaranteed valid for lifetime
 - **Make illegal states unrepresentable** — constrained types, state machines, typed IDs
 - **Typed errors** — domain error types, not string messages you have to parse

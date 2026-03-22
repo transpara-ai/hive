@@ -112,6 +112,13 @@ AUDIT: Compare what was built against what should exist.
 - Breakage: does it break anything that worked before?
 - Simplicity: is there a simpler way?
 - Security: any vulnerabilities?
+- Identity: are entities referenced by ID, never by display name?
+  Strings are display values. IDs are identity. If any code stores,
+  matches, JOINs, or compares on a name/display string where a user
+  ID should be used, REVISE. This includes: author, actor, assignee,
+  participants, tags. Names change. IDs don't.
+- Tests: does the change include tests? If code was added or changed,
+  tests must be added or updated. No untested code ships.
 
 DUAL: When something fails, don't just validate forward (trace the
 chain). Also analyze backward — find the failure, then trace WHY it

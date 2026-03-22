@@ -795,6 +795,24 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 
 ---
 
+## Iterations 48-49 — 2026-03-23
+
+**Cluster:** Identity Fix (48-49)
+
+**Built:** Eliminated all 13 name-as-identifier bugs. Added `author_id` to nodes, `actor_id` to ops. All queries use ID-based JOINs. Tags store user IDs. Updated Critic AUDIT with identity and test checks. Added invariants 11 (IDENTITY) and 12 (VERIFIED).
+
+**COVER:** Matt caught this, not the loop. "How much code have we written without a single test?" → "why on earth would we be matching strings and not IDs?" → "how can the loop learn to catch this?" The loop's coverage was structurally blind to data model correctness because the Critic had no check for it. ✓
+
+**BLIND → FAILURE:** The loop's BLIND operation failed at a fundamental level. 49 iterations of name-based identity went undetected. The root cause: the Critic's AUDIT checklist was incomplete. It checked correctness (does it work?) but not soundness (is the data model right?). **The loop cannot catch what it doesn't know to look for.** Adding the check to the Critic and the invariants to the constitution is the fix.
+
+**ZOOM:** This is the biggest single fix since the project started. 13 bugs, 8 files, schema migration, loop update, invariant additions. Two iterations (48 for the band-aid, 49 for the proper fix) because the first attempt (matching on both name AND ID) was wrong — it preserved the broken model instead of replacing it.
+
+**FORMALIZE:** **Lesson 36: the loop can only catch errors it has checks for. When a human catches something the loop missed, don't just fix the code — fix the loop. Add the check to the Critic, add the invariant, update the coding standards. The fix is not in the codebase; it's in the process that produces the codebase.**
+
+**Next iteration:** Identity is fixed. The loop is stronger. Options: (a) backfill existing data (UPDATE nodes SET author_id = ...), (b) open auth gate, (c) conversation types, (d) return to hive codebase.
+
+---
+
 ## Iteration 46 — 2026-03-23
 
 **Cluster:** Auto-Reply (46)

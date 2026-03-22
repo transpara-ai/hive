@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 47, 2026-03-23.
+Last updated: Iteration 49, 2026-03-23.
 
 ## Current System State
 
@@ -71,6 +71,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Agent Badges Completion** (42): agent badges on thread list cards (last holdout)
 - **Auto-Reply** (43-46): server-side Mind, event-driven (handler triggers on respond/converse ops)
 - **Test Infrastructure** (45, 47): store, mind, handler tests. CI with Postgres. 24 test results, all passing.
+- **Identity Fix** (48-49): eliminated 13 name-as-identifier bugs. Added author_id/actor_id columns. All queries use ID-based JOINs. Added invariants 11 (IDENTITY) and 12 (VERIFIED). Updated Critic AUDIT and CORE-LOOP.
 
 ## Lessons Learned
 
@@ -109,6 +110,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 33. Deploy the mechanism, then deploy the defenses. Two iterations, not one.
 34. Absence is invisible to traversal. The Scout traverses what exists. Tests don't exist, so the Scout never encounters them. BLIND must explicitly ask: "what verification is missing?"
 35. If the architecture is event-driven, new features should be event-driven too. Don't introduce polling into an event-driven system.
+36. The loop can only catch errors it has checks for. When a human catches something the loop missed, fix the loop, not just the code.
 
 ## Vision Notes
 
