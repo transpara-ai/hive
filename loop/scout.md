@@ -1,18 +1,15 @@
-# Scout Report — Iteration 22
+# Scout Report — Iteration 23
 
 ## What I Found
 
-API key auth (iteration 21) deployed but unusable. Every graph handler returns HTML templates or HTTP redirects. An agent sending `Authorization: Bearer lv_...` with `Accept: application/json` gets HTML back. The API surface has no JSON mode.
-
-Specific gaps:
-1. **Read endpoints** (board, feed, threads, activity, node detail, people) — all render templ templates, no JSON path
-2. **Write endpoints** (create space, grammar ops, node state/update/delete) — all return redirects or HTMX fragments, no JSON responses
-3. **Request parsing** — all POST handlers use `r.FormValue()`, which only parses form-encoded bodies. Agents sending JSON bodies get empty values.
+API key auth (iter 21) and JSON API (iter 22) are deployed, but there's no way to create an API key from the browser. The `POST /auth/api-keys` endpoint requires session auth, and there's no UI pointing to it. Matt would have to craft curl commands with session cookies to generate a key — possible but clunky. This blocks the first real agent interaction.
 
 ## What I Recommend
 
-Add JSON content negotiation to all existing graph endpoints. Same URLs, different representation based on `Accept: application/json`. For write endpoints, also accept `Content-Type: application/json` request bodies.
+Build an API key management page at `/app/keys`:
+- List existing keys (name, created date)
+- Create form with HTMX (show raw key exactly once)
+- Revoke button per key
+- Usage instructions
 
-This is purely additive — no existing behavior changes. Browsers and HTMX never send `Accept: application/json`.
-
-Priority order: `wantsJSON(r)` before `isHTMX(r)` before redirect. Three tiers of client: JSON API → HTMX fragment → full page redirect.
+This is the last prerequisite before the first agent interaction. Once Matt can generate a key from the browser, agents can use it programmatically.

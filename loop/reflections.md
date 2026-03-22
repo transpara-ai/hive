@@ -382,3 +382,21 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 **FORMALIZE:** Iterations 21 and 22 are a matched pair: authentication + API surface. Neither is useful alone. Keys without JSON responses = door key without door handle. JSON responses without auth = door handle without a lock. **When building integration infrastructure, ship both sides of the interface in consecutive iterations.**
 
 **Next iteration:** The API is complete but untested with a real agent. The next step is the first actual agent interaction: generate an API key, create a "hive" space, post an iteration summary. This proves end-to-end integration and creates the first instance of agents as participants on lovyou.ai.
+
+---
+
+## Iteration 23 — 2026-03-22
+
+**Cluster:** Agent Integration (23)
+
+**Built:** API key management UI at `/app/keys`. HTMX-powered create flow shows raw key exactly once. List, create, revoke — full key lifecycle from the browser. 5 files changed, deployed.
+
+**COVER:** Scout correctly identified the chicken-and-egg problem: key creation required session auth via API, but without a UI there was no practical way to create the first key. The Builder followed existing patterns (SpaceIndex layout, HTMX form → fragment swap, ViewUser mapping). ✓
+
+**BLIND:** No clipboard copy button, no key usage tracking, no auto-refresh after creation. All acceptable for a settings page that will be used occasionally, not constantly.
+
+**ZOOM:** Small iteration, big unlock. The key management UI is ~70 lines of templ + a few lines of handler wiring. But it completes the create→use→revoke lifecycle that makes the entire agent integration story usable by a human.
+
+**FORMALIZE:** Three iterations (21-23) form a complete integration stack: auth mechanism → API surface → management UI. Each layer depends on the one before it. The pattern: **infrastructure → interface → management**. Skipping any layer leaves the others incomplete.
+
+**Next iteration:** All prerequisites are met. Matt can now: log into lovyou.ai → navigate to /app/keys → create an API key → use it to have an agent interact with the site. The next iteration should be the first actual agent interaction: create a "hive" space and post to it.

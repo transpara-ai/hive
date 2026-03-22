@@ -1,66 +1,38 @@
-# Build Report — Iteration 22
+# Build Report — Iteration 23
 
 ## What I planned
 
-Add JSON API surface to all graph endpoints so agents can programmatically interact with lovyou.ai via Bearer token + JSON.
+Build a browser-based API key management page so users can create and revoke API keys without crafting curl commands.
 
 ## What I built
 
-Changes to 2 files in the site repo: `graph/store.go` and `graph/handlers.go`.
+Changes to 5 files in the site repo: `graph/views.templ`, `graph/handlers.go`, `auth/auth.go`, `cmd/site/main.go`, plus generated `graph/views_templ.go`.
 
-### JSON tags on domain types (store.go)
-- Added `json:"..."` tags to `Space`, `Node`, and `Op` structs
-- `omitempty` on optional fields (ParentID, NodeID, DueDate)
-- Clean camelCase→snake_case mapping matches the database columns
+### API Keys page (`/app/keys`)
+- Full standalone page using simpleHeader/simpleFooter pattern (like SpaceIndex)
+- Lists existing keys: name, created date, revoke button per key
+- Create form with name input
+- Usage instructions with curl example
+- Empty state when no keys exist
 
-### Helper functions (handlers.go)
-- `wantsJSON(r)` — checks `Accept: application/json` header
-- `writeJSON(w, status, v)` — sets Content-Type, writes status, encodes JSON
-- `populateFormFromJSON(r)` — for JSON request bodies, parses into `r.Form` so `r.FormValue()` works transparently for both form-encoded and JSON requests
+### HTMX create flow
+- Create form uses `hx-post="/auth/api-keys"` with `hx-target="#key-result"`
+- Modified `handleCreateAPIKey` in auth.go to detect HTMX requests
+- Returns HTML fragment showing the raw key with "Save this — you won't see it again" warning
+- JSON response preserved for API clients (unchanged behavior)
 
-### JSON response paths on all handlers
-- **Read handlers**: handleSpaceIndex, handleSpaceDefault, handleBoard, handleFeed, handleThreads, handlePeople, handleActivity, handleNodeDetail — all return JSON when `Accept: application/json`
-- **Write handlers**: handleCreateSpace, handleOp (all 9 grammar operations), handleNodeState, handleNodeUpdate, handleNodeDelete — all return JSON with created/updated entity
-- **JSON body parsing**: handleCreateSpace, handleOp, handleNodeState, handleNodeUpdate — call `populateFormFromJSON(r)` at top
+### Navigation
+- "API Keys" link added to SpaceIndex page (top right)
+- Delete redirects back to `/app/keys` (was `/app`)
 
-### Response format
-```json
-// Read: GET /app/{slug}/feed with Accept: application/json
-{"space": {...}, "nodes": [...]}
-
-// Write: POST /app/{slug}/op with op=express
-{"node": {...}, "op": "express"}
-
-// Create: POST /app/new
-{"space": {...}}
-
-// Delete: DELETE /app/{slug}/node/{id}
-{"deleted": "node-id"}
-```
-
-### Agent interaction pattern
-```bash
-# Create a space
-curl -X POST https://lovyou.ai/app/new \
-  -H "Authorization: Bearer lv_..." \
-  -H "Accept: application/json" \
-  -d "name=hive&kind=project&visibility=public"
-
-# Post to it
-curl -X POST https://lovyou.ai/app/hive/op \
-  -H "Authorization: Bearer lv_..." \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -d '{"op":"express","title":"Iteration 22","body":"Added JSON API"}'
-
-# Read the feed
-curl https://lovyou.ai/app/hive/feed \
-  -H "Authorization: Bearer lv_..." \
-  -H "Accept: application/json"
-```
+### Wiring
+- Route registered in main.go inside the auth block (where authService is accessible)
+- Handler calls `authService.ListAPIKeys`, maps to `graph.ViewAPIKey`, renders templ view
+- `ViewAPIKey` type added to graph/handlers.go (follows ViewUser pattern)
 
 ## Verification
 
+- `templ generate` — 7 updates
 - `go build -o /tmp/site.exe ./cmd/site/` — success
 - Committed and pushed to main
 - Deployed to Fly.io — both machines healthy

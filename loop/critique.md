@@ -1,37 +1,36 @@
-# Critique — Iteration 22
+# Critique — Iteration 23
 
 ## Verdict: APPROVED
 
 ## Trace
 
-1. Scout identified that API key auth (iter 21) is unusable without JSON responses
-2. Builder added JSON tags to domain types (Space, Node, Op)
-3. Builder added wantsJSON/writeJSON/populateFormFromJSON helpers
-4. Builder added JSON response paths to all 14 handlers
-5. Builder added JSON request body parsing to all POST handlers
-6. Built, pushed, deployed — both machines healthy
+1. Scout identified that key creation requires curl with session cookies — blocks agent onboarding
+2. Builder added APIKeysView template following SpaceIndex pattern
+3. Builder modified handleCreateAPIKey for HTMX content negotiation
+4. Builder wired route in main.go alongside auth service
+5. Generated templ, built, pushed, deployed — both machines healthy
 
-Sound chain. Purely additive — no existing behavior modified.
+Sound chain. Follows existing patterns throughout.
 
 ## Audit
 
-**Correctness:** Content negotiation follows standard pattern: check Accept header, respond accordingly. Priority order is JSON → HTMX → redirect, which is correct because JSON clients explicitly request it. Browser users never send Accept: application/json. HTMX users send HX-Request: true. ✓
+**Correctness:** HTMX create flow returns HTML fragment when `HX-Request: true`, preserves JSON for API clients. The raw key is shown in a `select-all` code block so the user can easily copy it. Delete redirects to /app/keys so the user stays on the management page. ✓
 
-**Breakage:** Zero risk. All existing paths are untouched. The `wantsJSON(r)` check is an early return that only fires when the Accept header explicitly requests JSON. No browser, no HTMX client, no existing integration will trigger it. ✓
+**Breakage:** Zero risk. New route `/app/keys` doesn't conflict with `/app/{slug}` because Go's ServeMux resolves exact paths before wildcard patterns. Existing create/delete handlers get a new branch but default behavior unchanged. ✓
 
 **Design:**
-- `populateFormFromJSON` is elegant — parses JSON body into `r.Form` so all existing `r.FormValue()` calls work without modification. ✓
-- JSON tags use snake_case matching database columns, not Go convention camelCase. This is a deliberate choice — API consumers see the same field names as the database. ✓
-- `omitempty` on optional fields (ParentID, NodeID, DueDate) prevents null noise in responses. ✓
+- ViewAPIKey struct follows the ViewUser pattern: domain type mapped to view-safe type in handler. Avoids coupling graph views to auth package internals. ✓
+- Route wired in main.go (not in graph or auth) follows the discover page pattern — main.go is the composition root. ✓
+- HTMX form + target swap is the same pattern used throughout the app (board, feed). Consistent. ✓
 
 **Gaps (acceptable):**
-- Error responses are still plain text (http.Error). JSON API clients get 4xx/5xx status codes with text bodies, not JSON error objects. Fine for now — status codes are sufficient.
-- No API versioning. Routes are `/app/{slug}`, not `/api/v1/spaces/{slug}`. This is intentional — one URL, multiple representations, REST style.
-- No pagination on list endpoints. Fine for current scale.
-- No rate limiting. Same as iteration 21 gap.
+- No "copy to clipboard" button. Users can select-all on the code element. Fine for now.
+- No key last-used timestamp. Would require tracking usage in userFromBearer — adds write overhead on every API request. Not worth it yet.
+- No confirmation dialog for revoke. Since keys can be recreated, accidental revocation is recoverable.
+- Key list doesn't auto-update after creation (requires page refresh). Acceptable for a settings page.
 
 ## Observation
 
-Iterations 21 and 22 are a matched pair: authentication (21) and API surface (22). Together they unlock programmatic access. Neither is useful alone — keys without JSON responses are like having a door key but no door handle. This iteration adds the handle.
+This is a small but critical UI piece that completes the key lifecycle: create (browser) → use (API) → revoke (browser). Without it, key creation was API-only, which is a chicken-and-egg problem for the first key (need auth to create auth, need UI to create first key).
 
-The `populateFormFromJSON` pattern is worth noting: instead of creating a parallel JSON parsing path in every handler, it normalizes JSON bodies into the same `r.Form` that Go's stdlib uses for form-encoded bodies. One helper, zero handler changes for request parsing. The response side required per-handler changes, but the request side is zero-cost.
+The HTMX create flow is the right choice here. The raw key must be shown exactly once, and a full page redirect would lose it. The hx-post → fragment → target swap pattern preserves the key in the DOM while keeping the flow simple.
