@@ -326,3 +326,23 @@ Aesthetic cluster complete:
 **FORMALIZE:** Test on the smallest screen, not just the default browser window. Desktop-first development creates invisible gaps for mobile visitors. **If the sidebar is hidden on mobile, something else must replace it.**
 
 **Next iteration:** Mobile responsiveness complete. Site is usable on all screen sizes. Remaining product gaps: (a) subtle animations for polish, (b) space previews on discover cards, (c) grammar op labels (user-friendly names). The site is functionally complete for public launch — everything after this is refinement.
+
+---
+
+## Iteration 20 — 2026-03-22
+
+**Cluster:** Animation (20)
+
+**Built:** Three animation classes: breathing logo (4s pulse), page-load reveals (staggered fade-up), scroll reveals (IntersectionObserver). Applied to home hero, discover heading/grid, blog heading, all logo instances. Respects `prefers-reduced-motion`. 10 files changed, deployed.
+
+**COVER:** Scout researched lovyou2's animation vocabulary — breathing pulses, scroll reveals, staggered delays, message animations. Builder carried forward the spirit ("ritual minimalism") not the specifics. Three CSS classes + one tiny JS observer is all it took. Applied selectively: content pages animate, app pages don't (speed over ceremony). ✓
+
+**BLIND:** Reference pages and blog post pages don't have scroll reveal yet. No hover micro-interactions beyond existing transitions. App views are deliberately unanimated — this is correct (tools should feel fast). The breathing animation timing (4s) and scale (1.03) are tuned but haven't been A/B tested.
+
+**ZOOM:** The breathing logo is the highest-impact single change in this iteration. It transforms the feel of every page — the site went from "competent dark theme" to "something alive." The IntersectionObserver pattern (one-shot, unobserve after triggering) is the standard approach. The stagger delay via CSS custom property (`--d`) is elegant — no JS needed for timing.
+
+**FORMALIZE:** Animation is identity, not decoration. The breathing logo says "this is alive" in a way that no amount of copy or color can. Motion should be reserved for moments that matter (page entry, brand elements) and absent from moments that need speed (tool interactions). **Animate ceremonies, not workflows.**
+
+Iteration 20 completes the animation cluster and closes the aesthetic arc that began in iteration 15.
+
+**Next iteration:** The aesthetic arc is complete (copy → theme → responsiveness → animation). The site is polished and functional. Remaining gaps are functional enhancements: (a) space previews on discover, (b) grammar op labels, (c) open auth gate. Or: step back from the site entirely and focus on the hive itself — agents, autonomy, integration.

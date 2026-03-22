@@ -1,38 +1,37 @@
-# Build Report — Iteration 19
+# Build Report — Iteration 20
 
 ## What I planned
 
-Make the site usable on mobile — the app sidebar is completely hidden (`hidden md:block`), and header nav overflows on small screens.
+Add subtle animations inspired by lovyou2's "ritual minimalism" — breathing brand elements, page load reveals, scroll reveals.
 
 ## What I built
 
-Changes across 4 files (2 templates + 2 generated) in the site repo.
+Changes across 10 files (5 templates + 5 generated) in the site repo.
 
-### Mobile lens bar (graph/views.templ)
-- New `mobileLensTab` component — compact horizontal tab with active state highlighting
-- Horizontal scrollable lens bar (`md:hidden`) placed between header and main content
-- Shows Board, Feed, Threads, People, Activity, Settings as compact tabs
-- Uses `overflow-x-auto` for smooth horizontal scroll on narrow screens
+### Animation system (layout.templ)
+Three CSS animation classes added to the `<style>` block:
 
-### App header responsive (graph/views.templ)
-- Desktop nav links hidden on mobile (`hidden md:flex`)
-- Breadcrumb simplified: "lovyou.ai / Space Name" on mobile (drops "App" segment)
-- Space name truncated with `truncate` class
-- Padding reduced to `px-4` on mobile, `md:px-6` on desktop
+- **`brand-breathe`** — 4s ease-in-out infinite pulse. Opacity 0.8→1, scale 1→1.03. Subtle enough to feel alive without being distracting.
+- **`reveal`** — page-load fade-up animation. 0.6s ease, staggered via CSS variable `--d` (each increment = 0.15s delay). Elements start opacity:0, translateY(12px), then animate to final position.
+- **`reveal-scroll`** — scroll-triggered fade-up. Same visual effect as `reveal` but triggered by IntersectionObserver when element enters viewport (threshold 0.1). Uses CSS transition instead of animation.
 
-### simpleHeader responsive (graph/views.templ)
-- Separate mobile nav (`flex md:hidden`) with just App + Discover + avatar
-- Full nav preserved for desktop (`hidden md:flex`)
+All three respect `prefers-reduced-motion: reduce` — animations disabled, elements shown immediately.
 
-### Content pages responsive (views/layout.templ)
-- Header: mobile nav shows App, Blog, Ref (abbreviated); desktop shows all 5 links
-- Main content: reduced padding on mobile (`px-4 py-8` vs `md:px-6 md:py-12`)
-- Footer: stacks vertically on mobile (`flex-col md:flex-row`)
+### IntersectionObserver script (layout.templ)
+Tiny inline script before `</body>` — finds all `.reveal-scroll` elements, observes them, adds `.in` class when they enter viewport, then unobserves (one-shot reveal).
 
-### Board view responsive (graph/views.templ)
-- Reduced padding on mobile (`p-4 md:p-6`)
-- Title truncates on narrow screens
-- Board already uses `overflow-x-auto` for horizontal scroll — no change needed
+### Brand breathing (layout.templ + graph/views.templ)
+Applied `brand-breathe` to all three logo instances:
+- layout.templ header logo (content pages)
+- appLayout header logo (app pages)
+- simpleHeader logo (space index, onboarding)
+
+Animation styles added to graph/views.templ `themeBlock()` as a separate `<style>` block.
+
+### Page reveals applied
+- **home.templ** — hero h1 (--d:0), subtitle (--d:1), CTA buttons (--d:2). Three sections below hero use `reveal-scroll`.
+- **discover.templ** — heading uses `reveal`, space grid uses `reveal-scroll`.
+- **blog.templ** — heading uses `reveal`.
 
 ## Verification
 

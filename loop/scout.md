@@ -1,30 +1,34 @@
-# Scout Report — Iteration 19
+# Scout Report — Iteration 20
 
 ## Map (from code + state)
 
-Read state.md. Space management cluster complete (iter 18). CRUD lifecycle closed.
+Read state.md. Mobile responsiveness complete (iter 19). Site functionally complete. State says "the product works — now it needs to breathe."
 
-Examined mobile experience: the app sidebar is `hidden md:block` — completely invisible on screens < 768px. Mobile users see space content but have no way to switch between lenses (Board, Feed, Threads, People, Activity, Settings). The header nav in both layout.templ and appLayout also has no mobile adaptation — 5+ links at `gap-6` will overflow on small screens.
+Explored lovyou2 animation patterns. Found a rich vocabulary:
+- **Heart breathing**: 3s ease-in-out pulse (opacity 0.6→1, scale 1→1.1)
+- **Scroll reveal**: IntersectionObserver + fade-up with staggered delays via CSS `--d` variable
+- **Message appear**: 0.3s ease translateY(4px)→0
+- **Thinking dots**: staggered opacity pulse
+- **Progress transitions**: 0.5s ease width/opacity changes
+
+Current site: zero animations. Every element appears instantly. The dark theme is polished but static.
 
 ## Gap Type
 
-Missing feature — no mobile navigation.
+Missing refinement — the site has no motion.
 
 ## The Gap
 
-On mobile:
-1. **App sidebar gone** — lenses, space list, and "New space" link are all invisible. User is trapped on whatever lens they landed on.
-2. **Header nav overflow** — 5 links in a row with gap-6 wraps poorly on narrow screens.
-3. **App header breadcrumb** — "lovyou.ai / App / Space Name" plus nav links is too wide for mobile.
+The Ember Minimalism aesthetic defined in iterations 15-16 has no kinetic dimension. lovyou2's philosophy of "ritual minimalism" — slow, deliberate reveals, breathing brand elements — has not been carried forward. The site feels competent but lifeless.
 
 ## Why This Gap
 
-The site is publicly deployed. Anyone can visit on a phone. If the app product is inaccessible on mobile, the whole experience breaks for ~50% of web traffic.
+Motion communicates intentionality. A breathing logo says "this is alive." Scroll reveals reward exploration. Staggered card appearances create rhythm. Without these, the dark theme feels flat rather than warm.
 
 ## Filled Looks Like
 
-1. **Mobile lens bar** — horizontal scrollable lens nav below the header, visible only on mobile (`md:hidden`). Shows lens icons/labels as compact tabs.
-2. **Hamburger menu** for header nav — collapse nav links behind a toggle on small screens.
-3. **Or simpler:** add a compact horizontal lens strip at the top of the main content area on mobile, keep the full sidebar on desktop.
-
-The simplest approach: a horizontal lens strip (`md:hidden`) above the main content on mobile, since adding a hamburger menu with JS state management adds complexity.
+1. **Brand breathing** — subtle pulse on the lovyou.ai logo (opacity + slight scale, 3s ease-in-out infinite)
+2. **Page reveal** — hero/heading elements fade up on page load with staggered delays
+3. **Scroll reveal** — cards and sections fade up as they enter viewport (IntersectionObserver)
+4. **Card hover glow** — subtle brand shadow on card hover (transition, already partially done with `hover:shadow-brand/5`)
+5. All animations CSS-only except scroll reveal which needs a small IntersectionObserver script

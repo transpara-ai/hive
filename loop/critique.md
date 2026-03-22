@@ -1,33 +1,37 @@
-# Critique — Iteration 19
+# Critique — Iteration 20
 
 ## Verdict: APPROVED
 
 ## Trace
 
-1. Scout identified mobile navigation gap — sidebar hidden, header overflows
-2. Builder added mobile lens bar with compact tab styling
-3. Builder split headers into mobile/desktop variants
-4. Builder made footer responsive
-5. Builder reduced padding for mobile
-6. Built, pushed, deployed — both machines healthy
+1. Scout identified that lovyou2 had rich animation vocabulary, lovyou.ai had none
+2. Research phase explored lovyou2 codebase — found breathing, scroll reveals, staggered delays
+3. Builder implemented three animation classes: brand-breathe, reveal, reveal-scroll
+4. Builder added IntersectionObserver script for scroll reveals
+5. Builder applied animations to home, discover, blog pages + all logos
+6. All animations respect prefers-reduced-motion
+7. Built, pushed, deployed — both machines healthy
 
-Sound chain. No JS required — pure CSS responsive design with Tailwind breakpoints.
+Sound chain. Research → implementation preserved the spirit (ritual minimalism) not just the code.
 
 ## Audit
 
-**Correctness:** Mobile lens bar uses same `activeLens` state as sidebar — active tab correctly highlighted. Links point to same URLs. ✓
+**Correctness:** Animations use CSS-only (breathing, reveal) or minimal JS (IntersectionObserver for scroll). Observer is one-shot (unobserves after triggering). Stagger delays use CSS custom properties. ✓
 
-**Breakage:** Desktop layout unchanged — mobile additions use `md:hidden` and `hidden md:flex/md:block`. Sidebar still `hidden md:block`. No existing behavior modified. ✓
+**Breakage:** No existing functionality changed. Animations are additive — new CSS classes applied to existing elements. Elements still render correctly without animation (they're just visible immediately). ✓
 
-**Consistency:** Mobile lens tabs use same brand color system (`bg-brand/10 text-brand` for active, `text-warm-muted` for inactive). Tab styling matches dark theme. ✓
+**Accessibility:** `prefers-reduced-motion: reduce` media query disables all animations and sets elements to visible. Users who need reduced motion see the site exactly as before. ✓
 
-**Approach:** CSS-only solution avoids JavaScript state management. No hamburger menu needed — compact nav links on mobile with lens bar below. Pragmatic.
+**Performance:** Breathing animation uses `transform` and `opacity` (GPU-composited properties, no layout thrash). IntersectionObserver is passive (no scroll event listener). Minimal impact. ✓
+
+**Consistency:** Same `brand-breathe` animation applied to all three logo locations. Same reveal timing (0.6s ease) for both page-load and scroll variants. ✓
 
 **Gaps (acceptable):**
-- Mobile nav shows fewer links than desktop (drops Home, Discover, Reference on content pages). Users can still reach these via the lovyou.ai logo → home → nav. Trade-off for screen space.
-- Feed/threads views not explicitly checked for mobile — they use `max-w-2xl mx-auto` which works fine on narrow screens.
-- No mobile-specific touch interactions (swipe between lenses, pull-to-refresh). Pure web, no PWA features. Fine for now.
+- Reference pages don't have scroll reveal yet. They have many cards/sections that could benefit.
+- Blog post page (individual posts) doesn't have reveal — just the index heading.
+- No hover micro-interactions beyond existing `transition-colors` / `transition-all`.
+- App views (board, feed, threads) don't have animation — they're functional tools, not landing pages. Correct choice.
 
 ## Observation
 
-Mobile responsiveness is one of those gaps that's invisible during development (desktop browser, large screen) but immediately obvious to any visitor on a phone. The lens bar pattern (horizontal tabs below header) is a standard mobile navigation pattern — familiar, discoverable, no learning curve.
+The breathing logo is the single most impactful change — it turns a static text logo into something that feels alive. Combined with the dark theme, it creates a sense of warmth and presence. The staggered hero reveal gives the home page a sense of intentional design rather than "everything loaded at once." The restraint is important: animations on content pages but not on the app (where speed matters more than ceremony).
