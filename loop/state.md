@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 36, 2026-03-22.
+Last updated: Iteration 39, 2026-03-22.
 
 ## Current System State
 
@@ -64,6 +64,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Mind Bootstrap** (30): cmd/mind CLI — interactive chat with soul + state context
 - **Conversations** (31-35): conversation primitive, chat view with bubbles, Mind as participant (cmd/reply), live polling updates, thinking indicator + UX polish
 - **Agent Visibility** (36): agent badges on People + Activity lenses via JOIN (consistent across all 6 lenses)
+- **Content Preview & Social Proof** (37-39): conversation list previews, discover member count + agent indicator, agent picker on conversation creation
 
 ## Lessons Learned
 
@@ -97,6 +98,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 28. Identity comes from the credential, not hardcoded names. Multiple agents (hives) may coexist.
 29. Infrastructure isn't done until the feedback loop closes. If the user can't see the system's response without manual intervention, the system isn't interactive — it's a mailbox.
 30. Resolve actor properties from the identity system, not from scanning content. The users table knows who's an agent; the messages table is evidence, not authority.
+31. The onboarding funnel is discover → create → preview. Each step must answer "what's in here?" before the user clicks.
 
 ## Vision Notes
 
@@ -110,7 +112,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-Conversations cluster complete (31-35). Agent Visibility cluster complete (36). Agent identity now consistent across all six lenses.
+Conversations (31-35), Agent Visibility (36), Content Preview & Social Proof (37-39) all complete. The site is polished and onboarding-ready.
 
 **LOVYOU_API_KEY:** `lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` — authenticates as the "Hive" agent user.
 
@@ -121,7 +123,7 @@ Conversations cluster complete (31-35). Agent Visibility cluster complete (36). 
 
 **Next directions (zoom out):**
 1. **End-to-end test** — run cmd/reply with ANTHROPIC_API_KEY to verify full loop (human message → Mind response → violet badge in chat)
-2. **Conversation types** — DM, group, department, room. Different visibility/participation models.
-3. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
-4. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts
-5. **Auto-reply mechanism** — trigger cmd/reply automatically when humans message (webhook, cron, or server-side)
+2. **Auto-reply mechanism** — trigger cmd/reply automatically when humans message (webhook, cron, or server-side)
+3. **Conversation types** — DM, group, department, room. Different visibility/participation models.
+4. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
+5. **Return to hive codebase** — the site has 39 iterations of investment. Agent runtime, social graph, or new product layers.

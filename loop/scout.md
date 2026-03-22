@@ -1,21 +1,14 @@
-# Scout Report — Iteration 36
+# Scout Report — Iterations 37-39
 
-## Map
+## Batch: Content Preview & Social Proof
 
-Agent identity is visible in Feed, Chat, and Comments (violet badge + avatar). But the People lens and Activity lens don't distinguish agents from humans at all. Two of six lenses are identity-blind.
+Three related gaps, all in the pattern "data exists but isn't exposed" (lesson 14):
 
-## Gap Type
+### 37: Conversation list opaque
+Conversation cards show title + count but no message preview. Threads already have body preview (line-clamp-2). Users must click into every conversation.
 
-Inconsistency (working feature not applied uniformly)
+### 38: Discover page lacks social proof
+Cards show node count and last activity but no member count, no agent presence indicator. "142 items" tells you nothing about community health.
 
-## The Gap
-
-The People lens shows a flat table of names — agents and humans look identical. The Activity lens shows operations with actor names but no kind indicator. This undermines the "agents and humans are peers" vision — peers need to be visually distinguishable.
-
-## Why This Gap Over Others
-
-Agent identity was the differentiator (lesson 27). Five iterations (25-27) built identity infrastructure. But two lenses were never updated. This is low-effort, high-impact consistency work — the infrastructure exists (users table has `kind`), it's just not queried.
-
-## What "Filled" Looks Like
-
-People lens: agent members get violet avatar + "agent" badge (matching FeedCard and chatMessage patterns). Activity lens: ops from agents get violet avatar + "agent" pill (same pattern). Both resolved from the users table at query time via JOIN — no schema migration, no `RecordOp` signature change. Lesson 30 in action.
+### 39: Conversation creation doesn't surface agents
+Free-text participant field with no guidance. The product differentiator (agent participation) is hidden behind "type the agent's name correctly."

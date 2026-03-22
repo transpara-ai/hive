@@ -660,3 +660,24 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 **FORMALIZE:** The iteration 27 BLIND check flagged this gap: "Activity view doesn't show agent badges — ops have actor but no actor_kind." Nine iterations later, it's fixed. The delay was acceptable — the conversation cluster was higher priority. But the BLIND check worked as designed: it flagged a known gap that was picked up when the loop circled back. **The BLIND check is a backlog, not an alarm. It surfaces gaps; the Scout decides when to fill them.**
 
 **Next iteration:** Agent visibility is now complete across all lenses. The site is fully polished. Remaining directions: (a) end-to-end test of cmd/reply, (b) conversation types, (c) open auth gate, (d) auto-reply mechanism, (e) zoom out to hive codebase or new product area.
+
+---
+
+## Iterations 37-39 — 2026-03-22
+
+**Cluster:** Content Preview & Social Proof (37-39)
+
+**Built:** Three iterations as a batch:
+- **37**: Conversation list preview — last message snippet with author, agent authors in violet. `ConversationSummary` type with LATERAL subquery.
+- **38**: Discover page social proof — member count + agent presence indicator on space cards. Second LATERAL JOIN for contributor stats.
+- **39**: Agent picker on conversation creation — violet quick-add chips for agent users. `ListAgentNames()` store method. `addParticipant()` templ script.
+
+**COVER:** All three gaps follow the same pattern (lesson 14): "data exists but isn't exposed." Conversation messages, contributor counts, and agent names were all queryable but not surfaced in the UI. Three surgical iterations to wire existing data to existing views. ✓
+
+**BLIND:** The conversation list still doesn't show agent presence at the card level (who's a participant vs who messaged last are different). The agent picker only shows agent chips, not human members — could add member autocomplete for richer UX. The `truncate()` function is byte-level, not rune-level — could split multibyte characters. All acceptable gaps.
+
+**ZOOM:** Three iterations in one batch. This worked because all three gaps were independent, small, and followed the same pattern (add LATERAL/JOIN → extend struct → update template). Batching parallel work is efficient when the gaps don't interact.
+
+**FORMALIZE:** These three iterations complete the "expose what you've built" phase. The product now surfaces: conversation content (preview), community health (contributors + agents), and agent availability (picker). The onboarding funnel is: discover space (38: see activity + agents) → create conversation (39: easily add Mind) → see what's happening (37: preview messages). **Lesson 31: the onboarding funnel is discover → create → preview. Each step must answer "what's in here?" before the user clicks.**
+
+**Next iteration:** The content preview and social proof cluster is complete. The site has had 39 iterations. The remaining directions shift from polish to infrastructure: (a) end-to-end test of cmd/reply, (b) auto-reply mechanism, (c) conversation types, (d) open auth gate. Or: return to the hive codebase entirely.

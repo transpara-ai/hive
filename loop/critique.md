@@ -1,27 +1,27 @@
-# Critique — Iteration 36
+# Critique — Iterations 37-39
 
 ## Verdict: APPROVED
 
-## Trace
-
-1. Scout identified: People and Activity lenses don't distinguish agents from humans
-2. Builder added `ActorKind` to Op via JOIN against users table (no schema migration)
-3. People and Activity templates updated with violet avatar + badge (same pattern as Feed/Chat)
-4. Deployed and healthy
-
 ## Audit
 
-**Correctness:**
-- LEFT JOIN handles ops from actors with no user record (COALESCE to 'human'). ✓
-- Agent detection resolved from users table, not from op content. Lesson 30 applied. ✓
-- Visual treatment identical across all six lenses: Feed, Chat, Comments, People, Activity, Board. ✓
-- Member kind populated from first op seen (stable — all ops from same actor have same kind). ✓
+**37 — Conversation Preview:**
+- LATERAL subquery handles conversations with no messages (NULL → empty strings). ✓
+- Agent author shown in violet, human in faint. Consistent with chat view. ✓
+- `truncate()` is byte-level, not rune-level. Could split a multibyte character. Acceptable for now — English content only.
 
-**Gaps:**
-- **JOIN performance at scale**: Every ListOps and ListNodeOps query now JOINs against users. Fine for current traffic. At scale, consider denormalizing `actor_kind` onto the ops table or caching.
-- **Board lens doesn't show agent badges**: Task cards show author but not author_kind badges. Visually consistent since tasks are usually human-authored, but worth noting.
-- **Name collision**: JOIN is `users.name = ops.actor`. If two users share a name (unlikely but possible), the JOIN is ambiguous. A future iteration should use actor IDs throughout.
+**38 — Discover Social Proof:**
+- `BOOL_OR(u.kind = 'agent')` correctly handles spaces with no agent activity (NULL → false via COALESCE). ✓
+- `COUNT(DISTINCT o.actor)` counts actual contributors, not total ops. Correct signal. ✓
+- Violet dot + "agents" text is subtle and consistent with agent visual language. ✓
 
-## DUAL
+**39 — Agent Picker:**
+- `addParticipant()` deduplicates (checks indexOf before adding). ✓
+- Chips only appear when `len(agents) > 0`. No empty UI clutter. ✓
+- Still free-text — users can type arbitrary names. Chips are additive, not restrictive. ✓
 
-Clean iteration. No mid-build feedback needed. The JOIN pattern avoided a large refactor (changing RecordOp signature + 10 call sites + schema migration) in favor of resolving from the identity system at query time. The right trade-off for now — performance optimization can come later if needed.
+## Gaps
+
+- **No agent participant indicator on conversation cards** in the list (iteration 37 shows last message preview but not agent presence on the card itself)
+- **No human participant chips** — only agent chips shown. Could add space members for autocomplete.
+- **Discover query could be slow at scale** — two LATERAL JOINs + users JOIN per space. Fine for now.
+- **truncate() is byte-level** — should be rune-level for Unicode safety. Minor.
