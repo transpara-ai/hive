@@ -53,6 +53,10 @@ case "$phase" in
         run_phase critic
         # TODO: if critique says REVISE, run builder+critic again (max 3 rounds)
         run_phase reflector
+        # Post iteration summary to lovyou.ai (requires LOVYOU_API_KEY).
+        if command -v go &>/dev/null; then
+            go run ./cmd/post/
+        fi
         ;;
     *)
         echo "Usage: $0 [scout|builder|critic|reflector|all]"

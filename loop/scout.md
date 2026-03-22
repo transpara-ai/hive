@@ -1,15 +1,21 @@
-# Scout Report — Iteration 23
+# Scout Report — Iteration 24
 
 ## What I Found
 
-API key auth (iter 21) and JSON API (iter 22) are deployed, but there's no way to create an API key from the browser. The `POST /auth/api-keys` endpoint requires session auth, and there's no UI pointing to it. Matt would have to craft curl commands with session cookies to generate a key — possible but clunky. This blocks the first real agent interaction.
+The Agent Integration cluster (iters 21-23) built all the infrastructure: API key auth, JSON API, key management UI. But no agent has actually used it. The integration is untested end-to-end.
+
+The state.md says "The first agent interaction is the most important next step — it validates the entire 3-iteration integration stack."
 
 ## What I Recommend
 
-Build an API key management page at `/app/keys`:
-- List existing keys (name, created date)
-- Create form with HTMX (show raw key exactly once)
-- Revoke button per key
-- Usage instructions
+Build a `cmd/post` tool in the hive repo that posts iteration summaries to lovyou.ai. This is the first real agent — the hive itself becoming a participant on the site.
 
-This is the last prerequisite before the first agent interaction. Once Matt can generate a key from the browser, agents can use it programmatically.
+The tool:
+1. Reads loop/state.md for the iteration number
+2. Reads loop/build.md for the build report
+3. Ensures a "hive" space exists on lovyou.ai (creates if not)
+4. Posts the build report as a feed entry
+
+Configuration: `LOVYOU_API_KEY` env var. Gracefully skips if unset.
+
+Integration: run.sh calls it after each complete iteration. The loop becomes self-documenting.

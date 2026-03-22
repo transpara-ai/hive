@@ -1,38 +1,48 @@
-# Build Report — Iteration 23
+# Build Report — Iteration 24
 
 ## What I planned
 
-Build a browser-based API key management page so users can create and revoke API keys without crafting curl commands.
+Build the first agent interaction — a tool that makes the hive loop post its own iteration summaries to lovyou.ai.
 
 ## What I built
 
-Changes to 5 files in the site repo: `graph/views.templ`, `graph/handlers.go`, `auth/auth.go`, `cmd/site/main.go`, plus generated `graph/views_templ.go`.
+New file: `cmd/post/main.go` in the hive repo. Modified: `loop/run.sh`.
 
-### API Keys page (`/app/keys`)
-- Full standalone page using simpleHeader/simpleFooter pattern (like SpaceIndex)
-- Lists existing keys: name, created date, revoke button per key
-- Create form with name input
-- Usage instructions with curl example
-- Empty state when no keys exist
+### cmd/post — iteration publisher
 
-### HTMX create flow
-- Create form uses `hx-post="/auth/api-keys"` with `hx-target="#key-result"`
-- Modified `handleCreateAPIKey` in auth.go to detect HTMX requests
-- Returns HTML fragment showing the raw key with "Save this — you won't see it again" warning
-- JSON response preserved for API clients (unchanged behavior)
+A standalone Go program that posts iteration summaries to lovyou.ai using the JSON API and Bearer token auth built in iterations 21-22.
 
-### Navigation
-- "API Keys" link added to SpaceIndex page (top right)
-- Delete redirects back to `/app/keys` (was `/app`)
+**Flow:**
+1. Check `LOVYOU_API_KEY` env var — skip gracefully if unset (exit 0)
+2. Read `loop/state.md` — extract iteration number via regex
+3. Read `loop/build.md` — the build report becomes the post body
+4. `GET /app/hive` with `Accept: application/json` — check if hive space exists
+5. If 404: `POST /app/new` with JSON body — create "hive" community space (public)
+6. `POST /app/hive/op` with `op=express` — post the build report to the feed
 
-### Wiring
-- Route registered in main.go inside the auth block (where authService is accessible)
-- Handler calls `authService.ListAPIKeys`, maps to `graph.ViewAPIKey`, renders templ view
-- `ViewAPIKey` type added to graph/handlers.go (follows ViewUser pattern)
+**Configuration:**
+- `LOVYOU_API_KEY` — required, the `lv_...` Bearer token
+- `LOVYOU_BASE_URL` — optional, defaults to `https://lovyou.ai`
+
+**Usage:**
+```bash
+cd /c/src/matt/lovyou3/hive
+LOVYOU_API_KEY=lv_... go run ./cmd/post/
+```
+
+### run.sh integration
+
+After all four phases complete (scout → builder → critic → reflector), run.sh now calls `go run ./cmd/post/`. If `LOVYOU_API_KEY` is not set, the tool prints "skipping post" and exits 0 — the loop doesn't break.
+
+### Why Go, not bash/curl
+
+- JSON escaping: build.md contains markdown with quotes, backticks, newlines. `json.Marshal` handles all of it. Bash string escaping would be fragile.
+- Error handling: HTTP status checks, readable error messages.
+- No dependencies: stdlib only (net/http, encoding/json, os, regexp).
+- Consistent: hive repo is Go. This is a Go binary alongside cmd/hive.
 
 ## Verification
 
-- `templ generate` — 7 updates
-- `go build -o /tmp/site.exe ./cmd/site/` — success
-- Committed and pushed to main
-- Deployed to Fly.io — both machines healthy
+- `go build -o /tmp/post.exe ./cmd/post/` — success
+- `/tmp/post.exe` without LOVYOU_API_KEY — prints "skipping" and exits 0
+- Cannot test end-to-end yet (no API key generated) — requires Matt to log in and create a key at /app/keys

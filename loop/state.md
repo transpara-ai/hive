@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 23, 2026-03-22.
+Last updated: Iteration 24, 2026-03-22.
 
 ## Current System State
 
@@ -10,15 +10,18 @@ Five repos, all compiling and tested:
 - **eventgraph** — foundation. Postgres stores, 201 primitives, trust, authority. Complete. Has CI.
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
-- **hive** — 4 agents (Strategist, Planner, Implementer, Guardian), agentic loop, budget. Complete. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. **Full agent integration: API keys + JSON API + key management UI.**
+- **hive** — 4 agents, agentic loop, budget, **cmd/post tool**. Complete. Has CI.
+- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack.
+
+**Agent integration stack (complete):**
+- API key auth — Bearer token, SHA-256 hashed, `lv_` prefix (iter 21)
+- JSON API — content negotiation on all graph endpoints (iter 22)
+- Key management UI — `/app/keys`, HTMX create flow (iter 23)
+- Post tool — `cmd/post`, publishes iteration summaries to lovyou.ai (iter 24)
 
 **Product features:**
 - Blog (43 posts, 6 arcs with section nav)
 - Reference (cognitive grammar, graph grammar, 13 layers, 201 primitives, 28 agent primitives)
-- Auth: Google OAuth (test mode) + API key auth (Bearer token, SHA-256 hashed)
-- **API key management UI** (`/app/keys`) — create, list, revoke keys from browser
-- JSON API — all graph endpoints support `Accept: application/json` content negotiation
 - Unified graph product (3 tables, 10 grammar ops, 5 lenses, HTMX, full CRUD)
 - Public spaces + discover page + space settings (full CRUD lifecycle)
 - Mobile responsive + animations (breathing logo, reveals)
@@ -36,7 +39,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Hive Autonomy** (11-13): prompt files, run.sh, CI on hive + site
 - **Product Development** (14): public spaces
 - **Aesthetics** (15-20): warm copy, dark theme, discovery, space settings, mobile, animations
-- **Agent Integration** (21-23): API key auth + JSON API surface + key management UI
+- **Agent Integration** (21-24): API key auth, JSON API, key management UI, post tool
 
 ## Lessons Learned
 
@@ -60,6 +63,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 18. Unlock the bottleneck before building what flows through it.
 19. Ship both sides of an interface in consecutive iterations.
 20. Infrastructure → interface → management. Skipping any layer leaves the others incomplete.
+21. Infrastructure before intelligence. Prove the plumbing, then add smarts.
 
 ## Vision Notes
 
@@ -73,20 +77,18 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-The Agent Integration cluster is complete. All prerequisites for agent interaction are deployed:
-- API key auth (iter 21)
-- JSON API surface (iter 22)
-- Key management UI (iter 23)
+The Agent Integration cluster is complete (4 iterations). The stack is built but unverified end-to-end — Matt needs to create an API key at /app/keys and run the post tool.
 
-**The next step is the first real agent interaction.** Matt can now:
-1. Log into lovyou.ai
-2. Navigate to `/app/keys`
-3. Create an API key
-4. Use that key to have an agent create a "hive" space and post iteration summaries
+**Activate the integration:**
+```bash
+# Matt: log into lovyou.ai → /app/keys → create key → note the lv_... value
+# Then:
+cd /c/src/matt/lovyou3/hive
+LOVYOU_API_KEY=lv_... go run ./cmd/post/
+```
 
-This is the most important next step — it validates the entire 3-iteration integration stack.
-
-Other options after proving integration:
-- Open auth gate — switch Google OAuth to production
-- Space previews on discover — node count, recent activity on cards
-- Self-posting loop — the hive loop posts its own iteration summaries to lovyou.ai
+**After integration is verified, next directions:**
+1. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
+2. **Space previews on discover** — node count, recent activity on discover cards
+3. **Return to hive** — Mind, social graph, operational autonomy (the hive repo itself)
+4. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts
