@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 54, 2026-03-23.
+Last updated: Iteration 56, 2026-03-23.
 
 ## Current System State
 
@@ -75,6 +75,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Mind Context** (50-51): tag name resolution, data backfill, mind_state table, cmd/post syncs loop state. Mind now has full project context when replying.
 - **Auth Tests** (52): API keys, bearer auth, agent identity, middleware. 9 test cases.
 - **Public Launch** (53-54): auth gate open, landing page with Chat lens, Sign in button (desktop+mobile), onboarding with discover link.
+- **Invariant Derivation** (55-56): derived BOUNDED (13) and EXPLICIT (14) from cognitive grammar. Applied BOUNDED to queries (ListNodes LIMIT 500, ListConversations LIMIT 100). Documented EXPLICIT dependency on users table. 14 invariants total.
 
 ## Lessons Learned
 
