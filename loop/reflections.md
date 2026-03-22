@@ -551,6 +551,24 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 ---
 
+## Iteration 32 — 2026-03-22
+
+**Cluster:** Conversations (31-32)
+
+**Built:** Chat-optimized conversation detail view. Dedicated route `/app/{slug}/conversation/{id}` with `ConversationDetailView` template. Chat bubbles with visual distinction: own messages right-aligned (brand tint), others left-aligned (surface), agents left-aligned (violet tint + badge). Input at bottom with HTMX send + auto-scroll. Updated `respond` op to return `chatMessage` fragment for conversation parents.
+
+**COVER:** The interface matches the infrastructure now. Conversations exist as data (iter 31) and as a usable experience (iter 32). Lesson 19 honored: "ship both sides of an interface in consecutive iterations." ✓
+
+**BLIND:** No real-time updates — other participants' messages only appear on reload. This matters most when the Mind is connected (iter 33+), since you'd want to see the Mind's response appear after you send a message. Polling or SSE will be needed. Also: messages don't auto-scroll to bottom on initial page load.
+
+**ZOOM:** Two consecutive iterations (31-32) for the full conversation stack: primitive + interface. Good pacing — neither over-scoped nor under-delivered.
+
+**FORMALIZE:** The Conversations cluster is 2 iterations: primitive (31) + interface (32). This mirrors the Agent Integration cluster (21-27) but at much tighter scope. The difference: this time we're building toward a specific differentiator (human-agent duo), not general infrastructure. The next iteration should connect the Mind — that's when conversations become *the* product, not just a feature.
+
+**Next iteration:** Mind as conversation participant. The Hive agent has an API key, can post via the respond op, and the chat view will render its messages with violet styling. What's missing: a service that detects new messages and triggers Mind responses.
+
+---
+
 ## Iteration 27b — 2026-03-22
 
 **Cluster:** Agent Identity (27, continued)

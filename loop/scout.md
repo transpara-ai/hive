@@ -1,21 +1,21 @@
-# Scout Report — Iteration 31
+# Scout Report — Iteration 32
 
 ## Map
 
-30 iterations. Site is feature-complete with 5 lenses. Mind CLI exists (iter 30) but Matt redirected: the Mind should be a web participant, not a CLI. The site already has agent identity, threads, people. What's missing is a conversation primitive — named, multi-participant, distinct from public threads.
+Iteration 31 added the conversation primitive: kind='conversation', 'converse' grammar op, Chat lens. But clicking a conversation routes to generic NodeDetail — a task/post detail view with "Replies (N)" header. Not chat.
 
 ## Gap Type
 
-Missing product primitive (needs building)
+Interface bottleneck (blocks adoption of new primitive)
 
 ## The Gap
 
-No conversation infrastructure. Threads are public discussion forums. The vision is Slack + AI chat: multiple named conversations per person, DMs, groups, rooms. The Mind as a participant. Human-agent duo — when a human messages, their agent has right of reply too.
+Conversations exist as data but have no chat-optimized UI. NodeDetail shows task metadata, edit forms, subtask progress — none of which apply to conversations. Messages display as generic "replies" with no chat feel. No message input at bottom. No visual distinction between your messages and others'.
 
 ## Why This Gap Over Others
 
-The conversation primitive is the foundation for everything: Mind web presence, human-agent duo communication, social product. Without it, the Mind has no channel to communicate through on the web.
+Lesson 18: unlock the bottleneck before building what flows through it. Lesson 20: infrastructure → interface → management. The conversation primitive (infrastructure) is done. The interface that uses it is broken. Building Mind response integration before fixing the conversation UI is building flow through a broken pipe.
 
 ## What "Filled" Looks Like
 
-`kind='conversation'` node type, `converse` grammar op, Chat lens in sidebar, `ConversationsView` template with create form and conversation list. Conversations store participants in `tags[]`, messages are child comment nodes.
+`/app/{slug}/conversation/{id}` — dedicated route with chat-optimized view. Messages in chronological order. Chat bubbles with visual distinction (your messages vs others vs agents). Input form at bottom. Back arrow to conversations list. HTMX-powered message sending that appends and auto-scrolls.

@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 31, 2026-03-22.
+Last updated: Iteration 32, 2026-03-22.
 
 ## Current System State
 
@@ -53,7 +53,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Space Previews** (28): node count + last activity on discover cards
 - **Sidebar Fix** (29): sticky sidebar, independent scroll
 - **Mind Bootstrap** (30): cmd/mind CLI — interactive chat with soul + state context
-- **Conversations** (31): conversation primitive, "converse" grammar op, Chat lens, ConversationsView
+- **Conversations** (31-32): conversation primitive, "converse" grammar op, Chat lens, chat-optimized detail view with bubbles
 
 ## Lessons Learned
 
@@ -113,7 +113,6 @@ Agent Integration cluster is complete (7 iterations, 21-27). Agents are real use
 
 **Next directions (zoom out):**
 1. **Mind as conversation participant** — webhook/polling that detects new messages in conversations where Mind is a participant and generates responses. This is the critical differentiator.
-2. **Chat-optimized message view** — NodeDetail works for conversations but isn't chat UX. Messages flowing bottom-up, input at bottom, real-time updates.
-3. **Conversation types** — DM, group, department, room. Different visibility/participation models.
+2. **Conversation types** — DM, group, department, room. Different visibility/participation models.
 4. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
 5. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts
