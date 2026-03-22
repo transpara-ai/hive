@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 9, 2026-03-22.
+Last updated: Iteration 10, 2026-03-22.
 
 ## Current System State
 
@@ -11,46 +11,47 @@ Five repos, all compiling and tested:
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
 - **hive** — 4 agents (Strategist, Planner, Implementer, Guardian), agentic loop, budget. Complete.
-- **site** — lovyou.ai on Fly.io. **Deployed and live.** Complete:
+- **site** — lovyou.ai on Fly.io. **Production-ready:**
   - Blog (43 posts, 6 arcs with section nav)
   - Reference (cognitive grammar, graph grammar, 13 layer grammars, 201 primitives, 28 agent primitives)
   - Auth (Google OAuth — test mode, can be opened whenever)
   - Unified graph product (3 tables, 10 grammar operations, 5 lenses, HTMX, full CRUD)
-  - Landing page: clear product description, five lens cards, three-step flow
-  - SEO: meta description + OG tags on every page
-  - Sitemap: 305 URLs, robots.txt
+  - Landing page, SEO meta tags, sitemap (305 URLs), robots.txt
+  - Canonical redirect (fly.dev → lovyou.ai)
   - All secrets configured on Fly
 
 Deploy: `fly deploy --remote-only` from site repo.
-
-## Lessons Learned
-
-1. **Code is truth, not docs.**
-2. **Verify infra assumptions** before building.
-3. **Update state.md every iteration.**
-4. **Ship what you build** — every Build iteration should deploy.
-5. **Try alternatives before declaring blockers.**
-6. **Name iteration clusters** and recognize when they're complete.
-7. **Focus on public-facing improvements** while auth is in test mode.
+Fly/Neon resources can be scaled up per user authorization.
 
 ## Completed Clusters
 
-- **Orient** (1-4): catch up with reality
-- **Ship** (5): deploy fix
+- **Orient** (1-4): catch up with reality, fix stale docs, accumulate knowledge
+- **Ship** (5): deploy fix (`--remote-only`)
 - **Discoverability** (6-8): landing page, SEO, sitemap
-- **Visitor Experience** (9): blog navigation
+- **Visitor Experience** (9): blog arc navigation
+- **SEO Canonicalization** (10): fly.dev → lovyou.ai redirect
 
-## Known Issues
+## Lessons Learned
 
-- No analytics — no way to measure traffic or behavior.
-- AUDIT.md in hive/docs/ is stale. Low priority.
-- Boot events re-emitted every agent run.
+1. Code is truth, not docs.
+2. Verify infra assumptions before building.
+3. Update state.md every iteration.
+4. Ship what you build — every Build iteration should deploy.
+5. Try alternatives before declaring blockers.
+6. Name iteration clusters and recognize completion.
+7. Hostname middleware must exclude /health (Fly probes via internal IP).
+
+## Vision Notes
+
+- Agents should acquire skills dynamically (like OpenClaw) — email, invoicing, payments, public accounting, any skill.
+- Auth gate can be opened to public whenever ready.
 
 ## What the Scout Should Focus On Next
 
-The site is visitor-ready: clear, discoverable, navigable. Two directions:
+The site is production-ready. Stop polishing it. The next cluster should be about:
 
-1. **Product access** — open the auth gate, verify the app experience works for new users. The user authorized this. But first, the loop should test the anonymous fallback and onboarding flow to ensure it doesn't confuse visitors.
-2. **Hive autonomy** — make the core loop self-running. Currently requires manual Claude Code CLI invocation. This is the infrastructure that would let the hive improve itself.
+1. **Hive autonomy** — make the core loop self-running. Highest compounding value. Currently requires manual Claude Code CLI invocation. Even a simple cron-triggered script would be a step toward autonomy.
+2. **Product development** — new features in the graph product, or new content.
+3. **Agent skill architecture** — design how agents acquire and use skills dynamically.
 
-Pick one. The product access path has immediate user-facing impact. The hive autonomy path has compounding long-term impact.
+The Reflector recommends hive autonomy as the next cluster.

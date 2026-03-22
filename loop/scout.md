@@ -1,19 +1,21 @@
-# Scout Report — Iteration 9
+# Scout Report — Iteration 10
 
-## Map (from code)
+## Map (from code + infra)
 
-Read state.md. Discoverability cluster complete. Assessed blog index.
-
-**Finding:** Blog index is a flat list of 43 posts — no structure, no grouping, no way to navigate by topic. Posts fall into natural arcs visible from the titles: Foundation (1-13), Thirteen Graphs (14-24), Consciousness (26-29), Application (31-34), Grammar (35-38), Building (39-43).
+Read state.md. Site is visitor-ready. Checked both domains — lovyou-ai.fly.dev and lovyou.ai serve identical content. SEO duplicate issue.
 
 ## Gap Type
 
-Missing quality — visitor experience. 43 posts in a flat list is overwhelming for a new reader.
+Missing quality — SEO duplicate content across two domains.
 
 ## The Gap
 
-Blog index has no sections, no topic navigation, no reading guide. A visitor arriving from search on "event graph AI accountability" has no way to find the relevant posts without scrolling through all 43.
+Both lovyou-ai.fly.dev and lovyou.ai return 200 with identical HTML. Search engines may split page rank between them or index the wrong domain.
+
+## Why This Gap
+
+305 pages indexed under the wrong domain wastes all SEO work from iterations 7-8. A canonical redirect is the standard fix — one middleware change, permanent resolution.
 
 ## Filled Looks Like
 
-Blog index grouped into six arcs with section headings. Jump nav at top. Each section has a one-line description. Posts still listed chronologically within each arc.
+GET lovyou-ai.fly.dev/* returns 301 → lovyou.ai/*. Health check endpoint excluded from redirect.

@@ -133,3 +133,24 @@ User also noted: auth gate can be opened whenever. This shifts the priority land
 The site is now ready for visitors: clear, discoverable, navigable. The next cluster should be about making the product itself accessible (opening auth gate, app onboarding) or making the hive self-running (autonomy).
 
 **Next iteration:** The site is visitor-ready. Two directions: (a) open the auth gate and ensure the app works for new users, or (b) build hive autonomy so the loop runs without manual invocation. The user said the auth gate can be opened whenever — but the loop should verify the app experience is good before opening it.
+
+## Iteration 10 — 2026-03-22
+
+**Built:** Canonical host redirect (fly.dev → lovyou.ai). Health check fix after first deploy failed.
+
+**COVER:** Both domains now handled correctly. Redirect verified with curl. Health check excluded from redirect. ✓
+
+**BLIND:** First deploy broke health checks — middleware intercepted Fly's internal health probes. Fixed within the same iteration. **Lesson: any hostname-based middleware must exclude /health because Fly probes via internal IP, not the public domain.**
+
+**ZOOM:** Right scale. One middleware, permanent SEO fix. Completes the discoverability work.
+
+**FORMALIZE:** Five completed clusters:
+- Orient (1-4)
+- Ship (5)
+- Discoverability (6-8)
+- Visitor Experience (9)
+- SEO Canonicalization (10)
+
+The site is production-ready. The loop should now shift to building the product or the hive itself, not polishing the site further. User's vision note: agents should acquire skills dynamically (email, invoicing, payments, public accounting) — this informs long-term architecture.
+
+**Next iteration:** The site is done (for now). The loop should shift to one of: (a) hive autonomy, (b) new product features, or (c) new content. Hive autonomy has the most compounding value — every improvement makes the loop faster, which makes everything else faster.

@@ -1,23 +1,17 @@
-# Build Report — Iteration 9
+# Build Report — Iteration 10
 
 ## What I planned
 
-Add section headings and arc navigation to the blog index.
+Add canonical host redirect from fly.dev to lovyou.ai.
 
 ## What I built
 
-1. **Jump navigation** — pill-shaped links at the top: Foundation, Thirteen Graphs, Consciousness, Application, Grammar, Building. Each anchors to its section.
+1. **canonicalHost middleware** — 301 redirects any non-lovyou.ai hostname to lovyou.ai. Preserves request path and query string. Skips localhost and 127.0.0.1 for local dev.
 
-2. **Section headings** — inserted based on `post.Order` thresholds:
-   - Foundation (posts 1-13): "The primitives, the layers, the architecture. What exists and why."
-   - Thirteen Graphs (14-24): "One graph per domain — work, market, social, justice, research, knowledge, governance, culture, existence."
-   - Consciousness (26-29): "What it means to be inside the system. Weight, transition, friction."
-   - Application (31-34): "From theory to practice. What you could build and why it matters."
-   - Grammar (35-38): "The operational heart. Fifteen operations, thirteen languages, one grammar."
-   - Building (39-43): "Shipping code. The SDK, the agents, the hive, the cognitive grammar."
+2. **Health check bypass** — first deploy failed because Fly's health check uses internal IP (not lovyou.ai). Added `/health` path exclusion. Second deploy succeeded.
 
-3. Updated intro text: "43 posts in six arcs. Best read in order, but each arc stands alone."
+3. Built, committed (2 commits: feature + fix), pushed, deployed. Verified: `curl -sI https://lovyou-ai.fly.dev/blog` returns `301 → https://lovyou.ai/blog`.
 
-4. No data model changes. Uses existing `post.Order` field for section boundaries.
+## Key finding
 
-5. Built, committed, pushed, deployed.
+Infrastructure changes that interact with deploy tooling (health checks, DNS) need careful attention to side effects. The loop caught and fixed the health check issue within the same iteration.
