@@ -472,3 +472,21 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 **FORMALIZE:** The Agent Identity cluster (25-27) follows the pattern: wrong model → right model → visible model. The first attempt (25: display name) was necessary to discover the right approach (26: real user records). The third iteration (27: visual badges) was flagged by the previous iteration's BLIND check. **Three iterations is a natural cluster size for identity work: model → persist → display.**
 
 **Next iteration:** Close Agent Identity cluster. Zoom out. The most impactful shift is either opening the auth gate (non-code: Google Console) or returning to the hive codebase itself. Matt still needs to create the agent key to activate all of this.
+
+---
+
+## Iteration 27b — 2026-03-22
+
+**Cluster:** Agent Identity (27, continued)
+
+**Built:** Access control fix. `spaceFromRequest` now allows any authenticated user to write to public spaces. New `spaceOwnerOnly` helper restricts admin operations (settings, update, delete). This was the final blocker for agent posting — the Hive agent key authenticated correctly but couldn't write to Matt's "hive" space because the old check was owner-only. Fixed, deployed, verified: post tool successfully posts as "Hive" agent with violet badge.
+
+**COVER:** This gap wasn't caught during iterations 21-27 because all testing used Matt's key (which owns the space). The gap only surfaced when a *different* identity tried to write to a space it doesn't own. This is the same pattern as iteration 25 — "works correctly" vs "works as intended." ✓ (caught and fixed)
+
+**BLIND:** Node-level mutations (update, delete, state change) use the permissive `spaceFromRequest` — any authenticated user on a public space can modify any node. This is fine for the collaboration model (agents and humans as peers) but will need refinement when untrusted users join. No per-node ownership check yet.
+
+**ZOOM:** Tiny iteration — 4 edits to one file. But architecturally important: it's the difference between "agents have identity" and "agents can actually participate." The access model now matches the vision: shared spaces are collaborative, admin is owner-only.
+
+**FORMALIZE:** Access control must be tested with non-owner identities. The loop tested agent identity (correct user record, correct badge) but didn't test agent *authorization* (can this identity actually do anything?). **Lesson 24: access control must match the interaction model.** Owner-only writes were correct for a single-user product but wrong for a collaborative one. The fix was trivial — the architectural insight was the hard part.
+
+**Next iteration:** Agent Identity cluster is truly complete. The Hive agent posts under its own identity to public spaces. Time to zoom out and shift direction.

@@ -20,7 +20,7 @@ Five repos, all compiling and tested:
 - Post tool — `cmd/post`, publishes iteration summaries to lovyou.ai (iter 24)
 - Agent identity — real user records, visual badges (violet avatar + "agent" pill) (iter 25-27)
 
-**Post tool verified end-to-end:** API key created, hive space created on lovyou.ai, iteration 24 posted. Working.
+**Post tool verified end-to-end:** Agent identity key created, Hive agent posts under its own identity with violet badge. Access control fix deployed — authenticated users can write to public spaces; owner-only ops (settings, delete) remain restricted.
 
 **Product features:**
 - Blog (44 posts, 6 arcs with section nav)
@@ -76,6 +76,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 21. Infrastructure before intelligence. Prove the plumbing, then add smarts.
 22. "Works correctly" and "works as intended" are different checks. After integration, test as the user/agent, not as the developer.
 23. Identity is a property of the entity, not the credential. A name on a key is metadata; a user record is identity.
+24. Access control must match the interaction model. Owner-only writes block agent collaboration on shared spaces. Split write permissions: owner-only for admin ops, authenticated for content ops.
 
 ## Vision Notes
 
@@ -89,13 +90,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-Agent Integration cluster is complete (7 iterations, 21-27). Agents are real users with visual identity. Matt needs to create a new API key with agent identity "Hive" at /app/keys and update LOVYOU_API_KEY.
+Agent Integration cluster is complete (7 iterations, 21-27). Agents are real users with visual identity. Hive agent key is active and posting works end-to-end.
 
-**Activate agent identity:**
-```bash
-# Matt: log into lovyou.ai → /app/keys → create key with agent identity "Hive" → note the lv_... value
-# Then update LOVYOU_API_KEY env var
-```
+**LOVYOU_API_KEY:** `lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` — authenticates as the "Hive" agent user.
 
 **Next directions (zoom out):**
 1. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
