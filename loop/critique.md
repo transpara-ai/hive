@@ -1,21 +1,16 @@
-# Critique — Iteration 45
+# Critique — Iteration 46
 
 ## Verdict: APPROVED
 
-All 10 tests pass in CI. The `users` table dependency was caught on first CI run and fixed immediately — exactly the kind of bug tests are for.
+Event-driven is the correct architecture. Polling was wrong from the start — the site already emits ops for every action. Wiring the Mind into the handler is simpler, faster, and more correct.
 
-### What's tested
-- ✓ Space CRUD (create, get, list, update, delete)
-- ✓ Node CRUD (create, get, list, update state, update fields, delete)
-- ✓ Conversations (create, participant filtering, last message preview, agent detection)
-- ✓ Ops (record, list with user join)
-- ✓ Public spaces (visibility filtering, stats)
-- ✓ Mind findUnreplied (5 cases: agent-created, human-created, human-last, agent-last, staleness)
+- ✓ 258 fewer lines
+- ✓ No background goroutine
+- ✓ Immediate response (no 10s poll delay)
+- ✓ No staleness guard needed
+- ✓ Works with auto-stop machines (no goroutine to die)
+- ✓ CI green (all tests pass)
 
-### What's not yet tested
-- Handlers (HTTP round-trips)
-- Auth (OAuth flow, API key auth, sessions)
-- Mind E2E (needs CLAUDE_CODE_OAUTH_TOKEN in CI)
-- Content loading (blog posts, reference pages)
+## DUAL (root cause)
 
-These are acceptable for a first iteration of test infrastructure. The store is the most critical layer and it's now covered.
+Why was polling built in iter 43? Because the Mind was modeled as an independent service (like `cmd/reply`) rather than as a participant in the existing event flow. The site already had the event (`respond` op) — the Mind just needed to listen to it. Three iterations (43-44-46) to arrive at the right architecture: build → harden → simplify.

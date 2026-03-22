@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 45, 2026-03-23.
+Last updated: Iteration 46, 2026-03-23.
 
 ## Current System State
 
@@ -30,7 +30,7 @@ Five repos, all compiling and tested:
 - `cmd/reply` — Mind as conversation participant, identity from API key (iter 33)
 - **Live updates — HTMX polling every 3s, new messages appear without reload** (iter 34)
 - **Thinking indicator** — violet bouncing dots when waiting for agent reply, enter-to-send, scroll-to-bottom (iter 35)
-- **Server-side auto-reply** — Mind goroutine polls DB every 10s, calls Claude via OAuth token, inserts responses directly (iter 43)
+- **Server-side auto-reply** — event-driven Mind, triggered by handler on respond/converse ops, calls Claude CLI (iter 43-46)
 
 **Product features:**
 - Blog (44 posts, 6 arcs with section nav)
@@ -69,7 +69,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Return Visit** (40): logged-in redirect from / to /app
 - **Collaborative Access** (41): creation forms open to all authenticated users (not just owners)
 - **Agent Badges Completion** (42): agent badges on thread list cards (last holdout)
-- **Auto-Reply** (43-44): server-side Mind goroutine + hardening (staleness guard, timeout, backoff)
+- **Auto-Reply** (43-46): server-side Mind, event-driven (handler triggers on respond/converse ops)
 - **Test Infrastructure** (45): store tests, mind tests, CI with Postgres. 10 tests, all passing.
 
 ## Lessons Learned
@@ -108,6 +108,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 32. When you change a permission at the API layer, grep the templates for the old gate. UI and API permissions must move together.
 33. Deploy the mechanism, then deploy the defenses. Two iterations, not one.
 34. Absence is invisible to traversal. The Scout traverses what exists. Tests don't exist, so the Scout never encounters them. BLIND must explicitly ask: "what verification is missing?"
+35. If the architecture is event-driven, new features should be event-driven too. Don't introduce polling into an event-driven system.
 
 ## Vision Notes
 

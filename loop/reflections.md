@@ -792,3 +792,21 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 **FORMALIZE:** The loop now has a new check: every iteration that adds code should include tests. This is lesson 34 operationalized. The test infrastructure (docker-compose, CI Postgres) makes this frictionless going forward.
 
 **Next iteration:** The test infrastructure is in place. Future iterations should add handler tests and auth tests incrementally. The immediate options: (a) Mind E2E test (Matt sends a message), (b) open auth gate, (c) handler tests, (d) return to hive codebase.
+
+---
+
+## Iteration 46 — 2026-03-23
+
+**Cluster:** Auto-Reply (46)
+
+**Built:** Rewrote Mind from polling to event-driven. Handler triggers `mind.OnMessage()` directly when a human messages in an agent conversation. Removed polling loop, staleness guard, `findUnreplied` query. Net -258 lines.
+
+**COVER:** Matt: "polling? why polling? we have event driven arch." He's right. The site emits ops for every action. The Mind should listen to those events, not poll the DB. Three iterations to get here: build (43) → harden (44) → simplify (46). ✓
+
+**BLIND:** The `OnMessage` call happens in a goroutine (`go h.mind.OnMessage(...)`). If the response takes >2 minutes (the timeout), the context cancels and the reply is lost. The user sees the thinking indicator but no reply. This is acceptable — better to drop a slow reply than block the handler.
+
+**ZOOM:** The auto-reply cluster is now 4 iterations (43-44-45-46). It should be closed. The architecture went: polling → hardened polling → event-driven. The hardening (44) was wasted work in hindsight — the polling approach was wrong from the start. **Lesson 35: if the architecture is event-driven, new features should be event-driven too. Don't introduce polling into an event-driven system just because it's familiar.**
+
+**FORMALIZE:** The pattern: **build wrong, then build right, is still faster than designing right.** Iterations 43-44 were necessary to understand the problem space. Iteration 46 deleted most of that work. The net cost was low (3 iterations for the wrong approach, 1 for the right one). The alternative — designing the right approach from the start — would have required understanding the existing architecture deeply before writing any code. The loop's method (build → critique → improve) got there faster.
+
+**Next iteration:** Auto-reply cluster is closed. Ready to test e2e (Matt sends a message). After that: open auth gate, conversation types, or return to hive codebase.

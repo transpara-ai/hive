@@ -1,35 +1,22 @@
-# Build Report — Iteration 45
+# Build Report — Iteration 46
 
 ## What was built
 
-**Test infrastructure** — the site's first tests after 44 iterations.
+**Event-driven Mind** — replaced polling with handler-triggered auto-reply.
 
-### Files added
+### Changes
 
-1. **`docker-compose.yml`** — local Postgres for testing (port 5433 to avoid conflicts)
-2. **`graph/store_test.go`** — 6 test functions covering:
-   - CreateAndGetSpace (create, get by slug, visibility)
-   - CreateAndListNodes (task, post, comment, child count, kind filter)
-   - Conversations (create, list by participant, non-participant exclusion, last message preview, agent detection)
-   - Ops (record, list)
-   - UpdateAndDeleteNode (state change, field update, delete, ErrNotFound)
-   - PublicSpaces (public vs private visibility, node count)
-3. **`graph/mind_test.go`** — 5 unit tests + 1 e2e test:
-   - agent_created_no_messages (should NOT be found)
-   - human_created_no_messages (SHOULD be found)
-   - human_last_message (SHOULD be found)
-   - agent_last_message (should NOT be found)
-   - staleness_guard (old messages skipped)
-   - E2E (requires CLAUDE_CODE_OAUTH_TOKEN — full human→Mind→reply flow)
+1. **`graph/mind.go`** — rewritten. Removed `Run()` polling loop, `findUnreplied()` query, `maxAge`, `pollEvery`. Added `OnMessage(spaceID, slug, convo, sender)` — called by handlers when a message arrives. Added `findAgentParticipant()` to check if conversation has an agent.
 
-### CI updated
+2. **`graph/handlers.go`** — `Handlers` struct gets `mind *Mind` field + `SetMind()` setter. `handleOp` triggers `go h.mind.OnMessage(...)` after `respond` ops in conversations and after `converse` ops (new conversations).
 
-- `.github/workflows/ci.yml` — added Postgres 16 service container + `go test -v -count=1 ./...`
-- Tests run on every push to main and every PR
+3. **`cmd/site/main.go`** — removed polling goroutine, `context`, `signal`, `syscall` imports. Now just `graphHandlers.SetMind(mind)`.
 
-### How to run locally
+4. **`graph/mind_test.go`** — updated tests for new API: `TestMindFindAgentParticipant` (3 cases), `TestMindOnMessage` (agent ignored, human without Claude), `TestMindE2E`.
 
-```bash
-docker compose up -d
-DATABASE_URL=postgres://site:site@localhost:5433/site?sslmode=disable go test -v ./graph/
-```
+### Net result
+
+- 168 insertions, 426 deletions (net -258 lines)
+- Simpler architecture: handler → Mind → Claude → insert
+- No background goroutine, no polling, no staleness guard
+- Reply happens immediately when human messages

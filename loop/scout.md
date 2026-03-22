@@ -1,12 +1,11 @@
-# Scout Report — Iteration 45
+# Scout Report — Iteration 46
 
-## Gap: Zero tests in 44 iterations
+## Gap: Mind uses polling in an event-driven architecture
 
-Matt identified a systemic weakness: the entire site codebase (store, handlers, auth, Mind) has zero tests. The Mind auto-reply can't even be verified. Every query, every handler, every auth flow is untested. This is the biggest gap — not a feature, not polish, but the absence of verification.
+Matt: "polling? why polling? we have event driven arch"
+
+The site is event-driven — every action is a grammar op. When `handleOp` processes a `respond` in a conversation, it already has all the context. The Mind should be triggered there, not by polling the DB every 10 seconds.
 
 ## What "Filled" Looks Like
 
-- Test infrastructure: docker-compose for local Postgres, CI with Postgres service
-- Store tests: spaces, nodes, conversations, ops, mutations, public spaces
-- Mind tests: findUnreplied query (5 cases), staleness guard, e2e flow
-- CI runs tests on every push
+When a human sends a message in a conversation with an agent, the handler triggers the Mind immediately. No polling loop, no staleness guard, no wasted DB queries.
