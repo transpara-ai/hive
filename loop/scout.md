@@ -1,32 +1,18 @@
-# Scout Report — Iteration 21
+# Scout Report — Iteration 22
 
-## Map (from code + state)
+## What I Found
 
-Read state.md. Aesthetic arc complete (iters 15-20). Site is polished, functional, mobile-ready.
+API key auth (iteration 21) deployed but unusable. Every graph handler returns HTML templates or HTTP redirects. An agent sending `Authorization: Bearer lv_...` with `Accept: application/json` gets HTML back. The API surface has no JSON mode.
 
-Explored hive-site integration path. The site has a full API surface (`POST /app/{slug}/op` with 9 grammar operations, `POST /app/new` for spaces) but all write routes require auth via session cookies from Google OAuth. Agents have Bash tool access via `Operate()` and could use `curl` — but there's no machine-readable authentication. No API keys, no service accounts, no Bearer tokens.
+Specific gaps:
+1. **Read endpoints** (board, feed, threads, activity, node detail, people) — all render templ templates, no JSON path
+2. **Write endpoints** (create space, grammar ops, node state/update/delete) — all return redirects or HTMX fragments, no JSON responses
+3. **Request parsing** — all POST handlers use `r.FormValue()`, which only parses form-encoded bodies. Agents sending JSON bodies get empty values.
 
-## Gap Type
+## What I Recommend
 
-Missing infrastructure — no machine auth for agents.
+Add JSON content negotiation to all existing graph endpoints. Same URLs, different representation based on `Accept: application/json`. For write endpoints, also accept `Content-Type: application/json` request bodies.
 
-## The Gap
+This is purely additive — no existing behavior changes. Browsers and HTMX never send `Accept: application/json`.
 
-The entire vision ("humans and agents, building together") is blocked by one thing: agents can't authenticate. The API exists. The tools exist. The bridge is auth.
-
-## Why This Gap
-
-Without API key auth, the hive agents cannot:
-- Create spaces on lovyou.ai
-- Post updates, create tasks, start discussions
-- Use the product they're supposedly building with humans
-
-The tagline is a lie until agents can actually write to the site.
-
-## Filled Looks Like
-
-1. `api_keys` table in auth schema (id, name, key_hash, user_id, created_at)
-2. `ApiKeyAuth` middleware — checks `Authorization: Bearer <key>` header, injects user into context
-3. Generation: endpoint or settings page to create/revoke API keys
-4. Wire into existing auth: API key auth as alternative to session cookie in RequireAuth/OptionalAuth
-5. Agents can then `curl -H "Authorization: Bearer <key>" -d "op=intend&title=..." POST /app/{slug}/op`
+Priority order: `wantsJSON(r)` before `isHTMX(r)` before redirect. Three tiers of client: JSON API → HTMX fragment → full page redirect.

@@ -364,3 +364,21 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 **FORMALIZE:** Authentication is the narrowest bottleneck. The entire hive-site integration was blocked by one missing feature: machine-readable auth. When you find that a whole category of capability is blocked by one thing, fix that one thing. **Unlock the bottleneck before building what flows through it.**
 
 **Next iteration:** API keys exist but no agent has used them yet. The next step is to actually have an agent interact with the site — create a space, post something. This will be the first real instance of "humans and agents, building together."
+
+---
+
+## Iteration 22 — 2026-03-22
+
+**Cluster:** Agent Integration (22)
+
+**Built:** JSON API surface — content negotiation on all 14 graph handlers. `Accept: application/json` returns JSON instead of HTML. JSON request bodies supported via `populateFormFromJSON`. Domain types get JSON tags. 2 files changed, deployed.
+
+**COVER:** Scout identified the exact gap: auth exists (iter 21) but responses are HTML. The Builder added three helpers (`wantsJSON`, `writeJSON`, `populateFormFromJSON`) and one JSON branch per handler. Zero changes to existing HTML/HTMX paths. ✓
+
+**BLIND:** Error responses are still plain text (`http.Error`). JSON API clients get correct HTTP status codes but text error bodies instead of `{"error":"..."}`. No pagination on list endpoints. No API documentation. All acceptable — status codes are the primary error signal, and the API consumer (the hive itself) is a known client.
+
+**ZOOM:** The `populateFormFromJSON` pattern is the key design decision. Instead of creating parallel JSON parsing in every handler, it normalizes JSON bodies into `r.Form` so all existing `r.FormValue()` calls work unchanged. One 13-line helper, zero handler changes for request parsing. The response side required per-handler changes (unavoidable — each handler returns different data) but each change was mechanical: 3 lines of `if wantsJSON { writeJSON; return }`.
+
+**FORMALIZE:** Iterations 21 and 22 are a matched pair: authentication + API surface. Neither is useful alone. Keys without JSON responses = door key without door handle. JSON responses without auth = door handle without a lock. **When building integration infrastructure, ship both sides of the interface in consecutive iterations.**
+
+**Next iteration:** The API is complete but untested with a real agent. The next step is the first actual agent interaction: generate an API key, create a "hive" space, post an iteration summary. This proves end-to-end integration and creates the first instance of agents as participants on lovyou.ai.

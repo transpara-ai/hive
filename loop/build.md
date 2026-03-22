@@ -1,38 +1,63 @@
-# Build Report — Iteration 21
+# Build Report — Iteration 22
 
 ## What I planned
 
-Add API key authentication so agents can programmatically interact with lovyou.ai. This is the foundation for "humans and agents, building together."
+Add JSON API surface to all graph endpoints so agents can programmatically interact with lovyou.ai via Bearer token + JSON.
 
 ## What I built
 
-Changes to 1 file (auth/auth.go) in the site repo.
+Changes to 2 files in the site repo: `graph/store.go` and `graph/handlers.go`.
 
-### API key data model
-- `api_keys` table: `id`, `name`, `key_hash` (SHA-256, unique), `user_id` (FK → users), `created_at`
-- `APIKey` struct for metadata (no raw key in struct — only returned at creation)
+### JSON tags on domain types (store.go)
+- Added `json:"..."` tags to `Space`, `Node`, and `Op` structs
+- `omitempty` on optional fields (ParentID, NodeID, DueDate)
+- Clean camelCase→snake_case mapping matches the database columns
 
-### Key generation
-- `createAPIKey(ctx, userID, name)` → returns raw key `lv_` + 64 hex chars
-- SHA-256 hash stored, raw key never persisted
-- `lv_` prefix makes keys identifiable in logs/configs
+### Helper functions (handlers.go)
+- `wantsJSON(r)` — checks `Accept: application/json` header
+- `writeJSON(w, status, v)` — sets Content-Type, writes status, encodes JSON
+- `populateFormFromJSON(r)` — for JSON request bodies, parses into `r.Form` so `r.FormValue()` works transparently for both form-encoded and JSON requests
 
-### Authentication flow
-- `userFromBearer(r)` — extracts `Authorization: Bearer <key>` header, hashes key, looks up user
-- `RequireAuth` now checks Bearer token first, falls back to session cookie
-- `OptionalAuth` same — Bearer token → cookie → anonymous
-- Seamless: existing browser users unaffected, agents use Bearer token
+### JSON response paths on all handlers
+- **Read handlers**: handleSpaceIndex, handleSpaceDefault, handleBoard, handleFeed, handleThreads, handlePeople, handleActivity, handleNodeDetail — all return JSON when `Accept: application/json`
+- **Write handlers**: handleCreateSpace, handleOp (all 9 grammar operations), handleNodeState, handleNodeUpdate, handleNodeDelete — all return JSON with created/updated entity
+- **JSON body parsing**: handleCreateSpace, handleOp, handleNodeState, handleNodeUpdate — call `populateFormFromJSON(r)` at top
 
-### API key management routes
-- `POST /auth/api-keys` — create key (requires session auth), returns JSON `{"key": "lv_...", "name": "..."}`
-- `POST /auth/api-keys/{id}/delete` — revoke key (owner only)
-- `ListAPIKeys(ctx, userID)` — public method for UI integration (returns metadata only)
+### Response format
+```json
+// Read: GET /app/{slug}/feed with Accept: application/json
+{"space": {...}, "nodes": [...]}
 
-### Security
-- Raw key shown exactly once (at creation), never stored
-- SHA-256 hash comparison for lookups
-- Delete requires both key ID and matching user_id (can't delete others' keys)
-- API key creation requires session auth (must be logged in via browser to generate keys)
+// Write: POST /app/{slug}/op with op=express
+{"node": {...}, "op": "express"}
+
+// Create: POST /app/new
+{"space": {...}}
+
+// Delete: DELETE /app/{slug}/node/{id}
+{"deleted": "node-id"}
+```
+
+### Agent interaction pattern
+```bash
+# Create a space
+curl -X POST https://lovyou.ai/app/new \
+  -H "Authorization: Bearer lv_..." \
+  -H "Accept: application/json" \
+  -d "name=hive&kind=project&visibility=public"
+
+# Post to it
+curl -X POST https://lovyou.ai/app/hive/op \
+  -H "Authorization: Bearer lv_..." \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"op":"express","title":"Iteration 22","body":"Added JSON API"}'
+
+# Read the feed
+curl https://lovyou.ai/app/hive/feed \
+  -H "Authorization: Bearer lv_..." \
+  -H "Accept: application/json"
+```
 
 ## Verification
 

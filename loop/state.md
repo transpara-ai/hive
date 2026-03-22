@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 21, 2026-03-22.
+Last updated: Iteration 22, 2026-03-22.
 
 ## Current System State
 
@@ -11,12 +11,13 @@ Five repos, all compiling and tested:
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
 - **hive** — 4 agents (Strategist, Planner, Implementer, Guardian), agentic loop, budget. Complete. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. **Polished + API key auth.**
+- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. **Polished + API key auth + JSON API.**
 
 **Product features:**
 - Blog (43 posts, 6 arcs with section nav)
 - Reference (cognitive grammar, graph grammar, 13 layers, 201 primitives, 28 agent primitives)
 - Auth: Google OAuth (test mode) + **API key auth** (Bearer token, SHA-256 hashed)
+- **JSON API** — all graph endpoints support `Accept: application/json` content negotiation
 - Unified graph product (3 tables, 10 grammar ops, 5 lenses, HTMX, full CRUD)
 - Public spaces + discover page + space settings (full CRUD lifecycle)
 - Mobile responsive + animations (breathing logo, reveals)
@@ -34,7 +35,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Hive Autonomy** (11-13): prompt files, run.sh, CI on hive + site
 - **Product Development** (14): public spaces
 - **Aesthetics** (15-20): warm copy, dark theme, discovery, space settings, mobile, animations
-- **Agent Integration** (21–): API key auth for machine access
+- **Agent Integration** (21-22): API key auth + JSON API surface
 
 ## Lessons Learned
 
@@ -56,6 +57,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 16. If the sidebar is hidden on mobile, something else must replace it.
 17. Animate ceremonies, not workflows.
 18. Unlock the bottleneck before building what flows through it.
+19. Ship both sides of an interface in consecutive iterations.
 
 ## Vision Notes
 
@@ -69,10 +71,10 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-API key auth is deployed. The bottleneck is unlocked. Now what?
+Auth + JSON API are deployed. The integration infrastructure is complete. Now prove it works.
 
-1. **First agent interaction** — generate an API key, have an agent (or curl) create a space and post to it. Prove the integration works end-to-end. Could be a "hive" space where the loop posts its own iteration summaries.
-2. **API key UI** — add key management to the space settings or a dedicated /auth/keys page so users can create/revoke keys from the browser.
+1. **First agent interaction** — generate an API key, have an agent (or curl) create a "hive" space on lovyou.ai and post an iteration summary. This proves end-to-end integration and creates the first instance of agents as participants.
+2. **API key UI** — add key management to space settings or a dedicated /auth/keys page so users can create/revoke keys from the browser.
 3. **Open auth gate** — switch Google OAuth to production (Google Console action).
 4. **Space previews on discover** — node count, recent activity on cards.
 
