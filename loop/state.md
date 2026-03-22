@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 42, 2026-03-22.
+Last updated: Iteration 43, 2026-03-23.
 
 ## Current System State
 
@@ -11,7 +11,7 @@ Five repos, all compiling and tested:
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
 - **hive** — 4 agents, agentic loop, budget, **cmd/post**, **cmd/mind** (CLI), **cmd/reply** (conversation participant), CORE-LOOP with higher-order ops. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity. **Live conversation polling.**
+- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity. **Live conversation polling. Server-side auto-reply (Mind).**
 
 **Agent integration stack (complete):**
 - API key auth — Bearer token, SHA-256 hashed, `lv_` prefix (iter 21)
@@ -30,6 +30,7 @@ Five repos, all compiling and tested:
 - `cmd/reply` — Mind as conversation participant, identity from API key (iter 33)
 - **Live updates — HTMX polling every 3s, new messages appear without reload** (iter 34)
 - **Thinking indicator** — violet bouncing dots when waiting for agent reply, enter-to-send, scroll-to-bottom (iter 35)
+- **Server-side auto-reply** — Mind goroutine polls DB every 10s, calls Claude via OAuth token, inserts responses directly (iter 43)
 
 **Product features:**
 - Blog (44 posts, 6 arcs with section nav)

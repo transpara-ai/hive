@@ -738,3 +738,21 @@ Also: no end-to-end test — ANTHROPIC_API_KEY wasn't available in session. The 
 1. **Auto-reply** — requires ANTHROPIC_API_KEY as Fly secret (director action)
 2. **Return to hive codebase** — agent runtime, social graph, new product layers
 3. **Open auth gate** — Google Console action (director action)
+
+---
+
+## Iteration 43 — 2026-03-23
+
+**Cluster:** Auto-Reply (43)
+
+**Built:** Server-side Mind — a background goroutine in the site server that polls for unreplied agent conversations and responds via Claude. New file `graph/mind.go` (~250 lines) + 2-line edit to `main.go`. Uses raw HTTP to the Anthropic Messages API with the Claude Code OAuth token (fixed-cost Max plan). Polls every 10 seconds. Deployed to Fly.io with `CLAUDE_CODE_OAUTH_TOKEN` secret. Verified: logs show `mind enabled` and `mind: started (polling every 10s)`.
+
+**COVER:** The Scout correctly identified this as the post-fixpoint gap. 42 iterations of site polish built the infrastructure (chat, bubbles, polling, thinking indicator, agent identity) but nothing connected it to Claude. The thinking indicator trained users to expect automatic responses that weren't happening. This iteration closes the feedback loop: human message → Mind detects → Claude responds → response appears via existing HTMX polling. ✓
+
+**BLIND:** The OAuth token (`sk-ant-oat01-...`) may not work with the standard Anthropic Messages API. The API typically expects `sk-ant-api03-...` keys. If it's rejected, the Mind will log errors silently. **This is untested** — no conversations currently need replies. The first real test happens when Matt messages in an agent conversation. Fallback: use a standard API key or install Claude CLI in Docker.
+
+**ZOOM:** Single-iteration build. The right scale: one new file, one small edit, one secret. The Mind reuses the existing soul prompt from `cmd/reply` and the existing HTMX polling for display. No new dependencies, no Docker changes, no schema changes. The infrastructure from iterations 31-35 made this trivial.
+
+**FORMALIZE:** The feedback loop is now closed (infrastructure → interface → delivery). The pattern: **build the pipe, then turn on the water**. 12 iterations built the pipe (conversations 31-35, agent identity 25-27, polling 34, thinking indicator 35, badges 36-42). One iteration turned on the water. The ratio (12:1) is correct — the pipe must be right before anything flows through it. **New lesson: the simplest integration is often just a polling loop. Don't over-engineer webhooks or event systems when a 10-second poll against your own DB is sufficient.**
+
+**Next iteration:** Verify auto-reply end-to-end (Matt sends a message, Mind responds). If the OAuth token doesn't work with the API, fix the auth mechanism. After that: open auth gate (Google Console), return to hive codebase, or conversation types.

@@ -1,13 +1,17 @@
-# Scout Report — Iteration 42
+# Scout Report — Iteration 43
 
-## Gap: Thread cards missing agent author badges
+## Gap: Auto-reply — the feedback loop doesn't close
 
-Thread list cards show author as plain text (line 573 of views.templ). Feed cards already show violet avatar + "agent" badge for agent-authored posts (since early iterations). Conversation cards show agent indicator on last message (iter 37). Thread cards are the last holdout.
+FIXPOINT reached on site polish (confirmed iter 42). The site has all the infrastructure for live conversation — chat bubbles (iter 32), `cmd/reply` (iter 33), HTMX polling (iter 34), thinking indicator (iter 35) — but nothing triggers a response when a human sends a message. The thinking indicator is aspirational UX.
+
+Lesson 29: "Infrastructure isn't done until the feedback loop closes."
 
 ## What "Filled" Looks Like
 
-Thread card author line gets the same violet avatar + badge treatment as FeedCard and opItem. Small template change.
+When a human sends a message in a conversation with an agent participant, the agent replies automatically within ~15 seconds. No manual `cmd/reply` invocation needed.
 
-## Note
+## Approach
 
-This is a fixpoint-adjacent iteration — diminishing returns on site polish. The biggest remaining gap is auto-reply (the Mind doesn't respond to conversations automatically). That requires ANTHROPIC_API_KEY as a Fly secret. Next iteration should address that.
+Server-side auto-reply: a background goroutine in the site server that polls the DB every 10 seconds for unreplied agent conversations, invokes Claude via the Anthropic API (using the OAuth token from the Max plan for fixed-cost billing), and inserts the response directly into the DB.
+
+No new Go dependencies — raw HTTP to the Anthropic Messages API. No Docker changes. One Fly secret: `CLAUDE_CODE_OAUTH_TOKEN`.
