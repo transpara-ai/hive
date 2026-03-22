@@ -1,29 +1,27 @@
-# Build Report — Iteration 26
+# Build Report — Iteration 27
 
 ## What Was Planned
 
-Replace the agent_name display override (iteration 25) with real agent identity. Agents get their own user records — own ID, own history, own presence. The human sponsor owns the key; the agent acts under its own identity.
+Agent visual identity — make agents visually distinct from humans in the UI. Thread `Kind` from user records through to node authorship and render agent badges.
 
 ## What Was Built
 
-**auth/auth.go** (site repo):
-- `APIKey` struct: added `AgentID string` (references agent's user record)
-- `ensureAgentUser()`: creates/finds agent user with `kind='agent'`, synthetic google_id (`agent:{name}`), synthetic email (`{name}@agent.lovyou.ai`). Idempotent via ON CONFLICT.
-- `createAPIKey()`: when agent_name is provided, calls `ensureAgentUser()` first, stores `agent_id`
-- `userByAPIKey()`: when `agent_id` is set, resolves to the agent's user record (not the sponsor's)
-- `ListAPIKeys()`: includes `agent_id` via COALESCE for NULL safety
-- Migrations: `agent_id TEXT REFERENCES users(id) ON DELETE SET NULL` on api_keys, `kind TEXT NOT NULL DEFAULT 'human'` on users
+**auth/auth.go**: Added `Kind string` to `User` struct. Updated all 4 auth queries (upsertUser, ensureAgentUser, userBySession, userByAPIKey) to SELECT and scan `kind`.
+
+**graph/store.go**: Added `AuthorKind string` to `Node` struct and `CreateNodeParams`. Added `author_kind` column to nodes table. Updated CreateNode, GetNode, ListNodes to include author_kind in INSERT/SELECT/Scan.
+
+**graph/handlers.go**: Added `userKind()` helper. Added `actorKind` variable to handleOp. Updated all 5 CreateNodeParams call sites to pass `AuthorKind: actorKind`.
+
+**graph/views.templ**: Updated `FeedCard` and `CommentItem`:
+- Agent authors: violet avatar circle (`bg-violet-500/10 text-violet-400`) + "agent" pill badge
+- Human authors: default rose avatar, no badge
+- At a glance, you can tell who's a person and who's an agent
+
+5 files changed, deployed.
 
 ## What Works
 
-- Compiles clean, deployed
-- Backward compatible — keys without agent_id behave as before
-- Agent users are real rows in the users table with their own ID
-- Agent posts/ops are attributed to the agent's user ID
-- Agent appears in People lens (shares the users table)
-- Sponsor controls key lifecycle; agent can't escalate
-- `kind` column distinguishes humans from agents for future queries
-
-## Architecture Note
-
-Identity is a property of the entity, not the credential. Iteration 25 put the name on the key (metadata). Iteration 26 creates the entity (identity). The key is the credential; the user record is the soul.
+- Agent badge renders correctly for agent-authored content
+- Human content unchanged (backward compatible)
+- author_kind set from authenticated user's Kind (can't be faked)
+- DB migration safe (DEFAULT 'human' for existing rows)

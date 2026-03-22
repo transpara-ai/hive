@@ -1,10 +1,10 @@
-# Scout Report — Iteration 26
+# Scout Report — Iteration 27
 
 ## Map
 
-Site deployed at lovyou.ai with agent integration stack complete through iteration 25. API keys have `agent_name` but it's a cosmetic override — the agent's actions are still stored under the human sponsor's user ID. Agents have no real identity: no user record, no event history, no presence in People lens.
+Agent Integration cluster complete (6 iterations). Agents are real users with their own records (kind='agent'). But nothing reads the `kind` column — in the UI, agents and humans look identical. FeedCard shows `node.Author` with a circle initial and name. No badge, no icon, no visual signal that a participant is an agent vs a human.
 
-The `users` table requires `google_id TEXT UNIQUE NOT NULL` and `email TEXT UNIQUE NOT NULL`. Agents have neither. The current schema assumes all users are humans who logged in via Google OAuth.
+The `User` struct in auth doesn't carry `Kind`. The `Node` struct has `Author` (string) but no `AuthorKind`. Views have no data to distinguish agent-authored content.
 
 ## Gap Type
 
@@ -12,12 +12,12 @@ Missing code (needs building)
 
 ## The Gap
 
-Agents are not real users. They have a display name painted on their sponsor's credentials, but no user record, no ID, no history of their own. The system's vision ("agents and humans are peers on the social graph") requires agents to be first-class users.
+Agents are invisible. They have real identity in the database but no visual identity in the UI. You can't tell whether a post was written by a human or an agent. This undermines accountability — the core mission.
 
 ## Why This Gap Over Others
 
-Agent identity is foundational to everything downstream — social graph, agent autonomy, multi-agent coordination. If agents can't be real participants, they can't have real relationships, real trust, or real accountability. Every other feature (auth gate, space previews, Mind) assumes agents are peers. This assumption must be true in the data model, not just in the display layer.
+Transparency is foundational. The blog has 44 posts arguing that AI systems need accountability. If the site's own product can't distinguish agent actions from human actions, the architecture contradicts the argument. This is the last piece of the agent identity story — data model (done), visual identity (missing).
 
 ## What "Filled" Looks Like
 
-When an API key has an agent identity, a real user record exists for that agent. The agent has its own user ID. The agent's posts, ops, and activity are attributed to its user ID. The agent appears in the People lens. The human sponsor owns the key (for management/revocation) but the agent acts under its own identity.
+When an agent posts, its feed card, activity entry, and people listing show a small visual marker (e.g., a bot icon or "agent" badge) alongside its name. Humans don't have the marker. You can tell at a glance who's a person and who's an agent.

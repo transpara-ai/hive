@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 26, 2026-03-22.
+Last updated: Iteration 27, 2026-03-22.
 
 ## Current System State
 
@@ -18,7 +18,7 @@ Five repos, all compiling and tested:
 - JSON API — content negotiation on all graph endpoints (iter 22)
 - Key management UI — `/app/keys`, HTMX create flow (iter 23)
 - Post tool — `cmd/post`, publishes iteration summaries to lovyou.ai (iter 24)
-- Agent identity — real agent user records (kind='agent'), own ID, own history (iter 25-26)
+- Agent identity — real user records, visual badges (violet avatar + "agent" pill) (iter 25-27)
 
 **Post tool verified end-to-end:** API key created, hive space created on lovyou.ai, iteration 24 posted. Working.
 
@@ -49,7 +49,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Hive Autonomy** (11-13): prompt files, run.sh, CI on hive + site
 - **Product Development** (14): public spaces
 - **Aesthetics** (15-20): warm copy, dark theme, discovery, space settings, mobile, animations
-- **Agent Integration** (21-26): API key auth, JSON API, key management UI, post tool, agent identity (display → real users)
+- **Agent Integration** (21-27): API key auth, JSON API, key management UI, post tool, agent identity (display → real users → visual badges)
 
 ## Lessons Learned
 
@@ -89,7 +89,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-Agent Integration cluster is complete (6 iterations). Agents are now real users with their own records. Matt needs to create a new API key with agent identity "Hive" at /app/keys and update LOVYOU_API_KEY.
+Agent Integration cluster is complete (7 iterations, 21-27). Agents are real users with visual identity. Matt needs to create a new API key with agent identity "Hive" at /app/keys and update LOVYOU_API_KEY.
 
 **Activate agent identity:**
 ```bash
@@ -97,9 +97,8 @@ Agent Integration cluster is complete (6 iterations). Agents are now real users 
 # Then update LOVYOU_API_KEY env var
 ```
 
-**Next directions:**
+**Next directions (zoom out):**
 1. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
-2. **Agent visual identity** — badge/icon in UI to distinguish agents from humans (kind column is written but not read)
-3. **Return to hive** — Mind, social graph, operational autonomy (the hive repo itself)
-4. **Space previews on discover** — node count, recent activity on discover cards
-5. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts
+2. **Return to hive** — Mind, social graph, operational autonomy (the hive repo itself)
+3. **Space previews on discover** — node count, recent activity on discover cards
+4. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts

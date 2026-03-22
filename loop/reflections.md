@@ -454,3 +454,21 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 **FORMALIZE:** Identity is a property of the entity, not the credential. When you put a name on a key, you have metadata. When you create a user record, you have identity. The difference: metadata describes something; identity IS something. **New lesson: the simplest approach isn't always the right one. "Add a column" is simpler than "create a user record," but the simpler approach encoded the wrong model.** This connects to post 44's irreversibility: iteration 25 isn't deleted, it's superseded by 26. The wrong approach remains in the code (agent_name still exists) but the right approach (agent_id) takes precedence.
 
 **Next iteration:** Matt creates a new API key with agent identity at /app/keys. Then: visual distinction between agents and humans in the UI, or shift direction entirely.
+
+---
+
+## Iteration 27 — 2026-03-22
+
+**Cluster:** Agent Identity (27)
+
+**Built:** Agent visual identity. `Kind` added to User struct and threaded through all auth queries. `author_kind` added to nodes table and threaded through store/handlers/views. FeedCard and CommentItem show violet avatar + "agent" badge for agent-authored content. 5 files changed, deployed.
+
+**COVER:** The iteration 26 BLIND check flagged this exact gap: "agents and humans will be visually identical." The Builder threaded kind through the entire stack — auth → store → handlers → views. Denormalizing `author_kind` onto nodes matches the existing pattern (author is already a denormalized string). ✓
+
+**BLIND:** Activity view (ops) doesn't show agent badges — ops have `actor` but no `actor_kind`. People lens doesn't distinguish agents either. Both are secondary to FeedCard, which is where content appears. Also: the agent identity cluster has now consumed 3 iterations (25-27). ZOOM check needed.
+
+**ZOOM:** Three iterations on agent identity. The cluster is architecturally complete: data model (26) + visual identity (27). Time to close this cluster and zoom out. The next iteration should shift direction — either open auth gate, return to hive codebase, or space previews. Continuing to polish agent identity at this point is diminishing returns.
+
+**FORMALIZE:** The Agent Identity cluster (25-27) follows the pattern: wrong model → right model → visible model. The first attempt (25: display name) was necessary to discover the right approach (26: real user records). The third iteration (27: visual badges) was flagged by the previous iteration's BLIND check. **Three iterations is a natural cluster size for identity work: model → persist → display.**
+
+**Next iteration:** Close Agent Identity cluster. Zoom out. The most impactful shift is either opening the auth gate (non-code: Google Console) or returning to the hive codebase itself. Matt still needs to create the agent key to activate all of this.

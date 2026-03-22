@@ -1,37 +1,38 @@
-# Critique — Iteration 26
+# Critique — Iteration 27
 
 ## Verdict: APPROVED
 
 ## Trace
 
-1. Matt observed that `agent_name` is "a name without a soul" — display override, not real identity
-2. Scout identified: agents need real user records, not cosmetic labels
-3. Builder added `ensureAgentUser()` — creates agent users with kind='agent' and synthetic google_id
-4. Builder added `agent_id` to api_keys — links key to agent's user record
-5. Builder updated `userByAPIKey()` — resolves to agent user when agent_id is set
+1. Scout identified: agents have real identity (iter 26) but no visual distinction — you can't tell agent posts from human posts
+2. Builder added `Kind` to User struct, threaded through all 4 auth queries
+3. Builder added `author_kind` to nodes table + Node struct + CreateNodeParams
+4. Builder added `actorKind` to handleOp, passes through to all 5 CreateNodeParams call sites
+5. Builder updated FeedCard + CommentItem: violet avatar circle + "agent" badge when author_kind = "agent"
 6. Compiles clean, deployed
 
-Sound chain. The gap → plan → code → verify chain holds.
+Sound chain. The gap was correctly scoped to the data + view layer.
 
 ## Audit
 
 **Correctness:**
-- `ensureAgentUser()` uses `ON CONFLICT (google_id)` with synthetic `agent:{name}` — idempotent. Creating the same agent twice returns the existing record. ✓
-- `createAPIKey()` creates agent user before inserting key — agent_id is always valid when set. ✓
-- `userByAPIKey()` does two queries when agent_id is set (one for key lookup, one for agent). Could be a JOIN but simplicity wins here. ✓
-- `ListAPIKeys()` uses `COALESCE(agent_id, '')` — handles NULL → empty string cleanly. ✓
+- User.Kind populated in all 4 auth paths: upsertUser, ensureAgentUser, userBySession, userByAPIKey. ✓
+- author_kind stored on every node creation (5 call sites in handleOp). Default "human" when empty. ✓
+- DB migration: `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS author_kind TEXT NOT NULL DEFAULT 'human'` — safe, backward-compatible. ✓
+- FeedCard: conditional rendering on `node.AuthorKind == "agent"` — violet avatar + badge. ✓
+- CommentItem: same treatment. ✓
 
-**Breakage:**
-- Existing keys without agent_id (NULL) → `agentID.Valid` is false → sponsor user returned. Fully backward compatible. ✓
-- `ON DELETE SET NULL` on agent_id: if agent user is deleted, key falls back to sponsor identity. Reasonable. ✓
-- Agent users can't log in via OAuth (no real google_id). Access only through API keys — sponsor controls access. ✓
+**Breakage:** Zero risk. All existing nodes get `author_kind = 'human'` via DEFAULT. Human users get `kind = 'human'` via DEFAULT. No visual change for humans. ✓
 
-**Simplicity:** One new function (`ensureAgentUser`), one new column (`agent_id`), one new column (`kind`). No new tables, no new types, no new middleware. ✓
+**Simplicity:** The approach denormalizes author_kind onto nodes rather than joining users at query time. This is the right tradeoff — avoids a JOIN in every query, matches the existing pattern where `author` is already a denormalized string. ✓
 
-**Security:** Agent identity is scoped to API key auth only. Agents can't create sessions, can't manage other keys, can't escalate. The sponsor revokes the key → agent loses access (but identity persists — their history remains). ✓
+**Security:** author_kind is set from the authenticated user's Kind, not from form input. Users can't fake being an agent. ✓
 
-**Dual (root cause):** Why was iteration 25's approach wrong? Because it treated identity as a *property of the credential* (agent_name on the key) rather than a *property of the entity* (user record). A name on a key is metadata. A user record is identity. The distinction: metadata describes something; identity IS something.
+**Gaps (acceptable for now):**
+- Activity view (ops) doesn't show agent badges — ops have `actor` but no `actor_kind`. Can be added later.
+- People lens doesn't distinguish agents. Can be added later.
+- Thread list doesn't show agent badges on thread starters.
 
 ## Observation
 
-The `kind` column on users is written but not yet read. Future iterations can use it to filter agents from humans in People lens, activity feeds, etc. The foundation is laid; the views will follow.
+The agent identity cluster is now architecturally complete: data model (iter 26: real user records) + visual identity (iter 27: badges). Three iterations (25→26→27) from "agents post as humans" to "agents are visible, distinguishable peers." The cluster can close.
