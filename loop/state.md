@@ -117,6 +117,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 34. Absence is invisible to traversal. The Scout traverses what exists. Tests don't exist, so the Scout never encounters them. BLIND must explicitly ask: "what verification is missing?"
 35. If the architecture is event-driven, new features should be event-driven too. Don't introduce polling into an event-driven system.
 36. The loop can only catch errors it has checks for. When a human catches something the loop missed, fix the loop, not just the code.
+37. The Scout must read the vision, not just the code. Product gaps outrank code gaps. 60 iterations of code polish while 12 of 13 product layers remained unbuilt.
 
 ## Vision Notes
 

@@ -37,8 +37,13 @@ Read everything. Orient. Identify ONE gap.
 
 ```
 Read loop/state.md FIRST — this is the accumulated knowledge from
-previous iterations. Then read the codebase, docs, vision, git log,
-deploy state, and test results.
+previous iterations. Then read:
+1. The VISION: blog posts (site/content/posts/), product-layers.md
+   (eventgraph/docs/), state.md Vision Notes. What should exist?
+2. The REALITY: codebase, deploy state, test results. What does exist?
+3. The GAP: vision minus reality. Not code bugs — product gaps.
+   Which of the 13 product layers are unbuilt? What can users not
+   do that the vision says they should?
 
 MAP: Produce a brief orientation of the current state. What repos
 exist, what's deployed, what's working, what's broken. Name specific
@@ -49,13 +54,15 @@ EXPLORE: Given that map, navigate into the gaps. What doesn't exist
 that should? What's broken that shouldn't be?
 
 CATALOG: What kind of gap is it?
+- Missing product (a layer from the 13-layer stack isn't shipped)
+- Missing visibility (something exists but users can't see it)
 - Missing code (needs building)
 - Broken code (needs fixing)
 - Missing infrastructure (needs provisioning)
 - Missing quality (needs polish)
 - Missing knowledge (needs research)
 - Missing users (needs onboarding/marketing)
-The type shapes what the Builder does.
+The type shapes what the Builder does. Product gaps outrank code gaps.
 
 NEED: Of all gaps, pick ONE. The most load-bearing — the one that,
 once filled, unblocks the most subsequent capability.
