@@ -1,48 +1,33 @@
-# Build Report — Iteration 24
+# Build Report — Iteration 25
 
-## What I planned
+## What Was Planned
 
-Build the first agent interaction — a tool that makes the hive loop post its own iteration summaries to lovyou.ai.
+Agent identity on API keys: when an API key has an `agent_name`, authenticate as that identity instead of the human who created the key. Also update blog post count from 43 to 44.
 
-## What I built
+## What Was Built
 
-New file: `cmd/post/main.go` in the hive repo. Modified: `loop/run.sh`.
+**auth/auth.go** (site repo, 7 changes):
+- Added `AgentName string` to `APIKey` struct
+- Added `agent_name` column to `api_keys` CREATE TABLE
+- Added `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` migration for existing DBs
+- Updated `createAPIKey()` to accept and store `agent_name`
+- Updated `userByAPIKey()` — if key has `agent_name`, overrides `User.Name` in context
+- Updated `ListAPIKeys()` to select `agent_name`
+- Updated `handleCreateAPIKey()` to read `agent_name` from form
 
-### cmd/post — iteration publisher
+**graph/handlers.go**: Added `AgentName` to `ViewAPIKey` struct
+**graph/views.templ**: Agent name input on create form, "posts as" badge in key list
+**cmd/site/main.go**: Pass `AgentName` through to view
+**views/home.templ + views/blog.templ**: Post count 43 → 44
 
-A standalone Go program that posts iteration summaries to lovyou.ai using the JSON API and Bearer token auth built in iterations 21-22.
+## What Works
 
-**Flow:**
-1. Check `LOVYOU_API_KEY` env var — skip gracefully if unset (exit 0)
-2. Read `loop/state.md` — extract iteration number via regex
-3. Read `loop/build.md` — the build report becomes the post body
-4. `GET /app/hive` with `Accept: application/json` — check if hive space exists
-5. If 404: `POST /app/new` with JSON body — create "hive" community space (public)
-6. `POST /app/hive/op` with `op=express` — post the build report to the feed
+- Compiles clean, templ generated
+- DB migration safe (IF NOT EXISTS on ALTER)
+- Backward compatible — keys without agent_name behave as before
+- Identity flows end-to-end: create key with agent_name → authenticate → User.Name becomes agent identity → all handlers use it for Author field
+- Deployed to Fly.io
 
-**Configuration:**
-- `LOVYOU_API_KEY` — required, the `lv_...` Bearer token
-- `LOVYOU_BASE_URL` — optional, defaults to `https://lovyou.ai`
+## Next Step
 
-**Usage:**
-```bash
-cd /c/src/matt/lovyou3/hive
-LOVYOU_API_KEY=lv_... go run ./cmd/post/
-```
-
-### run.sh integration
-
-After all four phases complete (scout → builder → critic → reflector), run.sh now calls `go run ./cmd/post/`. If `LOVYOU_API_KEY` is not set, the tool prints "skipping post" and exits 0 — the loop doesn't break.
-
-### Why Go, not bash/curl
-
-- JSON escaping: build.md contains markdown with quotes, backticks, newlines. `json.Marshal` handles all of it. Bash string escaping would be fragile.
-- Error handling: HTTP status checks, readable error messages.
-- No dependencies: stdlib only (net/http, encoding/json, os, regexp).
-- Consistent: hive repo is Go. This is a Go binary alongside cmd/hive.
-
-## Verification
-
-- `go build -o /tmp/post.exe ./cmd/post/` — success
-- `/tmp/post.exe` without LOVYOU_API_KEY — prints "skipping" and exits 0
-- Cannot test end-to-end yet (no API key generated) — requires Matt to log in and create a key at /app/keys
+Matt creates a new API key at /app/keys with agent_name="Hive", updates LOVYOU_API_KEY env var. Posts from the hive will then show as "Hive" not "Matt Searles."

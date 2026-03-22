@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 24, 2026-03-22.
+Last updated: Iteration 25, 2026-03-22.
 
 ## Current System State
 
@@ -10,22 +10,32 @@ Five repos, all compiling and tested:
 - **eventgraph** — foundation. Postgres stores, 201 primitives, trust, authority. Complete. Has CI.
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
-- **hive** — 4 agents, agentic loop, budget, **cmd/post tool**. Complete. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack.
+- **hive** — 4 agents, agentic loop, budget, **cmd/post tool**, CORE-LOOP with higher-order ops. Has CI.
+- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity.
 
 **Agent integration stack (complete):**
 - API key auth — Bearer token, SHA-256 hashed, `lv_` prefix (iter 21)
 - JSON API — content negotiation on all graph endpoints (iter 22)
 - Key management UI — `/app/keys`, HTMX create flow (iter 23)
 - Post tool — `cmd/post`, publishes iteration summaries to lovyou.ai (iter 24)
+- Agent identity — `agent_name` on API keys, agents post as themselves (iter 25)
+
+**Post tool verified end-to-end:** API key created, hive space created on lovyou.ai, iteration 24 posted. Working.
 
 **Product features:**
-- Blog (43 posts, 6 arcs with section nav)
+- Blog (44 posts, 6 arcs with section nav)
 - Reference (cognitive grammar, graph grammar, 13 layers, 201 primitives, 28 agent primitives)
 - Unified graph product (3 tables, 10 grammar ops, 5 lenses, HTMX, full CRUD)
 - Public spaces + discover page + space settings (full CRUD lifecycle)
 - Mobile responsive + animations (breathing logo, reveals)
 - Visual identity: "Ember Minimalism" — dark theme, rose accent, warm text, subtle motion
+
+**CORE-LOOP updates:**
+- Higher-order operations integrated (pipeline ordering, fixpoint awareness, irreversibility, depth, duality)
+- Critic prompt updated with DUAL (root cause analysis)
+- Reflector prompt updated with FIXPOINT CHECK
+- Post 44 published with arity answer
+- Footer links updated on posts 42-44 with lovyou.ai
 
 Deploy: `fly deploy --remote-only` from site repo.
 
@@ -39,7 +49,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Hive Autonomy** (11-13): prompt files, run.sh, CI on hive + site
 - **Product Development** (14): public spaces
 - **Aesthetics** (15-20): warm copy, dark theme, discovery, space settings, mobile, animations
-- **Agent Integration** (21-24): API key auth, JSON API, key management UI, post tool
+- **Agent Integration** (21-25): API key auth, JSON API, key management UI, post tool, agent identity
 
 ## Lessons Learned
 
@@ -64,6 +74,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 19. Ship both sides of an interface in consecutive iterations.
 20. Infrastructure → interface → management. Skipping any layer leaves the others incomplete.
 21. Infrastructure before intelligence. Prove the plumbing, then add smarts.
+22. "Works correctly" and "works as intended" are different checks. After integration, test as the user/agent, not as the developer.
 
 ## Vision Notes
 
@@ -77,18 +88,17 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-The Agent Integration cluster is complete (4 iterations). The stack is built but unverified end-to-end — Matt needs to create an API key at /app/keys and run the post tool.
+Agent Integration cluster is complete (5 iterations). Agent identity is built but Matt needs to create a new key with agent_name="Hive" to activate it.
 
-**Activate the integration:**
+**Activate agent identity:**
 ```bash
-# Matt: log into lovyou.ai → /app/keys → create key → note the lv_... value
-# Then:
-cd /c/src/matt/lovyou3/hive
-LOVYOU_API_KEY=lv_... go run ./cmd/post/
+# Matt: log into lovyou.ai → /app/keys → create key with agent_name="Hive" → note the lv_... value
+# Then update LOVYOU_API_KEY env var
 ```
 
-**After integration is verified, next directions:**
+**After identity is activated, next directions:**
 1. **Open auth gate** — switch Google OAuth to production (Google Console action, not code)
 2. **Space previews on discover** — node count, recent activity on discover cards
 3. **Return to hive** — Mind, social graph, operational autonomy (the hive repo itself)
 4. **Self-posting loop** — set LOVYOU_API_KEY in the environment so every iteration auto-posts
+5. **Critic USE check** — add "try the feature as a user" step to the Critic's process

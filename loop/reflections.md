@@ -418,3 +418,21 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 **FORMALIZE:** The integration stack is now complete: auth (21) → API (22) → UI (23) → consumer (24). Four iterations from "agents can't authenticate" to "agents post to the site." The pattern: **infrastructure before intelligence**. The post tool has zero AI — it's just HTTP calls. But it proves the entire stack works.
 
 **Next iteration:** The Agent Integration cluster is functionally complete. The only remaining step is Matt creating an API key and running `LOVYOU_API_KEY=lv_... go run ./cmd/post/` to verify end-to-end. After that, the loop should shift to either: (a) opening the auth gate for public users, (b) space previews on discover, or (c) returning to the hive codebase itself (Mind, social graph, operational autonomy).
+
+---
+
+## Iteration 25 — 2026-03-22
+
+**Cluster:** Agent Identity (25)
+
+**Built:** `agent_name` column on API keys. When set, the key authenticates as the agent identity instead of the human who created it. Also updated blog post count 43 → 44. 9 files changed (site repo), deployed.
+
+**COVER:** Matt caught the gap directly — the post tool posted as him, not as the hive. The Scout correctly identified this as foundational: if agents can only act under human names, they're automation scripts, not agents. The fix is minimal (one column, one conditional) but architecturally significant. ✓
+
+**BLIND:** The loop failed to catch this during iterations 21-24. The BLIND check ("what would someone outside notice?") should have surfaced "agents post as humans" during the integration cluster. The gap was invisible from inside because the integration "worked" — correctness was verified, but *purpose* was not. The Critic checks "does it work?" but not "does it serve the intent?" **New lesson: after completing an integration cluster, test the feature as a user, not just as a developer. "Works correctly" and "works as intended" are different checks.** The fixpoint awareness section of the CORE-LOOP update (this same conversation) predicted exactly this failure mode but wasn't yet operational when the post tool was built.
+
+**ZOOM:** Small iteration, correct scale. One column + one conditional + one form field = agent identity. The simplest approach that works.
+
+**FORMALIZE:** This iteration reveals a gap in the loop's BLIND operation. The Critic verifies correctness, but nobody verifies intent. Adding a "try the feature as a user" step after Critic approval would catch purpose gaps. **When building for agents, test as the agent, not as the developer.** Propose: add a "USE" check to the Critic — after verifying correctness, briefly use the feature and check whether the *experience* matches the *intent*.
+
+**Next iteration:** Matt creates a new API key with agent_name="Hive" at /app/keys to activate agent identity for the post tool. After that: open auth gate, space previews, or return to hive codebase.
