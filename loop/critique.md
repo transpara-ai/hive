@@ -1,8 +1,8 @@
-# Critique — Iteration 126
+# Critique — Iteration 127
 
 ## AUDIT
-**Correctness:** PASS. Deadline is optional. Overdue check uses `time.Now()` — correct for server-side rendering. Only open proposals show as overdue.
-**Breakage:** PASS. No schema changes — reuses existing DueDate field.
-**Simplicity:** PASS. 5 lines of handler, 7 lines of template.
+**Correctness:** PASS. LEFT JOIN ensures ops without nodes still appear. COALESCE handles nulls. Truncation prevents layout overflow.
+**Breakage:** PASS. Op struct gains a field — zero value "" is correct for ops without nodes.
+**Tests:** PASS. Existing tests don't scan NodeTitle but the field is JSON-tagged and backward compatible.
 
 ## Verdict: PASS

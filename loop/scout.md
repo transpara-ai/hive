@@ -1,7 +1,7 @@
-# Scout Report — Iteration 126
+# Scout Report — Iteration 127
 
-## Gap: Governance proposals have no deadlines
+## Gap: Activity feed shows op type but not what it's about
 
-Proposals stay open forever. No urgency, no resolution timeline. The DueDate field exists on all nodes but isn't used for proposals.
+"Matt intend" is meaningless without clicking through. The Activity lens and dashboard agent activity show op type + actor but not the node title. Users can't understand what happened without navigating to each node.
 
-**Scope:** Add deadline input to proposal form, parse in handler, show on proposal cards with overdue indicator.
+**Scope:** Join nodes in ListOps and ListUserAgentActivity queries, add NodeTitle to Op struct, show titles in activity views.

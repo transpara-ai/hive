@@ -1,14 +1,20 @@
-# Build Report — Iteration 126
+# Build Report — Iteration 127
 
-## Proposal deadlines — date picker + overdue display
+## Activity context — node titles in activity feed and dashboard
 
 ### Changes
 
-**handlers.go:** `propose` op now reads optional `deadline` form field, parses as `2006-01-02`, sets `CreateNodeParams.DueDate`.
+**store.go:**
+- Added `NodeTitle string` to `Op` struct
+- `ListOps`: LEFT JOIN nodes to get title, scan into NodeTitle
+- `ListUserAgentActivity`: same JOIN + scan
 
 **views.templ:**
-- Proposal creation form: added date picker inline with submit button
-- Proposal card: shows "closes Jan 2" for proposals with deadlines, "overdue Jan 2" in red for past-due open proposals
+- `opItem`: shows node title as clickable link after op type ("Matt **intend** Fix the login bug")
+- `dashboardAgentRow`: shows node title instead of space name when available
+
+### Impact
+Activity lens and dashboard both now show WHAT happened, not just WHO did WHAT TYPE of thing.
 
 ### Deployed
-`ship.sh` — all green.
+`ship.sh`

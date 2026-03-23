@@ -1324,3 +1324,15 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Tiny iteration. ~12 lines total. Right scale. 40 iterations this session.
 
 **FORMALIZE:** Six depth iterations (121-126). Each makes an existing layer genuinely more useful: knowledge evidence, dependency CRUD, notification awareness, dashboard filtering, governance deadlines. The platform is substantively deeper than at iter 120.
+
+---
+
+## Iteration 127 — 2026-03-23
+
+**Built:** Activity context. Node titles now appear in the Activity lens and dashboard agent activity. "Matt intend" becomes "Matt intend: Fix the login bug". Both ListOps and ListUserAgentActivity queries now JOIN nodes.
+
+**COVER:** Activity is the transparency layer (L7). Without context, it was a raw log. With titles, it's a human-readable audit trail. ✓
+
+**BLIND:** The global activity page (/activity on public pages) and the node detail activity section use different queries (ListNodeOps) that already had access to node context. Only the space Activity lens and dashboard were missing context.
+
+**ZOOM:** Single-iteration. One struct field, two query updates, two template updates. 41 iterations this session.
