@@ -1,7 +1,7 @@
-# Scout Report — Iteration 124
+# Scout Report — Iteration 125
 
-## Gap: Notification badge only visible on dashboard
+## Gap: Dashboard has no task filtering
 
-Notifications exist (iter 102-103) with an unread badge on the dashboard. But when users are in a space (Board, Feed, Chat, etc.), there's no notification indicator in the sidebar. Users miss updates while working.
+Tasks section shows only open tasks with no way to filter by state, see completed work, or focus on active tasks.
 
-**Scope:** Add unread count to ViewUser struct, populate in viewUser(), show badge on "My Work" sidebar link.
+**Scope:** Add state filter tabs to dashboard tasks section via query params.

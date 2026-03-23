@@ -1298,3 +1298,15 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Tiny iteration. 3 lines of Go, 3 lines of templ. Maximum leverage — one struct field gives every page notification awareness.
 
 **FORMALIZE:** Four depth iterations (121-124). Pattern: complete existing features rather than add new ones. Knowledge evidence, dependency CRUD, notification badge. Each makes something that existed but was invisible into something useful. 38 iterations this session.
+
+---
+
+## Iteration 125 — 2026-03-23
+
+**Built:** Dashboard task filtering. State tabs (Open/Active/Review/Done/All) via query params. Users can now see completed work, focus on active tasks, or view everything.
+
+**COVER:** The dashboard was the most-visited page with the least functionality. Five tabs is the simplest filtering that actually helps. ✓
+
+**BLIND:** No space-level filtering on dashboard. Tasks from all spaces appear together. Also no sorting (by due date, priority, space).
+
+**ZOOM:** Single-iteration. Right scale. 39 iterations this session.

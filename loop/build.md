@@ -1,19 +1,20 @@
-# Build Report — Iteration 124
+# Build Report — Iteration 125
 
-## Notification badge in sidebar — unread count visible from every space
+## Dashboard task filtering — state tabs with query params
 
 ### Changes
 
-**handlers.go:**
-- Added `UnreadCount int` to `ViewUser` struct
-- `viewUser()` now calls `store.UnreadCount()` to populate the count for authenticated users
+**store.go:** `ListUserTasks` now accepts `stateFilter` param: "" (open), "active", "review", "done", "all". Switch-based SQL generation. Limit increased to 20.
+
+**handlers.go:** Reads `?tasks=` query param, passes to store and template.
 
 **views.templ:**
-- "My Work" link in sidebar now shows a brand-colored badge with unread count when > 0
-- Badge uses `ml-auto` to push to the right of the link, matching the dashboard's badge style
+- Dashboard signature extended with `taskFilter string`
+- Added filter tabs: Open / Active / Review / Done / All
+- `dashboardTaskTab` component with brand highlight for active tab
+- Context-aware empty state messages
 
-### Impact
-Every page that uses `appLayout` (all space lenses) now shows the notification count. Users don't need to navigate to the dashboard to know something happened.
+**store_test.go:** Updated `ListUserTasks` call to include state filter param.
 
 ### Deployed
 `ship.sh` — all green.
