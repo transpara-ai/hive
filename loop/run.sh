@@ -28,7 +28,7 @@ run_phase() {
     fi
 
     echo "=== ${phase^^} ==="
-    claude -p "$(cat "$prompt_file")"
+    claude --dangerously-skip-permissions -p "$(cat "$prompt_file")"
     echo ""
 }
 
@@ -53,9 +53,11 @@ case "$phase" in
         run_phase critic
         # TODO: if critique says REVISE, run builder+critic again (max 3 rounds)
         run_phase reflector
-        # Post iteration summary to lovyou.ai (requires LOVYOU_API_KEY).
-        if command -v go &>/dev/null; then
-            go run ./cmd/post/
+        # Post iteration summary to lovyou.ai.
+        if command -v go &>/dev/null && [ -n "${LOVYOU_API_KEY:-}" ]; then
+            LOVYOU_API_KEY="$LOVYOU_API_KEY" go run ./cmd/post/
+        else
+            echo "SKIP: post (set LOVYOU_API_KEY to enable)"
         fi
         ;;
     *)

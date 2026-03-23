@@ -4,7 +4,7 @@ Plan first: What files change? What does the code look like? Sketch key types, f
 
 Then build: Write code. Run build. Run tests. Fix what breaks. Commit with a descriptive message. Push to GitHub.
 
-If site changes: deploy with `cd /c/src/matt/lovyou3/site && fly deploy --remote-only`.
+If site changes: deploy with `cd /c/src/matt/lovyou3/site && /c/Users/matt_/.fly/bin/flyctl deploy --remote-only`.
 
 BOUNDED: If the change is taking too long, stop and write what you have. Partial progress that compiles is better than ambitious progress that doesn't.
 

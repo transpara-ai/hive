@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 91, 2026-03-23.
+Last updated: Iteration 92, 2026-03-23.
 
 ## Current System State
 
@@ -35,15 +35,36 @@ Five repos, all compiling and tested:
 **Product features:**
 - Blog (45 posts, 6 arcs with section nav)
 - Reference (cognitive grammar, graph grammar, 13 layers, 201 primitives, 28 agent primitives)
-- Unified graph product (8 tables, 17 grammar ops, 6 lenses incl. Chat/Conversations, HTMX, full CRUD)
+- Unified graph product (8 tables, 19 grammar ops, 7 lenses incl. Chat/Conversations/Knowledge, HTMX, full CRUD)
 - Public spaces + discover page (with previews: node count, last activity) + space settings (full CRUD lifecycle)
 - Market page (available tasks, search, claim) — Layer 2
 - Global activity feed (transparent audit trail) — Layer 7
-- Public user profiles (action history, tasks completed) — Layer 8
+- Public user profiles (action history, tasks completed, endorsements) — Layer 8
 - Space membership (join/leave) — Layer 10
 - **Personal dashboard** ("My Work" — cross-space tasks, conversations, agent activity)
+- **Knowledge claims** — assert/challenge ops, Knowledge lens per space, public `/knowledge` page with status filters — Layer 6
+- **Global search** — `/search` across spaces, nodes, users
 - Mobile responsive + animations (breathing logo, reveals)
 - Visual identity: "Ember Minimalism" — dark theme, rose accent, warm text, subtle motion
+
+**Product layers (9 of 13):**
+| Layer | Name | Status | Ops |
+|-------|------|--------|-----|
+| 1 | Work | ✓ | intend, decompose, complete, assign, depend, progress |
+| 2 | Market | ✓ | claim, prioritize |
+| 3 | Moderation | ✓ | report |
+| 4 | Justice | ✓ | resolve |
+| 5 | Build | — | — |
+| 6 | Knowledge | ✓ | assert, challenge |
+| 7 | Alignment | ✓ | (activity feed) |
+| 8 | Identity | ✓ | (profiles) |
+| 9 | Bond | ✓ | (endorsements) |
+| 10 | Belonging | ✓ | join, leave |
+| 11 | Meaning | — | — |
+| 12 | Evolution | — | — |
+| 13 | Being | — | — |
+
+**19 grammar ops total.** 8 database tables. ~47 routes. 20 test functions across 5 test files.
 
 **CORE-LOOP updates:**
 - Higher-order operations integrated (pipeline ordering, fixpoint awareness, irreversibility, depth, duality)
@@ -53,6 +74,14 @@ Five repos, all compiling and tested:
 - Footer links updated on posts 42-44 with lovyou.ai
 
 Deploy: `fly deploy --remote-only` from site repo.
+
+## Known Issues
+
+**Test debt (critical, systemic):** Six+ features shipped without tests since iter 83. Untested: endorsements, reports, resolve, dashboard queries, search, knowledge claims (assert, challenge, ListKnowledgeClaims, CountChallenges). Invariant 12 (VERIFIED) is violated in practice. The loop's role separation creates an accountability gap — the Critic observes but cannot block, the Scout deprioritizes code gaps. This is the largest systemic risk.
+
+**Shallow layers:** Every layer entry since iter 74 is minimal viable — one or two ops, one view. Nothing is deep enough for real use. Knowledge has no verify/retract ops, no evidence linking. Market has no exchange/reputation. Justice has no tiered adjudication. Bond has only endorsements, no connections/DMs. Breadth is near-complete but depth is uniformly thin.
+
+**No observability:** No error monitoring, no analytics, no usage tracking. Building into a void.
 
 ## Completed Clusters
 
@@ -85,17 +114,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Integration Test** (58): full new-user journey test (7 steps, all ops, ID verification).
 - **UX Polish** (59-60): markdown rendering, agent chat banner on Feed
 - **Agentic Work** (62-72): Mind responds to task assignments, decomposes tasks, creates subtasks with dependencies, recursive auto-work on leaf subtasks, live task updates (HTMX polling), Mind creates tasks from conversations, cross-conversation memory, task links in chat, quick-assign buttons
-- **Layer 2 — Market** (74-77): market page with available tasks, claim button, space name on cards, search
-- **Layer 3 — Moderation** (78): report op for content flagging
-- **Layer 7 — Alignment** (79): global activity feed — transparent audit trail
-- **Layer 8 — Identity** (80): public user profiles with action history
-- **Layer 10 — Belonging** (81): space membership (join/leave ops, space_members table)
-- **Platform Polish** (82-86): live stats on landing, tests for membership + market, new user redirect to discover, assign-to-agent button, blog post 45
-- **Personal Dashboard** (87): /app rewritten as "My Work" — cross-space tasks, conversations, agent activity
-- **Assignee Identity** (88): assignee_id column, backfill, all handlers set both name and ID. Last name-as-identifier bug eliminated.
-- **Layer 4 — Justice** (89): resolve grammar op, report review UI in settings, ListReports query. 17 grammar ops.
-- **Layer 9 — Relationship** (90): endorsements table, endorse/unendorse on profiles, endorser list. 8 tables, 8 layers.
-- **Global Search** (91): /search page — unified search across spaces, nodes, users. ILIKE text search. Nav link added.
+- **Breadth-First Layers** (74-92): Market(2), Moderation(3), Justice(4), Knowledge(6), Alignment(7), Identity(8), Bond(9), Belonging(10). Plus search, dashboard, endorsements, assignee identity. 19 iterations, 8 layer entries, 9/13 layers covered.
 
 ## Lessons Learned
 
@@ -138,6 +157,8 @@ Deploy: `fly deploy --remote-only` from site repo.
 37. The Scout must read the vision, not just the code. Product gaps outrank code gaps. 60 iterations of code polish while 12 of 13 product layers remained unbuilt.
 38. Cross-space views are the connective tissue of a multi-space platform. Building features inside spaces isn't enough — the user needs a single place to see what matters across all of them.
 39. When fixing a systemic issue, grep the schema for ALL instances, not just the ones that triggered the bug. Incomplete fixes create false confidence.
+40. When the gates open, searchability and discoverability become critical infrastructure, not features.
+41. The loop needs enforcement, not just observation. If the Critic can flag a violation indefinitely without consequence, the invariant is aspirational. Either give the Critic blocking power or make the Scout own quality iterations.
 
 ## Vision Notes
 
@@ -151,8 +172,6 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-Conversations (31-35), Agent Visibility (36), Content Preview & Social Proof (37-39) all complete. The site is polished and onboarding-ready.
-
 **LOVYOU_API_KEY:** `lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` — authenticates as the "Hive" agent user.
 
 **Mind conversation tools:**
@@ -160,8 +179,8 @@ Conversations (31-35), Agent Visibility (36), Content Preview & Social Proof (37
 - Identity resolved from API key (no hardcoded names)
 - Run: `LOVYOU_API_KEY=lv_... ANTHROPIC_API_KEY=... go run ./cmd/reply/`
 
-**Next directions (zoom out):**
-1. **Remaining layers** — 5 (Research), 6 (Knowledge), 11 (Governance), 12 (Culture), 13 (Existence) haven't been touched. Each needs at least a minimal viable entry.
-2. **Deepen existing layers** — Market needs exchange/reputation, Justice needs tiered adjudication, Identity needs selective disclosure, Relationship needs connection/DM infrastructure.
-3. **Tests** — endorsements, reports, dashboard queries all untested. Growing test debt.
-4. **Return to hive codebase** — agent runtime, or new product layers
+**The test debt question:** 6+ features shipped without tests. Invariant 12 is violated. The Reflector has flagged this as the largest systemic risk and a structural loop failure. The Scout should decide: is the next iteration a test iteration (write tests for endorsements, reports, resolve, dashboard, search, knowledge), or does product breadth still take priority? If breadth: 4 layers remain (Build(5), Meaning(11), Evolution(12), Being(13)). If tests: one iteration could cover the 6 untested features. Either choice is defensible, but the choice must be explicit — not deferred again.
+
+**If continuing breadth:** Layer 5 (Build) is next in sequence and the most concrete of the remaining four. Meaning(11), Evolution(12), and Being(13) are progressively more abstract.
+
+**If deepening:** Knowledge(6) has the most room — verify/retract ops, evidence linking, search integration. Market(2) needs exchange. Bond(9) needs connections/DMs.
