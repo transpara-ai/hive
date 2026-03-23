@@ -1,3 +1,3 @@
-# Build Report — Iteration 118
+# Build Report — Iteration 119
 
-Renamed "Sign in" to "My Work" in public nav (mobile + desktop). Links to /app which redirects logged-in users to dashboard and anonymous users to discover. Works for both auth states without needing auth context in the template.
+Activity feed ops now link to their target nodes. When an op has a NodeID, the op name becomes a clickable link to /app/{slug}/node/{id}. Ops without NodeID (join, leave) remain plain text. opItem template now takes spaceSlug param.

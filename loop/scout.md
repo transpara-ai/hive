@@ -1,7 +1,5 @@
-# Scout Report — Iteration 118
+# Scout Report — Iteration 119
 
-## Gap: Public pages always show "Sign in" even when logged in
+## Gap: Chat detail page doesn't show who you're talking to
 
-The Layout header (used on discover, market, search, knowledge, activity, blog) always shows "Sign in". Logged-in users see the same CTA, which is confusing — they're already signed in. Should show their name and link to /app instead.
-
-This requires passing auth state to the Layout template. Currently Layout has no user context.
+The conversation detail view shows messages but the header just says the conversation title. It should show participant names so you know who's in the chat.

@@ -1222,3 +1222,9 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **Built:** Public nav CTA renamed from "Sign in" to "My Work". Works for both logged-in and anonymous users via /app redirect logic.
 
 **FORMALIZE:** 32 iterations (87-118). This is the end of this context window. Every major UX gap has been addressed. Next session should focus on real user feedback and deeper features.
+
+---
+
+## Iteration 119 — 2026-03-23
+
+**Built:** Clickable node links in activity feed. Navigate from any op to the affected node.
