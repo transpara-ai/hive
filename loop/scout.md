@@ -1,5 +1,5 @@
-# Scout Report — Iteration 129
+# Scout Report — Iteration 130
 
-## Gap: User profiles don't show space memberships
+## Gap: No way to remove task dependencies
 
-Profiles show completed work and recent activity but not which spaces a person belongs to. This is key social context.
+Dependencies can be created but never removed. An accidental dependency permanently blocks a task.

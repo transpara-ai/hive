@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 129, 2026-03-23.
+Last updated: Iteration 130, 2026-03-23.
 
 ## Current System State
 
@@ -139,7 +139,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Layer 13 — Being** (97): reflect op — existential accountability. 24 ops. **ALL 13 LAYERS TOUCHED.**
 - **Depth: Pin UI** (98): pin/unpin buttons on node detail, pin indicators on Feed (brand border + label) and Board (pin icon). Layer 12 now usable.
 - **Depth: Knowledge Evidence** (121): evidence reasons on challenge/verify/retract, expandable forms, evidence trail on node detail. Layer 6 now evidence-based.
-- **Depth: Dependencies** (122-123): depends-on/blocking sections on node detail + creation form. Full dependency CRUD (minus delete).
+- **Depth: Dependencies** (122-123, 130): full CRUD — view, create, remove.
 - **Depth: Notifications** (124): sidebar badge visible from all lenses.
 - **Depth: Dashboard** (125): task state filtering tabs.
 - **Depth: Governance** (126): proposal deadlines with overdue indicators.

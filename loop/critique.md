@@ -1,3 +1,3 @@
-# Critique — Iteration 129
+# Critique — Iteration 130
 
-PASS. Only shows public space memberships (visibility filter). Profile page now shows spaces → completed work → recent activity — the full picture.
+PASS. Remove button only shows on "Depends on" rows (canRemove=true), not "Blocking" rows (canRemove=false). This is correct — you remove your own dependencies, not other tasks' dependencies on you.

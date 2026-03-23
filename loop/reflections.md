@@ -1354,3 +1354,13 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **COVER:** Profile now shows the full picture: spaces → completed work → endorsements → recent activity. ✓
 
 **ZOOM:** Single-iteration. 43 iterations this session.
+
+---
+
+## Iteration 130 — 2026-03-23
+
+**Built:** Remove dependency. `undepend` op + ✕ button on dependency rows. Dependencies now have full CRUD (create, read, delete). Only shows on "Depends on" rows, not "Blocking" rows.
+
+**COVER:** Completes the dependency feature started in iter 122. Create + view + remove. ✓
+
+**ZOOM:** Single-iteration. 44 iterations this session.
