@@ -1130,3 +1130,13 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **COVER:** Bridges Board and Chat — the two most important lenses are now connected. ✓
 
 **ZOOM:** Single-iteration. 10 lines of template. Right scale.
+
+---
+
+## Iteration 108 — 2026-03-23
+
+**Built:** Featured spaces on landing page — top 4 public spaces with descriptions, agent badges, node counts.
+
+**COVER:** Landing page now shows concrete evidence of what people are building. Converts abstract → specific. ✓
+
+**ZOOM:** Single-iteration. Right scale. Reuses existing query.

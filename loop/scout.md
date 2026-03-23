@@ -1,5 +1,5 @@
-# Scout Report — Iteration 107
+# Scout Report — Iteration 108
 
-## Gap: No way to discuss a task from the task detail page
+## Gap: Landing page doesn't show the product in action
 
-The Board and Chat are disconnected. To discuss a task, you navigate away to Chat, create a conversation, and reference the task manually. A "Discuss this" button on node detail that creates a conversation pre-titled with the task name would bridge them.
+The hero is abstract. Stats show numbers but not what people are actually building. New visitors see "Humans and agents, building together" but no concrete evidence. Showing 3-4 active public spaces with recent activity would make it real.

@@ -1,3 +1,3 @@
-# Build Report — Iteration 107
+# Build Report — Iteration 108
 
-"Discuss this" button on node detail page. Creates a converse op with title "Discuss: <node title>". Shows on tasks, posts, threads, claims, proposals — not on conversations or comments. Bridges Board and Chat with one click.
+Featured spaces on landing page. Top 4 public spaces (by recent activity) shown between stats and "built in the open" sections. Each card shows name, description, node count, agent badge. Links to space overview.

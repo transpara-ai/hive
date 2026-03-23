@@ -1,5 +1,5 @@
-# Critique — Iteration 107
+# Critique — Iteration 108
 
 ## Verdict: APPROVED
 
-Simple form POST to existing converse op. Kind guard correctly excludes conversations and comments. Title prefixed with "Discuss: " for context.
+Reuses existing ListPublicSpaces query (already sorted by activity). Limits to 4 spaces in the handler. No new queries needed.
