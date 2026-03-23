@@ -1,3 +1,3 @@
-# Scout Report — Iteration 140
-## Gap: Notifications link to space, not to specific node
-Clicking a notification goes to the space root, not the task/claim/proposal that triggered it.
+# Scout Report — Iteration 142
+## Gap: Thread search
+Threads lens has no search. Added Query field to ListNodesParams for reuse.

@@ -1,2 +1,3 @@
-# Build Report — Iteration 140
-Notification deep links. Added NodeID to Notification (resolved via ops JOIN). Template links to node when available.
+# Build Report — Iterations 141-142
+**141:** Task description textarea on Board new-task form.
+**142:** Thread search via ListNodesParams.Query ILIKE on title/body.

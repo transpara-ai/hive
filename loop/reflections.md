@@ -1429,4 +1429,11 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 ## Iteration 140 — 2026-03-23
 
-**Built:** Notification deep links. Notifications now link to the specific node (task, claim, proposal) via op JOIN, not just the space. Click a notification → go straight to what happened. The notification system is now complete: triggers for all actions, sidebar badge, deep links. 54 iterations this session.
+**Built:** Notification deep links. Click → go straight to the node. 54 iterations this session.
+
+---
+
+## Iterations 141-142 — 2026-03-23
+
+**141:** Task description textarea on Board creation form. Agents need context.
+**142:** Thread search. ILIKE on Threads lens + `Query` field on `ListNodesParams` (reusable). 56 iterations this session.
