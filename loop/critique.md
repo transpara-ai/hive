@@ -1,5 +1,5 @@
-# Critique — Iteration 113
+# Critique — Iteration 114
 
 ## Verdict: APPROVED
 
-Simple nav addition. Consistent placement (top of sidebar, start of mobile bar).
+Correctly uses existing join op. Three states handled: non-member (join button), member (status text), owner (neither). IsMember check added to handler.

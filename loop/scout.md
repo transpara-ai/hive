@@ -1,5 +1,5 @@
-# Scout Report — Iteration 113
+# Scout Report — Iteration 114
 
-## Gap: No way back to the dashboard from inside a space
+## Gap: No "Join" button on public space overview
 
-Once you enter a space, the sidebar shows lenses and other spaces but no link back to /app (the dashboard). The only way back is the browser back button or editing the URL. The dashboard is the command center — it should be one click away from everywhere.
+When a logged-in user visits a public space they're not a member of, there's no way to join from the overview page. They'd have to find the join op somehow. A visible "Join this space" button on the overview makes participation one click.

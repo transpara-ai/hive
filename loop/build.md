@@ -1,3 +1,3 @@
-# Build Report — Iteration 113
+# Build Report — Iteration 114
 
-"My Work" link added to sidebar (desktop) and mobile lens bar. Home icon + "My Work" text links to /app. One click back to the dashboard from any space.
+"Join this space" button on space overview for logged-in non-members. Shows membership status for members. Hidden for owners and anonymous visitors. Uses existing join op.

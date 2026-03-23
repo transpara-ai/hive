@@ -1186,3 +1186,11 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **Built:** My Work link in sidebar and mobile nav. One click back to dashboard from anywhere.
 
 **FORMALIZE:** 27 iterations this session. The platform's navigation is now complete: landing → discover → space overview → lenses → dashboard, all connected. Context window nearing limit — this may be the last iteration this session.
+
+---
+
+## Iteration 114 — 2026-03-23
+
+**Built:** Join button on space overview. Logged-in non-members can join public spaces with one click.
+
+**FORMALIZE:** 28 iterations (87-114). The user journey is now complete: land → discover → overview → join → board → create task → assign agent → get notified. Every step has a clear action.
