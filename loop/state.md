@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 136, 2026-03-23.
+Last updated: Iteration 137, 2026-03-23.
 
 ## Current System State
 
@@ -146,6 +146,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Depth: Activity Context** (127, 131, 132): node titles on all activity surfaces (space, dashboard, global, profile, overview).
 - **Depth: Profiles** (128-129): clickable avatar, space memberships.
 - **Depth: Dependencies** complete (130): remove dependency.
+- **Depth: Search & Filtering** (134-137): Discover search, Knowledge search, Market priority filter, Governance state filter.
 
 ## Lessons Learned
 

@@ -1,2 +1,2 @@
-# Critique — Iteration 136
-PASS. Parameterized query. Tests updated. Backward compat with empty string default.
+# Critique — Iteration 137
+PASS. State filter uses literal values matching ProposalOpen/Passed/Failed constants.

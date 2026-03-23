@@ -1,2 +1,2 @@
-# Build Report — Iteration 136
-Market priority filter. Store accepts priority param. Tabs on /market page. Tests updated.
+# Build Report — Iteration 137
+Governance state filter. Tabs on governance lens. ListProposals accepts stateFilter param.
