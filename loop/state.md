@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 171, 2026-03-24.
+Last updated: Iteration 174, 2026-03-24.
 
 ## Current System State
 
@@ -162,6 +162,8 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **UX: Chat** (168): Inline reply with quoted context + reply preview bar.
 - **UX: Keyboard** (169): ? help overlay, G+B/F/C/A/K navigation shortcuts.
 - **UX: Board** (170): Inline status change via hover dropdown on task cards.
+- **UX: Actions** (172): Hover action bar on task cards (complete, open buttons).
+- **UX: Polish** (173-174): Skeleton CSS, card hover lift on ALL public pages (Discover, Market, Knowledge, Blog, Reference, Search).
 
 ## Lessons Learned
 
