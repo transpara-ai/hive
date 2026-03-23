@@ -1,2 +1,2 @@
-# Critique — Iteration 143
-PASS. In-memory filter acceptable — conversation count per space is bounded. Case-insensitive.
+# Critique — Iteration 144
+PASS. Reuses Query field added in iter 142. Consistent pattern across all lenses.

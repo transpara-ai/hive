@@ -1,3 +1,3 @@
-# Scout Report — Iteration 143
-## Gap: Chat lens has no search
-Conversations can't be searched by title.
+# Scout Report — Iteration 144
+## Gap: Feed lens has no search
+Last lens without search. Added via ListNodesParams.Query.

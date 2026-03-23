@@ -1437,4 +1437,7 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 **141:** Task description textarea on Board creation form. Agents need context.
 **142:** Thread search. ILIKE on Threads lens + `Query` field on `ListNodesParams` (reusable).
-**143:** Conversation search on Chat lens. Every lens now has search. 57 iterations this session.
+**143:** Conversation search on Chat lens.
+**144:** Feed search. Every single lens now has search. 58 iterations this session.
+
+**FORMALIZE:** The search-everywhere cluster (134-137, 142-144) is complete. Every surface has search or filtering: Board (iter 109), Feed (144), Threads (142), Chat (143), Knowledge (135), Governance (137), Discover (134), Market (136), Global search (91), Dashboard task tabs (125). The platform is fully searchable.
