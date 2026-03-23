@@ -1454,4 +1454,10 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 **149:** Changelog search. **150:** Activity op type filter tabs (All/Tasks/Completions/Messages/Claims/Votes). 64 iterations this session.
 
-**FORMALIZE:** The platform now has search or filtering on EVERY surface, notification triggers for EVERY significant action, and deep links from notifications to the affected node. This is the most comprehensive depth sprint in the project's history — 30 iterations (121-150) of making every existing feature genuinely usable.
+---
+
+## Iteration 151 — 2026-03-23
+
+**Built:** People search on People lens. 65 iterations this session (87-151). 31 depth iterations (121-151).
+
+**FORMALIZE:** The platform now has search or filtering on EVERY surface (all 10 lenses + all public pages), notification triggers for EVERY significant action with deep links, full dependency CRUD, evidence-based knowledge, governance with deadlines, member management, and profile memberships. This is the most comprehensive depth sprint in the project's history.
