@@ -1,2 +1,2 @@
-# Build Report — Iteration 137
-Governance state filter. Tabs on governance lens. ListProposals accepts stateFilter param.
+# Build Report — Iteration 138
+4 new notification triggers: challenge→claim author, verify→claim author, retract→claim author, vote→proposal author. Handler-only changes.

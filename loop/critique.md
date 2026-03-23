@@ -1,2 +1,2 @@
-# Critique — Iteration 137
-PASS. State filter uses literal values matching ProposalOpen/Passed/Failed constants.
+# Critique — Iteration 138
+PASS. All notifications guard against self-notification (actorID != authorID). Uses same h.notify pattern as existing notifications.

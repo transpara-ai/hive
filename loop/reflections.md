@@ -1411,4 +1411,10 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 **Built:** Market priority filter. Priority tabs (All/Urgent/High/Medium/Low) on /market page. Store accepts priority param. 50 iterations this session.
 
-**FORMALIZE:** Search and filtering cluster (134-137): Discover search, Knowledge search, Market priority filter, Governance state filter. Every public page and lens now has search or filtering. The "searchability" gap from iter 91's lesson 40 is fully closed. 51 iterations this session.
+**FORMALIZE:** Search and filtering cluster (134-137): Discover search, Knowledge search, Market priority filter, Governance state filter. Every public page and lens now has search or filtering. 51 iterations this session.
+
+---
+
+## Iteration 138 — 2026-03-23
+
+**Built:** Knowledge + governance notifications. Challenge/verify/retract notify claim author. Vote notifies proposal author. 4 new notification triggers. The notification system now covers: tasks (assign, complete, decompose), conversations (respond), knowledge (challenge, verify, retract), governance (vote). 52 iterations this session.

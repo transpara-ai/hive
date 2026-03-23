@@ -1,3 +1,3 @@
-# Scout Report — Iteration 137
-## Gap: Governance lens has no state filter
-All proposals shown together. No way to filter by Open/Passed/Rejected.
+# Scout Report — Iteration 138
+## Gap: No notifications for knowledge/governance actions
+Challenge/verify/retract/vote don't notify affected users.
