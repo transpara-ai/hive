@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 94, 2026-03-23.
+Last updated: Iteration 97, 2026-03-23.
 
 ## Current System State
 
@@ -64,24 +64,24 @@ Five repos, all compiling and tested:
 | 12 | Evolution | — | — |
 | 13 | Being | — | — |
 
-**21 grammar ops total.** 8 database tables (+ endorsements). ~50 routes. 26 test functions across 5 test files.
+**24 grammar ops total.** 9 database tables (+ endorsements). ~52 routes. 26 test functions across 5 test files. **All 13 product layers have minimum viable entries.**
 
-**Product layers (10 of 13):**
+**Product layers (13 of 13):**
 | Layer | Name | Status | Ops |
 |-------|------|--------|-----|
 | 1 | Work | done | intend, decompose, complete, assign, depend, progress |
 | 2 | Market | done | claim, prioritize |
 | 3 | Moderation | done | report |
 | 4 | Justice | done | resolve |
-| 5 | Build | — | — |
+| 5 | Build | done | (changelog lens) |
 | 6 | Knowledge | done | assert, challenge |
 | 7 | Alignment | done | (activity feed) |
 | 8 | Identity | done | (profiles, endorsements) |
 | 9 | Bond | done | (endorsements) |
 | 10 | Belonging | done | join, leave |
 | 11 | Governance | done | propose, vote |
-| 12 | Culture | — | — |
-| 13 | Being | — | — |
+| 12 | Culture | done | pin, unpin |
+| 13 | Being | done | reflect |
 
 **CORE-LOOP updates:**
 - Higher-order operations integrated (pipeline ordering, fixpoint awareness, irreversibility, depth, duality)
@@ -134,6 +134,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Breadth-First Layers** (74-92): Market(2), Moderation(3), Justice(4), Knowledge(6), Alignment(7), Identity(8), Bond(9), Belonging(10). Plus search, dashboard, endorsements, assignee identity. 19 iterations, 8 layer entries, 9/13 layers covered.
 - **Test Debt Paydown** (93): 6 new test functions covering endorsements, reports, dashboard, search, knowledge claims. Invariant 12 compliance restored.
 - **Layer 11 — Governance** (94): propose and vote ops, Governance lens with vote tallies, kind guard, one-vote-per-user. 21 ops, 10/13 layers.
+- **Layer 5 — Build** (95): Changelog lens — completed tasks as build history. No new ops, new lens on existing data.
+- **Layer 12 — Culture** (96): pin/unpin ops, pinned boolean column, pinned items sort first. 23 ops.
+- **Layer 13 — Being** (97): reflect op — existential accountability. 24 ops. **ALL 13 LAYERS TOUCHED.**
 
 ## Lessons Learned
 
