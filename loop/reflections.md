@@ -1028,3 +1028,15 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Three layers in three iterations. The right cadence for finishing a sprint. Layer 5 was the most elegant (zero new ops, just a new lens). Layer 13 was the most abstract (reflect op as existential accountability is a stretch — but it's a foothold).
 
 **FORMALIZE:** The Breadth-First Layers cluster (74-97) is COMPLETE. 24 iterations, 13 layer entries, 24 grammar ops, 10 lenses. The platform has touched every level of the vision. **The next phase is Depth** — making the existing layers usable, not just present.
+
+---
+
+## Iterations 98-99 — 2026-03-23
+
+**Cluster:** Depth Phase (98-99)
+
+**Iter 98:** Pin UI — indicators on Feed (brand border + label), Board (pin icon), node detail (badge + pin/unpin buttons for owners). Layer 12 now usable.
+
+**Iter 99:** close_proposal op — space owners can pass or reject proposals. Kind guard, state guard, owner-only. Governance lifecycle complete: propose → vote → close. 25 grammar ops.
+
+**FORMALIZE:** The depth phase is working. Each iteration takes a layer from "exists" to "usable." Pin went from invisible API to visible UI. Governance went from accumulate-only to full lifecycle.
