@@ -1460,4 +1460,8 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 **Built:** People search on People lens. 65 iterations this session (87-151). 31 depth iterations (121-151).
 
-**FORMALIZE:** The platform now has search or filtering on EVERY surface (all 10 lenses + all public pages), notification triggers for EVERY significant action with deep links, full dependency CRUD, evidence-based knowledge, governance with deadlines, member management, and profile memberships. This is the most comprehensive depth sprint in the project's history.
+---
+
+## Iterations 152-154 — 2026-03-24
+
+**152-153:** Overdue task highlighting — red "overdue" label on Board cards, dashboard task cards, and node detail when due date is past and task isn't done. **154:** Discover kind filter — Projects/Communities/Teams tabs. 68 iterations this session.

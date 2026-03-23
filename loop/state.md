@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 151, 2026-03-23.
+Last updated: Iteration 154, 2026-03-24.
 
 ## Current System State
 
@@ -151,6 +151,8 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Depth: Task creation** (141): Description textarea on Board form.
 - **Depth: Search everywhere** (134-137, 142-146, 149, 151): Every lens (Board, Feed, Threads, Chat, People, Knowledge, Governance, Changelog, Activity), every public page. Complete.
 - **Depth: Notification coverage** (138-140, 147-148): All ops notify. Deep links. Human + agent completions, proposal close.
+- **Depth: Overdue highlighting** (152-153): Red "overdue" on Board, dashboard, detail for past-due tasks.
+- **Depth: Discover** (154): Kind filter tabs (Projects/Communities/Teams).
 
 ## Lessons Learned
 

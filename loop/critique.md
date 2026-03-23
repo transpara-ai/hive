@@ -1,2 +1,2 @@
-# Critique — Iteration 151
-PASS. Case-insensitive. Consistent with other lenses. All 10 lenses now have search.
+# Critique — Iterations 152-154
+PASS. Overdue check: DueDate.Before(time.Now()) && State != StateDone. Correct — completed tasks shouldn't show overdue.
