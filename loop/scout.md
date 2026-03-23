@@ -1,28 +1,28 @@
-# Scout Report — Iteration 88
+# Scout Report — Iteration 89
 
-## Gap: assignee stores display name, not user ID
+## Gap: Reports go nowhere — Layer 4 (Justice) has no resolution
 
-The `nodes.assignee` column stores the display name (e.g., "Hive", "Matt") instead of a user ID. This is the last name-as-identifier bug from the identity fix (iter 48-49). The identity fix added `author_id` and `actor_id` but didn't address `assignee`.
+The `report` op (iter 78) lets users flag content. But there's no way to:
+- See what's been reported
+- Review the flagged content
+- Resolve reports (dismiss, warn, remove)
 
-Consequences:
-- The dashboard query (`ListUserTasks`) has to resolve the user's name and match on it
-- If a user changes their display name, their task assignments silently break
-- Two-step lookup (resolve name → match) instead of single ID match
-- Violates invariant 11 (IDENTITY)
+The report op records the flag in the ops table but nothing acts on it. It's a dead end — infrastructure without interface or management (lesson 20).
+
+This is the simplest entry point for Layer 4 (Justice). The vision says Layer 4 adds "evidence, adjudication, precedent, enforcement." We don't need all that yet — we need the ability for a space owner to see reports and take action.
 
 ## What "Filled" Looks Like
 
-- Add `assignee_id` column to nodes
-- Update all handlers that set assignee to also set assignee_id
-- Update queries to match on assignee_id
-- Keep `assignee` as display-only (like `author` alongside `author_id`)
-- Backfill existing rows from users table
+Space owners see a "Reports" section in Settings (or a dedicated view) showing:
+- Reported nodes with the reason
+- Who reported it and when
+- Actions: dismiss (close the report) or remove (delete the node)
+
+The `resolve` grammar op records the decision. Simple binary outcome: dismissed or removed.
 
 ## Approach
 
-Same pattern as the author_id migration (iter 48-49):
-1. Add `assignee_id` column with default ''
-2. Update handlers: intend, assign, claim ops set both assignee (name) and assignee_id (ID)
-3. Update dashboard query to match on assignee_id
-4. Update Mind triggers to use assignee_id
-5. Backfill existing data
+1. New grammar op: `resolve` — records the decision (dismiss/remove) on a reported node
+2. New store query: `ListReports(ctx, spaceID)` — returns ops where op='report' with the reported node
+3. New view section in Settings or a dedicated `/app/{slug}/reports` page
+4. Wire up dismiss (mark report resolved) and remove (delete node + record op)

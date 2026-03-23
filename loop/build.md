@@ -1,22 +1,15 @@
-# Build Report — Iteration 88
+# Build Report — Iteration 89
 
-Added `assignee_id` column to nodes table. Same pattern as the author_id migration (iter 48-49).
+Layer 4 (Justice) entry point: report resolution.
 
-**Schema:** `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS assignee_id TEXT NOT NULL DEFAULT ''` + backfill migration.
+**New grammar op:** `resolve` — space owner dismisses or removes reported content. Records decision in ops with `{"action": "dismiss|remove"}` payload. Owner-only (403 for non-owners).
 
-**Handler changes:**
-- `intend`: resolves assignee name → ID, passes both to CreateNode
-- `assign`: passes resolved ID to UpdateNode
-- `claim`: passes actorID as assigneeID to UpdateNode
-- `handleUpdateNode`: resolves assignee name → ID when assignee field is updated
+**New store query:** `ListReports(ctx, spaceID)` — returns report ops that have no corresponding resolve op for the same node_id. Includes node title/kind and extracted reason from payload.
 
-**Store changes:**
-- `CreateNode` stores assignee_id
-- `UpdateNode` accepts optional assignee_id parameter
-- `ListUserTasks` now matches on `n.assignee_id = $1` instead of resolving name
+**New type:** `Report` — extends Op with NodeTitle, NodeKind, Reason.
 
-**Mind:** task creation now sets AssigneeID = agentID.
+**Settings update:** Reports section (amber border) appears between save button and danger zone when unresolved reports exist. Shows reported node with link, reporter name, reason, and dismiss/remove buttons.
 
-**Backfill:** `UPDATE nodes SET assignee_id = u.id FROM users u WHERE nodes.assignee = u.name AND nodes.assignee_id = '' AND nodes.assignee != ''`
+**Op count:** 17 grammar ops total.
 
-All tests pass. Deployed.
+Deployed. All tests pass.

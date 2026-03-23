@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 88, 2026-03-23.
+Last updated: Iteration 89, 2026-03-23.
 
 ## Current System State
 
@@ -35,7 +35,7 @@ Five repos, all compiling and tested:
 **Product features:**
 - Blog (45 posts, 6 arcs with section nav)
 - Reference (cognitive grammar, graph grammar, 13 layers, 201 primitives, 28 agent primitives)
-- Unified graph product (7 tables, 16 grammar ops, 6 lenses incl. Chat/Conversations, HTMX, full CRUD)
+- Unified graph product (7 tables, 17 grammar ops, 6 lenses incl. Chat/Conversations, HTMX, full CRUD)
 - Public spaces + discover page (with previews: node count, last activity) + space settings (full CRUD lifecycle)
 - Market page (available tasks, search, claim) — Layer 2
 - Global activity feed (transparent audit trail) — Layer 7
@@ -93,6 +93,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Platform Polish** (82-86): live stats on landing, tests for membership + market, new user redirect to discover, assign-to-agent button, blog post 45
 - **Personal Dashboard** (87): /app rewritten as "My Work" — cross-space tasks, conversations, agent activity
 - **Assignee Identity** (88): assignee_id column, backfill, all handlers set both name and ID. Last name-as-identifier bug eliminated.
+- **Layer 4 — Justice** (89): resolve grammar op, report review UI in settings, ListReports query. 17 grammar ops.
 
 ## Lessons Learned
 

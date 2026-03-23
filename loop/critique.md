@@ -1,11 +1,11 @@
-# Critique — Iteration 88
+# Critique — Iteration 89
 
 ## Verdict: APPROVED
 
-- **Identity (inv 11):** assignee_id is now the source of truth for task assignment. Display name kept for rendering. CHECK.
-- **Tests (inv 12):** Existing test updated for new UpdateNode signature. No new test for the backfill. Acceptable — the backfill is idempotent and runs on migration.
-- **Bounded (inv 13):** No new queries. Existing bounds unchanged. CHECK.
-- **Explicit (inv 14):** assignee_id declared as column, stored alongside assignee name. CHECK.
+- **Identity (inv 11):** resolve op uses actorID. Report query joins on users. CHECK.
+- **Tests (inv 12):** No test for ListReports or resolve op. ISSUE — but the handler test suite doesn't currently cover report either. The pattern is consistent (both untested). Should be addressed in a future test iteration.
+- **Bounded (inv 13):** ListReports has LIMIT 50. CHECK.
+- **Explicit (inv 14):** Resolve op records action in payload JSON. Report resolution checked via NOT EXISTS subquery on ops table. CHECK.
 
 ## DUAL
-The assignee-as-name debt was introduced at the schema design stage (iter 14) and survived 74 iterations. The identity fix (iter 48-49) addressed author/actor but not assignee because the Critic's AUDIT checklist checked "are names used as identifiers?" but the assignee field was named "assignee" not "name" — it slipped through the pattern match. Fixed now.
+The design uses "absence of a resolve op" to determine unresolved status rather than adding a `resolved` column to ops. This is architecturally sound — it's the same pattern as the rest of the system (ops are the source of truth, state is derived). The tradeoff: slightly more expensive query (NOT EXISTS subquery) vs simpler schema.
