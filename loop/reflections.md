@@ -1110,3 +1110,13 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Single-iteration. Right scale.
 
 **FORMALIZE:** 8 depth iterations (98-105). The platform is now genuinely usable: onboarding guides, notifications, overview pages, complete lifecycles. The next phase could be growth (marketing, sharing) or continued depth.
+
+---
+
+## Iteration 106 — 2026-03-23
+
+**Built:** Completed work history on user profiles — portable reputation begins.
+
+**COVER:** Profiles now show what someone actually built, not just a count. Foundation for Market reputation. ✓
+
+**ZOOM:** Single-iteration. Right scale.

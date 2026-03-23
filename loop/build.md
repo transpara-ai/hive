@@ -1,7 +1,5 @@
-# Build Report — Iteration 105
+# Build Report — Iteration 106
 
-Space overview page replaces the blind redirect on `/app/{slug}`.
+Completed work history on user profiles. New `ListCompletedByUser` store query joins ops (complete) with nodes (task, done) and spaces (public). Profile shows "Completed work" section with task titles, space names, completion dates. Links to task detail pages.
 
-Shows: space name/description, kind badge, member count, task stats (open/active/done), lens quick links (Board/Feed/Chat/Governance), pinned content with pin icons, and 5 most recent ops. "View all activity" link at bottom.
-
-Handler fetches: spaces, pinned nodes, member count, recent ops, and counts tasks by state. No new store queries — reuses ListPinnedNodes, MemberCount, ListOps, ListNodes.
+Deepens Layer 2 (Market — portable reputation) and Layer 8 (Identity — profiles).

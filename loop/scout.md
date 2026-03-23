@@ -1,9 +1,9 @@
-# Scout Report — Iteration 105
+# Scout Report — Iteration 106
 
-## Gap: Space landing page is a blind redirect — no overview or context
+## Gap: User profiles show action count but not what was actually done
 
-When you visit `/app/{slug}`, you're immediately redirected to board or feed. There's no overview — no stats, no pinned content, no sense of what this space is about before diving into a lens. For a visitor arriving from Discover or a shared link, the first impression is a raw kanban or feed with no context.
+Profiles show "X tasks completed" and "Y actions" as numbers. But there's no list of completed tasks — no track record. For a platform with a Market (Layer 2), portable reputation requires visible work history. A user claiming a task from the market has no way to prove their competence.
 
 ## What "Filled" Looks Like
 
-`/app/{slug}` shows a space overview: name, description, member count, pinned items, recent activity summary, and quick links to each lens. The redirect to board/feed becomes a fallback for spaces with no description.
+User profiles show a "Completed Work" section listing tasks the user completed (across public spaces), with space names and completion dates. This is the beginning of portable reputation.
