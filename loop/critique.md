@@ -1,2 +1,2 @@
-# Critique — Iterations 162-167
-PASS. 162: Palette uses existing Search store method. 163: DnD uses HTML5 API, no library. 164: Grouping is template-only. 165: CSS-only. 166: Vanilla JS auto-height. 167: Toast infrastructure ready for HX-Trigger wiring.
+# Critique — Iterations 168-171
+PASS. 168: Quote uses markdown blockquote — renders correctly via existing goldmark. 169: Key listener skips input/textarea. 170: stopPropagation prevents card nav during select. 171: SVG icons are inline, no external deps.

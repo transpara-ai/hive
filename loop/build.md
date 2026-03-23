@@ -1,13 +1,9 @@
-# Build Report — Iterations 162-167 (UX Sprint)
+# Build Report — Iterations 168-171
 
-**162: Cmd+K command palette** — /api/palette endpoint returns grouped HTML (Spaces, Items, People). dialog element with HTMX 150ms debounced search. Arrow key navigation. Available on all pages (app layout, public layout, dashboard).
+**168: Inline reply** — Reply button on message hover. Reply preview bar above chat input. Prepends `> @author: text` as markdown quote on send. Cancel button clears.
 
-**163: Board drag-and-drop** — TaskCard gets draggable="true" with ondragstart/ondragend. Board columns get ondragover/ondragleave/ondrop handlers. Drop fires POST to /node/{id}/state. Column highlights with brand color during drag-over.
+**169: Keyboard shortcuts** — ? opens help dialog listing all shortcuts. G+B/F/C/A/K navigates to Board/Feed/Chat/Activity/Knowledge. G+H goes to dashboard. Extracts space slug from URL. Skips when focused in input/textarea.
 
-**164: Chat message grouping** — Consecutive messages from same author within 5 minutes render as chatMessageCompact (no avatar/name, reduced padding py-1 vs py-2.5). Template logic only.
+**170: Inline status change** — Select dropdown appears on TaskCard hover (opacity transition). stopPropagation prevents card navigation. Fires POST to /node/{id}/state. Reloads page.
 
-**165: Card hover lift** — All interactive cards get hover:-translate-y-0.5 + hover:shadow-lg hover:shadow-brand/10. Applies to: TaskCard, dashboard cards, thread cards, conversation cards.
-
-**166: Auto-expanding chat textarea** — Replaced input[type=text] with textarea rows=1. Auto-height JS on input event (max 144px = 6 lines). Shift+Enter for newline, Enter to send.
-
-**167: Toast notification infrastructure** — Fixed container at bottom-right. showToast(msg) function. CSS shrink animation for progress bar. Listens for HX-Trigger {"toast":"message"} header.
+**171: Empty state illustrations** — Feed, Threads, Chat empty states replaced with SVG icons + descriptive text + helpful hint.

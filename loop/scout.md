@@ -1,2 +1,2 @@
-# Scout Report — Iterations 162-167 (UX Sprint)
-Working through urgent UX tickets from the board. Cmd+K, drag-and-drop, message grouping, chat textarea, card hover, toasts.
+# Scout Report — Iterations 168-171
+Continuing UX ticket sprint. Inline reply, keyboard shortcuts, inline status, empty states.

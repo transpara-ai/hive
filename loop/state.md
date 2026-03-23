@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 167, 2026-03-24.
+Last updated: Iteration 171, 2026-03-24.
 
 ## Current System State
 
@@ -158,7 +158,10 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **UX: Cmd+K** (162): Command palette on every page, fuzzy search, arrow key nav.
 - **UX: Board DnD** (163): Drag-and-drop task cards between kanban columns.
 - **UX: Chat** (164, 166): Message grouping by author+time, auto-expanding textarea with shift+enter.
-- **UX: Polish** (165, 167): Card hover lift effect, toast notification infrastructure.
+- **UX: Polish** (165, 167, 171): Card hover lift, toasts, empty state illustrations.
+- **UX: Chat** (168): Inline reply with quoted context + reply preview bar.
+- **UX: Keyboard** (169): ? help overlay, G+B/F/C/A/K navigation shortcuts.
+- **UX: Board** (170): Inline status change via hover dropdown on task cards.
 
 ## Lessons Learned
 
