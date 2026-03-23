@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 131, 2026-03-23.
+Last updated: Iteration 132, 2026-03-23.
 
 ## Current System State
 
@@ -143,6 +143,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Depth: Notifications** (124): sidebar badge visible from all lenses.
 - **Depth: Dashboard** (125): task state filtering tabs.
 - **Depth: Governance** (126): proposal deadlines with overdue indicators.
+- **Depth: Activity Context** (127, 131, 132): node titles on all activity surfaces (space, dashboard, global, profile, overview).
+- **Depth: Profiles** (128-129): clickable avatar, space memberships.
+- **Depth: Dependencies** complete (130): remove dependency.
 
 ## Lessons Learned
 

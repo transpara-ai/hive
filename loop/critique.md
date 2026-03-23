@@ -1,3 +1,3 @@
-# Critique — Iteration 131
+# Critique — Iteration 132
 
-PASS. Consistent with iter 127 pattern. LEFT JOIN handles ops without nodes. Truncation prevents layout overflow.
+PASS. Template-only. Completes the activity-context work across all surfaces.

@@ -1,5 +1,5 @@
-# Scout Report — Iteration 131
+# Scout Report — Iteration 132
 
-## Gap: Global activity page and profile activity lack node context
+## Gap: Space overview activity lacks node context
 
-/activity and profile show "Matt intend" without what was created. Same gap iter 127 fixed for space lens, but on public pages.
+Recent activity on space overview shows "Matt intend" without what was created. Data already available (ListOps JOINs nodes since iter 127), just not displayed.
