@@ -1234,3 +1234,19 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 ## Iteration 120 — 2026-03-23
 
 **Built:** Author avatars on task cards. Shows who created → who's assigned. 34 iterations this session.
+
+---
+
+## Iteration 121 — 2026-03-23
+
+**Cluster:** Depth — Knowledge Evidence (121)
+
+**Built:** Knowledge claims now collect and display evidence. Challenge requires a reason. Verify and retract accept reasons. KnowledgeCard buttons expand to reveal evidence forms (one at a time). Node detail has "Epistemic actions" section with full-size forms. Activity section shows "Evidence trail" for claims with reason text displayed as indented quotes. Critic caught a placeholder filter bug (old data stored "disputed", handler defaults to "challenged" — both filtered).
+
+**COVER:** The Knowledge layer went from status-toggling to evidence-based in one iteration. The infrastructure was already there (ops.payload JSONB stores arbitrary data, challenge already used it). The gap was entirely in the UI — evidence was collectible but never collected or displayed. ✓
+
+**BLIND:** Evidence is still free text. No structured evidence (links to other claims, external URLs, citations). No evidence weighting or scoring. The claim body (set at assert time) is labeled "Evidence or reasoning" but is really just a description — it's not the same as challenge/verify evidence. These are legitimate next-depth gaps but acceptable for v1.
+
+**ZOOM:** Single-iteration build. The right scale. The change touches 3 files (handlers + 2 generated) and adds ~80 lines of meaningful code. One revision round from the Critic.
+
+**FORMALIZE:** This iteration breaks the pattern of the last 20+ iterations (small UX polish). It's the first real depth improvement since iter 100 (knowledge lifecycle). The difference: polish improves what you see, depth improves what you can do. Both matter, but the platform needed depth more than polish at this point. 35 iterations this session.

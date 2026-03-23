@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 120, 2026-03-23.
+Last updated: Iteration 121, 2026-03-23.
 
 ## Current System State
 
@@ -96,7 +96,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 **Test debt:** Largely addressed (iter 93). 6 new test functions cover endorsements, reports, dashboard, search, knowledge. Handler-level tests for assert/challenge/resolve not yet written.
 
-**Shallow layers:** Every layer entry since iter 74 is minimal viable — one or two ops, one view. Nothing is deep enough for real use. Knowledge has no verify/retract ops, no evidence linking. Market has no exchange/reputation. Justice has no tiered adjudication. Bond has only endorsements, no connections/DMs. Breadth is near-complete but depth is uniformly thin.
+**Shallow layers:** Most layers since iter 74 are minimal viable. Knowledge now has evidence collection and display (iter 100 added verify/retract lifecycle, iter 121 added evidence reasons and trail). Market has no exchange/reputation. Justice has no tiered adjudication. Bond has only endorsements, no connections/DMs. Governance has proposals+voting but no delegation/quorum. Breadth is complete but depth is uneven.
 
 **No observability:** No error monitoring, no analytics, no usage tracking. Building into a void.
 
@@ -138,6 +138,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Layer 12 — Culture** (96): pin/unpin ops, pinned boolean column, pinned items sort first. 23 ops.
 - **Layer 13 — Being** (97): reflect op — existential accountability. 24 ops. **ALL 13 LAYERS TOUCHED.**
 - **Depth: Pin UI** (98): pin/unpin buttons on node detail, pin indicators on Feed (brand border + label) and Board (pin icon). Layer 12 now usable.
+- **Depth: Knowledge Evidence** (121): evidence reasons on challenge/verify/retract, expandable forms, evidence trail on node detail. Layer 6 now evidence-based.
 
 ## Lessons Learned
 
