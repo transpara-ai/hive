@@ -1,33 +1,29 @@
-# Build Report — Iteration 121
+# Build Report — Iteration 122
 
-## Knowledge evidence — reasons on challenge/verify/retract, evidence trail on node detail
+## Dependency visibility — depends-on and blocking sections on node detail
 
 ### Changes
 
+**store.go:**
+- `ListDependencies(ctx, nodeID)` — returns all nodes that nodeID depends on (both done and not done), sorted incomplete-first
+- `ListDependents(ctx, nodeID)` — returns all nodes that depend on nodeID, sorted incomplete-first
+
 **handlers.go:**
-- `verify` handler now reads `reason` form field and stores it in ops.payload as JSON (same pattern as challenge)
-- `retract` handler now reads `reason` form field and stores it in ops.payload as JSON
+- `handleNodeDetail` now fetches dependencies and dependents, passes them to the template
+- JSON API response includes `dependencies` and `dependents` arrays
 
-**views.templ — KnowledgeCard:**
-- Replaced one-click challenge/verify/retract buttons with expandable forms
-- Each form has a textarea for the reason/evidence
-- Challenge requires a reason (required field). Verify and retract accept optional reasons.
-- `toggleForm()` script function ensures only one form open at a time per card
-- Buttons moved from right column to bottom of card for cleaner layout
-
-**views.templ — NodeDetailView:**
-- Added "Epistemic actions" section for claims (challenge/verify/retract with full-size forms and required reasons)
-- Activity section shows "Evidence trail" heading for claims instead of "Activity"
-- Op payloads with reasons are now displayed inline — reason text shown as an indented quote below each evidence op
-- Added `opReason()` and `isEvidenceOp()` helper functions
+**views.templ:**
+- `NodeDetailView` signature extended with `dependencies []Node, dependents []Node`
+- New "Dependencies" section between task metadata and body:
+  - "Depends on" — lists tasks this node depends on with status badges
+  - "Blocking" — lists tasks that depend on this node
+- New `depRow` component: clickable link with status icon (emerald check for done, amber ring for incomplete), title, state badge, assignee
 
 ### Files changed
-- `graph/handlers.go` — verify + retract handlers
-- `graph/views.templ` — KnowledgeCard, NodeDetailView, helper functions
+- `graph/store.go` — 2 new methods
+- `graph/handlers.go` — handler update
+- `graph/views.templ` — template + depRow component
 - `graph/views_templ.go` — generated
 
-### Tests
-All existing tests pass. No new test functions added (store-level knowledge tests from iter 93 still cover the ops).
-
 ### Deployed
-`ship.sh` — generated, built, tested, deployed to lovyou.ai, committed, pushed.
+`ship.sh` — generated, built, tested, deployed (408 retry succeeded), committed, pushed.

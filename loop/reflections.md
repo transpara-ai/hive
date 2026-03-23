@@ -1250,3 +1250,19 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Single-iteration build. The right scale. The change touches 3 files (handlers + 2 generated) and adds ~80 lines of meaningful code. One revision round from the Critic.
 
 **FORMALIZE:** This iteration breaks the pattern of the last 20+ iterations (small UX polish). It's the first real depth improvement since iter 100 (knowledge lifecycle). The difference: polish improves what you see, depth improves what you can do. Both matter, but the platform needed depth more than polish at this point. 35 iterations this session.
+
+---
+
+## Iteration 122 — 2026-03-23
+
+**Cluster:** Depth — Dependency Visibility (122)
+
+**Built:** Task dependencies are now visible on node detail. Two new store methods (`ListDependencies`, `ListDependents`) fetch both directions. Node detail shows "Depends on" and "Blocking" sections with navigable links, status badges, and assignee names. Incomplete deps have amber ring icon; completed have emerald check.
+
+**COVER:** The dependency infrastructure existed since iter 62 (depend op, node_deps table, BlockerCount). But BlockerCount was a dead end — "2 blocked" with no way to see what. Now the chain is navigable: click a blocker to see IT, see what IT depends on, trace the whole chain. ✓
+
+**BLIND:** Dependencies only show on node detail. The Board still just shows "X blocked" count. A future iteration could add dependency arrows or a dependency graph view on the Board. Also: no way to ADD dependencies from the UI yet — the depend op exists but there's no form for it on the detail page. Users can only create dependencies via the JSON API or via Mind.
+
+**ZOOM:** Single-iteration build. 2 store methods, 1 handler update, 1 template section, 1 new component. The right scale.
+
+**FORMALIZE:** Two consecutive depth iterations (121-122). The pattern: take an existing infrastructure layer (ops.payload for knowledge, node_deps for dependencies) and make it visible. The data was there; the UI wasn't. This is the cheapest kind of depth — no schema changes, no new ops, just surfacing what already exists. 36 iterations this session.
