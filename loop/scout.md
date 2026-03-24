@@ -1,21 +1,19 @@
-# Scout Report — Iteration 189
+# Scout Report — Iteration 190
 
-## Gap: Message Search (Phase 1 item 6 — final Chat Foundation item)
+## Gap: Endorse on posts (Phase 2 item 1 — first Square feature)
 
-**Source:** social-spec.md Phase 1, board milestone. Last remaining item before Phase 2.
+**Source:** social-spec.md Phase 2, board milestone. First differentiator feature.
 
-**Current state:** Chat lens has `?q=` search that filters conversation *titles* only (line 653 of handlers.go). No way to search message *bodies* across conversations. No operator syntax.
+**Current state:** Endorsements exist for users only (endorsements table: from_id → to_id). Profile pages show endorsement count + toggle button. No endorsement on content (posts, threads, claims, etc.).
 
 **What's needed:**
-1. `SearchMessages(spaceID, query, limit)` store method — ILIKE on message bodies, returns messages with conversation context (convo title, author name, space slug)
-2. Operator parsing: `from:username` filters by author, plain text matches body
-3. Chat lens search: when query contains text, search messages (not just conversation titles) and show results with context
-4. Results link to the conversation containing the match
+1. `endorse` grammar op — toggles endorsement on a node (endorse/unendorse)
+2. Bulk endorsement loading — counts per node + user's endorsement state, for Feed rendering
+3. Endorsement button on FeedCard — HTMX toggle with count, brand-colored when endorsed
+4. Endorsement count on node detail
 
-**Approach:** Follow existing pattern — every lens already has `?q=` search. Chat gets message-level search. Store does the heavy lifting with a JOIN query (nodes as messages JOIN nodes as conversations). View renders results as message cards with conversation context.
+**Why endorse first:** It's our differentiator. Reactions (emoji) are acknowledgment. Endorsement is a quality/trust signal — "I vouch for this." No other platform has this on content. It maps directly to the Code Graph Endorse primitive.
 
-**Composition:** `Search(Navigate(messages))` — traverse the message graph, filter by query. Uses the same `ListNodesParams.Query` ILIKE pattern already in the codebase.
+**Approach:** Reuse existing endorsements table (from_id, to_id). Node IDs and user IDs are in different namespaces (both random hex, but stored in different tables). `CountEndorsements(nodeID)` works as-is. Add bulk operations for Feed efficiency. Follow the reaction pattern: `GetBulkReactions` → `GetBulkEndorsementCounts` + `GetBulkUserEndorsements`.
 
-**Risk:** Low. New store method, handler logic, template section. No schema changes. No breaking changes.
-
-**Estimated scope:** ~100 lines store + handler, ~50 lines template.
+**Risk:** Low. No schema changes. Existing store methods work for nodes. Just need bulk variants + handler op + template buttons.

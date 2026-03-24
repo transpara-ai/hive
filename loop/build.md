@@ -1,19 +1,29 @@
-# Build Report — Iteration 189
+# Build Report — Iteration 190
 
-## 186 REVISE: Edit message inline swap
-- Replaced `location.reload()` with direct DOM update in `editMessage()` script
-- Added `id={"msg-body-" + msg.ID}` to message body div for targeting
-- After fetch succeeds, finds element by ID and sets `textContent = newBody`
-- Preserves scroll position, no page reload
+## Endorse on Posts
 
-## 189: Message Search
-- **Store:** `SearchMessages(spaceID, query, fromAuthor, limit)` — searches message bodies via ILIKE with JOIN to parent conversation. Returns `MessageSearchResult` with convo title, author, body, timestamps.
-- **Operator parsing:** `parseMessageSearch()` extracts `from:username` operator from query string. Remaining text becomes body search.
-- **Handler:** `handleConversations` calls `SearchMessages` when query is present, passes results to view.
-- **View:** `ConversationsView` now accepts `msgResults []MessageSearchResult`. When results exist, shows "Messages (N)" section below conversations with cards linking to the parent conversation.
-- **Placeholder:** Search input updated to `"Search messages... (from:name)"` to hint at operator syntax.
+**Store:**
+- `GetBulkEndorsementCounts(targetIDs) map[string]int` — single query for all post endorsement counts
+- `GetBulkUserEndorsements(userID, targetIDs) map[string]bool` — which posts the user has endorsed
+- Reuses existing `endorsements` table (from_id, to_id). No schema changes.
+
+**Handler:**
+- New `endorse` grammar op — toggles endorsement (endorse if not yet, unendorse if already)
+- Records op + notifies post author on endorse (not on unendorse)
+- HTMX response: returns `endorseButton` component for inline swap
+- JSON response: `{"op": "endorse", "endorsed": true/false}`
+
+**Feed handler:**
+- Loads bulk endorsement counts + user endorsement state for all posts
+- Passes both maps to FeedView
+
+**Template:**
+- `FeedView` accepts `endorseCounts map[string]int, userEndorsed map[string]bool`
+- `FeedCard` accepts `endorseCount int, endorsed bool`
+- `endorseButton` component: thumbs-up icon + count, brand-colored when endorsed, HTMX toggle
+- Filled icon when endorsed, outline when not
 
 **Files changed:**
-- `graph/store.go` — `MessageSearchResult` type + `SearchMessages` method
-- `graph/handlers.go` — `parseMessageSearch` helper + handler wiring
-- `graph/views.templ` — updated `ConversationsView` signature + message result cards + edit inline fix
+- `graph/store.go` — `GetBulkEndorsementCounts`, `GetBulkUserEndorsements`
+- `graph/handlers.go` — `endorse` op case, feed handler wiring
+- `graph/views.templ` — `FeedView`, `FeedCard`, `endorseButton` signatures + template

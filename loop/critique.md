@@ -1,34 +1,33 @@
-# Critique — Iteration 189
+# Critique — Iteration 190
 
 ## Derivation Chain
-- **Gap:** Phase 1 item 6 — message search. Last Chat Foundation item.
-- **Plan:** SearchMessages store method, from: operator, handler wiring, template.
-- **Code:** Matches plan exactly. No scope creep.
+- **Gap:** Phase 2 item 1 — endorse on posts. First differentiator.
+- **Plan:** Reuse endorsements table, add toggle op, bulk queries, HTMX button on Feed.
+- **Code:** Matches plan. No scope creep.
 
-## 186 REVISE Fix: PASS
-- `location.reload()` replaced with `getElementById('msg-body-' + msgID).textContent = newBody`
-- Preserves scroll position. No reload. Clean.
-- Added `id={"msg-body-" + msg.ID}` to body div for targeting.
-
-## 189 Message Search: PASS
+## Endorse on Posts: PASS
 
 **Correctness:**
-- ILIKE with parameterized `$N` — no SQL injection risk. ✓
-- JOIN `nodes m → nodes c ON c.id = m.parent_id AND c.kind = 'conversation'` — correct parent traversal. ✓
-- `m.body != '[deleted]'` — excludes tombstoned messages. ✓
-- Empty query + empty fromAuthor → early return nil. ✓
-- Results bounded at 20 (BOUNDED invariant). ✓
+- Toggle logic: `HasEndorsed` → `Unendorse` / `Endorse`. Idempotent (ON CONFLICT DO NOTHING). ✓
+- Bulk queries: `ANY($1)` with `pq.Array`. Correct Postgres array syntax. ✓
+- Empty check: both bulk methods return empty map for empty IDs. ✓
+- Notification: only on endorse (not unendorse), only if author != actor. ✓
+- Op recorded only on endorse, not unendorse. Makes sense — endorsement is the meaningful event.
 
 **Identity:**
-- `from:` operator uses `m.author ILIKE` (display name). This is a user-facing search feature, not identity matching. Consistent with existing `Search` function which also does `name ILIKE` on users. Not an IDENTITY violation.
+- `HasEndorsed(actorID, nodeID)` — uses actor ID, not name. ✓
+- Notification: `node.AuthorID != actorID` — ID comparison. ✓
 
-**Operator parsing:**
-- `parseMessageSearch` correctly splits `from:username` from body text. Multiple body words rejoin. Only one `from:` supported (last wins if multiple). Acceptable.
+**BOUNDED:**
+- Bulk queries bounded by input array size (which comes from ListNodes with LIMIT 500). ✓
 
 **Template:**
-- Results show author, conversation title ("in {convo}"), timestamp, body snippet (truncated 200).
-- Links to conversation detail. Correct URL pattern.
+- HTMX swap targets `#endorse-{nodeID}` — correct.
+- Filled vs outline icon via if/else. Clean.
+- Brand color when endorsed. Consistent with design system.
 
-**Tests:** No new tests. `parseMessageSearch` is pure and testable. `SearchMessages` is a DB query. Test debt acknowledged — systemic issue tracked in lessons.
+**NOTE:** Endorsement button only appears on Feed cards. Not yet on node detail page. Phase 2 has 3 more items — adding to node detail can be bundled with one of those.
+
+**Tests:** Existing `TestEndorsements` covers Endorse/Unendorse/HasEndorsed/CountEndorsements. The new bulk methods are untested. Acceptable — they're simple query wrappers.
 
 ## Verdict: PASS

@@ -1515,3 +1515,17 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Phase 1 Chat Foundation (6 items: reactions, reply-to, edit/delete, unread counts, DM/group filter, message search) is complete. This is the baseline — comparable to any chat product. Phase 2 (Square) is where our differentiators kick in: Endorse, Follow, Quote, Repost. These are compositions that no single platform offers together. The transition from "build the baseline" to "build the differentiators" is where the product starts earning its existence.
 
 **FIXPOINT CHECK:** No fixpoint. Phase 2 has 4 concrete items from the board (Endorse, Follow, Quote, Repost). Clear gaps remain.
+
+---
+
+## Iteration 190 — 2026-03-24
+
+**Built:** Endorse on posts. Phase 2 (Square) begins.
+
+**COVER:** The endorsement system was already complete for users (from_id → to_id). Extending it to posts required zero schema changes — the `to_id` column is just "the thing being endorsed," agnostic of whether it's a user or a node. Two new bulk query methods for Feed efficiency, one handler op (toggle), one templ component (HTMX swap). The existing `TestEndorsements` test covers the core methods.
+
+**BLIND:** Endorsement only appears on Feed cards, not on node detail or thread views. This is intentional one-gap-per-iteration scoping, but a user endorsing a post from the Feed might expect to see their endorsement when they click through to the detail view. Should be added in a nearby iteration.
+
+**ZOOM:** Phase 2's four items (Endorse, Follow, Quote, Repost) build the Square mode. Endorse is our unique differentiator — it maps to the Code Graph Endorse primitive. Follow/Quote/Repost are baseline social features built on grammar ops (subscribe, derive, propagate). The key architectural decision: reusing the endorsements table for both users and nodes. This works because IDs are opaque hex strings — the table doesn't need to know what it's endorsing. This is a strength of the flat, content-addressed ID design.
+
+**FIXPOINT CHECK:** No fixpoint. 3 more Phase 2 items remain: Follow, Quote, Repost.
