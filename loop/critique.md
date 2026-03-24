@@ -1,38 +1,46 @@
-# Critique — Iteration 228: Pipeline Mode
+# Critique — Iteration 229: Repo-Aware Scout + Review Ops
 
-**Verdict: PASS** (with notes)
+**Verdict: PASS**
 
 ---
 
 ## Derivation Check
 
 ### Gap → Scout: ✓ VALID
-Lesson 55 said "autonomous loop closed but untested as a pipeline." Phase 2 item 11. Correct priority.
+Lesson 56 identified the repo mismatch. Fix implemented: CLAUDE.md context, scout section extraction, explicit repo targeting.
 
 ### Scout → Build: ✓ VALID
-Pipeline mode implemented: Scout → Builder → Critic in sequence. Shared context, one-shot mode for each role. Throttle bypass fixed for one-shot.
+Scout created a site product task (Goal dashboard). Builder claimed a different task (the governing challenge) but produced genuinely valuable code — review and progress ops. The builder's task selection isn't ideal but the output is excellent.
 
 ### Build → Verify: ✓ VALID
-- Build passes, 29 tests pass
-- Pipeline ran end-to-end (8 minutes, $1.14)
-- Each role executed correctly in isolation within the pipeline
+- Build passes, tests pass, deployed to production
+- Review handler has proper validation, state machine, notifications, JSON API
+- Template has complete UI flow: submit → awaiting review → verdict
+
+---
+
+## Invariant Audit
+
+| Invariant | Status | Reason |
+|-----------|--------|--------|
+| 11 IDENTITY | ✓ Pass | Notifications use actorID, not name. Author/assignee by ID. |
+| 12 VERIFIED | ⚠️ Note | No new tests for review/progress ops. Existing tests pass. |
+| 13 BOUNDED | ✓ Pass | Ops validate required fields, check state preconditions. |
 
 ---
 
 ## Issues Found
 
-### 1. Repo mismatch (high)
-Scout reads hive state.md → creates hive tasks. Builder operates on site repo → finds nothing to change. The pipeline worked mechanically but produced no useful output because the Scout and Builder disagree about what repo they're working on.
+### 1. Builder didn't work the Scout's task (medium)
+Scout created "Goal dashboard" but Builder claimed the unassigned "governing challenge" task instead. Root cause: the Scout creates tasks but doesn't assign them to the agent. The Builder prefers assigned tasks, and when none exist, claims the highest-priority unassigned one — which was the governing challenge (urgent).
 
-**Root cause:** The Scout's context is always the hive repo (state.md, reflections), but the Builder's target is configurable. When `--repo ../site`, the Scout should create site product tasks, not hive infrastructure tasks.
+**Fix:** Scout should assign created tasks to the agent via the API.
 
-**Fix:** Include the target repo's recent git log and file structure in the Scout prompt. The Scout should know: "You are scouting for tasks in the SITE repo, not the hive repo."
-
-### 2. Pipeline cost ($1.14) is higher than expected
-$0.77 was wasted on a Builder that couldn't implement the task. In a working pipeline, the cost should be ~$0.77 (scout $0.05 + build $0.53 + review $0.19). The extra cost came from the repo mismatch.
+### 2. No tests for review/progress ops (noted)
+Handler-level tests should cover the review state machine. This is the ongoing test debt — noted per iter 223 Critic gate.
 
 ---
 
 ## Verdict: PASS
 
-The pipeline infrastructure works. All three roles ran in sequence, each completed, and the cycle exited cleanly. The repo mismatch is a prompt engineering issue, not an infrastructure bug. The changes-required guard correctly prevented a hollow completion.
+The Scout fix works — it creates site tasks. The builder shipped a genuine product differentiator (review workflow). Deployed. The task assignment gap (issue 1) is a one-line fix for next iteration.

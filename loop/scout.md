@@ -1,19 +1,17 @@
-# Scout Report — Iteration 228
+# Scout Report — Iteration 229
 
 ## Gap Identified
 
-**The three roles work in isolation but have never run as a pipeline.** Lesson 55: "The autonomous loop is closed but untested as a pipeline." This is Phase 2 item 11: "Test: full Scout → Builder → Critic cycle."
-
-Currently requires three separate commands. One command should run the full cycle.
+**Repo mismatch: Scout creates hive tasks, Builder targets site repo.** Lesson 56: "The Scout must know the Builder's target." The pipeline ran but produced no useful output — the Scout created a hive infrastructure task, the Builder couldn't implement it on the site repo.
 
 ## Plan
 
-1. Add `--pipeline` mode to cmd/hive — runs Scout → Builder → Critic in sequence on the same repo
-2. Scout creates a task → Builder claims and implements → Critic reviews the commit
-3. All three share the same API client, budget, and repo path
-4. Pipeline exits after one full cycle (like one-shot but for all three roles)
-5. Run it and verify end-to-end: task appears on board, code committed, review posted
+1. Read the target repo's CLAUDE.md (if it exists) — this has the product context
+2. Include target repo path and a `ls` of top-level structure in the Scout prompt
+3. Add explicit instruction: "Create tasks for the TARGET REPO, not the hive."
+4. Extract just the "What the Scout Should Focus On Next" section from state.md (instead of truncating the whole file)
+5. Re-run the pipeline and verify: Scout creates a site product task → Builder implements it → Critic reviews
 
 ## Priority
 
-**P0** — Phase 2 item 11. This proves the hive can operate autonomously in a single command.
+**P0** — Without this fix, the pipeline can't ship product features autonomously.

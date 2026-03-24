@@ -1,42 +1,56 @@
-# Build Report — Iteration 228: Pipeline Mode
+# Build Report — Iteration 229: Repo-Aware Scout + Review Ops Shipped
 
 ## What This Iteration Does
 
-Adds `--pipeline` mode to cmd/hive: one command runs Scout → Builder → Critic in sequence. Phase 2 item 11.
+Two things:
+1. Fixed the Scout's repo mismatch (lesson 56) — Scout now reads the target repo's CLAUDE.md and creates tasks FOR that repo
+2. The builder autonomously shipped **review and progress ops** — Work's key differentiator from Linear
 
-## Files Changed
+## Scout Fix
 
-| File | What |
-|------|------|
-| `cmd/hive/main.go` | Added `--pipeline` flag, `runPipeline()` function. Runs Scout → Builder → Critic with shared context. |
-| `pkg/runner/scout.go` | Fixed tick throttle bypass in one-shot mode (linter fix). |
-| `pkg/runner/critic.go` | Fixed tick throttle bypass in one-shot mode (linter fix). |
-| `pkg/runner/scout_test.go` | Added `TestScoutThrottleBypassInOneShot`. |
-| `pkg/runner/critic_test.go` | Added `TestCriticThrottleBypassInOneShot`. |
+### `pkg/runner/scout.go`
+- New `readRepoContext()` — reads target repo's CLAUDE.md for product context
+- New `readScoutSection()` — extracts just "What the Scout Should Focus On Next" from state.md (instead of truncating the whole file)
+- Updated `buildScoutPrompt()` — includes repo path, repo context, explicit instruction: "Create tasks for THIS repo, not the hive"
+- Added entity pipeline pattern reference in instructions
 
-## Pipeline E2E Test
+### Result
+Scout created: "Add Goal progress dashboard — aggregate Goal → Project → Task view with rollup" — a SITE product task, not a hive infrastructure task. Fix confirmed.
 
-```bash
-go run ./cmd/hive --pipeline --repo ../site --space hive --agent-id ... --budget 5
+## Builder: Review & Progress Ops (autonomous)
+
+The builder claimed "Make Work and Social genuinely competitive" and implemented:
+
+### `site/graph/handlers.go` (+94 lines)
+- `progress` op — moves task active → review, with optional summary note, notifies author
+- `review` op — structured review with verdict (approve/revise/reject), feedback body, state transition, notifies assignee
+
+### `site/graph/views.templ` (+110 lines)
+- "Submit for Review" panel on active tasks
+- "Awaiting Review" panel with approve/revise/reject buttons + feedback textarea
+- Review verdict badges in activity trail (green/amber/red)
+- Progress note display in activity trail
+
+### State Machine (now complete)
+```
+intend → open → claim/assign → active → progress → review
+                                                      ↓
+                                        approve → done
+                                        revise  → active (cycle back)
+                                        reject  → closed
 ```
 
-```
-[pipeline] ── scout ──     Created task ($0.05, 38s)
-[pipeline] ── builder ──   Claimed, Operated ($0.77, 4m16s) → DONE, no changes
-[pipeline] ── critic ──    Reviewed Policy commit → PASS ($0.32, 2m29s)
-[pipeline] ── cycle complete ──
-Total: $1.14, ~8 minutes
-```
+## Metrics
 
-## Issue: Repo Mismatch
-
-The Scout created a hive infrastructure task ("Add --pipeline mode to cmd/hive") but the Builder operates on the site repo. The Builder correctly Operated but found nothing to change in `../site`. The changes-required guard caught this and left the task in-progress.
-
-**Root cause:** The Scout reads state.md from the hive repo and identifies hive gaps. But the Builder builds on the site repo. The Scout needs to understand which repo it's scouting for and create tasks accordingly.
-
-**Fix:** Pass the target repo context to the Scout prompt. Or: run the pipeline with `--repo ../hive` for hive tasks, `--repo ../site` for site tasks.
+| Phase | Time | Cost |
+|-------|------|------|
+| Scout | 43s | $0.07 |
+| Builder | 7m27s | $1.43 |
+| **Total** | **~8min** | **$1.50** |
 
 ## Build
 
-- `go build ./...` ✓
-- `go test ./...` ✓ (29 tests)
+- `templ generate` ✓
+- `go build -buildvcs=false ./...` ✓
+- `go test ./...` ✓
+- `flyctl deploy --remote-only` ✓ — review ops live on lovyou.ai

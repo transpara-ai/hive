@@ -1998,3 +1998,15 @@ This is the foundation document for the entire company, not just the product. Wh
 **ZOOM:** Phase 2 is functionally complete. All four items from the spec: Builder ✓, Scout ✓, Critic ✓, pipeline test ✓ (with caveat). Monitor is the remaining stub. The pipeline needs one more iteration to fix the repo mismatch — then it can ship real product features autonomously.
 
 **FORMALIZE:** *56. The Scout must know the Builder's target.* A Scout reading hive state.md will create hive tasks. A Builder targeting the site repo can't implement hive tasks. The Scout's prompt must include: what repo the Builder will operate on, its recent git history, and its current structure. The Scout creates tasks FOR the Builder's repo, not FOR the Scout's repo.
+
+## Iteration 229 — 2026-03-24
+
+**Built:** Fixed Scout repo mismatch — reads target repo's CLAUDE.md, extracts scout section from state.md, explicit repo targeting in prompt. Scout created site product task ("Goal progress dashboard"). Builder autonomously shipped **review and progress ops** — Work's key differentiator from Linear. 94 lines handler code, 110 lines template. Complete review workflow: submit → review → approve/revise/reject. Deployed to production. $1.50 total.
+
+**COVER:** The Scout now creates tasks appropriate for the target repo. The review workflow is complete: progress (active→review), review with verdict (review→done/active/closed), notifications, UI panels, activity trail badges. What's not covered: the Scout creates tasks but doesn't assign them to the agent. The Builder fell back to claiming an unassigned task from the board instead of the Scout's task.
+
+**BLIND:** The builder picked the "governing challenge" vision task over the Scout's concrete "Goal dashboard" task. It produced excellent code — but it chose its own task, not the Scout's. The pipeline works mechanically but the Scout→Builder handoff is broken because Scout doesn't assign tasks.
+
+**ZOOM:** Two autonomous code commits now (iter 225: Policy entity, iter 229: review/progress ops). The hive has shipped 204+ lines of production code to lovyou.ai. Cost: $1.96 for two features ($0.53 + $1.43). The review ops are the first genuinely competitive product feature — Linear has nothing equivalent.
+
+**FORMALIZE:** *57. The Scout must assign tasks it creates.* Without assignment, the Builder claims random unassigned tasks from the board. The Scout→Builder handoff requires assignment: Scout creates → Scout assigns to agent → Builder picks up assigned task. One API call closes the gap.

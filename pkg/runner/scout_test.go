@@ -73,8 +73,14 @@ func TestParseScoutTaskEmpty(t *testing.T) {
 }
 
 func TestBuildScoutPrompt(t *testing.T) {
-	prompt := buildScoutPrompt("state content", "git log", "board summary")
+	prompt := buildScoutPrompt("/path/to/site", "repo context", "state content", "git log", "board summary")
 
+	if !searchString(prompt, "/path/to/site") {
+		t.Error("prompt missing repo path")
+	}
+	if !searchString(prompt, "repo context") {
+		t.Error("prompt missing repo context")
+	}
 	if !searchString(prompt, "state content") {
 		t.Error("prompt missing state")
 	}
@@ -86,5 +92,8 @@ func TestBuildScoutPrompt(t *testing.T) {
 	}
 	if !searchString(prompt, "TASK_TITLE") {
 		t.Error("prompt missing output format")
+	}
+	if !searchString(prompt, "MUST create tasks") {
+		t.Error("prompt missing target repo instruction")
 	}
 }
