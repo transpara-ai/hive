@@ -1,9 +1,11 @@
-# Scout Report — Iteration 209
+# Scout Report — Iteration 210
 
-## Gap: 11 of 13 layers have no general specification
+## Gap: Three unresolved spec questions blocking fixpoint
 
-Work and Social were generalized (iters 201-204). The remaining 11 layers are still "minimal viable entries" — single features, not full domains. Each layer, when examined through cognitive grammar, expands into entity kinds, modes, and cross-layer relationships.
+1. **Organization ↔ Space** — Spaces contain Nodes. Organizations should contain Spaces. Current model can't express this.
+2. **Thin kinds** — ~half of the 54 proposed entity kinds fail the lifecycle test. Need to filter.
+3. **Market exchange flow** — entity kinds listed but the multi-step exchange mechanism isn't designed.
 
-**Method:** Apply cognitive grammar to all 13 layers simultaneously. Produce one architecture document that shows the full ontology — every layer generalized, every cross-layer relationship mapped, every entity kind identified.
+**Method:** Address all three in one pass. Apply the thin-kinds test (distinct lifecycle, create form, list view). Resolve Organization ↔ Space architecturally. Design the Market exchange flow at grammar-op level.
 
-**Output:** `hive/loop/layers-general-spec.md`
+**Output:** Updates to unified-spec.md and layers-general-spec.md. Fixpoint or honest admission of remaining gaps.

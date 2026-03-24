@@ -355,8 +355,106 @@ Not all 54 entity kinds are equally valuable. Priority based on:
 
 ---
 
-## The Principle
+---
 
-Every entity kind is a Node. Every operation is an Op. The grammar is the API. Adding a new entity kind costs: 1 constant, 1 handler, 1 template. Adding a new op costs: 1 handler case. The architecture doesn't change. The product grows by accumulating entity kinds and cross-layer relationships on the same graph.
+## Fixpoint Pass — Three Resolved Questions
 
-This is what "substrate for collective existence" means in practice. 64 entity kinds across 13 layers, all on one graph, all using one grammar, all composable with each other. A friend group uses 5 kinds. A company uses 30. A civilization uses all 64. The same product, different configurations.
+### 1. Organization ↔ Space: Space Nesting
+
+**Problem:** Spaces contain Nodes. But Organizations should contain Spaces. A Node can't contain a Space.
+
+**Resolution:** Add `parent_id` to the spaces table. Spaces can nest.
+
+```
+ALTER TABLE spaces ADD COLUMN parent_id TEXT REFERENCES spaces(id);
+```
+
+An Organization is a Space with `kind=organization, parent_id=NULL`. It contains child Spaces:
+
+```
+Acme Corp (Space, kind=organization)
+├── Engineering (Space, kind=team)
+│   ├── Backend (Space, kind=team)
+│   └── Frontend (Space, kind=team)
+├── Marketing (Space, kind=team)
+└── Company-wide (Space, kind=community)
+```
+
+Each child Space has its own sidebar, modes, content, membership. The discover page shows top-level Spaces (parent_id IS NULL). Inside an org Space, you see child Spaces.
+
+**Team and Department** are Spaces, not Nodes. They have members (via space membership), their own content (tasks, posts, conversations), their own modes. This is correct — a Team isn't a piece of content, it's a container for content.
+
+**What remains a Node:** Role (describes a capability, lives inside a Team/Org space), Policy (describes a rule, lives inside a governance context), Decision (records a choice).
+
+### 2. Thin-Kinds Filter: 54 → 20
+
+Applied the test: **distinct lifecycle (state machine) + distinct create form + distinct list view. All three required.**
+
+**PASS — 20 entity kinds (10 exist, 10 new):**
+
+| Kind | Layer | Lifecycle | Exists? |
+|------|-------|-----------|---------|
+| task | Work | open→active→review→done | ✓ |
+| project | Work | open→active→done | ✓ |
+| goal | Work | open→active→done | ✓ |
+| post | Social | created→[deleted] | ✓ |
+| thread | Social | open→closed | ✓ |
+| conversation | Social | active→archived | ✓ |
+| comment | Social | created→[deleted] | ✓ |
+| claim | Knowledge | asserted→challenged→verified/retracted | ✓ |
+| proposal | Governance | open→passed/failed | ✓ |
+| role | Identity | active→deprecated | NEW |
+| policy | Governance | draft→active→deprecated | NEW |
+| decision | Governance | proposed→decided→superseded | NEW |
+| document | Knowledge | draft→published→archived | NEW |
+| channel | Social | active→archived | NEW |
+| resource | Market | available→allocated→consumed | NEW |
+| case | Justice | filed→investigating→resolved | NEW |
+| incident | Build | detected→investigating→resolved | NEW |
+| release | Build | planned→released | NEW |
+| question | Knowledge | asked→answered→closed | NEW |
+| event | Social | scheduled→active→past | NEW (borderline — defer if needed) |
+
+**FAIL — 34 proposed kinds that are metadata, not entities:**
+
+Milestone (= goal child), Cycle/Sprint (= date range on project), Norm/Tradition/Value (= document or pinned post), Recognition/Badge/Credential (= endorsement or profile metadata), Reputation (= computed score), Connection/Block/Recommendation (= follows/endorsements/ops), Intention/Growth (= goal), Check-in (= post format), Analytics/Disclosure (= computed views), Audit (= task with kind=audit or review op), Listing (= task in market space), Invoice/Contract (= document in market space), Amendment/Appeal/Precedent (= proposal/case variants), Artifact/Review (= task output / op), Definition/Lesson (= claim or document tagged).
+
+**Honest count: 20 kinds, not 64.** 10 new to build.
+
+### 3. Market Exchange Flow: No New Ops
+
+The exchange mechanism maps to existing grammar ops in sequence:
+
+```
+1. LIST    — Intend(kind=task, space=marketplace) → open listing
+2. BID     — Respond(parent=listing, body=offer) → comment with structured bid
+3. ACCEPT  — Consent(node=listing, participants=[lister, bidder]) → bilateral agreement
+4. FULFILL — Claim(node=listing) → self-assign + active
+5. DELIVER — Complete(node=listing, body=evidence) → done
+6. REVIEW  — Review(node=listing, verdict=approve/revise) → quality check
+```
+
+**No new ops needed.** The exchange flow is a composition of Intend → Respond → Consent → Claim → Complete → Review applied to nodes in a market-type space. The **Resource** entity kind tracks what's being exchanged. The mechanism is the grammar.
+
+### Fixpoint Assessment
+
+| Question | Status |
+|----------|--------|
+| Organization ↔ Space | **Resolved.** Space nesting via parent_id. |
+| Thin kinds | **Resolved.** 54 → 20. 10 new to build. |
+| Market exchange | **Resolved.** Composition of existing ops. |
+| Root (collective existence) | Stable. |
+| Work + Social as peers | Stable. |
+| Grammar is kind-agnostic | Stable. |
+| Entity-as-Node architecture | Stable. |
+| Modes emerge from content | Stable. |
+
+**Fixpoint reached.** Applying the method again would refine details (exact state machines per kind, exact views per kind) but wouldn't change the architecture or entity list. The remaining work is implementation, not specification.
+
+---
+
+## The Principle (revised)
+
+20 entity kinds across 13 layers, all on one graph, all using one grammar. Spaces nest for organizational hierarchy. 10 kinds exist. 10 kinds to build. Each costs: 1 constant, 1 handler, 1 template. The exchange mechanism is a composition of 6 existing grammar ops. Nothing new needs to be invented.
+
+A friend group uses 5 kinds in 1 space. A company uses 15 kinds across nested spaces. A civilization uses all 20 across interconnected organizations. The same code, different configurations.

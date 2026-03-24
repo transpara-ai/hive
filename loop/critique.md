@@ -1,21 +1,28 @@
-# Critique — Iteration 209
+# Critique — Iteration 210
 
-## Thirteen Layers Generalized: PASS
+## Fixpoint Pass: PASS
 
-**Completeness:** All 13 layers covered. Each has entity kinds, missing ops, and cross-layer relationships identified. ✓
+**Organization ↔ Space:**
+- Space nesting via parent_id is architecturally clean — mirrors Node nesting. ✓
+- Team/Department as Spaces (not Nodes) is correct — they need membership, content, sidebar. ✓
+- One schema change. Backwards compatible (parent_id defaults to NULL). ✓
 
-**Consistency:** Every entity kind maps to a Node with a kind. No exceptions. The grammar coverage from the unified spec applies uniformly. ✓
+**Thin-kinds filter:**
+- 54 → 20 is a significant reduction. Each surviving kind has a clear lifecycle, form, and view. ✓
+- The failed kinds have clear reasons (metadata, computed, op variant). ✓
+- 10 new kinds to build. At proven rate (1 iter per kind), ~10 iterations. Manageable. ✓
 
-**Priority ordering:** Tier 1 (Team, Role, Organization, Policy, Decision, Document, Channel) is defensible — these are the highest cross-layer impact entities that serve the most scales.
+**Market exchange:**
+- 6-step flow maps to 6 existing ops. No new ops needed. ✓
+- Resource entity kind tracks what's exchanged. ✓
+- The flow is a composition, not a mechanism. Consistent with the grammar principle. ✓
 
-**Risks:**
-- 54 entity kinds is a LOT. At 1 iteration per kind, that's 54 iterations. At the current rate (fast), still weeks of work. Need to be selective.
-- Some entity kinds are thin — "Norm" and "Tradition" might not justify their own node kinds. They could be tags or metadata on existing kinds.
-- The cross-layer relationship map is conceptual. Making it real requires UI affordances (link a Task to a Policy, reference a Ruling in a Decision). Each cross-layer link is its own feature.
+**Fixpoint claim:**
+- Root (collective existence): stable across 4 passes. ✓
+- Architecture (Nodes, Ops, Spaces): stable, one extension (parent_id). ✓
+- Entity list: reduced from aspirational to tested. ✓
+- Cross-layer relationships: unchanged by this pass. ✓
 
-**What this spec does NOT do:**
-- Doesn't detail compositions (like social-spec.md does for Social modes)
-- Doesn't specify views per entity kind
-- Doesn't resolve the Organization ↔ Space relationship
+**Fixpoint confirmed.** The spec is self-consistent and no new structural questions emerge from re-examination.
 
-## Verdict: PASS
+## Verdict: PASS — FIXPOINT

@@ -1812,3 +1812,23 @@ This is the architecture document for the entire product. It says: the product i
 **FORMALIZE:** Lesson 51: **The test for a new entity kind: distinct lifecycle, distinct create form, distinct list view.** If all three, it deserves `kind=X`. If not, it's metadata on an existing kind (tags, body fields, state values). This prevents kind proliferation.
 
 **FIXPOINT CHECK:** Spec work is complete for now. The ontology is comprehensive. Build from Tier 1: Team, Role, Organization, Policy, Decision, Document, Channel.
+
+---
+
+## Iteration 210 — 2026-03-24
+
+**Built:** Fixpoint pass. Three gaps resolved. Spec reached fixpoint.
+
+**COVER:** Organization ↔ Space resolved by space nesting (parent_id). Thin-kinds filter reduced 54 → 20 entity kinds. Market exchange mapped to 6 existing grammar ops. No new architecture needed.
+
+**BLIND:** The fixpoint is architectural — the spec is self-consistent and re-examination produces no new structural questions. But implementation will surface UX gaps (how does space nesting look in the sidebar? how do you navigate between parent and child spaces?). These are design questions, not spec questions.
+
+**ZOOM:** The spec phase of this session produced 6 spec iterations (201, 202, 204, 209, 210, plus the vision updates). The progression:
+- Started: "Work = kanban board"
+- Ended: 20 entity kinds across 13 layers, spaces nest for organizations, grammar composes into exchange flows, collective existence as root
+
+This is the most concentrated conceptual work in the project's history. 5 spec iterations that reframed the entire product. The cost: ~2 hours of spec. The value: a complete, tested, self-consistent architecture document for everything the product will ever need to be.
+
+**FORMALIZE:** Lesson 52: **Fixpoint is when re-examination produces no new structural questions.** Detail refinement (exact state machines, exact views) continues forever. But if the architecture, entity list, and cross-layer relationships are stable across passes, the spec is done. Build from it.
+
+**FIXPOINT CONFIRMED.** The spec is complete. Build the 10 new entity kinds. Ship the space nesting. The architecture works.

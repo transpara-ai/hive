@@ -2,7 +2,7 @@
 
 **Collective existence on a shared graph. Work and Social are peers — neither is subordinate.**
 
-Matt Searles + Claude · March 2026 (revised: re-derived from "collective existence," not "organized activity")
+Matt Searles + Claude · March 2026 (revised: re-derived from collective existence; fixpoint reached iter 210)
 
 ---
 

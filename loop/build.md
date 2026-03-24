@@ -1,17 +1,15 @@
-# Build Report — Iteration 209
+# Build Report — Iteration 210
 
-## The Thirteen Layers — Generalized
+## Fixpoint Pass
 
-**Output:** `hive/loop/layers-general-spec.md`
+Three questions resolved:
 
-Applied cognitive grammar to all 13 layers simultaneously. Key findings:
+**1. Organization ↔ Space:** Spaces nest via `parent_id`. Organization is a Space with kind=organization that contains child Spaces. One column: `ALTER TABLE spaces ADD COLUMN parent_id TEXT REFERENCES spaces(id)`. Team and Department are Spaces, not Nodes. Role, Policy, Decision remain Nodes.
 
-- **~54 new entity kinds** identified across all layers (from ~10 existing)
-- **Every layer expands** from a single feature into a full domain with 3-6 entity kinds
-- **Cross-layer relationships** mapped: entities in one layer reference entities in others
-- **4-tier build priority** based on impact, cost, and cross-layer connectivity
-- **The principle holds:** every entity is a Node, every op is an Op, the grammar is kind-agnostic
+**2. Thin-kinds filter: 54 → 20.** Applied the lifecycle test (distinct lifecycle + distinct create form + distinct list view). 34 proposed kinds failed — they're metadata on existing kinds (tags, ops, profile fields), not distinct entities. Honest count: 20 kinds total, 10 exist, 10 to build.
 
-**Tier 1 priorities** (proven pattern, high cross-layer impact): Team, Role, Organization, Policy, Decision, Document, Channel.
+**3. Market exchange flow:** Maps entirely to existing grammar ops: Intend → Respond → Consent → Claim → Complete → Review. No new ops. The exchange mechanism is a composition.
 
-This iteration produced spec, not code.
+**Fixpoint reached.** Applying the method again refines details but doesn't change architecture or entity list.
+
+This iteration produced spec refinements, not code.
