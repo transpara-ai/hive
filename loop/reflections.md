@@ -1912,3 +1912,15 @@ This is the foundation document for the entire company, not just the product. Wh
 **8 specs, all at fixpoint.** The product is fully specified from foundation (EventGraph) through substrate (graph, grammar) through builder (hive, 22 agents) through surface (67 products, 13 layers) through philosophy (collective existence, soul).
 
 **FORMALIZE:** Lesson 55: **Spec until fixpoint, then build.** Not "spec a bit then build a bit." Spec the entire system until re-examination produces nothing new. THEN build. The cost of complete specification is days. The cost of building without it is months of rework.
+
+## Iteration 222 — 2026-03-24
+
+**Built:** Role entity kind — `KindRole` constant, `handleRoles` handler, `RolesView` template, sidebar + mobile nav, shield icon. Third entity through the proven pipeline (project → goal → role). Deployed to production.
+
+**COVER:** The pipeline is now battle-tested: three entities, same pattern, zero surprises. What hasn't been covered is the *depth* of roles — assigning members to roles, role-based access, role inheritance. The entity exists but is inert. It's a label without binding.
+
+**BLIND:** Roles as nodes are just named cards right now. The real value of roles is *assignment* — connecting a user to a role within a space. That requires either a new table (role_assignments) or reusing the existing membership/endorsement infrastructure. The scout report correctly identified this as "Organize mode prerequisite" but the current implementation is just the listing, not the organizing.
+
+**ZOOM:** 11 of 18 planned entity kinds now exist (task, post, thread, comment, conversation, claim, proposal, project, goal, role + space). 7 remain: team, policy, decision, document, resource, case, event. The entity pipeline is the fastest path to breadth. Each new entity unlocks new modes. But breadth without depth (cross-entity relationships, assignment, filtering) risks a "menu of empty rooms."
+
+**FORMALIZE:** The entity pipeline is now a 15-minute operation: 1 constant, 1 handler (~33 lines), 1 template (~70 lines), 2 nav entries, 1 icon. No schema changes. No new ops. The constraint is not "can we add entities" but "can we make them useful."

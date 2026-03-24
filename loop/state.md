@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 202, 2026-03-24.
+Last updated: Iteration 222, 2026-03-24.
 
 ## Current System State
 
@@ -196,6 +196,8 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 **Unified ontology at hive/loop/unified-spec.md.** 10 modes, 18 entities, derivation order. Everything is organized activity. Modes emerge from content. Architecture already supports this.
 
+- **Entity: Role** (222): `KindRole` constant, `handleRoles` handler, `RolesView` template, sidebar + mobile nav, shield icon. Organize mode prerequisite. 11th entity kind.
+
 ## What the Scout Should Focus On Next
 
 **THE GOVERNING CHALLENGE:** If we're not better than existing products in form AND function AND philosophy, we offer no real value in switching. The philosophy is strong (13 layers, 15 grammar operations, soul). The form is improving. The FUNCTION of Work and Social must be dramatically better than Linear and Discord/Twitter.
@@ -268,8 +270,8 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 - **Root:** Collective existence (the soul: "take care of your human, humanity, and yourself")
 - **Architecture:** Event graph, grammar ops, signed causal chains. Kind-agnostic — a Node is a Node whether it's a task, a policy, or a friendship.
-- **Modes:** 10 currently (Board, Projects, Goals, Feed, Chat, Threads, People, Knowledge, Governance, Build, Activity). More emerge as entity kinds are added.
-- **Entity kinds:** 10 currently (task, post, thread, comment, conversation, claim, proposal, project, goal). 8+ more from the unified spec (role, team, department, policy, process, decision, resource, document, organization).
+- **Modes:** 11 currently (Board, Projects, Goals, Roles, Feed, Chat, Threads, People, Knowledge, Governance, Build, Activity). More emerge as entity kinds are added.
+- **Entity kinds:** 11 currently (task, post, thread, comment, conversation, claim, proposal, project, goal, role). 7+ more from the unified spec (team, department, policy, process, decision, resource, document, organization).
 - **Scale:** Same primitives serve solo dev through civilizational. Modes emerge from content, not from feature gates.
 - **Agents:** Peers on the graph. Many hives, many apps. Each space can have its own agents with their own roles and capabilities.
 - **Revenue:** Charge corporations, free for individuals. Hosted persistence.
@@ -290,6 +292,6 @@ Deploy: `fly deploy --remote-only` from site repo.
 - `cmd/reply` — one-shot, identity from API key
 - `cmd/post` — publishes iteration summaries
 
-**The entity kind pipeline is proven.** Each new kind = 1 constant, 1 handler, 1 template. Priority order for remaining kinds: Team, Role (Organize mode) → Policy, Decision (Govern mode) → Document (Learn mode) → Resource (Allocate mode) → Organization (meta-container).
+**The entity kind pipeline is proven.** Each new kind = 1 constant, 1 handler, 1 template. Priority order for remaining kinds: Team (Organize mode) → Policy, Decision (Govern mode) → Document (Learn mode) → Resource (Allocate mode) → Organization (meta-container). Role shipped in iter 222.
 
 **Cross-entity depth is more valuable than more kinds.** Board project filter (207) shows the pattern: entities filtering and contextualizing each other. Next: Goal progress dashboard (aggregated Goal → Project → Task view), task auto-assign to filtered project.

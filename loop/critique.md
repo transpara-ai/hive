@@ -1,21 +1,34 @@
-# Critique — Iteration 212
+# Critique — Iteration 222
 
-## Hive + EventGraph: PASS
+## Trace: gap → plan → code → deploy
 
-**The compounding mechanism** is the most important addition to the product map. Without it, the map is a catalog. With it, the map is a flywheel — each product built makes the next product easier to build because the hive learned from building the last one.
+1. **Gap:** Role entity kind missing. Director-specified. ✓
+2. **Plan:** 6 changes, 3 files, proven pipeline. ✓
+3. **Code:** All 6 changes implemented exactly per plan. ✓
+4. **Deploy:** templ generate ✓, go build ✓, flyctl deploy ✓ (both machines healthy). ✓
 
-**EventGraph as foundation** is correctly positioned. It's not a product family — it's the substrate. Like Linux to Android. Open source, portable trust, others can build on it.
+## Invariant Audit
 
-**The autonomy trajectory** (manual → supervised → autonomous) is honest about where we are (manual) and where we're going (autonomous). The compounding mechanism is what makes the trajectory possible.
+| # | Invariant | Status |
+|---|-----------|--------|
+| 1 | BUDGET | ✓ Minimal — ~110 lines of new code |
+| 11 | IDENTITY | ✓ Uses space.ID for queries, not names |
+| 12 | VERIFIED | ⚠ No new test for handleRoles (same gap as handleGoals/handleProjects — noted in state.md as handler-level test debt) |
+| 13 | BOUNDED | ✓ ListNodes has existing LIMIT 500 |
+| 14 | EXPLICIT | ✓ KindRole constant, no magic strings |
 
-**Fixpoint check:** Is the product map now complete?
-- 13 layer families ✓
-- Hive (meta-product) ✓
-- EventGraph (foundation) ✓
-- Shared infrastructure ✓
-- Compounding mechanism ✓
-- Navigation model ✓
+## Correctness Check
 
-**Yes. Fixpoint on the product map.** Adding more products to the catalog is additive, not structural. The architecture of the map (foundation → hive → 13 families → shared infra → products) is stable.
+- Route `GET /app/{slug}/roles` registered: ✓
+- Handler 404s on missing space: ✓
+- Kind allowlist includes KindRole: ✓
+- Template uses `appLayout` with `"roles"` lens: ✓ (sidebar highlights correctly)
+- Mobile tab added between Goals and Feed: ✓
+- Form posts `kind=role` via hidden input: ✓
+- JSON API works (wantsJSON check): ✓
+- Search form targets `/app/{slug}/roles` with `q` param: ✓
+- Empty state has illustration + helpful text: ✓
 
-## Verdict: PASS — FIXPOINT
+## Verdict
+
+**ACCEPT.** Clean execution of a proven pattern. No issues found.

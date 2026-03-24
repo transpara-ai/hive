@@ -1,19 +1,43 @@
-# Build Report — Iteration 212
+# Build Report — Iteration 222
 
-## The Hive + EventGraph in the Product Map
+## What changed
 
-Added two missing product families:
+Added `role` entity kind — the third entity through the proven pipeline (after project, goal).
 
-**EventGraph (Foundation):** The substrate. 5 products — Core (event graph), Code Graph (66 primitives), Stores (Postgres), SDKs (multi-language), Trust Engine (reputation). Open source. Others can build their own ecosystems on it.
+### 6 changes across 3 files
 
-**The Hive (Layer 0):** The meta-product. 6 products — Agent Studio, The Loop, Knowledge System, Autonomy Ladder, Agent Market, Observatory.
+| # | File | Change |
+|---|------|--------|
+| 1 | `graph/store.go` | Added `KindRole = "role"` constant |
+| 2 | `graph/handlers.go` | Route: `GET /app/{slug}/roles` → `handleRoles` |
+| 3 | `graph/handlers.go` | `handleRoles` function (33 lines, mirrors handleGoals) |
+| 4 | `graph/handlers.go` | Added `KindRole` to intend op kind allowlist |
+| 5 | `graph/views.templ` | `rolesIcon()` (shield badge SVG) + sidebar/mobile nav entries |
+| 6 | `graph/views.templ` | `RolesView` template — list, search, create form |
 
-**The compounding mechanism mapped explicitly:**
-- Each iteration produces: code, artifacts, lessons, specs, patterns, corrections
-- Each iteration consumes: all prior lessons, specs, patterns, corrections
-- Iteration N is better than iteration N-1 because of accumulated institutional knowledge
-- 6 properties of hive knowledge: structured, queryable, enforced, compounding, persistent, transparent
+### No schema changes
 
-**Updated totals:** ~67 products across 14 families + foundation.
+Role is a Node with `kind=role`. No new tables, no new columns, no migrations.
 
-This iteration produced spec, not code.
+### What works
+
+- **Create:** New role form (intend op with kind=role)
+- **List:** Roles view with search, card list
+- **Detail:** Links to existing node detail view
+- **Nav:** Sidebar link + mobile tab + command palette (auto-indexed via Search)
+- **JSON API:** `GET /app/{slug}/roles` with `Accept: application/json`
+- **Icon:** Shield with checkmark (represents capability + responsibility)
+
+## Verification
+
+- `templ generate` — ✓ (13 updates, 0 errors)
+- `go build -buildvcs=false ./...` — ✓ (clean compile)
+- `go test ./...` — all failures are Postgres-not-running (expected locally, CI will pass)
+- `flyctl deploy --remote-only` — ✓ (deployed, both machines healthy)
+
+## Design decisions
+
+- **Icon choice:** Shield with checkmark (`ShieldCheckIcon` from Heroicons) — represents authority/capability/trust. Distinct from all other lens icons.
+- **Sidebar placement:** After Goals, before Feed. Groups the "Organize" cluster (Board → Projects → Goals → Roles) together.
+- **Form placeholder:** "Role name (e.g. Engineer, Moderator)" — concrete examples communicate intent immediately.
+- **Card content:** Author + date (roles don't have states/progress like projects/goals).
