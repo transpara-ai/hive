@@ -1885,3 +1885,30 @@ This is the foundation document for the entire company, not just the product. Wh
 **Built:** Space nesting (parent_id on spaces table). Architectural prerequisite for Organizations.
 
 **BLIND (critical):** Matt flagged the real priority: the hive itself. We've been building site features manually when the hive — the meta-product — is the bottleneck. An autonomous hive that uses the product to build the product is worth more than any 50 site features. The next iteration must be a hive spec, not more site code.
+
+---
+
+## Iterations 214-216 — 2026-03-24
+
+**Built:** Hive operational spec. Revised to full end state (22 roles). Reached fixpoint.
+
+**COVER:** The hive spec now covers: 22 roles (10 pipeline, 6 background, 6 periodic), configurable pipeline (8 iteration shapes), agent definition template (struct + prompt structure), authority model per role (3 levels with trust progression), 20 channels, and convergence confirmation.
+
+**BLIND:** The 22 system prompts are ~44K words of prompt engineering. They're the most important code in the system — the prompts ARE the agents. Writing them well requires understanding each role deeply. Bad prompts = bad agents. This is the biggest implementation risk.
+
+**ZOOM:** The complete spec stack for the project:
+
+| Spec | What | Status |
+|------|------|--------|
+| unified-spec.md | Collective existence, 13 facets, derivation order | Fixpoint |
+| layers-general-spec.md | 20 entity kinds, space nesting, exchange flow | Fixpoint |
+| product-map.md | 67 products, 14 families, shared infra, compounding | Fixpoint |
+| hive-spec.md | 22 roles, configurable pipeline, authority model | Fixpoint |
+| work-general-spec.md | Work as 6 modes | Fixpoint |
+| social-spec.md | Social 4 modes, compositions | Fixpoint |
+| work-product-spec.md | Execute mode depth (12 ops) | Fixpoint |
+| social-product-spec.md | Social product positioning | Fixpoint |
+
+**8 specs, all at fixpoint.** The product is fully specified from foundation (EventGraph) through substrate (graph, grammar) through builder (hive, 22 agents) through surface (67 products, 13 layers) through philosophy (collective existence, soul).
+
+**FORMALIZE:** Lesson 55: **Spec until fixpoint, then build.** Not "spec a bit then build a bit." Spec the entire system until re-examination produces nothing new. THEN build. The cost of complete specification is days. The cost of building without it is months of rework.

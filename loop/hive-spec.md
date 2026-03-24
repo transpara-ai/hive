@@ -414,4 +414,169 @@ No agent can read everything. Context must be managed:
 
 This is 22 prompts × ~2000 words each = ~44,000 words of prompt engineering. The prompts ARE the agents. They're the most important code in the entire system.
 
-**Fixpoint?** Not yet. The role taxonomy is at fixpoint (22 roles, 3 categories). But the agent DEFINITIONS (prompts, watch patterns, capabilities, channel assignments) need a full pass. And the configurable pipeline mechanism needs design.
+---
+
+## Part 9: The Configurable Pipeline
+
+Not every iteration needs all 10 pipeline roles. The PM declares the **iteration shape** based on the task:
+
+| Shape | Roles engaged | When |
+|-------|--------------|------|
+| **Quick fix** | Scout → Builder → Critic → Reflector | Bug fix, typo, small change |
+| **Standard** | PM → Scout → Builder → Critic → Reflector | Normal feature iteration |
+| **Designed** | PM → Scout → Architect → Designer → Builder → Tester → Critic → Reflector | UI-heavy feature |
+| **Researched** | PM → Researcher → Scout → Architect → Builder → Tester → Critic → Reflector | New domain, unfamiliar problem |
+| **Full** | All 10 pipeline roles | Major feature, new product, architectural change |
+| **Spec** | PM → Researcher → Scout → Architect → Critic → Reflector | Spec iteration (no code) |
+| **Test** | Scout → Tester → Critic → Reflector | Test debt paydown |
+| **Ops** | Scout → Ops → Critic → Reflector | Infrastructure, deploy, monitoring |
+
+The PM chooses the shape at the start of each iteration. The pipeline state machine:
+
+```
+PM writes ticket with shape
+  → Each role in the shape activates in sequence
+  → Each role reads the previous role's output
+  → Each role posts to its channel
+  → Each role @mentions the next role
+  → If Critic says REVISE: loop back to the revise target (Builder, Architect, or Designer)
+  → Reflector closes the iteration
+  → PM reads reflection, picks next ticket
+```
+
+### Pipeline State Machine
+
+```
+States: pending → active → blocked → completed → revised
+
+Transitions:
+  pending → active       (previous role completed)
+  active → completed     (role produces its artifact)
+  active → blocked       (role needs input from another role — @mention + wait)
+  completed → (triggers next role)
+  completed → revised    (Critic says REVISE — role re-activates)
+```
+
+---
+
+## Part 10: Agent Definition Template
+
+Every agent is defined by one struct. The prompt is the soul of the agent.
+
+```go
+AgentDef{
+    Name:          "scout",
+    Role:          "scout",
+    Model:         "claude-opus-4-6",
+    Category:      "pipeline",      // pipeline | background | periodic
+    PipelineOrder: 3,               // position in pipeline (0 = not pipeline)
+    SystemPrompt:  scoutPrompt,     // the detailed role prompt
+    WatchPatterns: []string{"loop.pm.completed"},
+    Channels:      []string{"#scout-reports", "#questions"},
+    CanOperate:    false,
+    Authority:     AuthRecommended, // Required | Recommended | Notification
+    Reads:         []string{"state.md", "product-map.md", "relevant spec", "codebase"},
+    Produces:      []string{"scout.md"},
+    Techniques:    []string{"cognitive-grammar", "nine-operations", "fixpoint-awareness"},
+}
+```
+
+### Prompt Template Structure
+
+Every agent prompt follows this structure:
+
+```
+## Identity
+You are the {role} of the hive. Your name is {name}.
+
+## Soul
+> Take care of your human, humanity, and yourself.
+
+## Purpose
+{what this role does, in 2-3 sentences}
+
+## What You Read
+{specific files/channels/APIs this role consumes}
+
+## What You Produce
+{specific artifacts this role creates}
+
+## Techniques
+{methods this role uses — cognitive grammar, COVER/BLIND, etc.}
+
+## Channel Protocol
+- Post to: {channels}
+- @mention: {next role in pipeline} when done
+- Respond to: @mentions from {other roles}
+
+## Authority
+{what you can do autonomously vs what needs approval}
+- Autonomous: {list}
+- Needs approval: {list}
+
+## Quality Criteria
+{how to know your output is good enough}
+
+## Anti-patterns
+{common mistakes for this role — things NOT to do}
+```
+
+---
+
+## Part 11: Authority Model Per Role
+
+| Role | Default authority | Autonomous | Needs approval |
+|------|------------------|-----------|----------------|
+| PM | Recommended | Prioritize backlog, write tickets, choose pipeline shape | Change strategic direction, cancel projects |
+| Researcher | Notification | Read docs, search web, produce research | Access external APIs, spend on tools |
+| Scout | Notification | Read all code/specs/state, produce reports | — |
+| Architect | Recommended | Design solutions, write plans | Change schema, add dependencies |
+| Designer | Recommended | Design UI, write mockups | Change visual identity |
+| Builder | Required → Recommended | Read/write code, run tests | Merge to main, deploy, modify schema |
+| Tester | Notification | Write/run tests | Modify production data |
+| Critic | Notification | Read all artifacts, produce reviews | Block a deploy (Guardian does this) |
+| Ops | Required → Recommended | Deploy, monitor, restart | Scale infrastructure, change DNS |
+| Reflector | Notification | Update state.md, write reflections | Modify invariants |
+| Guardian | Required | HALT on violations | Everything else (Guardian is reactive, not proactive) |
+| Librarian | Notification | Read/organize docs, answer questions | Delete docs, restructure knowledge |
+| Accountant | Notification | Read all resource data, produce reports | Set budgets, approve spending |
+| Coordinator | Recommended | Sequence tasks, resolve conflicts | Reassign work between agents |
+| Maintainer | Recommended | Fix regressions, update deps | Major version upgrades |
+| Security | Required | Scan code, report vulnerabilities | Block deploys, revoke access |
+| Marketer | Recommended | Write blog posts, docs | Publish externally |
+| Analyst | Notification | Read analytics, produce reports | — |
+| Onboarder | Notification | Write guides, answer questions | — |
+| Optimizer | Recommended | Profile performance, suggest improvements | Modify queries, change architecture |
+| Spawner | Required | Propose new agents | Create/destroy agents |
+| Support | Recommended | Respond to users, file bugs | Modify user data |
+
+Authority levels progress as trust accumulates:
+- New agent: everything is **Required** (human approves)
+- After 10 successful iterations: **Recommended** (auto-approve with logging)
+- After 50 successful iterations: **Notification** (auto-approve, just logged)
+
+---
+
+## Part 12: Convergence — Final Pass
+
+**Role taxonomy (22 roles):** Stable. Applying Distinguish again to "activities in building products" produces the same 20 activities. The 22 roles map 1:1 (Director is human, Coordinator is meta). No new activities found.
+
+**Pipeline mechanism:** Stable. 8 iteration shapes cover the observed patterns from 215 iterations of manual loop running. Every iteration we've done maps to one of these shapes.
+
+**Agent definition template:** Stable. The struct + prompt template covers all the information an agent needs to operate.
+
+**Authority model:** Stable. The three levels (Required/Recommended/Notification) already exist in the codebase. The per-role defaults are derived from the risk profile of each role's actions.
+
+**Channel structure:** Stable. 20 channels map to the roles. Each channel has clear ownership and purpose.
+
+**What remains as implementation, not specification:**
+1. Writing the 22 system prompts (~44K words)
+2. Creating the 20 channels in the hive space
+3. Building the pipeline state machine in `pkg/loop`
+4. Building token tracking wrapper
+5. Building the Observatory UI
+6. Trust progression logic
+
+These are build tasks, not spec tasks. The spec defines WHAT each thing is. The build makes it real.
+
+**Fixpoint reached.** Re-examining the hive spec produces no new structural questions. The role taxonomy, pipeline mechanism, prompt template, authority model, and channel structure are all stable. The remaining work is implementation.
