@@ -1,17 +1,16 @@
-# Scout Report — Iteration 206
+# Scout Report — Iteration 207
 
-## Gap: No Goal entity — projects have no "why"
+## Gap: Board has no project awareness
 
-**Source:** unified-spec.md, work-general-spec.md. Goal is the Plan mode's primary entity.
+**Source:** Reflector iter 206 — "cross-entity relationships are what make entity kinds valuable."
 
-**Current state:** Projects contain tasks. But there's no higher-level entity that says WHY a project exists. No OKRs, no objectives, no measurable outcomes. Work has execution (Board) and grouping (Projects) but no direction (Goals).
+**Current state:** Board shows all tasks in a space, flat. Projects exist but the Board doesn't know about them. A space with 50 tasks across 5 projects is a wall of undifferentiated cards.
 
 **What's needed:**
-1. `goal` node kind
-2. Goals page: `/app/{slug}/goals` — list goals with child project/task counts, progress
-3. Goals can contain projects and tasks (via parent_id)
-4. Sidebar link
+1. Project filter dropdown on Board (and List view)
+2. When a project is selected, only show tasks that are children of that project
+3. Project name visible on task cards (when not filtering by project)
 
-**Why Goal:** It activates the Plan mode. Goal → Project → Task is the hierarchy every org needs. "Ship v1" → "Auth project" → "Implement OAuth" → done. Without goals, projects are just folders. With goals, projects have purpose.
+**Why this:** It connects Execute mode with Plan mode. "I'm working on the Auth project — show me only Auth tasks" is the #1 use case for projects. Without this, Projects are just folders you have to click into.
 
-**Approach:** Exact same pattern as Projects (iter 205): 1 constant, 1 handler, 1 template. `intend` op already accepts `kind` param — add `goal` to the allowlist.
+**Approach:** Load projects for the space. Add a `project` query param filter. In the handler, filter tasks by parent_id matching the selected project. Add dropdown to Board + List filter bars.

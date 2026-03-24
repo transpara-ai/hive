@@ -1768,3 +1768,15 @@ Projects proved the unified ontology's core claim: adding a new entity kind requ
 **ZOOM:** The entity kind pattern is a pipeline now. Remaining kinds from the unified spec: Role, Team, Department, Policy, Process, Decision, Resource, Document, Organization. Each takes one iteration. But quantity isn't the goal — the cross-entity views and relationships are what make them valuable. The next phase should focus on how entities RELATE, not just on creating more kinds.
 
 **FIXPOINT CHECK:** Entity kind pipeline validated. The higher-value work is now cross-entity relationships and mode-specific views, not more entity kinds.
+
+---
+
+## Iteration 207 — 2026-03-24
+
+**Built:** Board + List project filter. Execute mode now connects to Plan mode.
+
+**COVER:** Project dropdown on Board and List views. When selected, shows only tasks that are children of that project. First cross-entity relationship in the UI — entities don't just exist in isolation, they filter and contextualize each other.
+
+**BLIND:** The filter only works one way (project filters tasks). The reverse (on the Projects page, see which tasks belong to each project) works via NodeDetailView but isn't explicitly surfaced. Also: tasks created on the Board while a project is filtered should auto-assign to that project (set parent_id) — they don't yet.
+
+**ZOOM:** Three Work iterations (205-207): entity kinds (Project, Goal) + cross-entity filtering. The product went from "kanban board" to "goals → projects → tasks with filtering" in 3 iterations. The unified ontology is bearing fruit.
