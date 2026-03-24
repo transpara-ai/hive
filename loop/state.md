@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 197, 2026-03-24.
+Last updated: Iteration 198, 2026-03-24.
 
 ## Current System State
 
@@ -179,6 +179,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Phase 3 — Composition** (194-197): Following feed + repost surfacing + attribution. For You (endorsement-weighted). Trending (velocity scoring). Feed has 4 tabs: All, Following, For You, Trending.
 
 **Phase 3 (Composition) COMPLETE.** All 4 feed algorithms + repost attribution shipped. Feed matches spec's SquareMode.
+- **Polish** (198): Engagement bar on node detail — endorse, repost, quote buttons on post/thread detail pages.
+
+**Social layer Phases 1-3 COMPLETE.** 16 iterations (183-198). Chat Foundation + Square mode + Feed composition + engagement bar everywhere. Next: Rooms, Forum, Work depth, or testing.
 
 ## What the Scout Should Focus On Next
 

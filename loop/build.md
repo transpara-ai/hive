@@ -1,27 +1,18 @@
-# Build Report — Iteration 197
+# Build Report — Iteration 198
 
-## Trending Feed (Velocity Scoring)
-
-**Store:**
-- `ListPostsByTrending(spaceID, limit)` — engagement velocity ranking
-- Score: `(recent_endorsements * 3 + recent_reposts * 2 + recent_replies) / GREATEST(1, hours_old)`
-- "Recent" = created in last 48 hours (`created_at > NOW() - INTERVAL '48 hours'`)
-- Age in hours via `EXTRACT(EPOCH FROM NOW() - n.created_at) / 3600`
-- Cast to float for division: `::float`
-- Same full Node scan as other methods
+## Engagement Bar on Node Detail
 
 **Handler:**
-- `tab=trending` branch → `ListPostsByTrending`
-- Falls back to chronological for search queries on Trending tab
+- `handleNodeDetail`: loads endorsement count, endorsed state, repost count, reposted state for the node
+- Uses existing `CountEndorsements`, `HasEndorsed`, `GetBulkRepostCounts`, `HasReposted`
 
 **Template:**
-- "Trending" tab pill added after "For You"
-
-**Difference from For You:**
-- For You: cumulative engagement + recency bonus → quality over time
-- Trending: recent engagement / age → what's hot RIGHT NOW
+- `NodeDetailView`: accepts 4 new params: `endorseCount int, endorsed bool, repostCount int, reposted bool`
+- Engagement bar: replies count + repost button + quote link + endorse button
+- Only shows for posts and threads (not tasks, comments, conversations)
+- Reuses existing `endorseButton` and `repostButton` components (same HTMX swap behavior)
+- Placed between body and edit form
 
 **Files changed:**
-- `graph/store.go` — `ListPostsByTrending`
-- `graph/handlers.go` — trending branch
-- `graph/views.templ` — Trending tab pill
+- `graph/handlers.go` — handleNodeDetail engagement data loading
+- `graph/views.templ` — NodeDetailView signature + engagement bar

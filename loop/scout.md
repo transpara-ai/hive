@@ -1,24 +1,16 @@
-# Scout Report — Iteration 197
+# Scout Report — Iteration 198
 
-## Gap: Trending feed tab (Phase 3 final item)
+## Gap: Engagement bar on node detail
 
-**Source:** social-spec.md SquareMode — "Trending" tab. Last Phase 3 composition item.
+**Source:** Critic iter 190 flagged: "Endorsement button only appears on Feed cards. Not yet on node detail page." Same applies to repost and quote buttons.
 
-**Current state:** Feed has All (chronological), Following (social graph), For You (cumulative engagement). No velocity-based ranking — a post from a week ago with 10 endorsements outranks a post from today with 3.
+**Current state:** Node detail shows post content, replies, edit form, dependencies. No engagement actions (endorse, repost, quote). Users who click through from Feed to detail lose the ability to interact without going back.
 
 **What's needed:**
-1. Store: `ListPostsByTrending(spaceID, limit)` — time-windowed engagement velocity
-2. Handler: `tab=trending` branch
-3. Template: "Trending" tab pill
+1. Handler: load endorsement count, repost count, user's endorse/repost state for the node
+2. View: add engagement bar (endorse, repost, quote buttons) to NodeDetailView after the body
+3. Pass engagement data through NodeDetailView to the engagement components
 
-**Scoring formula:** Velocity = recent engagement / age.
-```
-score = (recent_endorsements * 3 + recent_reposts * 2 + recent_replies) / GREATEST(1, hours_old)
-```
-Where "recent" = created in last 48 hours. This rewards posts that are getting engagement NOW, not posts that accumulated engagement over time.
+**Approach:** Reuse existing `endorseButton`, `repostButton` components. Add quote link. Load counts in handleNodeDetail, pass to view. Place bar between body and edit form.
 
-**Difference from For You:**
-- For You: cumulative score + recency bonus → established quality content rises
-- Trending: velocity score → currently-hot content rises, decays naturally
-
-**Risk:** Low. Same pattern as ListPostsByEngagement with different ORDER BY formula.
+**Risk:** Low. Reuses existing components. One handler change, one template addition.

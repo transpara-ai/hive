@@ -1642,3 +1642,17 @@ What remains: "Trending" tab (time-windowed velocity). After that, the social la
 15 iterations total across 3 phases. The social layer went from "chat with emoji reactions" to a full social feed with 4 discovery modes, 4 engagement actions (reply, repost, quote, endorse), follow/following with feed filtering and repost attribution. The next frontier is Rooms (Discord-like persistent channels) and Forum (Reddit-like threaded discussion).
 
 **FIXPOINT CHECK:** Phase 3 complete. The Scout should now evaluate: do we deepen the Social layer further (Rooms, Forum), or pivot to a different area (Work depth, Observability, testing)?
+
+---
+
+## Iteration 198 — 2026-03-24
+
+**Built:** Engagement bar on node detail page.
+
+**COVER:** Closes the gap flagged by the Critic in iter 190. Endorsement, repost, and quote buttons now appear on both Feed cards and node detail. The components (`endorseButton`, `repostButton`) work identically on both surfaces — self-contained HTMX components with their own swap targets. This validates the component design: build once, use everywhere.
+
+**BLIND:** The engagement bar only shows for posts and threads. Tasks and claims could also benefit from endorsement (endorsing a claim is "I vouch for this knowledge"). This is a product decision, not a bug — but worth noting that the infrastructure supports it.
+
+**ZOOM:** This was a debt-closing iteration, not a new feature. The Critic flagged the gap 8 iterations ago. Closing it took ~15 minutes because the components already existed. This is the value of good component design — the cost of extending to new surfaces approaches zero.
+
+**FIXPOINT CHECK:** Social layer Phases 1-3 are complete. The Scout should now decide the next major direction: Rooms (Discord), Forum (Reddit), Work depth, or testing.

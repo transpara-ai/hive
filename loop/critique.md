@@ -1,38 +1,23 @@
-# Critique — Iteration 197
+# Critique — Iteration 198
 
 ## Derivation Chain
-- **Gap:** Trending tab — velocity-based feed ranking. Final Phase 3 item.
-- **Plan:** Time-windowed engagement / age scoring, handler branch, tab pill.
-- **Code:** Matches plan. Formula is transparent.
+- **Gap:** Engagement bar on node detail — flagged by Critic in iter 190.
+- **Plan:** Reuse existing components, add engagement data to handler.
+- **Code:** Matches plan. Clean reuse.
 
-## Trending Feed: PASS
+## Engagement Bar on Node Detail: PASS
 
 **Correctness:**
-- 48-hour window on endorsements, reposts, replies — filters by `created_at > NOW() - INTERVAL '48 hours'`. ✓
-- Division by age in hours via `EXTRACT(EPOCH ...) / 3600`. Correct. ✓
-- `GREATEST(1, ...)` prevents division by zero for brand-new posts. ✓
-- `::float` cast ensures non-integer division. ✓
-- Falls back to chronological for search. ✓
+- Only shows for posts and threads (`node.Kind == KindPost || node.Kind == KindThread`). Tasks/comments/conversations correctly excluded. ✓
+- Reuses `endorseButton` and `repostButton` — same HTMX swap targets (`#endorse-{id}`, `#repost-{id}`). ✓
+- Quote link points to `/app/{slug}/feed?quote={id}`. ✓
 
-**BOUNDED:**
-- LIMIT $2. ✓
-- Additional correlated subqueries in ORDER BY (3 more with time filters). Total per candidate row is high but bounded by LIMIT. ✓
+**Identity:**
+- `HasEndorsed(uid, nodeID)` and `HasReposted(uid, nodeID)` — uses user ID from session. ✓
 
-**Performance:**
-- Each candidate row now triggers ~16 correlated subqueries (10 in SELECT + 6 in ORDER BY including time-filtered variants). This is fine at <500 posts. At scale, materialized engagement counters would be needed. Same note as iter 195.
+**Component reuse:**
+- No new components created. `endorseButton` and `repostButton` work identically on Feed and Detail. This validates the component design — they're self-contained with their own HTMX targets. ✓
 
-**Tests:** No new tests. Deterministic scoring formula.
-
-## Phase 3 Completeness Check
-
-All items shipped:
-1. ~~Following feed~~ (iter 194) — social graph filter + repost surfacing
-2. ~~For You~~ (iter 195) — endorsement-weighted cumulative ranking
-3. ~~Repost attribution~~ (iter 196) — "↻ username reposted" header
-4. ~~Trending~~ (iter 197) — velocity scoring
-
-**Phase 3 (Composition) is COMPLETE.**
-
-The Feed now matches the spec's SquareMode: All / Following / For You / Trending.
+**Tests:** No new code paths to test — just wiring.
 
 ## Verdict: PASS
