@@ -1,25 +1,24 @@
-# Scout Report — Iteration 191
+# Scout Report — Iteration 192
 
-## Gap: Follow users (Phase 2 item 2)
+## Gap: Quote post (Phase 2 item 3)
 
-**Source:** social-spec.md Phase 2, board milestone. Maps to Subscribe grammar op.
+**Source:** social-spec.md Phase 2, board milestone. Maps to Derive grammar op.
 
-**Current state:** No follow system exists. Profile pages show endorsements but no follow button. No follower/following counts. No "following" feed filter.
+**Current state:** Posts have no quote reference. The `express` op creates standalone posts. No way to embed one post inside another.
 
 **What's needed:**
-1. `follows` table — `follower_id, followed_id, created_at, PRIMARY KEY (follower_id, followed_id)`
-2. Store methods: Follow, Unfollow, IsFollowing, CountFollowers, CountFollowing
-3. Profile page: Follow/unfollow button (HTMX toggle), follower + following counts
-4. Notification when someone follows you
+1. Schema: `ALTER TABLE nodes ADD COLUMN quote_of_id TEXT NOT NULL DEFAULT ''`
+2. Node struct: `QuoteOfID`, `QuoteOfAuthor`, `QuoteOfTitle`, `QuoteOfBody` (resolved via correlated subqueries, like reply_to)
+3. Handler: `express` op accepts optional `quote_of_id` form field
+4. FeedCard: when `QuoteOfID` is set, render a bordered preview card of the quoted post
+5. Engagement bar: "Quote" button that triggers the compose form with the reference
 
-**Scoping:** Feed filtering ("Following" tab on Feed) is a separate iteration. This iteration establishes the follow relation and makes it visible on profiles.
-
-**Approach:** Follow the endorsement pattern — same table structure (from/to), same toggle handler, same HTMX swap. Profile page already has the endorsement button pattern to copy.
+**Approach:** Follow the `reply_to_id` pattern exactly — column, subquery resolution in GetNode/ListNodes, struct fields, template rendering. The quote preview in FeedCard is a compact bordered card with author + title + body snippet.
 
 **From the spec:**
 ```
-current_user.follows(user) → "Unfollow"
-else → "Follow"
+if post.quote_of { @EntityPreview(post.quote_of) }
 ```
+Maps to Derive operation in the grammar matrix.
 
-**Risk:** Low. New table, store methods, profile UI. Schema migration auto-applies via `CREATE TABLE IF NOT EXISTS`.
+**Risk:** Medium — touches GetNode and ListNodes queries (adding 4 correlated subqueries). Both are well-established patterns. Every Node scan needs updating.

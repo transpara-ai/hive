@@ -1543,3 +1543,17 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Phase 2 is moving fast. 2 of 4 items shipped in 2 iterations. The pattern is: each social feature maps to one grammar op (Endorse→endorse, Follow→subscribe) and one table. The Code Graph primitives predicted exactly the data model needed. This is the spec-first approach working as intended — the spec names the op, the op implies the table, the table implies the UI.
 
 **FIXPOINT CHECK:** No fixpoint. 2 more Phase 2 items: Quote post, Repost.
+
+---
+
+## Iteration 192 — 2026-03-24
+
+**Built:** Quote post. Derive grammar op. Schema change, query updates, compose integration, inline preview.
+
+**COVER:** Quote follows the reply_to pattern exactly — column, correlated subqueries, struct fields, template rendering. The consistency validates the architectural decision: every node-to-node relation (parent, reply_to, quote_of) uses the same pattern. The Node struct now has 3 kinds of reference: hierarchical (parent_id), conversational (reply_to_id), and citational (quote_of_id). Each resolved at query time, not JOINed.
+
+**BLIND:** The "quote" button goes to `/feed?quote={id}` which reloads the entire feed page. If you're scrolled down, you lose position. A JS approach (click quote → inject preview into compose form without reload) would be better UX. Also: quoting only works from Feed cards, not from node detail. And there's no way to quote a post from a different space.
+
+**ZOOM:** The correlated subquery count in GetNode/ListNodes is growing (10 subqueries per row). This is an architectural choice: resolve everything at query time, no N+1 in the handler. It works at current scale but will need attention if query latency increases. The alternative — JOINs or handler-level batch resolution — trades query complexity for code complexity.
+
+**FIXPOINT CHECK:** No fixpoint. 1 more Phase 2 item: Repost.

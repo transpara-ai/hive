@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 191, 2026-03-24.
+Last updated: Iteration 192, 2026-03-24.
 
 ## Current System State
 
@@ -173,9 +173,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Phase 1 — Chat Foundation** (184-189): Reply-to linkage (structured, not markdown), message edit/delete (author-only, soft delete, audit trail), unread counts (read_state table, UPSERT), DM/group filter tabs, message search (ILIKE on bodies, from: operator, conversation context). Edit REVISE fixed (inline DOM swap, not reload).
 
 **Phase 1 (Chat Foundation) COMPLETE.** All 6 items shipped.
-- **Phase 2 — Square** (190-191): Endorse on posts (toggle, HTMX swap, bulk queries). Follow users (follows table, profile button, counts, notification).
+- **Phase 2 — Square** (190-192): Endorse on posts (toggle, HTMX swap, bulk queries). Follow users (follows table, profile button, counts, notification). Quote post (quote_of_id column, correlated subquery resolution, compose integration, inline preview).
 
-**Phase 2 (Square) in progress.** 2 of 4 items shipped. Remaining: Quote, Repost.
+**Phase 2 (Square) in progress.** 3 of 4 items shipped. Remaining: Repost.
 
 ## What the Scout Should Focus On Next
 
@@ -186,7 +186,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 **Phase 2 — Square (from social-spec.md + board milestones):**
 1. ~~Endorse on posts~~ — DONE (iter 190)
 2. ~~Follow users~~ — DONE (iter 191)
-3. Quote post — create a new post that embeds/references another post
+3. ~~Quote post~~ — DONE (iter 192)
 4. Repost — share someone else's post to your feed
 
 **Key insight:** Phase 2 is where our differentiators emerge. Endorse is unique to us (Code Graph primitive — no other platform has it on content). Follow+Quote+Repost are baseline social features, but built on grammar operations (react, relate, express) rather than ad-hoc implementations.

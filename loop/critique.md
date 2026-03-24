@@ -1,34 +1,34 @@
-# Critique — Iteration 191
+# Critique — Iteration 192
 
 ## Derivation Chain
-- **Gap:** Phase 2 item 2 — follow users. Subscribe grammar op.
-- **Plan:** New follows table, store methods, profile button + counts.
-- **Code:** Matches plan. Scoped correctly — no feed filtering yet.
+- **Gap:** Phase 2 item 3 — quote post. Derive grammar op.
+- **Plan:** quote_of_id column, correlated subquery resolution, compose form integration, inline preview.
+- **Code:** Matches plan. All queries updated consistently.
 
-## Follow Users: PASS
+## Quote Post: PASS
 
 **Correctness:**
-- ON CONFLICT DO NOTHING — idempotent follow. ✓
-- Self-follow prevented (redirect no-op). ✓
-- Notification only on follow, not unfollow. ✓
-- Viewer auth checked before showing button. ✓
+- `quote_of_id` defaults to empty string — backwards compatible. ✓
+- Correlated subqueries: COALESCE with empty string fallback if quoted post deleted. ✓
+- GetNode and ListNodes both updated with same 4 subqueries. Consistent. ✓
+- CreateNode INSERT updated to $17 with quote_of_id. ✓
+- Compose form: hidden input only present when quotePost != nil. ✓
 
 **Identity:**
-- Follow uses IDs (`follower_id`, `followed_id`). ✓
-- `ResolveUserID(name)` to get target ID from URL. ✓
-- `viewer.ID` from auth context. ✓
+- Quote links by node ID, not title/name. ✓
+- Author resolved via subquery at render time. ✓
 
 **BOUNDED:**
-- Count queries are single-row aggregates. ✓
-- `IsFollowing` is an EXISTS check. ✓
+- Correlated subqueries are single-row lookups by PK. O(1) per row. ✓
+- Quote body truncated to 120 chars. ✓
 
 **Template:**
-- Follow button next to endorse button. Layout preserved.
-- Stats line shows follower/following counts. Clean.
-- No HTMX swap — uses full form POST + redirect. Acceptable for profile page (not high-frequency action). Could be HTMX-ified later.
+- Quote preview shows above body in FeedCard (matches spec: "if post.quote_of { @EntityPreview }"). ✓
+- Compose form shows quote preview with brand border when quoting. Clear UX. ✓
+- "quote" link in engagement bar. Simple, visible. ✓
 
-**Tests:** No new tests for follow methods. Pattern matches endorsements which are tested. Acceptable.
+**Performance note:** GetNode and ListNodes now have 7 correlated subqueries each (3 counts, 3 reply_to, 4 quote_of = 10 total). At current scale (<500 posts per query) this is fine. If it becomes a bottleneck, consolidate into JOINs.
 
-**NOTE:** Feed filtering by followed users not yet implemented. Scoped out correctly — one gap per iteration.
+**Tests:** No new tests. The schema migration is auto-applied. Existing tests still pass (they don't create posts with quotes, but the DEFAULT '' handles it).
 
 ## Verdict: PASS
