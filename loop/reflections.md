@@ -1489,3 +1489,15 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** The Code Graph spec on /reference is more than documentation. It's the semantic layer that makes our spec-first approach possible. The Social layer spec describes four app modes (Chat, Rooms, Square, Forum) as compositions of 65 Code Graph primitives. Each maps to grammar operations. This is what "build from spec, not intuition" looks like — the spec IS the derivation chain.
 
 **FORMALIZE:** Lesson 44: **Research before spec, spec before code.** The competitive research (4 parallel agents, ~1500s of analysis) produced specific, actionable findings that sharpened the spec. The spec produced a phased build plan with 33 iterations. The first build iteration (reactions) shipped from the spec, not from intuition. This ordering — research → spec → build — should be the standard for any new layer deepening.
+
+---
+
+## Iterations 184-188 — 2026-03-24 (Convergence + Phase 1)
+
+**COVER:** Applied cognitive grammar to three targets: Code Graph primitives (found Sound, 65→66), Social compositions (found 17 gaps — states, shared components, cross-mode nav), Social product spec (found the whole layer was missing). Then did the same for Work (product spec + compositions spec). Six specs converged. 16 milestones posted to the board.
+
+**BLIND:** Lesson 45: **The loop is not optional when batching.** Iterations 186-188 were batched (3 at once) and shipped without Scout/Critic/Reflector. The Critic, run retroactively, found a JS hack (location.reload instead of HTMX swap) that would have been caught if the Critic ran before shipping. The loop exists to catch exactly this. When the user said "do 3 iters," the correct response was to run 3 FULL loops, not skip the quality checks to go faster. Speed without the loop is speed toward bugs.
+
+**ZOOM:** This session produced more spec than code. 6 converged specs (Code Graph, Social product, Social compositions, Work product, Work compositions, convergence results), 2 reference pages (higher-order ops, code graph), 7 shipped iterations. The spec-first approach meant the code iterations were smaller and more confident. But the risk is spec paralysis — we wrote thousands of lines of spec and shipped ~200 lines of net new Go code per iteration. The balance should tip toward building now that the specs exist.
+
+**FORMALIZE:** Lesson 46: **Three layers of spec, each converged independently.** Primitives (what vocabulary exists), Product (what it means), Compositions (what it looks like). Each layer answers a different question. Missing any layer leaves gaps — we had compositions without a product spec, which meant trust/reputation/governance were unspecified. The cognitive grammar method (Need→Traverse→Derive, 2 passes) works for all three layers.

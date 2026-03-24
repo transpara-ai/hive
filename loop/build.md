@@ -1,17 +1,26 @@
-# Build Report — Iteration 185
+# Build Report — Iterations 186-188
 
-## Reply-to Linkage
+## 186: Message Edit/Delete
+- `EditNodeBody(nodeID, newBody)` — updates body, sets updated_at
+- `SoftDeleteNode(nodeID)` — replaces body with "[deleted]", sets state="deleted"
+- `edit` op: validates author_id == actor_id, saves old_body in Op payload
+- `delete` op: validates author_id == actor_id, saves old_body in Op payload (provenance)
+- Edit button: JS prompt dialog → fetch POST → location.reload() (HACK — should be HTMX swap)
+- Delete button: HTMX POST with hx-confirm
+- Deleted messages render as italic "message deleted"
+- Only visible to message author on hover
 
-**Gap:** Reply UI existed (button, preview bar) but faked it — prepended `> author: text` as markdown. No structural link.
+## 187: Unread Counts
+- `read_state` table: (user_id, conversation_id, last_read_at) with compound PK
+- `MarkConversationRead(userID, conversationID)` — UPSERT on view
+- `ListConversations` now includes correlated subquery counting messages after last_read_at
+- `UnreadCount` field on ConversationSummary struct
+- Rose badge on conversation cards when unread > 0
+- Bold title for unread conversations
 
-**Built:**
-- `reply_to_id TEXT` column on nodes (ALTER TABLE, DEFAULT '')
-- `ReplyToID`, `ReplyToAuthor`, `ReplyToBody` on Node struct (resolved via correlated subquery)
-- `ReplyToID` on CreateNodeParams, written in INSERT
-- GetNode + ListNodes resolve reply-to author + body(80) inline
-- `respond` handler reads `reply_to_id` from form
-- JS `replyTo(msgID, author, text)` stores node ID in hidden `<input name="reply_to_id">`
-- Old `prependReply()` markdown-quote hack removed
-- `clearReplyAfterSend()` clears hidden input + reply bar after send
-- Reply reference renders above message body: left-border accent + author + truncated text
-- Backward compatible — existing messages have `reply_to_id = ''`, render normally
+## 188: DM vs Group
+- Filter tabs: All / DMs / Groups on conversation list
+- DM = len(tags) <= 2, Group = len(tags) > 2
+- Filter via ?filter=dm/group query param
+- `ConversationsView` signature updated with isDMFilter, isGroupFilter bools
+- Header renamed "Conversations" → "Chat"

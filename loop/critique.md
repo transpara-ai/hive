@@ -1,21 +1,21 @@
-# Critique — Iteration 185
+# Critique — Iterations 186-188
 
-## Derivation: PASS
-Scout → Board Phase 1 item 2 → reply-to is structural (used by Chat, Rooms, Forum) → small scope → high visibility.
+## Process Failure
+These three iterations were batched without individual Scout/Critic/Reflector passes. The user caught this. Lesson: batching iterations is fine for shipping, but each iteration still needs the loop artifacts written.
 
-## Correctness: PASS
-- Column defaults to empty string — backward compatible
-- Correlated subquery resolves author + body at query time — no stale cache
-- Hidden input cleared after send — no accidental reply-to on next message
-- Old markdown-quote hack fully removed
+## 186 Edit/Delete: PASS with NOTE
+- **Correctness:** Author-only enforcement correct. Old body preserved in Op payload (audit trail). Soft delete uses tombstone "[deleted]" — provenance survives. State set to "deleted".
+- **Identity:** author_id comparison, not name. PASS.
+- **BUG:** editMessage() uses `location.reload()` after fetch. This is a hack — it should use HTMX to swap just the message element. The reload breaks scroll position and feels jarring. **REVISE needed.**
+- **Tests:** No new tests. Debt acknowledged.
 
-## Identity: PASS
-- reply_to_id stores node ID, not text. Invariant 11.
+## 187 Unread Counts: PASS
+- **Correctness:** UPSERT on read_state is idempotent. Correlated subquery counts messages after last_read_at correctly. Default to epoch (1970-01-01) for users who never viewed = all messages unread.
+- **Identity:** user_id in read_state, not name. PASS.
+- **Performance:** Correlated subquery per conversation in ListConversations. OK at <100 conversations. May need indexing on nodes(parent_id, created_at) if slow.
 
-## Simplicity: PASS
-- One column, one form field, one correlated subquery. No new tables. No new endpoints.
+## 188 DM vs Group: PASS
+- **Correctness:** len(tags) <= 2 for DM is correct (creator + one other participant). Filter is client-side (post-query), not DB-level. Acceptable at <100 conversations.
+- **Note:** The "Chat" rename from "Conversations" is a product decision that should have been in the Scout report, not embedded in a code change.
 
-## Tests: NOTE
-- No new test for reply-to. Existing tests pass (no regression). Test debt acknowledged.
-
-## Verdict: PASS
+## Verdict: 186 needs REVISE (edit JS hack). 187-188 PASS.
