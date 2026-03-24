@@ -1726,3 +1726,15 @@ This is the same pattern as iters 182-183 (Social spec). Spec iterations are the
 **FORMALIZE:** Lesson 49: **Spec unifies before code diverges.** Without the unified ontology, Work and Social would have been built as separate products with separate data models, separate navigation, separate concepts. The spec shows they're facets of one thing. One graph, one grammar, one navigation. The spec is the integration point.
 
 **FIXPOINT CHECK:** Spec phase complete. Two specs produced (work-general-spec.md, unified-spec.md). Both converged at pass 2. Ready to build from the unified ontology. First target: the missing entity kinds (project, goal, role, team) + Organize mode basics.
+
+---
+
+## Iteration 203 — 2026-03-24
+
+**Built:** Sidebar refactor from "Work/Social" division to unified mode groups (Execute, Communicate, Govern).
+
+**COVER/BLIND COLLISION:** Matt flagged mid-iteration: "not all social activity is work related." He's right. The unified spec claimed Work is the gravitational center. But people chat about their weekend. People post memes. People follow someone because they're interesting, not because they're productive. Community, play, connection, and identity exist independently of organized activity. The spec over-collapsed: it's correct that Work and Social OVERLAP on the same graph, but incorrect that Social is subordinate to Work. They're peers with shared infrastructure, not parent-child.
+
+**ZOOM:** The derivation went too far. "Everything is organized activity" is a useful framing for enterprise/civilizational scale but wrong at the individual/community scale. The truth is closer to: the platform supports BOTH purposeful activity AND social connection, on the same graph, with shared primitives. Sometimes they overlap (task discussion). Sometimes they don't (chatting with friends). The sidebar should reflect this without forcing everything into "modes of work."
+
+**FIXPOINT CHECK:** The ontology needs refinement. Work and Social are peers, not parent-child. The sidebar grouping should acknowledge both purposes.

@@ -1,11 +1,43 @@
-# Scout Report — Iteration 202
+# Scout Report — Iteration 203
 
-## Gap: Social defined as platform replacement, not as coordination for work
+## Gap: Sidebar still presents Work and Social as separate products
 
-**The problem:** The social-spec.md defines 4 modes by what platforms they replace (Chat→Slack, Rooms→Discord, Square→Twitter, Forum→Reddit). This is correct but shallow. Social exists because organized activity requires coordination. Every social feature is instrumentally serving work — Chat because teams need to align, Feed because orgs need to broadcast, Follow because you track who does what.
+**Source:** unified-spec.md — "Not 'Work' and 'Social' as separate sections. Instead, the sidebar presents available modes."
 
-**What cognitive grammar should reveal:** If Work is the root (organized activity), then Social is "the coordination that organized activity requires." The modes should derive from coordination needs, not from existing platforms.
+**Current state:** Sidebar has "Work" (→ Board) then expandable "Social" (→ Feed/Threads/Chat/People) then Knowledge, Governance, Build, Transparency, Settings. This framing says "here are two products." The unified ontology says they're all modes of one thing.
 
-**Method:** Apply the generator function to "coordination within organized activity." Derive the modes from first principles. See if Social is a peer of Work or a sub-domain. Produce a unified ontology that relates Work and Social structurally.
+**What's needed:** Reorganize sidebar into modes of organized activity. Group by purpose, not by product line.
 
-**Output:** `hive/loop/unified-spec.md` — the unified ontology. Not a replacement for the existing specs — a structural document that shows how everything relates.
+**Proposed sidebar:**
+```
+My Work (dashboard)
+
+Activity:
+  Execute (Board/List)
+  Chat
+  Feed
+  Threads
+  Forum (future)
+
+Structure: (future — when org entities exist)
+  Teams
+  Roles
+  Policies
+  Goals
+
+Knowledge:
+  Knowledge
+  Build (changelog)
+
+Governance:
+  Governance
+
+Transparency:
+  Activity
+
+Settings
+```
+
+**Simpler first step:** Remove the Work/Social division. Make all modes top-level under one "Modes" or unlabeled nav section. Keep existing routes — just reorganize the sidebar.
+
+**Risk:** Low. Template-only change. No handler/store changes. No route changes.
