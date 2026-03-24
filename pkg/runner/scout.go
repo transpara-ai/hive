@@ -36,13 +36,14 @@ func (r *Runner) runScout(ctx context.Context) {
 	log.Printf("[scout] tick %d: scouting (agent has %d/%d tasks)", r.tick, agentTasks, maxAgentTasks)
 
 	// Gather context.
+	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
 	stateContext := r.readScoutSection()
 	repoContext := r.readRepoContext()
 	gitLog := r.recentGitLog()
 	boardSummary := r.boardSummary()
 
 	// Build the scouting prompt.
-	prompt := buildScoutPrompt(r.cfg.RepoPath, repoContext, stateContext, gitLog, boardSummary)
+	prompt := buildScoutPrompt(r.cfg.RepoPath, sharedCtx, repoContext, stateContext, gitLog, boardSummary)
 
 	// Call Reason() — no tools, just thinking.
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
@@ -190,8 +191,11 @@ func (r *Runner) boardSummary() string {
 	return fmt.Sprintf("Open tasks: %d (%d assigned)\nRecent:\n%s", open, assigned, strings.Join(titles, "\n"))
 }
 
-func buildScoutPrompt(repoPath, repoContext, state, gitLog, board string) string {
+func buildScoutPrompt(repoPath, sharedCtx, repoContext, state, gitLog, board string) string {
 	return fmt.Sprintf(`You are the Scout. Your job is to identify ONE concrete, implementable gap and produce a task for the Builder.
+
+## Institutional Knowledge
+%s
 
 ## CRITICAL: Target Repo
 
@@ -226,7 +230,7 @@ You MUST end your response with exactly these three lines:
 
 TASK_TITLE: <one-line title>
 TASK_PRIORITY: <urgent|high|medium|low>
-TASK_DESCRIPTION: <2-3 sentence description with specific files to change>`, repoPath, repoContext, gitLog, state, board)
+TASK_DESCRIPTION: <2-3 sentence description with specific files to change>`, sharedCtx, repoPath, repoContext, gitLog, state, board)
 }
 
 func parseScoutTask(content string) (title, desc, priority string) {

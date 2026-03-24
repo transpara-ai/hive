@@ -73,7 +73,7 @@ func TestParseScoutTaskEmpty(t *testing.T) {
 }
 
 func TestBuildScoutPrompt(t *testing.T) {
-	prompt := buildScoutPrompt("/path/to/site", "repo context", "state content", "git log", "board summary")
+	prompt := buildScoutPrompt("/path/to/site", "shared context", "repo context", "state content", "git log", "board summary")
 
 	if !searchString(prompt, "/path/to/site") {
 		t.Error("prompt missing repo path")

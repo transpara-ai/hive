@@ -304,6 +304,13 @@ func (r *Runner) workTask(ctx context.Context, t api.Node) {
 func (r *Runner) buildPrompt(t api.Node) string {
 	var b strings.Builder
 
+	// Shared institutional knowledge — every agent gets this.
+	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
+	if sharedCtx != "" {
+		b.WriteString(sharedCtx)
+		b.WriteString("\n\n---\n\n")
+	}
+
 	// Role context.
 	if r.cfg.RolePrompt != "" {
 		b.WriteString(r.cfg.RolePrompt)

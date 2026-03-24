@@ -92,7 +92,8 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	}
 
 	// Build the review prompt.
-	prompt := buildReviewPrompt(c, diff)
+	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
+	prompt := buildReviewPrompt(c, diff, sharedCtx)
 
 	// Call Reason() — no tools, just thinking.
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
@@ -145,8 +146,11 @@ func (r *Runner) getCommitDiff(hash string) (string, error) {
 	return string(out), nil
 }
 
-func buildReviewPrompt(c commit, diff string) string {
+func buildReviewPrompt(c commit, diff, sharedCtx string) string {
 	return fmt.Sprintf(`You are the Critic. Review this commit for correctness and completeness.
+
+## Institutional Knowledge (invariants, coding standards, lessons)
+%s
 
 ## Commit
 %s: %s
@@ -168,7 +172,7 @@ Start with your analysis, then end with exactly one of:
 VERDICT: PASS
 VERDICT: REVISE
 
-If REVISE, list the specific issues that must be fixed.`, c.hash[:12], c.subject, diff)
+If REVISE, list the specific issues that must be fixed.`, sharedCtx, c.hash[:12], c.subject, diff)
 }
 
 func parseVerdict(content string) string {

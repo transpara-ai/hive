@@ -56,7 +56,7 @@ func TestBuildReviewPrompt(t *testing.T) {
 	c := commit{hash: "abc123def456", subject: "[hive:builder] Add Policy"}
 	diff := "+KindPolicy = \"policy\""
 
-	prompt := buildReviewPrompt(c, diff)
+	prompt := buildReviewPrompt(c, diff, "## Invariants\n1. IDENTITY\n2. VERIFIED")
 
 	// Should contain the commit info.
 	if !contains(prompt, "abc123def456") {
