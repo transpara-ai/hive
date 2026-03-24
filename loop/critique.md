@@ -1,39 +1,35 @@
-# Critique — Iteration 193
+# Critique — Iteration 194
 
 ## Derivation Chain
-- **Gap:** Phase 2 item 4 — repost. Propagate grammar op. Final Square item.
-- **Plan:** reposts table, toggle, bulk queries, HTMX button. Mirror endorsement.
-- **Code:** Exact mirror of endorsement. No deviation.
+- **Gap:** Following feed tab — composition of Follow + Repost features.
+- **Plan:** Tab filtering, follow set + repost set, merge into feed.
+- **Code:** Matches plan. Clean post-query filter.
 
-## Repost: PASS
+## Following Feed Tab: PASS
 
 **Correctness:**
-- Toggle: HasReposted → Unrepost / Repost. Idempotent (ON CONFLICT DO NOTHING). ✓
-- Notification: only on repost (not unrepost), only if author != actor. ✓
-- Op recorded only on repost. ✓
-- Bulk queries: same pattern as endorsement. ✓
+- Follow set built from `ListFollowedIDs`. ✓
+- Repost set: `ListRepostedNodeIDs` returns DISTINCT node_ids reposted by followed users. ✓
+- Filter: `followSet[p.AuthorID] || repostSet[p.ID]`. Correct — includes both authored and reposted posts. ✓
+- Empty follow list → empty follow set → no posts pass filter. Correct behavior. ✓
+- Tab defaults to "" (all) when not set. ✓
 
 **Identity:**
-- All operations use user IDs. ✓
+- Filter uses AuthorID, not Author name. ✓
+- ListFollowedIDs queries by follower_id. ✓
 
 **BOUNDED:**
-- Bulk queries bounded by input array. ✓
+- ListFollowedIDs: unbounded but follows table is small. OK.
+- ListRepostedNodeIDs: limited to 50 (default) or 100 (passed). ✓
+- Post-query filter operates on already-bounded post list (LIMIT 500). ✓
 
 **Template:**
-- Emerald color for repost (distinct from brand/rose endorsement). Good visual distinction. ✓
-- ↻ icon (arrows) — standard repost iconography. ✓
-- Engagement bar order: replies → repost → quote → endorse. Matches spec's EngagementBar ordering. ✓
+- Tabs only show for logged-in users. Anonymous sees all posts, no tabs. ✓
+- Search preserves tab via hidden input. ✓
+- Following empty state is distinct from general empty state. Good UX. ✓
 
-**Tests:** No new tests. Same pattern as endorsement (which is tested).
+**Performance note:** This does 3 queries (posts, followed IDs, reposted node IDs) then filters in Go. At scale, this should be a single DB query with JOINs. At current scale, fine.
 
-## Phase 2 Completeness Check
-
-All 4 items shipped:
-1. ~~Endorse on posts~~ (iter 190) — Endorse grammar op
-2. ~~Follow users~~ (iter 191) — Subscribe grammar op
-3. ~~Quote post~~ (iter 192) — Derive grammar op
-4. ~~Repost~~ (iter 193) — Propagate grammar op
-
-**Phase 2 (Square) is COMPLETE.**
+**Tests:** No new tests. ListFollowedIDs and ListRepostedNodeIDs are simple queries.
 
 ## Verdict: PASS

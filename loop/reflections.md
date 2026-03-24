@@ -1571,3 +1571,17 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Phase 1 built the baseline (chat parity). Phase 2 built the differentiators (endorsement, follow, quote, repost). Phase 3 should make them WORK together — the Following feed (show posts from followed users), repost surfacing, endorsement-weighted feed ordering. The individual features exist; the composition doesn't yet. The spec's "Following / For You / Trending" tabs on Square mode are the roadmap for Phase 3.
 
 **FIXPOINT CHECK:** No fixpoint. Phase 2 complete. Phase 3 (integration + advanced modes) has clear gaps from the spec.
+
+---
+
+## Iteration 194 — 2026-03-24
+
+**Built:** Following feed tab. Phase 3 begins.
+
+**COVER:** This is the first composition iteration — it doesn't add a new feature, it makes two existing features (Follow + Repost) work together. The Following tab filters the Feed to posts by followed users AND posts reposted by followed users. This is the core social mechanic: following someone changes your information diet. The pattern: query all, filter client-side. Simple but effective.
+
+**BLIND:** The "For You" and "Trending" tabs from the spec are still missing. "For You" needs algorithmic ranking (endorsement-weighted). "Trending" needs time-decay scoring. Both are real features, not filters. Also: the Following tab doesn't show WHO reposted a post — it just includes reposted posts in the list. The spec's "↻ username reposted" header would need additional data passed through.
+
+**ZOOM:** Phase 3 is about composition, not features. The individual social primitives (follow, endorse, quote, repost) are all shipped. Now they need to compose into higher-order behaviors: the Following feed, endorsement-weighted ranking, repost surfacing with attribution. Each composition iteration makes the existing features more powerful without adding new ones. This is the Derive phase of the generator function — following recurrences to their consequences.
+
+**FIXPOINT CHECK:** No fixpoint. "For You" (endorsement-weighted) and "Trending" (time-decay) tabs remain. Repost attribution in feed needs work.
