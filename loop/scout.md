@@ -1,15 +1,11 @@
-# Scout Report — Iteration 213
+# Scout Report — Iteration 214
 
-## Gap: Spaces can't nest — blocks Organizations, Departments, Teams
+## Gap: The hive has no detailed operational spec
 
-**Source:** layers-general-spec.md fixpoint pass — "Spaces nest via parent_id."
+We know WHAT the hive is (the meta-product that builds products). We don't know HOW it operates in detail. What agents? How do they communicate? What does the UI look like? How do they track resources? What docs do they need? How do they apply techniques like cognitive grammar?
 
-**Current:** Spaces are flat. No hierarchy. A company can't have an "Engineering" space inside a "Company" space.
+**This is the most important spec we'll write.** The hive is both the builder and the first customer of everything we build.
 
-**What's needed:**
-1. Schema: `ALTER TABLE spaces ADD COLUMN parent_id TEXT REFERENCES spaces(id)`
-2. Store: update CreateSpace to accept parent_id, add ListChildSpaces
-3. Space detail: show child spaces when they exist
-4. Discover: only show top-level spaces (parent_id IS NULL)
+**Method:** Apply cognitive grammar to "a self-organizing agent civilization that builds products." Derive the roles, communication, coordination, knowledge management, and resource tracking.
 
-**One column. Unlocks the entire organizational hierarchy.**
+**Output:** `hive/loop/hive-spec.md`
