@@ -1,25 +1,24 @@
-# Scout Report — Iteration 196
+# Scout Report — Iteration 197
 
-## Gap: Repost attribution on Following feed
+## Gap: Trending feed tab (Phase 3 final item)
 
-**Source:** social-spec.md PostCard — "↻ reposted_by.name reposted" header. Phase 3 composition.
+**Source:** social-spec.md SquareMode — "Trending" tab. Last Phase 3 composition item.
 
-**Current state:** Following feed includes posts reposted by followed users, but doesn't show WHO reposted them. Posts appear as if they're regular feed items — no context for why you're seeing them.
+**Current state:** Feed has All (chronological), Following (social graph), For You (cumulative engagement). No velocity-based ranking — a post from a week ago with 10 endorsements outranks a post from today with 3.
 
 **What's needed:**
-1. Handler: when building the Following feed, track which posts were included via repost (not direct authorship)
-2. Store: resolve reposter names for those posts (who among the followed users reposted this?)
-3. Template: "↻ username reposted" header above the FeedCard when attribution exists
+1. Store: `ListPostsByTrending(spaceID, limit)` — time-windowed engagement velocity
+2. Handler: `tab=trending` branch
+3. Template: "Trending" tab pill
 
-**From the spec:**
+**Scoring formula:** Velocity = recent engagement / age.
 ```
-if post.reposted_by {
-    Layout(row, gap: xs, class: "text-xs text-muted mb-1", [
-      Display("↻"), Display(post.reposted_by.name + " reposted")
-    ])
-}
+score = (recent_endorsements * 3 + recent_reposts * 2 + recent_replies) / GREATEST(1, hours_old)
 ```
+Where "recent" = created in last 48 hours. This rewards posts that are getting engagement NOW, not posts that accumulated engagement over time.
 
-**Approach:** In the Following filter, build a `repostedBy map[string]string` (nodeID → reposter name). Pass it through FeedView to FeedCard. When set, render the attribution header. Use ResolveUserNames to get display names from IDs.
+**Difference from For You:**
+- For You: cumulative score + recency bonus → established quality content rises
+- Trending: velocity score → currently-hot content rises, decays naturally
 
-**Risk:** Low. Handler logic + template addition. No schema changes. No new store methods needed beyond existing ones.
+**Risk:** Low. Same pattern as ListPostsByEngagement with different ORDER BY formula.

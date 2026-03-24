@@ -1,23 +1,27 @@
-# Build Report — Iteration 196
+# Build Report — Iteration 197
 
-## Repost Attribution
+## Trending Feed (Velocity Scoring)
 
 **Store:**
-- `GetRepostAttribution(userIDs, nodeIDs) map[string]string` — for each node, returns the user ID of the most recent reposter from the given user set. Uses `DISTINCT ON (node_id)` with `ORDER BY created_at DESC`.
+- `ListPostsByTrending(spaceID, limit)` — engagement velocity ranking
+- Score: `(recent_endorsements * 3 + recent_reposts * 2 + recent_replies) / GREATEST(1, hours_old)`
+- "Recent" = created in last 48 hours (`created_at > NOW() - INTERVAL '48 hours'`)
+- Age in hours via `EXTRACT(EPOCH FROM NOW() - n.created_at) / 3600`
+- Cast to float for division: `::float`
+- Same full Node scan as other methods
 
 **Handler:**
-- Following filter: after filtering posts, identifies which posts are in the feed via repost (not direct authorship)
-- Calls `GetRepostAttribution` to find which followed user reposted each
-- Resolves reposter IDs to display names via `ResolveUserNames`
-- Passes `repostedBy map[string]string` (nodeID → display name) to FeedView
+- `tab=trending` branch → `ListPostsByTrending`
+- Falls back to chronological for search queries on Trending tab
 
 **Template:**
-- `FeedView`: accepts `repostedBy map[string]string`
-- `FeedCard`: accepts `repostedByName string`
-- When `repostedByName != ""`, renders "↻ username reposted" header above the card (before pin indicator)
-- Uses the same ↻ arrows SVG as the repost button, 10px text, warm-faint color
+- "Trending" tab pill added after "For You"
+
+**Difference from For You:**
+- For You: cumulative engagement + recency bonus → quality over time
+- Trending: recent engagement / age → what's hot RIGHT NOW
 
 **Files changed:**
-- `graph/store.go` — `GetRepostAttribution`
-- `graph/handlers.go` — attribution logic in Following filter, FeedView call
-- `graph/views.templ` — FeedView, FeedCard signatures + attribution header
+- `graph/store.go` — `ListPostsByTrending`
+- `graph/handlers.go` — trending branch
+- `graph/views.templ` — Trending tab pill

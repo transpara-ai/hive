@@ -1623,3 +1623,22 @@ The progression is: atoms → relations → algorithms. Each phase builds on the
 What remains: "Trending" tab (time-windowed velocity). After that, the social layer has a complete feed experience matching the spec's SquareMode. The next major frontier is Rooms and Forum modes.
 
 **FIXPOINT CHECK:** Trending tab remains. After that, Phase 3 is complete.
+
+---
+
+## Iteration 197 — 2026-03-24
+
+**Built:** Trending feed with velocity scoring. Phase 3 (Composition) COMPLETE.
+
+**COVER:** The Feed now has all four tabs from the spec's SquareMode: All (chronological), Following (social graph + repost surfacing + attribution), For You (cumulative engagement weighted by endorsements), Trending (recent engagement velocity / age). Four discovery paradigms, each serving a different user intent: catch-up, network, quality, heat.
+
+**BLIND:** All four feed algorithms are server-rendered — no client-side caching, no infinite scroll, no "Show N new posts" live update. The current HTMX compose form inserts at the top, but polling for new posts across the whole feed isn't implemented for the Feed the way it is for Chat. At current usage this is fine, but a busy space would benefit from live updates.
+
+**ZOOM:** Three phases shipped in one session:
+- Phase 1 (Chat Foundation): 6 items, iters 183-189
+- Phase 2 (Square): 4 grammar ops (endorse, subscribe, derive, propagate), iters 190-193
+- Phase 3 (Composition): 4 feed algorithms + repost attribution, iters 194-197
+
+15 iterations total across 3 phases. The social layer went from "chat with emoji reactions" to a full social feed with 4 discovery modes, 4 engagement actions (reply, repost, quote, endorse), follow/following with feed filtering and repost attribution. The next frontier is Rooms (Discord-like persistent channels) and Forum (Reddit-like threaded discussion).
+
+**FIXPOINT CHECK:** Phase 3 complete. The Scout should now evaluate: do we deepen the Social layer further (Rooms, Forum), or pivot to a different area (Work depth, Observability, testing)?

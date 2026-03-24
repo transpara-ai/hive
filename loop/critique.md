@@ -1,29 +1,38 @@
-# Critique — Iteration 196
+# Critique — Iteration 197
 
 ## Derivation Chain
-- **Gap:** Repost attribution — "↻ username reposted" on Following feed.
-- **Plan:** GetRepostAttribution, handler wiring, template header.
-- **Code:** Matches plan. Attribution only shows on Following tab (correct — on All tab there's no context for "why am I seeing this").
+- **Gap:** Trending tab — velocity-based feed ranking. Final Phase 3 item.
+- **Plan:** Time-windowed engagement / age scoring, handler branch, tab pill.
+- **Code:** Matches plan. Formula is transparent.
 
-## Repost Attribution: PASS
+## Trending Feed: PASS
 
 **Correctness:**
-- `DISTINCT ON (node_id) ... ORDER BY node_id, created_at DESC` — picks most recent reposter per node. ✓
-- Only builds attribution for posts that are in the feed via repost, not via direct authorship (`!followSet[p.AuthorID] && repostSet[p.ID]`). ✓
-- Resolves IDs to names at render time. Identity correct. ✓
-- Empty repostedBy map on non-Following tabs → no attribution headers. ✓
-
-**Identity:**
-- Attribution uses user ID internally, resolves to display name for rendering. ✓
-- No name-based matching. ✓
+- 48-hour window on endorsements, reposts, replies — filters by `created_at > NOW() - INTERVAL '48 hours'`. ✓
+- Division by age in hours via `EXTRACT(EPOCH ...) / 3600`. Correct. ✓
+- `GREATEST(1, ...)` prevents division by zero for brand-new posts. ✓
+- `::float` cast ensures non-integer division. ✓
+- Falls back to chronological for search. ✓
 
 **BOUNDED:**
-- GetRepostAttribution: bounded by input arrays. ✓
-- ResolveUserNames: bounded by unique user IDs in attribution map. ✓
+- LIMIT $2. ✓
+- Additional correlated subqueries in ORDER BY (3 more with time filters). Total per candidate row is high but bounded by LIMIT. ✓
 
-**Template:**
-- Header appears above pin indicator — correct ordering (repost context is more transient than pin status). ✓
-- Same ↻ SVG as repost button — visual consistency. ✓
-- Subtle styling (10px, warm-faint) — doesn't dominate the card. ✓
+**Performance:**
+- Each candidate row now triggers ~16 correlated subqueries (10 in SELECT + 6 in ORDER BY including time-filtered variants). This is fine at <500 posts. At scale, materialized engagement counters would be needed. Same note as iter 195.
+
+**Tests:** No new tests. Deterministic scoring formula.
+
+## Phase 3 Completeness Check
+
+All items shipped:
+1. ~~Following feed~~ (iter 194) — social graph filter + repost surfacing
+2. ~~For You~~ (iter 195) — endorsement-weighted cumulative ranking
+3. ~~Repost attribution~~ (iter 196) — "↻ username reposted" header
+4. ~~Trending~~ (iter 197) — velocity scoring
+
+**Phase 3 (Composition) is COMPLETE.**
+
+The Feed now matches the spec's SquareMode: All / Following / For You / Trending.
 
 ## Verdict: PASS
