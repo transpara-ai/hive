@@ -210,19 +210,33 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-**THE GOVERNING CHALLENGE:** If we're not better than existing products in form AND function AND philosophy, we offer no real value in switching. The philosophy is strong (13 layers, 15 grammar operations, soul). The form is improving. The FUNCTION of Work and Social must be dramatically better than Linear and Discord/Twitter.
+**COUNCIL DIRECTIVE: USER-FIRST FOR 20 ITERATIONS.** The 50-agent council (2026-03-25) converged: stop building inward, start making the product comprehensible to strangers. The CEO decided: "Can a stranger understand what this is in 30 seconds?"
 
-**Phase 1 — Chat Foundation: COMPLETE** (all 6 items shipped, iters 183-189)
+**What was already shipped (iters 233-235):**
+- Landing page rewritten: "Your team has an AI colleague" (not "One graph, many lenses")
+- Welcome page for new users: create-space form instead of redirect to /discover
+- Sidebar simplified: 4 core links (Board, Chat, Feed, People) + "More" toggle (was 15 links)
 
-**Phase 2 — Square (from social-spec.md + board milestones):**
-1. ~~Endorse on posts~~ — DONE (iter 190)
-2. ~~Follow users~~ — DONE (iter 191)
-3. ~~Quote post~~ — DONE (iter 192)
-4. ~~Repost~~ — DONE (iter 193)
+**The Newcomer's complaints (direct from council — use these as task seeds):**
+- "I have 8 seconds and you've given me a philosophy lecture"
+- "What does the button do? No — what button? Where is the button?"
+- "The funnel assumes I already want to be here"
+- "13 layers and 15 operations — those are homework. Nobody wants homework."
 
-**Key insight:** Phase 2 is where our differentiators emerge. Endorse is unique to us (Code Graph primitive — no other platform has it on content). Follow+Quote+Repost are baseline social features, but built on grammar operations (react, relate, express) rather than ad-hoc implementations.
+**Remaining user-first priorities (from council consensus):**
+1. Task creation form should pre-suggest assigning to the agent
+2. After assigning a task, immediate visible feedback (thinking indicator)
+3. Empty states should guide, not just say "nothing here"
+4. Mobile nav needs the same simplification as sidebar
+5. The "aha moment" — first time the agent responds — must be fast and visible
+6. Each lens needs a one-sentence explanation of what it's for
+7. Onboarding should end with the user having accomplished something, not just created a container
 
-**The sidebar now shows layers, not lenses.** Work, Social (expandable: Feed/Threads/Chat/People), Knowledge, Governance, Build, Transparency, Settings.
+**Growth agent's wedge:** "A small dev team using Board + Chat + Build with an agent peer. One space, one team, one agent."
+
+**Storyteller's one-line pitch:** "A place where humans and AI take care of each other — and build whatever they need together."
+
+**The test:** Would a stranger who lands on lovyou.ai stay for 60 seconds? Currently: probably not. Target: yes.
 
 ## Lessons Learned
 
