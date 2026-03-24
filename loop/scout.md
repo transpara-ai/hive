@@ -1,26 +1,23 @@
-# Scout Report — Iteration 194
+# Scout Report — Iteration 195
 
-## Gap: Following feed tab (Phase 3 item 1 — composition begins)
+## Gap: Endorsement-weighted feed ("For You" tab)
 
-**Source:** social-spec.md SquareMode — "Following / For You / Trending" tabs. First Phase 3 item.
+**Source:** social-spec.md SquareMode — "For You" tab. Phase 3 composition.
 
-**Current state:** Feed shows ALL posts in a space, unfiltered. Following someone changes a count on their profile but doesn't affect what you see. Reposts record a relation but don't surface content.
+**Current state:** Feed has All and Following tabs. Both sort by `pinned DESC, created_at` (chronological). Endorsements exist but don't affect visibility or ranking.
 
 **What's needed:**
-1. Store: `ListFollowedIDs(userID) []string` — IDs of users the current user follows
-2. Feed handler: read `?tab=following` query param, filter posts to followed authors
-3. Feed template: All / Following tabs above the feed
-4. Include reposts: when on Following tab, also show posts reposted by followed users
+1. A "For You" tab that ranks posts by engagement signals (endorsements, reposts, replies)
+2. Scoring: endorsement_count as primary signal, with reply count and repost count as secondary, time decay so old posts don't dominate
+3. Tab pill added to the existing All / Following row
 
-**Why this first:** Follow (iter 191) is useless without a Following feed. Repost (iter 193) is useless without surfacing in followers' feeds. This one feature activates both.
+**Why this:** Endorsement is our differentiator (Code Graph primitive). Making it the ranking signal means endorsing a post actually does something — it makes the post more visible. This is the first time a Code Graph primitive directly affects the user experience beyond a counter.
 
-**Approach:** Add `ListFollowedIDs` store method. In the Feed handler, when `tab=following`, build a set of followed user IDs and filter posts client-side (post-query). Also query reposts by followed users and merge them into the timeline. Add tab links above the feed.
+**Approach:**
+- SQL scoring: `(endorsement_count * 3 + repost_count * 2 + reply_count) + recency_days_bonus`
+- Recency bonus: posts < 7 days old get `(7 - days_old)` added to score
+- New store method: `ListPostsByEngagement(spaceID, limit)` with the scoring ORDER BY
+- Handler: when `tab=foryou`, use the engagement-sorted query
+- Template: add "For You" tab pill
 
-**From the spec:**
-```
-Action(label: "Following", style: if mode == "following" then "active"),
-Action(label: "For You", style: if mode == "foryou" then "active"),
-Action(label: "Trending", style: if mode == "trending" then "active")
-```
-
-**Scoping:** Ship "All" and "Following" tabs. "For You" and "Trending" require algorithmic ranking — Phase 3+.
+**Risk:** Low. One new store method, one handler branch, one template pill. The scoring formula can be tuned later.

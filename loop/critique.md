@@ -1,35 +1,28 @@
-# Critique — Iteration 194
+# Critique — Iteration 195
 
 ## Derivation Chain
-- **Gap:** Following feed tab — composition of Follow + Repost features.
-- **Plan:** Tab filtering, follow set + repost set, merge into feed.
-- **Code:** Matches plan. Clean post-query filter.
+- **Gap:** "For You" tab — endorsement-weighted feed ranking.
+- **Plan:** Engagement scoring query, handler branch, tab pill.
+- **Code:** Matches plan. Scoring formula is transparent and tunable.
 
-## Following Feed Tab: PASS
+## For You Feed: PASS
 
 **Correctness:**
-- Follow set built from `ListFollowedIDs`. ✓
-- Repost set: `ListRepostedNodeIDs` returns DISTINCT node_ids reposted by followed users. ✓
-- Filter: `followSet[p.AuthorID] || repostSet[p.ID]`. Correct — includes both authored and reposted posts. ✓
-- Empty follow list → empty follow set → no posts pass filter. Correct behavior. ✓
-- Tab defaults to "" (all) when not set. ✓
+- Scoring formula: `endorsements * 3 + reposts * 2 + replies + recency`. Weighted correctly — endorsements dominate (our differentiator). ✓
+- `GREATEST(0, 7 - EXTRACT(DAY FROM NOW() - n.created_at))` — clamps negative values to 0. Posts older than 7 days get no recency boost. ✓
+- Falls back to chronological for search queries (can't engagement-sort search results meaningfully). ✓
+- Full Node scan with all 28 columns — consistent with ListNodes. ✓
 
 **Identity:**
-- Filter uses AuthorID, not Author name. ✓
-- ListFollowedIDs queries by follower_id. ✓
+- No identity concerns — scoring is based on counts, not names. ✓
 
 **BOUNDED:**
-- ListFollowedIDs: unbounded but follows table is small. OK.
-- ListRepostedNodeIDs: limited to 50 (default) or 100 (passed). ✓
-- Post-query filter operates on already-bounded post list (LIMIT 500). ✓
+- LIMIT $2 on the query. ✓
+- Correlated subqueries in ORDER BY are per-row but bounded by LIMIT. ✓
 
-**Template:**
-- Tabs only show for logged-in users. Anonymous sees all posts, no tabs. ✓
-- Search preserves tab via hidden input. ✓
-- Following empty state is distinct from general empty state. Good UX. ✓
+**Performance:**
+- The ORDER BY has 3 additional correlated subqueries beyond the SELECT's existing 10. Total: 13 correlated subqueries per candidate row. At <500 posts, fine. At scale, these should be materialized (endorsement_count, repost_count columns or materialized view). This is a known scaling concern, not a current bug.
 
-**Performance note:** This does 3 queries (posts, followed IDs, reposted node IDs) then filters in Go. At scale, this should be a single DB query with JOINs. At current scale, fine.
-
-**Tests:** No new tests. ListFollowedIDs and ListRepostedNodeIDs are simple queries.
+**Tests:** No new tests. The query is deterministic given the scoring formula.
 
 ## Verdict: PASS

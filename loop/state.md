@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 194, 2026-03-24.
+Last updated: Iteration 195, 2026-03-24.
 
 ## Current System State
 
@@ -176,9 +176,9 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Phase 2 — Square** (190-193): Endorse on posts, Follow users, Quote post, Repost. 4 grammar ops (endorse, subscribe, derive, propagate), 3 tables (follows, reposts + endorsements), 1 column (quote_of_id).
 
 **Phase 2 (Square) COMPLETE.** All 4 items shipped.
-- **Phase 3 — Composition** (194): Following feed tab — filters Feed to posts by followed users + reposted by followed users. All/Following tab pills.
+- **Phase 3 — Composition** (194-195): Following feed tab (filters to followed users + reposted content). For You feed (endorsement-weighted ranking: endorsements * 3 + reposts * 2 + replies + recency).
 
-**Phase 3 (Composition) in progress.** Following feed shipped. Remaining: "For You" (endorsement-weighted), "Trending" (time-decay), repost attribution.
+**Phase 3 (Composition) in progress.** Feed has 3 tabs: All, Following, For You. Remaining: "Trending" (time-windowed velocity), repost attribution.
 
 ## What the Scout Should Focus On Next
 

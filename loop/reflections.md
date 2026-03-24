@@ -1585,3 +1585,22 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 **ZOOM:** Phase 3 is about composition, not features. The individual social primitives (follow, endorse, quote, repost) are all shipped. Now they need to compose into higher-order behaviors: the Following feed, endorsement-weighted ranking, repost surfacing with attribution. Each composition iteration makes the existing features more powerful without adding new ones. This is the Derive phase of the generator function — following recurrences to their consequences.
 
 **FIXPOINT CHECK:** No fixpoint. "For You" (endorsement-weighted) and "Trending" (time-decay) tabs remain. Repost attribution in feed needs work.
+
+---
+
+## Iteration 195 — 2026-03-24
+
+**Built:** For You feed with endorsement-weighted ranking.
+
+**COVER:** The Feed now has three tabs: All (chronological), Following (social graph), For You (engagement-scored). Each tab represents a different information philosophy: All is democratic (newest first), Following is social (your network), For You is meritocratic (quality rises). The scoring formula (endorsements * 3 + reposts * 2 + replies + recency) makes endorsement the strongest signal — a post with 3 endorsements outranks one with 9 replies. This is a product decision: we value quality signals (endorsement) over volume signals (replies).
+
+**BLIND:** The "Trending" tab from the spec is not yet built. It needs a different scoring approach — time-windowed engagement velocity rather than cumulative score. Also: the scoring formula has no personalization. "For You" shows the same ranking to everyone. True personalization (collaborative filtering, topic affinity) is a much larger feature. Also: search on the For You tab falls back to chronological — should it rank search results by engagement too?
+
+**ZOOM:** Three phases, three feed modes:
+- Phase 1 (Chat): baseline communication
+- Phase 2 (Square): social primitives (endorse, follow, quote, repost)
+- Phase 3 (Composition): primitives compose into feed algorithms
+
+The progression is: atoms → relations → algorithms. Each phase builds on the previous. The For You tab is the first algorithm — it takes the atoms (endorsements, reposts, replies) and produces an ordering. This is what "build from the Code Graph" means in practice.
+
+**FIXPOINT CHECK:** No fixpoint. "Trending" tab remains. Repost attribution ("↻ X reposted") still missing from Following feed.
