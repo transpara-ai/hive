@@ -1,11 +1,11 @@
-# Scout Report — Iteration 217
+# Scout Report — Iteration 220
 
-## Gap: Agent runtime architecture undefined, no prompts written
+## Gap: Agent runtime is cold-start, no persistent sessions, no event triggering
 
-The hive spec defines 22 roles but doesn't specify:
-1. How agents physically run (processes, machines, triggers)
-2. What tools agents have access to (CLI, API, filesystem)
-3. How the pipeline orchestrator works
-4. The actual system prompts
+**Current:** cmd/loop cold-starts every agent with 15K+ tokens of context per phase. No --resume. No event system for @mention triggering. Agents don't know where they run.
 
-**This iteration:** Define the runtime architecture, then start writing prompts for the core pipeline agents.
+**What's needed:**
+1. Persistent sessions per agent (--resume with named sessions)
+2. First run: full context injection (CONTEXT + METHOD + agent prompt). Subsequent runs: just the new task.
+3. Event-driven triggering for background agents
+4. Clear runtime model (local dev vs Fly.io production)

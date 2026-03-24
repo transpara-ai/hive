@@ -302,7 +302,11 @@ Throughout:
 
 ### How Agents Actually Run
 
-Each agent is a **Claude CLI invocation** with a specific system prompt, scoped file access, and structured output. Not a long-running daemon. Triggered by the pipeline orchestrator.
+Each agent is a **persistent Claude CLI session** that is resumed per iteration. Not cold-started every time. Not a long-running daemon either — triggered by the orchestrator, but RESUMED with context from prior runs.
+
+**First run:** Full context injection (CONTEXT.md + METHOD.md + agent prompt + state.md). Creates a named session (`hive-scout`, `hive-builder`, etc.).
+
+**Subsequent runs:** `claude --resume hive-scout --print --message "New iteration: {task}"`. The agent already has all its context from prior runs. Only the new task and phase artifacts are sent. Dramatically fewer tokens, faster execution.
 
 ```
 cmd/loop (pipeline orchestrator)
@@ -326,6 +330,26 @@ cmd/loop (pipeline orchestrator)
 3. Parse the output (artifacts written to files)
 4. Post to the relevant lovyou.ai channel via API
 5. Trigger the next step
+
+### Agent Triggering
+
+**Pipeline agents:** Triggered sequentially by cmd/loop. When Scout completes, the orchestrator sends the scout report to the Architect's session. No webhooks needed — the orchestrator IS the trigger system.
+
+**Background agents (Guardian, Librarian):** Two options:
+1. **Polling:** A long-running process that periodically checks for new events/messages and resumes the agent session. Simple, slightly wasteful.
+2. **Event subscription:** The hive runtime (`pkg/loop` bus) fires when events are recorded. The subscriber resumes the relevant agent session. More efficient but more complex.
+
+For now: polling for background agents. The Guardian polls every 30s for new ops. The Librarian polls #questions every 10s. Future: event subscription.
+
+**@mentions:** When an agent posts "done, @Builder please implement" to a channel, the orchestrator parses the @mention and triggers the next agent. For pipeline agents this is redundant (the orchestrator already knows the sequence). For cross-pipeline communication (e.g., Librarian answering a Builder question), the polling mechanism catches it.
+
+### Where Agents Run
+
+**Development:** Local machine (Matt's dev box). Claude CLI authenticated via OAuth (Max plan). Agents run in the hive repo directory. Full filesystem access.
+
+**Production:** Fly.io machine. Claude CLI installed in Docker image (already done for cmd/reply). Agents run in a persistent Fly machine with the repo cloned. Session files persisted in a volume.
+
+**The key constraint:** Claude CLI needs OAuth authentication. The token lives in `~/.claude/.credentials.json`. Any machine running agents needs this credential.
 
 ### The Three Execution Modes
 

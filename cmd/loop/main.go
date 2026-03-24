@@ -220,16 +220,31 @@ func buildPrompt(agent, loopDir, gap, siteRepo string) string {
 	return sb.String()
 }
 
-// runAgent calls Claude CLI with the given prompt.
-//
-// Pipeline agents (scout, architect, builder, etc.) are COLD-START:
-// each phase is a fresh CLI invocation with no state from prior phases
-// except via artifact files. This is intentional — stateless, reproducible.
-//
-// Background agents (guardian, librarian) would be LONG-RUNNING:
-// a persistent process that watches events. Not implemented yet.
-func _legacyRemoved() {} // placeholder — delete with legacy functions below
+// sessionFile returns the path where an agent's session ID is stored.
+func sessionFile(agent string) string {
+	return filepath.Join("agents", ".sessions", agent)
+}
 
+// getSessionID reads a persisted session ID for an agent, or returns empty.
+func getSessionID(agent string) string {
+	data, err := os.ReadFile(sessionFile(agent))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// saveSessionID persists a session ID for an agent.
+func saveSessionID(agent, sessionID string) {
+	os.MkdirAll(filepath.Join("agents", ".sessions"), 0755)
+	os.WriteFile(sessionFile(agent), []byte(sessionID), 0644)
+}
+
+// runAgent calls Claude CLI, resuming an existing session if one exists.
+//
+// First run: creates a new session with full context (CONTEXT + METHOD + agent prompt + state).
+// Subsequent runs: resumes the session with just the new task message.
+// This avoids re-reading 15K+ tokens of context every iteration.
 func _legacyScoutPrompt(loopDir, gap string) string {
 	var sb strings.Builder
 	sb.WriteString(`== ROLE: SCOUT ==
@@ -432,11 +447,32 @@ Rules:
 
 // runAgent calls Claude CLI with the given prompt.
 func runAgent(agent, prompt string, needsTools bool, siteRepo string) (string, error) {
-	args := []string{"--print"}
-	if needsTools {
-		args = []string{} // full tool access
+	sessionID := getSessionID(agent)
+
+	var args []string
+
+	if sessionID != "" {
+		// Resume existing session — agent already has CONTEXT, METHOD, and role prompt.
+		// Just send the new task as a message.
+		fmt.Fprintf(os.Stderr, "  Resuming session %s for %s\n", sessionID[:8], agent)
+		if needsTools {
+			args = []string{"--resume", sessionID, "--print"}
+		} else {
+			args = []string{"--resume", sessionID, "--print"}
+		}
+		// The message is just the phase-specific context (scout report, plan, etc.)
+		// extracted from the end of the prompt.
+		args = append(args, "--message", "New iteration. Execute your role with the following context:\n\n"+extractPhaseContext(prompt))
+	} else {
+		// First run — inject full context as system prompt.
+		fmt.Fprintf(os.Stderr, "  New session for %s (first run — full context)\n", agent)
+		if needsTools {
+			args = []string{"--print", "-n", "hive-"+agent}
+		} else {
+			args = []string{"--print", "-n", "hive-"+agent}
+		}
+		args = append(args, "--system-prompt", prompt, "--message", "You are now initialized. Execute your role. Produce the required artifacts.")
 	}
-	args = append(args, "--system-prompt", prompt, "--message", "Execute your role. Produce the required artifacts.")
 
 	cmd := exec.Command("claude", args...)
 	if needsTools {
@@ -449,7 +485,37 @@ func runAgent(agent, prompt string, needsTools bool, siteRepo string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("claude CLI: %w", err)
 	}
+
+	// If this was a new session, try to capture the session ID from output.
+	// Claude CLI prints session info — we'd need to parse it or use --output-format json.
+	// For now, use the agent name as a stable session name and use --continue next time.
+	if sessionID == "" {
+		saveSessionID(agent, "hive-"+agent)
+	}
+
 	return string(output), nil
+}
+
+// extractPhaseContext pulls just the phase-specific context from a full prompt
+// (everything after the last "==" section that contains artifacts from prior phases).
+func extractPhaseContext(prompt string) string {
+	// Find the last occurrence of "== SCOUT REPORT ==" or similar section markers.
+	markers := []string{"== SCOUT REPORT ==", "== PLAN ==", "== BUILD REPORT ==", "== CRITIQUE ==", "== PRODUCT MAP"}
+	lastIdx := -1
+	for _, m := range markers {
+		idx := strings.LastIndex(prompt, m)
+		if idx > lastIdx {
+			lastIdx = idx
+		}
+	}
+	if lastIdx > 0 {
+		return prompt[lastIdx:]
+	}
+	// Fallback: return the last 2000 chars (the phase-specific part).
+	if len(prompt) > 2000 {
+		return prompt[len(prompt)-2000:]
+	}
+	return prompt
 }
 
 // postIteration posts the build summary to lovyou.ai via API.
