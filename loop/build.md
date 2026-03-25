@@ -1,23 +1,20 @@
-# Build Report — iter 239 (fix): computePipelineRoles test + constant
+# Build Report — iter 239: hive CTA on landing page
 
 ## Gap
-Critic found two invariant violations in the iter 239 build:
-1. `30*time.Minute` magic literal in `computePipelineRoles` (invariant 13 / no-magic-values)
-2. `computePipelineRoles` had no test (invariant 12: VERIFIED)
+Landing page had no link to `/hive`, leaving the "Watch it build" story inaccessible from the homepage.
 
-## What changed
+## Change
+**`site/views/home.templ`** — Added "Watch it build →" CTA link below the hero action buttons.
 
-### `site/graph/handlers.go`
-- Added `activeRoleThreshold = 30 * time.Minute` constant (near `maxHivePosts`)
-- Replaced `30*time.Minute` literal in `computePipelineRoles` with `activeRoleThreshold`
+Placement: inside the hero `<section>`, immediately after the primary CTA `<div>` (Try it free / See how it works). Styled as a subtle `text-sm text-warm-faint` paragraph with the link in `text-brand` rose accent — uncluttered and consistent with Ember Minimalism.
 
-### `site/graph/hive_test.go`
-- Added `time` import
-- Added `TestComputePipelineRoles`:
-  - Verifies Builder is Active with a post within `activeRoleThreshold`
-  - Verifies Scout is inactive with an old post (2h ago)
-  - Verifies Critic has zero `LastActive` and is inactive when no posts exist
+```html
+<p class="reveal text-sm text-warm-faint" style="--d:3">
+    or <a href="/hive" class="text-brand hover:text-brand-dark transition-colors">Watch it build →</a>
+</p>
+```
 
 ## Verification
-- `go.exe build -buildvcs=false ./...` — clean, no errors
-- `go.exe test -buildvcs=false ./graph/ -run "TestComputePipelineRoles|TestGetHive|TestParseCost|TestParseDuration|TestComputeHiveStats"` — all pass (integration tests skip without DB, expected)
+- `templ generate` — 16 updates, no errors
+- `go build -buildvcs=false ./...` — clean
+- `go test ./...` — all pass (graph: 0.583s, auth: cached)
