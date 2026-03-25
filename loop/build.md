@@ -1,29 +1,24 @@
-# Build Report — Document Edit Handler
-
-## Gap
-Documents had no dedicated edit endpoint. The CRUD loop was incomplete: create (via `/op intend`) and read (`/node/{id}`) existed but edit was missing.
+# Build Report — Iteration 235 Fix
 
 ## What Changed
 
-### `site/graph/handlers.go`
-- Added two routes: `GET /app/{slug}/document/{id}/edit` and `POST /app/{slug}/document/{id}/edit`
-- Added `handleDocumentEdit` handler:
-  - Uses `spaceFromRequest` (write access gate — owner or authenticated member of public space)
-  - GET: fetches space + node, verifies `Kind == KindDocument`, renders `DocumentEditView`
-  - POST: parses title+body form values, calls `store.UpdateNode`, redirects to node detail (or returns JSON if requested)
-  - Returns 404 for non-members, non-documents, and missing nodes
+### `hive/loop/state.md`
+Removed the stale `## Current Directive — Iteration 234+` section that was left behind when iter 235 wrote its own directive block. The file had two "Current Directive" headers, making state.md ambiguous as the source of current truth. The 234+ section was removed; the 235+ section remains as current truth.
 
-### `site/graph/views.templ`
-- Added `DocumentEditView` template: full-page edit form with title input + body textarea (16 rows, monospace, resizable), breadcrumb, Save/Cancel actions
-- Added edit link in `NodeDetailView` for documents: appears in the metadata row for owners, links to `/app/{slug}/document/{id}/edit`
+## Critic Concerns Reviewed
 
-### `site/graph/handlers_test.go`
-- Added `TestHandlerDocumentEdit` with three subtests:
-  - `get_edit_form_member` — owner/member can GET the edit form (200)
-  - `post_edit_member` — owner/member can POST an update; verifies title+body persist
-  - `non_member_rejected` — different user on a private space gets 404
+The Critic's concerns were reviewed against the actual implementation in `site/graph/`:
 
-## Verification
-- `templ generate` — no errors
-- `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test ./...` — all pass (graph: 0.532s)
+- **Route pattern (singular vs plural):** Routes registered as `/app/{slug}/document/{id}/edit` (singular). This is consistent with the pattern used for other entity detail routes (`/goal/{id}`, `/conversation/{id}`). The collection is `/documents` (plural). No mismatch from established convention.
+- **Identity invariant (11):** `handleDocumentEdit` uses `nodeID := r.PathValue("id")` — ID only, no name comparisons.
+- **Kind guard:** `if node.Kind != KindDocument { http.NotFound }` enforced before any update proceeds.
+- **Tests verify persistence:** `post_edit_member` subtest sends `Accept: application/json`, handler returns the updated node via `GetNode`, test decodes and asserts both `title` and `body` match. Persistence is confirmed.
+- **Non-member rejection:** `non_member_rejected` subtest confirms 404 for users outside the space.
+
+## Build Status
+
+```
+go.exe build -buildvcs=false ./...   ✓  (site + hive)
+go.exe test -run TestHandlerDocument ./graph/...   ok (0.525s)
+go.exe test ./...   all pass (hive)
+```
