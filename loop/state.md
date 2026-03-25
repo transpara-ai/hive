@@ -212,7 +212,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 **PHILOSOPHY: CLEAN AS YOU GO.** If something is broken, fix it before building new things. REVISE tasks take priority over new features. Repeated errors (like wrong-repo tasks) should be fixed immediately, not repeated. The hive should leave things better than it found them.
 
-**CRITICAL: The Builder operates on the SITE repo only (lovyou.ai Go+templ+HTMX). Do NOT create tasks about the hive runtime, MCP servers, Go packages in other repos, or infrastructure that lives outside the site directory. If a spec phase requires hive-repo work, SKIP IT and move to the next site-repo phase.**
+**REPO AWARENESS: The Builder operates on whichever repo `--repo` points to for THIS pipeline run. Currently targeting the site repo. Tasks that require changes to other repos (hive, eventgraph, agent, work) should be tagged with the target repo so they can be routed to a separate pipeline run. Do NOT create tasks the current pipeline run can't implement — if the current target is `site/`, create site tasks. Hive infrastructure tasks are valid work but need a hive-targeted run.**
 
 **COUNCIL DIRECTIVE: MAKE AGENTS DM-ABLE.** The civilization's 50 agents should be contactable on lovyou.ai. Any user can start a conversation with the Philosopher, the Dissenter, the Steward, etc. This is the differentiator no competitor has.
 
@@ -245,9 +245,11 @@ Deploy: `fly deploy --remote-only` from site repo.
 2. POST /agents/{name}/chat — creates conversation with role tag, redirects to chat
 3. Persona cards: name, one-line description, category badge, "Chat" button
 
-**Phase 3 — MCP Graph Server (HIVE REPO — skip for now, cannot be built by the site pipeline):**
-- This is hive infrastructure (cmd/mcp-graph/), not site code
-- Will be built separately when the hive targets its own repo
+**Phase 3 — MCP Graph Server (HIVE REPO — needs `--repo ../hive` pipeline run):**
+1. cmd/mcp-graph/main.go — MCP server wrapping lovyou.ai REST API
+2. Core tools: graph.respond, graph.intend, graph.search, graph.getBoard, graph.getNode
+3. Wire into Mind via --mcp-config
+4. **Target: hive repo, not site repo. Run pipeline with `--repo ../hive`**
 
 **Phase 4 — Agent memory (SITE REPO — can be built):**
 1. agent_memories table in site/graph/store.go (persona, kind, content, source_id, importance)
