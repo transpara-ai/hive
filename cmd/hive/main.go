@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -213,8 +214,38 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 	hiveDir := findHiveDir()
 	client := api.New(apiBase, apiKey)
 
-	// Pipeline order: Scout → Builder (commit, no push) → Critic → push if PASS.
-	roles := []string{"scout", "builder", "critic"}
+	// Smart pipeline: assess the board, then run the right sequence.
+	//
+	// 1. Check the board for fix tasks (Critic REVISE)
+	// 2. If fix tasks exist: skip Scout, run Builder on fixes, then Critic
+	// 3. If no fix tasks: run Scout → Builder → Critic
+	// 4. Builder commits locally (no push)
+	// 5. Push after the cycle completes
+	//
+	// This ensures: REVISE gets fixed before new work. Critic reviews before push.
+
+	// Check for fix tasks.
+	hasFixes := false
+	tasks, err := client.GetTasks(space, "")
+	if err == nil {
+		for _, t := range tasks {
+			if t.Kind == "task" && t.State != "done" && t.State != "closed" {
+				if t.AssigneeID == agentID && strings.HasPrefix(t.Title, "Fix:") {
+					hasFixes = true
+					break
+				}
+			}
+		}
+	}
+
+	var roles []string
+	if hasFixes {
+		log.Printf("[pipeline] fix tasks found — skipping Scout, working fixes first")
+		roles = []string{"builder", "critic"}
+	} else {
+		roles = []string{"scout", "builder", "critic"}
+	}
+
 	for _, role := range roles {
 		select {
 		case <-ctx.Done():
@@ -246,7 +277,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			RolePrompt: runner.LoadRolePrompt(hiveDir, role),
 			BudgetUSD:  budget,
 			OneShot:    true,
-			NoPush:     role == "builder", // Builder commits locally; pipeline pushes after Critic
+			NoPush:     role == "builder",
 		})
 
 		if err := r.Run(ctx); err != nil {
@@ -254,9 +285,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
-	// Push after Critic review. The code is committed locally but not pushed
-	// until the full cycle completes. This means REVISE code doesn't reach
-	// the remote until the next successful cycle overwrites it.
+	// Push after the full cycle. Code stays local until Critic has reviewed.
 	log.Printf("[pipeline] ── pushing ──")
 	pusher := runner.New(runner.Config{RepoPath: absRepo})
 	if err := pusher.Push(); err != nil {
