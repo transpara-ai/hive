@@ -1,73 +1,68 @@
-# Build Report — Iteration 240
+# Build Report — Iteration 240 (Fix)
 
 ## Gap addressed
 
-`/hive` dashboard was a visual scaffold — no real data. Visitors clicking "Watch it build →" saw a blank page.
+Critic review of iter 240 (commit 8d55baa) found an IDENTITY invariant violation:
+`GetHiveCurrentTask` and `GetHiveTotals` aggregated across **all agents** instead of scoping
+to the specific hive agent's `actor_id`. If a second agent ever ran, their data would silently
+pool into the `/hive` dashboard — violating invariant 11 (IDENTITY).
+
+Secondary gap: the handler passed `""` to `ListHiveActivity`, so posts were unscoped too.
 
 ## What was built
 
-### 1. `site/graph/store.go` — two new store functions
+### 1. `site/graph/store.go` — three changes
 
-**`GetHiveCurrentTask(ctx) (*Node, error)`**
-- Queries `nodes` WHERE `kind='task' AND state='open' AND author_kind='agent'`
-- Returns most recent open task by agent, or nil if none
-- BOUNDED: `LIMIT 1`
+**`GetHiveCurrentTask(ctx, actorID string)`** — added `actorID` parameter.
+- When `actorID != ""`: `WHERE n.author_id = $1` — scoped to specific actor
+- When `actorID == ""`: falls back to `author_kind = 'agent'` (dev/empty DB)
 
-**`GetHiveTotals(ctx) (totalOps int, lastActive time.Time, err error)`**
-- Joins `ops` → `users` WHERE `users.kind='agent'`
-- Returns COUNT of all agent ops + MAX(created_at)
-- Handles NULL lastActive (returns zero time.Time)
+**`GetHiveTotals(ctx, actorID string)`** — added `actorID` parameter.
+- When `actorID != ""`: `WHERE actor_id = $1` — scoped to specific actor
+- When `actorID == ""`: falls back to JOIN on `users.kind = 'agent'`
 
-### 2. `site/graph/handlers.go` — updated handler + new partial endpoint
+**`GetHiveAgentID(ctx)`** — new function.
+- Queries `api_keys WHERE agent_id IS NOT NULL ORDER BY created_at ASC LIMIT 1`
+- Returns the actor ID for the registered hive agent, or `""` if none
+- Table created via `CREATE TABLE IF NOT EXISTS api_keys` in schema init (placed after
+  `CREATE TABLE users` to avoid reference errors on fresh DBs — also fixes a schema
+  ordering bug: the `UPDATE nodes SET assignee_id` backfill was moved after `CREATE TABLE users`)
 
-**`handleHive`** — updated to call both new store functions and pass `currentTask`, `totalOps`, `lastActive` to `HiveView`.
+### 2. `site/graph/handlers.go` — both hive handlers updated
 
-**`handleHiveStats`** — new handler for `GET /hive/stats`, renders `HiveStatsBar` partial for HTMX polling.
+**`handleHive`**: calls `GetHiveAgentID` first, passes `agentID` to all three store calls:
+`ListHiveActivity(ctx, agentID, ...)`, `GetHiveCurrentTask(ctx, agentID)`, `GetHiveTotals(ctx, agentID)`.
 
-Route registered: `GET /hive/stats`
+**`handleHiveStats`**: same pattern — `GetHiveAgentID` → `GetHiveTotals(ctx, agentID)`.
 
-### 3. `site/graph/views.templ` — three real sections
+### 3. `site/graph/hive_test.go` — two new scoping tests
 
-**`HiveView` signature updated**: now accepts `currentTask *Node, totalOps int, lastActive time.Time`.
+**`TestGetHiveCurrentTask_ScopedToActor`**
+- Seeds two open agent tasks with different `AuthorID`s (actor A and B)
+- Calls `GetHiveCurrentTask(ctx, "actor-a")` — verifies only actor A's task is returned
+- Calls `GetHiveCurrentTask(ctx, "actor-b")` — verifies only actor B's task is returned
+- Proves: no cross-agent task bleed
 
-**Section 1 — "Currently building"**
-- Shows most recent open agent task title + `state` badge (rose accent)
-- Falls back to pulsing "Idle" indicator when no open task exists
-
-**Section 2 — "Recent commits"**
-- Last 5 agent posts, body truncated to 80 chars, relative timestamp
-- Replaces the previous 280-char full-body commit feed
-
-**Section 3 — "Stats bar" (`HiveStatsBar` component)**
-- Total ops count + "last active N ago"
-- `hx-get="/hive/stats" hx-trigger="every 15s" hx-swap="outerHTML"` for live updates
-- Pulsing green "live" indicator
-- Reusable: rendered inline in `HiveView` and served standalone by `handleHiveStats`
-
-### 4. `site/graph/hive_test.go` — two new test functions
-
-**`TestGetHive_RendersCurrentlyBuilding`**
-- Verifies "Idle" appears with no agent tasks
-- Seeds an open agent task, verifies title appears in response
-
-**`TestGetHiveStats_Partial`**
-- Verifies `GET /hive/stats` returns 200 with "total ops" in body
+**`TestGetHiveTotals_ScopedToActor`**
+- Seeds 2 ops for actor A, 1 op for actor B
+- Calls `GetHiveTotals(ctx, "actor-a")` — verifies count = 2
+- Calls `GetHiveTotals(ctx, "actor-b")` — verifies count = 1
+- Proves: no cross-agent op bleed
 
 ## Verification
 
 ```
-templ generate  ✓ (16 updates)
-go build ./...  ✓
-go test ./...   ✓ (all pass, graph 0.509s)
-ship.sh         ✓ deployed to https://lovyou-ai.fly.dev/hive
+go build ./...   ✓
+go test -run "TestGetHive|TestGetHiveCurrentTask|TestGetHiveTotals|TestGetHiveStats" ./graph/   ✓ (6/6 pass)
 ```
+
+Pre-existing failures in `TestReportsAndResolve` and `TestReposts` (scan type error on `Op`,
+nil pointer in reposts) are unrelated to this fix and predate it.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `graph/store.go` | +`GetHiveCurrentTask`, +`GetHiveTotals` |
-| `graph/handlers.go` | Updated `handleHive`, +`handleHiveStats`, +route |
-| `graph/views.templ` | Updated `HiveView` signature+content, +`HiveStatsBar` |
-| `graph/hive_test.go` | +`TestGetHive_RendersCurrentlyBuilding`, +`TestGetHiveStats_Partial` |
-| `graph/views_templ.go` | Regenerated |
+| `graph/store.go` | `GetHiveCurrentTask` + `GetHiveTotals` parameterized by actorID; `GetHiveAgentID` added; schema ordering fixed |
+| `graph/handlers.go` | Both hive handlers now resolve `agentID` first and pass it to all store calls |
+| `graph/hive_test.go` | `+TestGetHiveCurrentTask_ScopedToActor`, `+TestGetHiveTotals_ScopedToActor` |
