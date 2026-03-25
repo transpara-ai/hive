@@ -433,10 +433,7 @@ func (r *Runner) git(args ...string) error {
 	return nil
 }
 
-// ─── Stub roles (Phase 2) ───────────────────────────────────────────
-
-// runScout is in scout.go
-// runCritic is in critic.go
+// ─── Monitor ─────────────────────────────────────────────────────────
 
 func (r *Runner) runMonitor(ctx context.Context) {
 	if r.tick%4 == 0 {
