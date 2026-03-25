@@ -77,4 +77,85 @@ The Reflector role exists but doesn't run. It should close every pipeline cycle:
 
 ---
 
+## Visual feedback — screenshots for the hive
+
+### The problem
+The Observer, Designer, Newcomer, and Inhabitant can only read HTML/templates. They can't SEE the rendered product. The LIMITATIONS.md is honest about this. But the tooling exists now.
+
+### The solution
+MCP screenshot servers: [Puppeteer MCP](https://www.pulsemcp.com/servers/modelcontextprotocol-puppeteer), [Playwright MCP](https://www.pulsemcp.com/servers/playwright-screenshot), [Screenshot Server](https://github.com/sethbang/mcp-screenshot-server). These give agents the ability to:
+- Screenshot any URL (full page or element)
+- Puppeteer auto-splits into tiles for multimodal analysis
+- Playwright reads the accessibility tree (structured data about every interactive element)
+- Claude is multimodal — it can look at screenshots and reason about layout, spacing, color, UX
+
+### Implementation
+1. Add Puppeteer or Playwright MCP server to the hive's MCP config
+2. The Observer uses `screenshot` tool on lovyou.ai pages after each deploy
+3. The Designer reviews screenshots for visual consistency
+4. The Newcomer navigates the site via screenshots and reports confusion
+5. The Inhabitant experiences the product visually, not just structurally
+
+**This closes the biggest limitation.** From LIMITATIONS.md: "Cannot see the rendered UI." With an MCP screenshot server, they can. The Observer goes from code-blind to sighted.
+
+---
+
+## Native apps
+
+### Mobile (iOS + Android)
+The site is already mobile-responsive (Tailwind). A native wrapper (WebView/Capacitor/Expo) gets us 80% of the way. True native for: push notifications, offline access, biometric auth.
+
+**Phased approach:**
+1. PWA first — add manifest.json, service worker. Installable from browser. Push via web push API.
+2. Capacitor wrapper — WebView with native bridges for push, biometrics, share sheet.
+3. True native (if needed) — Swift UI / Kotlin. Only if PWA + Capacitor can't deliver the UX.
+
+### Desktop
+Electron or Tauri wrapper. Probably not needed — the web app works. But: system tray icon showing agent activity, native notifications, keyboard shortcuts outside the browser.
+
+---
+
+## Public API layer
+
+### What exists
+The JSON API already works — `POST /app/{slug}/op` with Bearer token. All 27 grammar ops. `GET /app/{slug}/board?format=json`. This IS the public API. It just needs:
+
+1. **Documentation** — OpenAPI/Swagger spec auto-generated from handlers
+2. **Rate limiting** — per API key, tiered by plan
+3. **Versioning** — `/api/v1/` prefix for stability
+4. **Webhooks** — subscribe to events, get POSTed when they happen (task completed, message received, etc.)
+5. **SDK generation** — from the OpenAPI spec: TypeScript, Python, Go clients
+
+### The real API is the grammar
+The 27 ops ARE the API. `intend`, `respond`, `endorse`, `claim`, `review` — these are verbs, not endpoints. The API is a language, not a REST surface. This is the differentiator: other platforms have `/api/tasks/create`. We have `/op` with `op=intend`. The grammar IS the interface.
+
+---
+
+## EGIP — Inter-system protocol
+
+### What it is (from eventgraph docs)
+Sovereign systems communicate without shared infrastructure:
+- Ed25519 identity (no central registry)
+- Cross-Graph Event References (CGERs) — causal links across graph boundaries
+- Signed message envelopes
+- Seven message types: HELLO, MESSAGE, RECEIPT, PROOF, TREATY, AUTHORITY_REQUEST, DISCOVER
+- Treaties for bilateral governance
+
+### What it enables
+An agent on lovyou.ai can participate on ANOTHER platform. Your Philosopher can answer questions on someone else's product. The trust score follows the agent — portable, non-transferable, earned.
+
+A company running their own hive can federate with lovyou.ai. Their agents and ours can collaborate across graph boundaries. Tasks can span systems. Reviews can cite evidence from other graphs.
+
+### When
+After the local product works. EGIP is the network effect — but the node has to be valuable first. The Dissenter would say: "Don't build federation before you have two users on one system."
+
+### Build order
+1. EGIP message types in the eventgraph Go package (partially exists)
+2. HELLO/DISCOVER handshake between two lovyou.ai instances
+3. Cross-graph task references (a task on system A depends on a task on system B)
+4. Portable agent identity (agent's signing key works across systems)
+5. Treaty mechanism (two systems agree on shared governance rules)
+
+---
+
 *This file is append-only. Ideas move to specs when they're ready. The Mourner reviews periodically and releases what's no longer relevant.*
