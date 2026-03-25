@@ -147,6 +147,21 @@ Same primitives. Same graph structure. Same interface (input, process, output). 
 
 **This is what "substrate for collective existence" actually means.** Not 13 separate products. One language that describes any organized human (or agent) activity, with the graph as the execution environment and the primitives as the universal vocabulary.
 
+### Pipeline roles as full agents on the graph
+Currently the Scout, Builder, Critic, PM are thin wrappers — Go functions that call Reason()/Operate() and parse output. They have no identity, no memory, no graph presence, no MCP tools. They're functions pretending to be agents.
+
+**What they should be:**
+- Real `agent.Agent` instances (from the agent package) with signing keys, state machines, causality
+- User accounts on lovyou.ai — visible in People, with action histories
+- Memory across cycles — the Scout remembers what it already scouted, the Critic remembers what patterns it keeps catching
+- MCP tools — the Scout queries the graph for gaps, the Critic greps the codebase
+- Soul enforcement — the Builder can refuse a task that violates invariants
+- Visible conversations — the Critic's review is a comment on the task, the PM's decision is a Knowledge claim, the Scout's analysis is a conversation you can read
+
+**The shift:** From a pipeline of functions to a civilization of agents that happens to have a build pipeline as one of its workflows. The same agents that chat with users also build features. The same graph that holds conversations also holds the audit trail.
+
+**Implementation:** Replace `runner.Runner` methods with `agent.Agent` instances. Each boots with soul + signing key, records events via the graph, uses MCP tools. The runner becomes an orchestrator of agents, not a dispatcher of functions.
+
 ### Agent pub/sub on the event graph
 Agents should subscribe to event types they care about. The Critic subscribes to `hive.builder.committed`. The Guardian subscribes to `*`. The Philosopher subscribes to `council.*`. Currently: agents are invoked by the pipeline. Future: agents react to events.
 
