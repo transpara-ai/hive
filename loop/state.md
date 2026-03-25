@@ -226,7 +226,39 @@ Deploy: `fly deploy --remote-only` from site repo.
 3. Add `/app/{slug}/agents` route listing available agent personas with descriptions + "Chat" button
 4. The "Chat" button creates a conversation with the agent + sets the role in the title/tags
 
-**Previous directive (completed):** User-first sprint shipped 17 features: landing page, welcome, onboarding, empty states, nav simplification, thinking indicators, celebrations, reputation scores, demo space, invite flow.
+**Previous directive (completed):** User-first sprint shipped 17 features.
+
+**SPECS TO IMPLEMENT (read loop/agent-chat-spec.md and loop/agent-capability-spec.md for full details):**
+
+**Phase 1 — Persona storage + Mind routing:**
+1. Create `agent_personas` table (id, name, display, description, category, prompt, model, active)
+2. Seed from agents/*.md files at startup (upsert on boot)
+3. Update `buildSystemPrompt` in graph/mind.go to check `role:` tag on conversation, load persona prompt instead of generic mindSoul
+4. Store role tag in conversation tags when created via agent chat
+
+**Phase 2 — Agents page + chat creation:**
+1. GET /agents route — global page listing all active personas grouped by category (Care, Governance, Knowledge, Product, Outward, Resource)
+2. POST /agents/{name}/chat — creates conversation with role tag, redirects to chat
+3. Persona cards: name, one-line description, category badge, "Chat" button
+
+**Phase 3 — MCP Graph Server (foundation for agent capabilities):**
+1. cmd/mcp-graph/main.go — MCP server wrapping lovyou.ai REST API
+2. Core tools: graph.respond, graph.intend, graph.search, graph.getBoard, graph.getNode
+3. Wire into Mind via --mcp-config
+4. Test: agent creates a task from within a conversation
+
+**Phase 4 — Agent memory:**
+1. agent_memories table (persona, kind, content, source_id, importance)
+2. memory.remember + memory.recall MCP tools
+3. Inject relevant memories into system prompt
+4. Test: agent references a previous conversation
+
+**Phase 5 — Full graph access + self-improvement:**
+1. All 27 grammar ops as MCP tools
+2. Gap detection → task creation → pipeline builds new tools
+3. Conversation UX: global contact list, summaries, cross-search
+
+**Each phase is 1-3 pipeline iterations. Start with Phase 1 — it's a 15-line change in mind.go + a new table + a seed script.**
 
 **What was already shipped (iters 233-235):**
 - Landing page rewritten: "Your team has an AI colleague" (not "One graph, many lenses")
