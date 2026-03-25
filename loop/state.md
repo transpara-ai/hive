@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 232, 2026-03-25.
+Last updated: Iteration 239, 2026-03-26.
 
 ## Current System State
 
@@ -292,136 +292,24 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-## Scout Directive: Build the Hive Dashboard (`/hive`)
+## Scout Directive: Complete the Hive Dashboard (`/hive`)
 
-**Priority:** High  
-**Target repo:** `site`  
-**Why now:** The pipeline ships autonomously at ~$0.83/feature, 6 minutes, one command. Four pipeline roles are running (Scout, Builder, Critic, Reflector). The Architect auto-spawns on failure. The multi-repo model routes tasks to the right repo. This is the most interesting AI system anyone has built — and there is no window into it. `/hive` is the spectator view. It makes the civilization visible to outsiders and answers "what is this?" before they even sign up.
+**Priority:** High
+**Target repo:** `site`
+**Current state (iter 239):** The `/hive` route exists (`site/graph/handlers.go`). `HiveView` template renders stat cards (features shipped, total spend, avg cost/feature) and a posts feed with per-post cost and duration. `ListHiveActivity` store query is tested. Cost/duration parsing is implemented and unit-tested. Handler tests pass.
 
-**What to build:**
+**Remaining work:**
 
-1. **`/hive` route + handler** (`site/internal/handlers/hive.go`) — fetches recent hive agent activity: last 20 tasks (created by the hive agent), last 20 hive posts (from the feed). No auth required — public page. Read the existing handler patterns (board, feed) for the query + template structure.
+1. **Pipeline role status panel** — Query the last 20 agent posts, extract pipeline roles from title prefixes (`[hive:scout]`, `[hive:builder]`, `[hive:critic]`, `[hive:reflector]`). Display each role as a card with: role name, icon, last active timestamp, last task title. Pulse "active" (green) if last activity < 30 min; "idle" otherwise. Add to `HiveView` above the posts feed.
 
-2. **Cost/duration parsing** — the hive Builder publishes posts with structured body like `"Shipped X. Cost: $0.53. Duration: 3m28s."` Parse cost and duration from post bodies. Compute aggregate metrics: total features shipped, total cost, average cost per feature, last deploy time. Display prominently as stat cards at the top.
-
-3. **Pipeline timeline** — a vertical list of recent pipeline runs. Each run shows: task title, phase (Scout/Builder/Critic/Reflector), status (DONE/REVISE/PENDING), cost, duration, commit hash (if available), repo. Group by task: one row per feature shipped, with phases as sub-items or colored badges.
-
-4. **Link from landing page** — add a "Watch the hive build" or "Hive Observatory" link to the site landing page (`/`). The dashboard is the demo. It should be discoverable without knowing the URL.
+2. **Nav + landing page links** — Add a "Hive" link to the desktop header nav and mobile nav. Add a "Watch it build →" CTA to the landing page (`/`).
 
 **Implementation notes:**
-- The hive agent identity is known (`lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` prefix). Query nodes where `author_id` is the hive user.
-- Posts tagged with `[hive:builder]`, `[hive:scout]`, `[hive:critic]`, `[hive:reflector]` in the title — use these to classify pipeline phases.
-- Keep the UI on-brand: dark, ember glow, warm text. Stat cards in rose/amber. The pipeline timeline should feel like watching something alive, not a log dump.
-- No new tables needed — everything comes from existing `nodes` and `ops` tables.
-- One focused handler, one template. No new entity kinds.
+- Code lives in `site/graph/` (handlers.go, views.templ) — NOT `site/internal/handlers/`.
+- No new tables. No new entity kinds. No auth required on `/hive`.
+- Pipeline role classification: scan `posts[].Title` for `[hive:X]` prefix. Each role gets one card showing the most recent post matching that prefix.
 
-**Definition of done:** `lovyou.ai/hive` loads, shows real pipeline metrics, shows the last N features the hive shipped with cost and duration, and links from the landing page.
-
-## Scout Directive: Close Knowledge Sprint + Build the Hive Dashboard
-
-**Priority:** High  
-**Why now:** The Knowledge sprint is 90% done — one task remains (grounded indicator). Close it first, then pivot to the Hive Dashboard. The pipeline now ships autonomously at ~$0.83/feature. There is no surface that makes this visible. The `/hive` page is the window into the civilization — the demo that answers "what is this?" for any newcomer or potential client. The data is already there (hive agent posts with cost + duration in the body). Build it.
-
----
-
-### Task 0 [site] — Close the Knowledge sprint: "grounded in N docs" indicator (30 min)
-
-When Chat auto-reply fires in a space that has documents, add a muted label below the agent's message: "grounded in N docs". Implementation:
-- In `replyTo`, when `ListDocumentContext` returns >0 docs, add a tag `"grounded:N"` to the reply node's `tags` slice
-- In the `chatMessage` templ component, check for a tag matching `"grounded:"` prefix and render a small muted label (ember minimalism — small font, muted rose or warm-gray, not a banner)
-- Handler test: `TestReplyToAddsGroundedTag` — verify tag is set when docs present, absent when no docs
-- Ship: `cd site && ./ship.sh "iter N: grounded chat indicator"`
-
----
-
-### Task 1 [site] — `/hive` public route and layout
-
-Create `GET /hive` handler in `site/internal/handlers/` and `HiveView` templ template. Public, no auth required. Layout: full-width, dark, consistent with Ember Minimalism. Three sections: Pipeline Status (top), Recent Autonomous Commits (left), Cost Dashboard (right). Add "Hive" link to the desktop header nav and mobile nav. Add a "Watch it build →" CTA on the landing page (`/`). Ship: `./ship.sh "iter N: /hive route and layout"`.
-
----
-
-### Task 2 [site] — Pipeline role status panel
-
-Query `nodes` filtered by `author_id = hive_agent_user_id` (kind='post', LIMIT 20, ordered by `created_at DESC`). Extract the three pipeline roles — Scout, Builder, Critic — from post bodies using prefix matching (`[hive:scout]`, `[hive:builder]`, `[hive:critic]`). Display each as a card: role name, icon (telescope / hammer / shield), last active timestamp, last task title parsed from the post subject line. Show "active" green pulse if last activity < 30 minutes ago; "idle" otherwise.
-
-**Prerequisite:** Verify the hive agent's `user_id` is accessible (check `site/internal/config/` or env vars for `HIVE_AGENT_ID`). If not present, create a prerequisite task to add it to the site config before Task 2.
-
----
-
-### Task 3 [site] — Recent autonomous commits feed
-
-Surface the last 10 hive agent posts. Each entry: what was built (post title), cost (`$X.XX` parsed from body via regex `\$\d+\.\d+`), duration (`Xm` if present), timestamp. Link to full post. Style as a scrollable commit-log list — monospace for cost/duration stats, warm serif for the title. Use existing `ListNodes` with `author_id` filter. Ship: `./ship.sh "iter N: hive commits feed"`.
-
----
-
-### Task 4 [site] — Cumulative cost ticker
-
-Below the commits feed: sum all dollar amounts from hive agent post bodies. Display as: `"Total autonomous spend: $X.XX across N features shipped."` Add breakdown: avg cost/feature, total features. This makes the economics of the civilization legible and verifiable. Ship: `./ship.sh "iter N: hive cost ticker"`.
-
----
-
-### Task 5 [site] — Tests
-
-- Handler test: `GET /hive` returns 200, no auth required, correct template rendered
-- Store test: hive agent activity query returns posts filtered by agent `author_id`, ordered by recency, LIMIT respected (invariant 13: BOUNDED)
-- Ship: `./ship.sh "iter N: hive page tests"`
-
----
-
-**Acceptance criteria (all 5 tasks):**
-- `lovyou.ai/hive` loads without auth
-- Shows all three pipeline roles with last-active status
-- Shows last 5+ autonomous commits with titles, cost, duration
-- Shows cumulative cost ticker
-- Linked from main nav and landing page
-- All tasks have passing tests before Builder marks DONE
-
-**What NOT to build:**
-- Real-time WebSocket/SSE (HTMX polling is fine for now)
-- Per-agent drill-down logs
-- Admin pause/resume controls
-
-**Routing note:** All tasks tagged `[site]`. The Scout should read `site/internal/handlers/` and `site/internal/templates/` before creating tasks to confirm structure. If `HIVE_AGENT_ID` is not in site config, add a prerequisite Task 0.5 before Task 2.
-
-## Scout Directive: Hive Dashboard — The Civilization Made Visible
-
-**Priority:** High  
-**Target repo:** `site` (lovyou.ai)  
-**Why now:** The pipeline ships autonomously at $0.83/feature. The constraint is no longer "can it work" — it's "who can see it working." The agent posts iteration summaries to the feed. The runner tracks cost per task. The graph has all the data. There is no surface that makes this visible. Build it.
-
-**Background:** lovyou.ai/hive should be the live window into the civilization. Not inside a space — a top-level public page. The hive as a spectator sport. When someone asks "what is lovyou.ai?", you show them this page. When a potential client asks "can your agents really build things autonomously?", you show them this page.
-
-**Tasks to create (all tagged `repo:site`):**
-
-### Task 1: `/hive` public route and layout
-Create `GET /hive` handler and `HiveView` template in the site repo. Public, no auth required. Layout: full-width, dark, consistent with Ember Minimalism. Three panels: Pipeline Status (top), Recent Autonomous Commits (left), Cost Dashboard (right). Add "Hive" link to main nav (desktop header + mobile nav). Add a "Watch it build →" call-to-action on the landing page (`/`).
-
-### Task 2: Pipeline role status panel
-Query the `nodes` table for the hive agent user (kind='post', author_id = hive agent's user_id, ordered by created_at desc, LIMIT 20). Extract the three pipeline roles — Scout, Builder, Critic — from post bodies (they contain `[hive:builder]`, `[hive:scout]`, `[hive:critic]` prefixes). Display each role as a card: role name, icon (telescope/hammer/shield), last active timestamp, last task title. Show "active" (green pulse) if last activity < 30 minutes ago, "idle" otherwise.
-
-### Task 3: Recent autonomous commits feed
-Surface the last 10 pipeline iteration posts from the hive agent's feed activity. Each entry shows: what was built (title from post body), cost ($X.XX from post body if present), duration (Xm if present), timestamp. Use the existing `ListNodes` with author_id filter for the hive agent. Link each entry to its full post. Style as a scrollable commit-log list — monospace font for the cost/duration stats, serif for the title.
-
-### Task 4: Cumulative cost ticker
-Below the commit feed: running total cost across all autonomous iterations. Parse dollar amounts from hive agent post bodies (pattern: `\$\d+\.\d+`). Sum them. Display as: "Total autonomous spend: $X.XX across N features." Add a small breakdown: avg cost/feature, total features shipped. This makes the economics of the civilization legible.
-
-### Task 5: Test coverage
-Add handler test for `GET /hive` (200, no auth, correct template rendered). Add store-level test for the hive agent activity query (returns posts filtered by agent author_id, ordered by recency).
-
-**Acceptance criteria:**
-- `lovyou.ai/hive` loads without auth
-- Shows all three pipeline roles with last-active status
-- Shows at least the last 5 autonomous commits with titles
-- Shows cumulative cost ticker
-- Linked from the main nav and landing page
-- All 5 tasks have passing tests before Builder marks DONE
-
-**What NOT to build in this cluster:**
-- Real-time WebSocket or SSE (polling is fine for now)
-- Per-agent detailed logs or event drill-down
-- Admin controls or pause/resume pipeline buttons
-
-**The Scout's job:** Read the current site repo structure (handlers, templates, router) to confirm the hive agent's user_id is accessible, then create these 5 tasks on the board assigned to the Builder. If the hive agent's user_id is not stored in a retrievable config, flag this as a blocker and create a prerequisite task to add `HIVE_AGENT_ID` to the site's environment config.
+**Definition of done:** `/hive` shows live pipeline role status + stat cards + posts feed, and is linked from nav and landing page.
 
 ## Directive — Iteration 234+: Knowledge Product — Wire the Three Layers
 
