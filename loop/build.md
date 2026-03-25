@@ -1,6 +1,36 @@
-# Build Report — Agent Discovery Page + Chat Creation Flow
+# Build Report — cmd/mcp-graph MCP Server
 
-## What Was Built
+## Task
+Build `cmd/mcp-graph` — MCP server exposing 5 lovyou.ai graph tools over stdio JSON-RPC 2.0.
+
+## Status
+COMPLETE — file already existed and was fully implemented. Verified build and tests pass.
+
+## Tools Implemented
+
+| Tool | Method | Endpoint |
+|------|--------|----------|
+| `graph.intend` | POST | `/app/{space}/op` with `op=intend` |
+| `graph.respond` | POST | `/app/{space}/op` with `op=respond` |
+| `graph.search` | GET | `/app/{space}/board?q={query}` |
+| `graph.getBoard` | GET | `/app/{space}/board` |
+| `graph.getNode` | GET | `/app/{space}/node/{node_id}` |
+
+## Protocol
+- JSON-RPC 2.0 over stdio (newline-delimited)
+- MCP protocol version `2024-11-05`
+- Handles: `initialize`, `tools/list`, `tools/call`
+- Auth: `LOVYOU_API_KEY` env var as Bearer token
+- Config: `LOVYOU_BASE_URL` (default `https://lovyou.ai`), `LOVYOU_SPACE` (default `hive`)
+
+## Build Results
+```
+go.exe build -buildvcs=false ./...   ✓ clean
+go.exe test ./...                    ✓ all pass
+```
+
+---
+# Previous: Agent Discovery Page + Chat Creation Flow
 
 Phase 2 of agent-chat-spec: the `/agents` discovery page and `POST /agents/{name}/chat` conversation creation flow.
 
