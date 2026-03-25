@@ -1,24 +1,36 @@
-# Build Report — Iteration 235 Fix
+# Build Report — Add KindQuestion entity kind
 
-## What Changed
+## Gap
+Q&A product foundation missing. Knowledge layer (Layer 6) needs question entity kind to support Q&A mode alongside claims and documents.
 
-### `hive/loop/state.md`
-Removed the stale `## Current Directive — Iteration 234+` section that was left behind when iter 235 wrote its own directive block. The file had two "Current Directive" headers, making state.md ambiguous as the source of current truth. The 234+ section was removed; the 235+ section remains as current truth.
+## Changes
 
-## Critic Concerns Reviewed
+### site/graph/store.go
+- Added `KindQuestion = "question"` constant after `KindDocument`
 
-The Critic's concerns were reviewed against the actual implementation in `site/graph/`:
+### site/graph/handlers.go
+- Added `handleQuestions` — lists all questions in a space (GET /app/{slug}/questions), supports `?q=` search, JSON+HTML responses
+- Added `handleQuestionDetail` — shows a single question with its answers (GET /app/{slug}/question/{id}), JSON+HTML responses
+- Registered routes in `Register()`: `GET /app/{slug}/questions`, `GET /app/{slug}/question/{id}`
+- Added `KindQuestion` to the intend handler kind allowlist (alongside KindDocument, KindPolicy, etc.)
 
-- **Route pattern (singular vs plural):** Routes registered as `/app/{slug}/document/{id}/edit` (singular). This is consistent with the pattern used for other entity detail routes (`/goal/{id}`, `/conversation/{id}`). The collection is `/documents` (plural). No mismatch from established convention.
-- **Identity invariant (11):** `handleDocumentEdit` uses `nodeID := r.PathValue("id")` — ID only, no name comparisons.
-- **Kind guard:** `if node.Kind != KindDocument { http.NotFound }` enforced before any update proceeds.
-- **Tests verify persistence:** `post_edit_member` subtest sends `Accept: application/json`, handler returns the updated node via `GetNode`, test decodes and asserts both `title` and `body` match. Persistence is confirmed.
-- **Non-member rejection:** `non_member_rejected` subtest confirms 404 for users outside the space.
+### site/graph/views.templ
+- Added `questionsIcon()` — question mark circle SVG icon
+- Added `QuestionsView` — list view with new question form, search, question cards showing title/body/author/answer count
+- Added `QuestionDetailView` — detail view showing question + answers list + answer submission form (respond op)
+- Added `questions` lens to sidebar "More" section (after documents)
+- Added `questions` mobile nav tab (after documents)
 
-## Build Status
+### site/graph/handlers_test.go
+- Added `TestHandlerQuestions` with 3 subtests:
+  - `create_question` — POST /op with kind=question, verifies node created with correct kind/title
+  - `list_questions` — GET /app/{slug}/questions, verifies questions returned
+  - `question_detail` — GET /app/{slug}/question/{id}, verifies question fetched with correct id/kind
 
-```
-go.exe build -buildvcs=false ./...   ✓  (site + hive)
-go.exe test -run TestHandlerDocument ./graph/...   ok (0.525s)
-go.exe test ./...   all pass (hive)
-```
+## Verification
+- `templ generate` — OK (15 updates)
+- `go.exe build -buildvcs=false ./...` — OK
+- `go.exe test ./...` — OK (all pass)
+
+## Pattern followed
+KindDocument pattern from iter 234: same handler structure, same JSON/HTML content negotiation, same form-based create flow, same sidebar/mobile nav placement.

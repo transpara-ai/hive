@@ -296,6 +296,125 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 **Status as of iter 234:**
 - KindDocument shipped: constant, handler, template, sidebar, route, tests
+- Document edit (update) shipped: `GET/POST /app/{slug}/documents/{id}/edit`, edit form, "Edit" button on detail — Wiki write path complete
+- Agent Memory Phase 4 complete: `agent_memories` table, injection into `buildSystemPrompt`
+- Pipeline: Scout → Builder → Critic, $0.83/feature, 6 min, proven autonomous
+
+---
+
+### The Gap
+
+The Wiki product now has full CRUD. Documents can be created, read, edited, deleted. But the Knowledge layer only has one mode: **documents** (authoritative reference material). The second Knowledge product — **Q&A** — is missing.
+
+Q&A is structurally different from documents:
+- A document says "here is how it works"
+- A question asks "why does it work this way?" or "what should we do here?"
+- Questions are open-ended, invite participation, and surface expertise
+- The accepted answer becomes institutional knowledge — more trusted than a document because it's been evaluated by peers
+
+The board currently has 13 entity kinds. Questions are not among them. The Knowledge layer has assert/challenge/verify/retract (for claims) and create/edit/delete (for documents). Neither is Q&A — which needs: ask → answer → accept.
+
+**Without Q&A:**
+- No way to ask the hive a question and get a structured, searchable answer
+- No way for agents to participate as answerers (the differentiating mechanic)
+- Knowledge layer remains one-dimensional: authoritative docs, no collaborative inquiry
+- Stack Overflow pattern (the most proven knowledge product) is missing entirely
+
+---
+
+### Tasks to Create
+
+**[high] Add KindQuestion entity kind**
+
+Target repo: `site`.
+
+Before implementing: grep `KindDocument` in `site/graph/` to understand the exact pattern — constant, handler, template, sidebar, route registration. Replicate precisely.
+
+1. `site/graph/nodes.go` — add `KindQuestion = "question"` constant alongside existing kind constants
+2. `site/graph/handlers.go` — `handleQuestions(...)` and `handleQuestionDetail(...)`:
+   - `GET /app/{slug}/questions` — list questions, sorted by open-first, then newest. Show answer count per question.
+   - `GET /app/{slug}/questions/{id}` — question detail with answers thread below
+   - `POST /app/{slug}/questions` — create via `intend` op (title = question text, body = context). State: "open".
+   - Auth gate: same as other create ops — authenticated users only (grep `requireAuth` for the pattern)
+3. `site/graph/views.templ`:
+   - `QuestionsView(nodes []Node, space Space, currentUser *User)` — question list with state badges (open/answered/closed), answer count
+   - `QuestionDetailView(question Node, answers []Node, space Space, currentUser *User)` — question body, answer thread, answer form
+   - `QuestionCreateForm(space Space)` — title (the question) + body (context/details) + submit
+4. Sidebar + mobile nav: add "Questions" link with `?` icon to Knowledge section (grep `KindDocument` sidebar entry for exact pattern)
+5. Route registration: add routes alongside document routes in the router setup
+6. `intend` allowlist: grep for where KindDocument was added to the intend op allowlist and add KindQuestion alongside it
+
+**[high] Add answer and accept grammar ops**
+
+Target repo: `site`.
+
+Before implementing: grep `handleRespond` or the `respond` op handler in `site/graph/handlers.go` to understand how reply ops work. The answer op is a reply-to-question; accept is a state change.
+
+1. `site/graph/store.go` — verify `CreateOp` and `ListOps` support the new op types without changes. They likely do — ops are stored by type string.
+2. `site/graph/handlers.go`:
+   - `handleQuestionAnswer(w, r)`: `POST /app/{slug}/questions/{id}/answer` — creates a new node (kind="answer", parent node = question ID stored in tags or metadata) with the answer body. Author = current user (agent or human). Emits `answer` op.
+   - `handleQuestionAccept(w, r)`: `POST /app/{slug}/questions/{id}/accept/{answer_id}` — marks `answer_id` node state="accepted", updates question node state="answered". Emits `accept` op. Auth gate: question author only.
+3. `site/graph/views.templ`:
+   - Answer form below the question detail (body textarea + "Post answer" button)
+   - Each answer card: author avatar + name + body + "Accept this answer" button (visible only to question author if question state="open")
+   - Accepted answer highlighted with a checkmark indicator (ember-glow border? match the pin/pinned visual pattern)
+4. Notification: accepted answer notifies the answer author (grep `createNotification` for the pattern)
+
+**[high] Q&A tests**
+
+Add to `site/graph/handlers_test.go`:
+- `TestHandlerQuestions` with subtests:
+  - create question via intend op, verify state="open"
+  - post answer, verify answer node created with parent reference
+  - accept answer as question author, verify answer state="accepted" and question state="answered"
+  - verify non-author cannot accept answer (403)
+  - verify answer count increments on question list view
+
+After shipping: `cd site && ./ship.sh "iter 235: Q&A product — ask, answer, accept"`
+
+---
+
+### Board Hygiene
+
+Before creating the above tasks, CLOSE these stale tasks (vague backlog ideas, not implementable):
+
+- "AI Agent Audit Trail" — 3 duplicates, close all
+- "Open Source AI Agent Framework"
+- "Dispute Resolution Platform"
+- "Community Governance Platform"
+- "Portable Reputation Network"
+- "Enterprise AI Accountability Platform"
+- "Research Integrity Tool"
+- "Supply Chain Transparency Tool"
+
+Close message: `"Archived: vague product idea, not an implementable task. See loop/backlog.md."`
+
+---
+
+### Why Q&A, Not Something Else
+
+**Q&A > document depth (wikilinks, hierarchy):** Documents are complete for current use. The hive can write and edit specs. Document linking is nice-to-have; Q&A opens a new mode of knowledge production.
+
+**Q&A > KindEvent:** Events require date/time metadata and a new UX model (RSVP, calendar view). More infrastructure than Q&A. Q&A reuses everything: nodes table, ops table, existing lenses. Lower risk, higher immediate value.
+
+**Q&A > DMs:** Conversations already exist. True DMs (global, cross-space) require UI work beyond a new entity kind. Q&A is self-contained within a space.
+
+**Q&A > KindOrganization:** Org hierarchy is the company-in-a-box foundation but it's a multi-iteration arc (nested spaces, org chart view, department context). Q&A is one iteration.
+
+**The differentiating mechanic:** When Matt asks a question, the hive agent can answer. When the agent answers, Matt accepts it. The accepted answer is indexed, searchable, permanently linked to the question. This is Stack Overflow with an AI colleague who actually knows the codebase. Nobody else has this. The agent's right of reply (lesson 27) extends from Chat into Q&A.
+
+---
+
+### How to Run
+
+```bash
+cd hive && LOVYOU_API_KEY=lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd go run ./cmd/hive --role builder --repo ../site --space hive --agent-id 36509418df854dd4a709cfee3e915a17 --one-shot
+```
+
+## Current Directive — Iteration 235+
+
+**Status as of iter 234:**
+- KindDocument shipped: constant, handler, template, sidebar, route, tests
 - Documents can be created (intend op) and read (NodeDetailView renders markdown body)
 - Agent Memory Phase 4 complete: `agent_memories` table, injection into `buildSystemPrompt`
 - Pipeline: Scout → Builder → Critic, $0.83/feature, 6 min
