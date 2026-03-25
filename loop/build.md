@@ -1,36 +1,37 @@
-# Build Report — Add KindQuestion entity kind
+# Build Report — Fix: KindQuestion Route + state.md Duplicate Header
 
-## Gap
-Q&A product foundation missing. Knowledge layer (Layer 6) needs question entity kind to support Q&A mode alongside claims and documents.
+## What Changed
 
-## Changes
+### 1. state.md — Removed duplicate `## Current Directive` block
+**File:** `hive/loop/state.md`
 
-### site/graph/store.go
-- Added `KindQuestion = "question"` constant after `KindDocument`
+The builder had inserted the new Q&A directive above the existing document-edit directive instead of replacing it. Result: two identical `## Current Directive — Iteration 235+` H2 headers. Removed the old document-edit directive block (the second one), keeping only the current Q&A directive.
 
-### site/graph/handlers.go
-- Added `handleQuestions` — lists all questions in a space (GET /app/{slug}/questions), supports `?q=` search, JSON+HTML responses
-- Added `handleQuestionDetail` — shows a single question with its answers (GET /app/{slug}/question/{id}), JSON+HTML responses
-- Registered routes in `Register()`: `GET /app/{slug}/questions`, `GET /app/{slug}/question/{id}`
-- Added `KindQuestion` to the intend handler kind allowlist (alongside KindDocument, KindPolicy, etc.)
+### 2. handlers.go — Fixed singular route to plural
+**File:** `site/graph/handlers.go`
 
-### site/graph/views.templ
-- Added `questionsIcon()` — question mark circle SVG icon
-- Added `QuestionsView` — list view with new question form, search, question cards showing title/body/author/answer count
-- Added `QuestionDetailView` — detail view showing question + answers list + answer submission form (respond op)
-- Added `questions` lens to sidebar "More" section (after documents)
-- Added `questions` mobile nav tab (after documents)
+Changed `GET /app/{slug}/question/{id}` to `GET /app/{slug}/questions/{id}` — consistent with the list route and the KindDocument pattern (`/documents/{id}`).
 
-### site/graph/handlers_test.go
-- Added `TestHandlerQuestions` with 3 subtests:
-  - `create_question` — POST /op with kind=question, verifies node created with correct kind/title
-  - `list_questions` — GET /app/{slug}/questions, verifies questions returned
-  - `question_detail` — GET /app/{slug}/question/{id}, verifies question fetched with correct id/kind
+### 3. views.templ — Fixed detail link to plural
+**File:** `site/graph/views.templ`
+
+Changed `/app/%s/question/%s` to `/app/%s/questions/%s` in the QuestionsView list item link so it points to the corrected route.
+
+### 4. handlers_test.go — Updated test URL to plural
+**File:** `site/graph/handlers_test.go`
+
+Changed test URL from `/app/handler-qa-test/question/` to `/app/handler-qa-test/questions/` in the `question_detail` subtest.
+
+### 5. views_templ.go — Regenerated
+Ran `templ generate` after the views.templ change. 15 updates processed.
+
+## Critic Issue 3 (answer count) — Not a bug
+`QuestionsView` uses `q.ChildCount` (populated by the store from `child_count` DB column). Answers are stored as child nodes (parent_id = question ID), so `ChildCount` correctly reflects the answer count. No fix needed.
 
 ## Verification
-- `templ generate` — OK (15 updates)
-- `go.exe build -buildvcs=false ./...` — OK
-- `go.exe test ./...` — OK (all pass)
 
-## Pattern followed
-KindDocument pattern from iter 234: same handler structure, same JSON/HTML content negotiation, same form-based create flow, same sidebar/mobile nav placement.
+```
+templ generate           → 15 updates, no errors
+go.exe build ./...       → clean
+go.exe test ./...        → ok
+```
