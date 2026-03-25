@@ -159,17 +159,40 @@ Council every 10 iterations, or when the Scout can't find gaps, or on Director d
 ### REVISE enforcement gate
 Before Scout creates new work, check for open fix tasks. Fix before build. Currently: fix tasks pile up ignored.
 
-### Project-aware hive (multi-repo workspace)
-The hive shouldn't need `--repo` per run. It should know its project: which repos exist, where they are, what they contain, how they relate. The top-level CLAUDE.md already describes this.
+### Project-aware hive (data model, not config files)
+The hive shouldn't need `--repo` flags or config files. Clients, projects, and repos live in the database. The hive queries its own DB to know what it's working on.
 
-**What changes:**
-- Project config: a `project.json` or section in CLAUDE.md that lists repos, paths, what each contains
-- Scout creates tasks at the project level, tags with target repo (inferred from files mentioned)
-- Pipeline reads the project config, routes tasks to the right repo
-- Cross-repo awareness: "this site feature needs a new store method" → site task. "This MCP server needs a new tool" → hive task. "This event type needs a new content struct" → eventgraph task.
-- Build verification spans repos: if the site depends on eventgraph, check both build after changes
+**Data model:**
+```sql
+clients (id, name, contact, plan, created_at)
+projects (id, client_id, name, description, status)
+repos (id, project_id, url, branch, local_path, deploy_target, deploy_credentials_ref, language, framework)
+project_spaces (project_id, space_id)  -- links to lovyou.ai spaces
+project_agents (project_id, persona, memory_scope)  -- which agent personas are assigned
+```
 
-**Why:** The hive manages a PROJECT, not a repo. Five repos, one workspace. The `replace` directives in go.mod already encode the dependency graph. The hive should read those and understand the architecture.
+**How it works:**
+- Lovatts is a row in `clients`
+- "Lovatts Web Apps" is a row in `projects`
+- Each of their dozens of apps is a row in `repos` (url, branch, deploy target)
+- The hive queries: "what projects have open tasks? Which repos? What credentials?"
+- The Scout queries at the project level, tags tasks with the repo
+- The Builder checks out the right repo, works it, pushes
+- Agent memory is scoped to the project — the Lovatts agents accumulate Lovatts domain knowledge
+- Cross-repo awareness: go.mod replace directives, shared databases, app dependencies — all queryable
+
+**For lovyou.ai itself:**
+- lovyou.ai is the first client (dogfooding)
+- 5 repos: eventgraph, agent, work, hive, site
+- The hive's own project is in the same DB it queries for client work
+
+**For Lovatts:**
+- Dozens of repos, several databases
+- Each app: URL, branch, deploy target, language/framework
+- Credentials stored encrypted, agent-scoped access
+- Department spaces on lovyou.ai linked to the project
+
+**No --repo flag. No config files. The hive reads its own database.**
 
 ### Deploy-on-merge (not deploy-per-cycle)
 Batch commits, deploy once. The current approach of deploying after every cycle causes Fly machine collisions. Accumulate commits, deploy on a schedule or trigger.
