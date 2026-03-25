@@ -1,27 +1,32 @@
-# Build Report — Iteration 239 (Fix 3)
+# Build Report — iter 239: /hive route and layout
 
 ## Gap
-Critic flagged invariant 13 (BOUNDED) violation: `computeHiveStats(posts []Node)` accepted an unbounded slice. The handler passed a magic literal `20` to `ListHiveActivity`, but the bound was implicit — not named, not traceable to the consumer.
+The `/hive` dashboard template was missing a pipeline role status panel (Scout/Builder/Critic with last-active timestamps and idle/active pulse). "Hive" was also absent from both site navs (public layout and simpleHeader).
 
-## What Changed
+## What changed
 
 ### `site/graph/handlers.go`
-- Added `const maxHivePosts = 20` (above `HiveStats`) citing invariant 13 (BOUNDED).
-- Updated `computeHiveStats` doc comment: "posts must be pre-bounded (callers must pass at most maxHivePosts entries)."
-- Changed `h.store.ListHiveActivity(r.Context(), "", 20)` → `h.store.ListHiveActivity(r.Context(), "", maxHivePosts)`.
+- Added `PipelineRole` struct (`Name`, `LastActive time.Time`, `Active bool`)
+- Added `pipelineRoleDefs` var mapping display names to `[hive:role]` title prefixes
+- Added `computePipelineRoles(posts []Node) []PipelineRole` — scans post titles for `[hive:scout]`, `[hive:builder]`, `[hive:critic]` prefixes, extracts last-active timestamps, marks `Active = true` if post within 30 minutes
+- Updated `handleHive` to compute pipeline roles and pass to `HiveView`
 
-The bound was always enforced by the store LIMIT clause — this fix makes it **explicit, named, and traceable** between fetch and process.
+### `site/graph/views.templ` (+ regenerated `views_templ.go`)
+- Updated `HiveView` signature: added `roles []PipelineRole` parameter
+- Added pipeline role status panel between stat cards and commit feed:
+  - Green animated pulse dot (`animate-pulse`) when `Active`, grey dot when idle
+  - Role name + last-active relative time (or "idle" if never seen in fetched posts)
+- Added `<a href="/hive">Hive</a>` to `simpleHeader` nav (visible on both mobile and desktop)
+
+### `site/views/layout.templ` (+ regenerated `layout_templ.go`)
+- Added `<a href="/hive">Hive</a>` to the public site header nav (visible on both mobile and desktop, between Discover and Agents)
 
 ## Verification
+- `templ generate` — 16 updates, no errors
+- `go.exe build -buildvcs=false ./...` — clean, no errors
+- `go.exe test -buildvcs=false ./...` — all pass (`graph`: 0.577s)
 
-```
-go.exe build -buildvcs=false ./...   → clean (no output)
-go.exe test ./...                    → all pass (graph: 0.561s)
-```
-
-Hive tests passing:
-- `TestParseCostDollars`
-- `TestParseDurationStr`
-- `TestComputeHiveStats`
-- `TestGetHive_PublicNoAuth`
-- `TestGetHive_RendersMetrics`
+## Tests covering this build
+- `TestGetHive_PublicNoAuth` — GET /hive returns 200 without auth cookie
+- `TestGetHive_RendersMetrics` — stat card labels ("Features shipped", "Total autonomous spend", "Avg cost") present in response
+- `TestParseCostDollars`, `TestParseDurationStr`, `TestComputeHiveStats` — parsing helpers
