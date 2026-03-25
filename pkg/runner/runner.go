@@ -272,9 +272,15 @@ func (r *Runner) workTask(ctx context.Context, t api.Node) {
 			return // stay in-progress
 		}
 
-		// Check for file changes — implementation tasks should produce code.
+		// Check for file changes.
 		hasChanges := r.hasUncommittedChanges()
 		if !hasChanges {
+			// Fix tasks with no changes: the fix was already applied. Close the task.
+			if strings.HasPrefix(t.Title, "Fix:") {
+				log.Printf("[builder] fix task already resolved — closing")
+				_ = r.cfg.APIClient.CompleteTask(r.cfg.SpaceSlug, t.ID)
+				return
+			}
 			log.Printf("[builder] DONE but no file changes — leaving in-progress")
 			_ = r.cfg.APIClient.CommentTask(r.cfg.SpaceSlug, t.ID,
 				"Operate returned DONE but no files were changed. Task may need a different approach.")
