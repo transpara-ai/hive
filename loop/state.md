@@ -210,6 +210,10 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
+**PHILOSOPHY: CLEAN AS YOU GO.** If something is broken, fix it before building new things. REVISE tasks take priority over new features. Repeated errors (like wrong-repo tasks) should be fixed immediately, not repeated. The hive should leave things better than it found them.
+
+**CRITICAL: The Builder operates on the SITE repo only (lovyou.ai Go+templ+HTMX). Do NOT create tasks about the hive runtime, MCP servers, Go packages in other repos, or infrastructure that lives outside the site directory. If a spec phase requires hive-repo work, SKIP IT and move to the next site-repo phase.**
+
 **COUNCIL DIRECTIVE: MAKE AGENTS DM-ABLE.** The civilization's 50 agents should be contactable on lovyou.ai. Any user can start a conversation with the Philosopher, the Dissenter, the Steward, etc. This is the differentiator no competitor has.
 
 **How it works technically:**
@@ -241,22 +245,21 @@ Deploy: `fly deploy --remote-only` from site repo.
 2. POST /agents/{name}/chat — creates conversation with role tag, redirects to chat
 3. Persona cards: name, one-line description, category badge, "Chat" button
 
-**Phase 3 — MCP Graph Server (foundation for agent capabilities):**
-1. cmd/mcp-graph/main.go — MCP server wrapping lovyou.ai REST API
-2. Core tools: graph.respond, graph.intend, graph.search, graph.getBoard, graph.getNode
-3. Wire into Mind via --mcp-config
-4. Test: agent creates a task from within a conversation
+**Phase 3 — MCP Graph Server (HIVE REPO — skip for now, cannot be built by the site pipeline):**
+- This is hive infrastructure (cmd/mcp-graph/), not site code
+- Will be built separately when the hive targets its own repo
 
-**Phase 4 — Agent memory:**
-1. agent_memories table (persona, kind, content, source_id, importance)
-2. memory.remember + memory.recall MCP tools
-3. Inject relevant memories into system prompt
+**Phase 4 — Agent memory (SITE REPO — can be built):**
+1. agent_memories table in site/graph/store.go (persona, kind, content, source_id, importance)
+2. Store.RememberForPersona() and Store.RecallForPersona() methods
+3. Inject relevant memories into Mind's buildSystemPrompt
 4. Test: agent references a previous conversation
 
-**Phase 5 — Full graph access + self-improvement:**
-1. All 27 grammar ops as MCP tools
-2. Gap detection → task creation → pipeline builds new tools
-3. Conversation UX: global contact list, summaries, cross-search
+**Phase 5 — Conversation UX (SITE REPO — can be built):**
+1. Global contact list showing agents + humans you've talked to
+2. Conversation summaries (auto-generated after conversation goes idle)
+3. Multiple conversations with same agent listed together
+4. Cross-conversation search
 
 **Each phase is 1-3 pipeline iterations. Start with Phase 1 — it's a 15-line change in mind.go + a new table + a seed script.**
 

@@ -137,6 +137,18 @@ The Legal agent flagged: no privacy policy, no terms of service. Google OAuth co
 
 **The soul IS the terms.** "Take care of your human" translates directly to: we protect your data, we're transparent about what we do, we don't exploit you. The terms just make it legally binding.
 
+### State of the union
+A living document AND a page on the site. Where everything is. What's working, what's broken, what's next. Not state.md (internal, for the Scout). A public-facing honest assessment.
+
+**On the site:** lovyou.ai/status or lovyou.ai/union
+- What's built and working (13 layers, 27 ops, pipeline)
+- What's broken or incomplete (test debt, REVISE backlog, no mobile app)
+- What's next (from the spec backlog)
+- Known limitations (from LIMITATIONS.md)
+- Hive stats (iterations, cost, commits, features shipped)
+
+**Updated automatically** — the Reflector or a dedicated process updates it each iteration. Not a manual document that goes stale.
+
 ---
 
 ## Process ideas
