@@ -292,6 +292,117 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
+## Directive — Iter 236+: Complete the Knowledge Product
+
+**Priority: HIGH. Closes the space-aware agent story.**
+
+### What was already shipped
+
+- KindDocument (Wiki): CRUD, edit handler, templates — DONE
+- KindQuestion (Q&A): CRUD, templates — DONE
+- Auto-answer KindQuestion on `express(KindQuestion)`: agent answers questions grounded in space docs — DONE
+
+### What is NOT done (build this next)
+
+**Task 1 — Ground Chat auto-reply in space documents**
+
+In `site/`, find `handleAutoReply` (the path that fires on `respond`/`converse` ops — Chat conversations). Inject the space's `KindDocument` nodes into the system prompt the same way Q&A does:
+- Query `ListNodes(spaceID, KindDocument, LIMIT 10, ORDER BY created_at DESC)`
+- Inject as a `## Space Knowledge` block: each doc as `### [title]\n[body]`
+- Only inject if documents exist (no structural change when none)
+
+The Q&A auto-answer already has this pattern — replicate it on the Chat path.
+
+**Task 2 — Knowledge lens: unified Documents + Questions + Claims view**
+
+`/app/{slug}/knowledge` currently shows only claims (assert/challenge). Add two sections above claims:
+- **Documents** — list of `KindDocument` nodes (title, created_at, link to detail)
+- **Questions** — list of `KindQuestion` nodes with answered/open badge (answered = has at least one `comment` op from an agent)
+
+Keep existing Claims section unchanged. Knowledge is now one coherent view.
+
+**Task 3 — "Grounded in N docs" indicator on agent chat replies**
+
+When Chat auto-reply fires in a space that has documents, add a subtle muted label below the agent's message: "grounded in N docs" (ember minimalism style — small, muted, not a banner). This makes the grounding visible. Store the doc count in the op's metadata or as a tag on the message node.
+
+**Task 4 — Test coverage (INVARIANT 12)**
+
+Tests for:
+- (a) Chat auto-reply injects document context when space has docs
+- (b) Chat auto-reply does NOT inject when space has no docs (prompt structure unchanged)
+- (c) Knowledge lens query returns documents + questions + claims together
+
+### Target repo
+- **site** — all changes. Ship with: `cd site && ./ship.sh "iter N: knowledge-grounded chat"`
+
+### Why this is the priority
+
+1. **Closes the product story.** Documents exist. Q&A knows them. Chat doesn't. An agent that answers questions from docs but ignores them in chat is inconsistent — users will notice.
+2. **The differentiator is grounding.** "Your agent knows your space" is the pitch. Half-grounded agents undermine it.
+3. **Knowledge lens is unusable.** Documents and Q&A nodes exist but aren't surfaced on the Knowledge lens — users can't find what they created.
+4. **Compounds agent memory.** Memory (iter 233) + document grounding = agent knows both history and content. Rich context that generic AI can't replicate.
+
+### What NOT to do
+- No document versioning or history
+- No structured footnotes/citations — the system prompt instruction to cite by name is sufficient
+- No pagination on Knowledge lens — BOUNDED limit of 50 per section is enough
+- Don't refactor shared grounding logic unless it appears in 3+ places
+
+## Directive — Iter 235+: Knowledge-Grounded Chat
+
+**Priority: HIGH. This closes the knowledge product.**
+
+### Why
+
+The Q&A auto-answer directive is complete: KindDocument (Wiki) and KindQuestion (Q&A) are shipped, and agent auto-answers are grounded in the space's KindDocument nodes. But this grounding only fires on the `express(KindQuestion)` path.
+
+The Chat path (auto-reply on `respond`/`converse`) doesn't inject documents. An agent chatting with a user in a space with 10 SOPs answers from general knowledge, not from those SOPs.
+
+The full product story is: **Create docs → Ask questions → Chat with agent → All three paths know your docs.** Right now, only the second path is grounded. This iteration closes the other two.
+
+### What to build (in order)
+
+**Task 1 — Ground Chat auto-reply in space documents**
+
+In `site/`, wherever `handleAutoReply` builds its Mind call for Chat conversations (the `respond`/`converse` op path), inject the space's `KindDocument` nodes the same way the Q&A path does:
+- Query `ListNodes(spaceID, KindDocument, LIMIT 10, ORDER BY created_at DESC)`
+- Inject as a `## Space Knowledge` context block in the system prompt: each doc as `### [title]\n[body]`
+- Only inject if documents exist (don't change prompt structure when there are none)
+
+**Task 2 — Knowledge lens: unified Documents + Questions view**
+
+Currently the Knowledge lens shows only claims (assert/challenge). KindDocument and KindQuestion nodes exist but aren't surfaced there. Update the Knowledge lens (`/app/{slug}/knowledge`) to show three sections:
+- **Documents** — list of `KindDocument` nodes (title, created_at, edit link)
+- **Questions** — list of `KindQuestion` nodes with answered/open status badge
+- **Claims** — existing assert/challenge content (keep as-is)
+
+This makes Knowledge a coherent product view, not just a claims tracker.
+
+**Task 3 — "Grounded in N docs" indicator on agent chat messages**
+
+When the auto-reply fires in a space that has documents, add a subtle indicator to the agent's response message in the chat UI: a small "📚 N docs" or similar note (match ember minimalism style — a muted label, not a banner). This makes the grounding visible to users and explains WHY the agent knows space-specific things.
+
+**Task 4 — Test coverage**
+
+Tests for: (a) document context injected into Chat auto-reply when space has docs, (b) no injection when space has no docs (prompt unchanged), (c) Knowledge lens returns documents + questions + claims together. INVARIANT 12 compliance required.
+
+### Target repos
+- **site** — all handler, template, store, and Mind changes
+- Ship with: `cd site && ./ship.sh "iter N: knowledge-grounded chat"`
+
+### Why this is the priority
+
+1. **Closes the product story.** Documents exist. Q&A knows them. Chat doesn't. That asymmetry is a bug in the product narrative, not just in the code.
+2. **Makes personas genuinely useful.** A space's agent knowing the space's docs is the differentiator — an agent that doesn't is just generic ChatGPT.
+3. **Compounds agent memory.** Memory (iter 233) + documents (iters 234-235) = agent that knows both what was said AND what was written. Rich context.
+4. **Unifies the Knowledge product.** Documents, Q&A, and claims are all "knowledge" — they belong in one view.
+
+### What NOT to do
+- Don't add document versioning or history yet.
+- Don't add "cite sources" as structured footnotes — the system prompt instruction to cite by name is enough for now.
+- Don't refactor the grounding logic into a shared helper unless the duplication is in 3+ places — extend, don't redesign.
+- Don't paginate the Knowledge lens yet — BOUNDED limit of 50 nodes per section is sufficient.
+
 ## Directive — Iter 234+: Close the Q&A Loop
 
 **Priority: HIGH. This is the next cluster.**

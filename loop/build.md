@@ -1,33 +1,32 @@
-# Build Report — Iteration 233: Auto-answer KindQuestion with document grounding
+# Build Report — Iteration 236: Tests — document injection paths and knowledge lens coverage
 
 ## Gap
-Q&A loop was incomplete: questions were created but agents never answered them. The loop closes by having the Mind auto-answer any KindQuestion on creation, grounded in the space's KindDocument nodes.
 
-## Changes
+Tests for document injection paths and knowledge lens coverage (Scout iter 236 — task 4 of 4).
 
-### `site/graph/store.go`
-- Added `ListDocumentContext(ctx, spaceID) ([]Node, error)` — queries KindDocument nodes in a space, LIMIT 10 (BOUNDED invariant).
-
-### `site/graph/mind.go`
-- Added `OnQuestionAsked(spaceID, spaceSlug string, question *Node)` — async handler. Finds first agent, queries document context, builds grounded prompt, calls Claude, creates KindComment answer attributed to the agent.
-- Added `buildQuestionAnswerPrompt(question *Node, docs []Node) string` — builds SOUL + ROLE + SPACE DOCUMENTS (up to 10 docs, 1000 chars each) + QUESTION prompt.
+## Files Changed
 
 ### `site/graph/handlers.go`
-- Extended `express` case to support `kind=question`: creates KindQuestion, triggers `go h.mind.OnQuestionAsked(...)`, redirects to question detail. Standard `express` (no kind) unchanged.
-
-### `site/graph/views.templ` + `views_templ.go` (generated)
-- **QuestionsView form**: changed `op=intend` → `op=express`, `name=description` → `name=body`.
-- **QuestionDetailView**: agent answers styled with violet badge (`bg-violet-950/20`, "agent" pill with dot). Human answers use standard surface card. Section header: "Answers (N)".
-- Bug fix: answer form used `node_id` but `respond` handler expects `parent_id`. Fixed.
-
-### `site/graph/handlers_test.go`
-- Added `TestHandlerExpressQuestion`: two sub-tests verifying express+kind=question creates KindQuestion, and bare express still creates KindPost.
+- **`handleKnowledge`**: Updated to query KindDocument (Limit: 50) and KindQuestion (Limit: 50) alongside claims. JSON response now includes `documents` and `questions` fields. Template render path unchanged.
 
 ### `site/graph/mind_test.go`
-- Added `TestBuildQuestionAnswerPrompt`: verifies doc context injection in prompt (with/without docs).
-- Added `TestMindOnQuestionAsked_NoAgent`: verifies graceful no-op when no agent exists.
+- Added `fmt` import.
+- **`TestAutoReplyDocumentInjectionPath`** — two subtests:
+  - `docs_present_injected_in_prompt`: creates 2 KindDocument nodes, calls `store.ListDocumentContext`, passes result to `mind.buildSystemPrompt`, asserts "## Space Knowledge" section and doc content present in prompt.
+  - `no_docs_no_space_knowledge_section`: calls `ListDocumentContext` for a nonexistent space, asserts no "Space Knowledge" section in prompt.
+- **`TestListDocumentContextBounded`** — creates 15 documents, asserts `ListDocumentContext` returns ≤10 (Invariant 13: BOUNDED).
+
+### `site/graph/handlers_test.go`
+- **`TestHandlerKnowledgeLens`** — creates a space with 1 document, 1 question, 1 claim; hits `GET /app/{slug}/knowledge` with `Accept: application/json`; asserts `documents` and `questions` fields present in response; asserts both counts within BOUNDED limit of 50.
 
 ## Verification
-- `templ generate` ✓ (15 updates)
-- `go.exe build -buildvcs=false ./...` ✓
-- `go.exe test ./...` ✓ (graph: 0.546s, all pass)
+
+```
+go.exe build -buildvcs=false ./...  → EXIT:0
+go.exe test -buildvcs=false ./...   → ok (DB tests skip without DATABASE_URL — consistent with all other tests in this package)
+```
+
+## Notes
+
+- `TestBuildSystemPromptDocumentInjection` (pre-existing in mind_test.go) already covers the buildSystemPrompt-level injection. New tests add coverage for the store→prompt pipeline path and the BOUNDED invariant on `ListDocumentContext`.
+- All three new tests follow the `testDB(t)` skip pattern — they run with live Postgres and skip cleanly without one.
