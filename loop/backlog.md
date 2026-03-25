@@ -121,6 +121,32 @@ Code is already this. Every function is input → process → output. A program 
 
 **What this means for Lovatts:** Their puzzle generator doesn't need to be a monolith. It decomposes into primitives on the graph. Each step is auditable, replaceable, improvable. The hive can modernize one primitive at a time — replace the 20-year-old grid-fill algorithm without touching the clue generator. Granular, traceable, incremental.
 
+### Primitives as universal description language
+The 201 primitives are a semi-formal pseudocode that describes anything — not just software. The Code Graph semantically describes UI compositions. Extend the same idea to every domain.
+
+**The insight:** The primitives aren't software abstractions. They're the vocabulary of structured, accountable action. Compose them and you describe:
+
+- **Business process:** Intent(create purchase order) → Offer → Acceptance → Agreement → Obligation(deliver goods) → Fulfillment → Exchange(payment) → Accountability
+- **Legal proceeding:** Claim → Evidence → Due Process → Adjudication → Remedy → Precedent
+- **Relationship over time:** Bond → Attachment → Rupture → Grief → Repair → Forgiveness → Growth
+- **Research paper:** Observation → Method → Measurement → Evidence → Confidence → Knowledge → Revision
+- **Puzzle generator:** Intent(create puzzle) → Method(grid algorithm) → Tool(word database) → Measurement(difficulty) → Standard(format) → Fulfillment(deliver)
+- **Governance decision:** Proposal → Deliberation → Consent → Collective Act → Accountability → Precedent
+
+Same primitives. Same graph structure. Same interface (input, process, output). Different domain-specific implementations (plugins). Everything described this way is automatically auditable, traceable, attributable, composable.
+
+**The 13 product layers are already this.** Work interprets Intent as a task. Market interprets Exchange as a transaction. Justice interprets Due Process as dispute resolution. Knowledge interprets Evidence as a citation. Same primitives, different interpretations. Each layer IS a domain plugin for the universal vocabulary.
+
+**The grammar operations are the verbs.** `intend`, `respond`, `endorse`, `review`, `claim`, `propose`, `vote` — these compose the primitives into sentences. The primitives are the nouns. The graph is the syntax. Together: a language that describes accountable action in any domain.
+
+**What this enables:**
+- A non-programmer describes a business process in primitives → the graph captures it → agents implement it
+- A lawyer describes a contract in primitives → the graph enforces it → violations are automatically detected
+- A department head describes a workflow → primitives decompose into steps → agents execute and monitor
+- Domain experts speak in their language; the primitives translate to auditable, executable graphs
+
+**This is what "substrate for collective existence" actually means.** Not 13 separate products. One language that describes any organized human (or agent) activity, with the graph as the execution environment and the primitives as the universal vocabulary.
+
 ### Agent pub/sub on the event graph
 Agents should subscribe to event types they care about. The Critic subscribes to `hive.builder.committed`. The Guardian subscribes to `*`. The Philosopher subscribes to `council.*`. Currently: agents are invoked by the pipeline. Future: agents react to events.
 
