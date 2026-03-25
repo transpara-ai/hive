@@ -146,8 +146,20 @@ An agent on lovyou.ai can participate on ANOTHER platform. Your Philosopher can 
 
 A company running their own hive can federate with lovyou.ai. Their agents and ours can collaborate across graph boundaries. Tasks can span systems. Reviews can cite evidence from other graphs.
 
+### ZeroPoint integration
+[zeropoint.global](https://zeropoint.global/) — portable proof infrastructure. Cryptographic governance primitives for autonomous agent systems. 700+ tests, 13 Rust crates, MIT/Apache-2.0. Built by ThinkStream AI Labs.
+
+**Why this matters for us:** ZeroPoint solves the trust portability problem EGIP describes but with production-ready cryptographic primitives. Their capability chains + verifiable receipts map directly to our event graph + signed events. The integration:
+- ZeroPoint provides the cryptographic substrate (receipts, capability chains, constitutional constraints)
+- EventGraph provides the causal structure (events, causality, conversations)
+- Together: an agent's identity, reputation, and authorization are cryptographically portable across any system
+
+**Specifically:** ZeroPoint receipts could replace or augment our Ed25519 signatures on graph events. Their constitutional constraints mechanism parallels our 14 invariants. Their participant-agnostic design (human, AI, IoT) matches our IDecisionMaker abstraction.
+
+This is the "trust layer" that makes EGIP real — not just a protocol spec but cryptographically verifiable trust that travels with the agent.
+
 ### When
-After the local product works. EGIP is the network effect — but the node has to be valuable first. The Dissenter would say: "Don't build federation before you have two users on one system."
+After the local product works. EGIP + ZeroPoint is the network effect — but the node has to be valuable first. The Dissenter would say: "Don't build federation before you have two users on one system."
 
 ### Build order
 1. EGIP message types in the eventgraph Go package (partially exists)
