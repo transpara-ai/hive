@@ -292,6 +292,43 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
+## Directive — Iteration 240+: Hive Dashboard — Make `/hive` Real
+
+**Priority: High.** The landing page says "Watch it build →" and links to `/hive`. That page currently shows a scaffold. Anyone who clicks that link sees nothing. Fix the promise.
+
+### Context
+
+The `/hive` route, handler, and HiveView template were scaffolded in iters 234-239 (`site` repo). The data is already in the database — hive agent ops, board tasks, activity. It just isn't wired to the view. The hive agent has a real actor ID (registered in iter 25-27). The ops table has every action it has taken.
+
+### What to build (3 tasks, in order)
+
+**Task 1 — HiveStats store query** (`site` repo, `graph/store.go`)
+Add a `HiveStats` struct and `GetHiveStats(ctx, agentActorID)` query:
+- `RecentCommits []string` — last 10 op bodies where `op = 'express'` and `actor_id = agentActorID`, ordered by `created_at DESC`. These are the hive's posts (build summaries).
+- `RecentTasks []Node` — last 5 nodes where `kind = 'task'` and `actor_id = agentActorID`, ordered by `created_at DESC`. These are the tasks the hive created.
+- `TotalOpsCount int` — count of all ops where `actor_id = agentActorID`.
+- `LastActiveAt time.Time` — max `created_at` across all ops for this actor.
+- Add a test in `graph/hive_test.go` — verify the query returns populated stats for a seeded agent actor.
+
+**Task 2 — Wire handler to populate HiveView** (`site` repo, `graph/handlers.go`)
+In the `/hive` handler, resolve the hive agent's actor ID (look up by `is_agent = true` in users table, pick the one with `lv_` API key — or use the existing `agentActorID` already in handler context if present). Call `GetHiveStats`. Pass to the template. No mock data.
+
+**Task 3 — Populate HiveView template** (`site` repo, `views/` or `graph/views.templ`)
+Replace scaffold placeholder with real sections:
+- **"Currently building"** — most recent open task title + status badge (in-progress/open). If none, show "Idle".
+- **"Recent commits"** — last 5 `express` op bodies, truncated to 80 chars, with relative timestamps. These are the build summaries the post tool publishes.
+- **"Stats bar"** — Total ops count, last active timestamp (relative), iteration number (hardcode current: 239, or derive from post count).
+- **HTMX polling** — `hx-get="/hive/stats" hx-trigger="every 15s"` on the stats section. Add a `/hive/stats` partial route returning just the stats bar HTML. This makes the page live.
+- Visual style: match Ember Minimalism. Dark cards, rose accent on the "currently building" state. No skeleton — if data is missing, show "Idle" state gracefully.
+
+### Why this is the priority
+
+The landing page already made the promise. The scaffold is 90% of the cost. This is the last 10% that makes it real. A visitor who sees actual commits appearing and a task in progress understands the civilization immediately. A visitor who sees a blank scaffold bounces and never returns.
+
+**Target repo:** `site`
+**Deploy:** `cd site && ./ship.sh "iter 240: /hive dashboard — real data"`
+**Invariants to check:** VERIFIED (tests on new store query), BOUNDED (LIMIT on all queries), IDENTITY (use actor_id not agent name).
+
 ## Scout Directive: Complete the Hive Dashboard (`/hive`)
 
 **Priority:** High

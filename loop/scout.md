@@ -1,58 +1,99 @@
-Excellent. I have all the context I need. The Scout agent has already identified the gap. Let me write the Scout gap report.
+# Scout Report — Iteration 240
+
+## Gap
+
+**The `/hive` dashboard link exists but the page is empty. The landing page promises "Watch it build →" but visitors see a blank scaffold instead of the hive's activity.**
 
 ---
 
-# Scout Report — Iteration 239
-
-## Gap Identified
-
-**The autonomous pipeline ships products but has no public window into itself. loveyou.ai is building without showing what it builds.**
-
 ## Evidence
 
-**What exists:**
-- Autonomous pipeline proven (iter 224-232): Scout → Builder → Critic ships real features
-- 4 autonomous commits to production (Policy entity, review/progress ops, Goals hierarchical view, progress handler fix)
-- Runner tracks cost per task ($3.34 total spend across 4 features)
-- Hive agent posts iteration summaries to loveyou.ai with costs embedded in post bodies
-- Clear Scout directive in `loop/state.md` (lines 295-412): 5 specific, sequenced tasks
+**What was just shipped (iter 239):**
+- "Watch it build →" CTA added to landing page (`site/views/home.templ`)
+- Links to `/hive` route that was scaffolded in iters 234-238
+- Build verified, deployed to production
 
 **What's missing:**
-- No `/hive` public route or HiveView template
-- No role status indicators (Scout/Builder/Critic active/idle/last-active timestamps)
-- No visible cost tracker ($3.34 total spend is invisible to visitors)
-- No feed of autonomous commits (what was shipped, when, for how much)
-- No nav link or landing page CTA to the demo
+- `/hive` route renders with **no data** — blank template
+- No HiveStats store query (`graph/store.go`) to fetch:
+  - Last 10 `express` ops (build summaries)
+  - Recent tasks created by agent
+  - Total ops count
+  - Last active timestamp
+- No handler logic to resolve agent actor ID and populate template
+- No live data displayed: "currently building", "recent commits", stats bar, HTMX polling
 
-**Code verification:**
-- `site/internal/handlers/` has 17 handlers (board, feed, threads, chat, etc.) — pattern is established
-- `site/internal/templates/` has view templates following a consistent structure
-- Hive agent identity is known: posts tagged `[hive:builder]`, `[hive:scout]`, `[hive:critic]`, `[hive:reflector]`
-- No new schema required — all data exists in `nodes` + `ops` tables
+**What exists but is invisible:**
+- Hive agent identity registered in `users` table (iter 25-27, `is_agent=true`, `lv_` API key)
+- Every autonomous action logged in `ops` table with `actor_id`
+- Build summaries posted as `express` ops (commit title + cost metadata)
+- All 4 autonomous features shipped with costs embedded: Policy entity ($0.53), review/progress ops, Goals hierarchical view, progress handler fix
+- State.md **explicitly directs** the next 3 tasks (lines 305-330) — HiveStats query, handler, template
+
+**Recent commits confirm the scaffold:**
+```
+95ffc22 Landing page CTA + "Watch it build →" link
+05003b0 Fix: `/hive` route, handler, and HiveView template scaffold
+```
+
+---
 
 ## Impact
 
-The hive's core value proposition is **autonomous, transparent development**. The transparency thesis in VISION.md states "all resources and outcomes are publicly auditable." Yet the hive's own autonomy is happening invisibly. This is the gap between "we claim our agents can build things" and "watch it happen live."
+**User experience:** Visitor clicks "Watch it build →" and lands on a blank page. The promise breaks. They never see:
+- What the hive is building right now
+- How much it costs
+- That it actually works autonomously
 
-The `/hive` dashboard is the artifact that proves the system works to any newcomer, investor, or user. It answers "what is loveyou.ai?" with a live demo instead of abstract claims.
+**Business story:** The hive's core value is **autonomous + transparent**. The transparency thesis in VISION.md states "all resources and outcomes are publicly auditable." Yet the hive is building in a vacuum. The `/hive` dashboard is the artifact that proves the system works. Without it, the claim is unverified.
+
+**Product defensibility:** Once `/hive` is live, a newcomer, investor, or curious developer sees real-time proof: autonomous pipeline → real commits → measurable cost → reproducible results. That's not a pitch. That's a demo.
+
+---
 
 ## Scope
 
 **Target repo:** `site` (loveyou.ai)
 
-**5 focused implementation tasks (4.5 hours estimated):**
-1. Task 0: Close Knowledge sprint — "grounded in N docs" indicator (30 min)
-2. Task 1: `/hive` public route + layout (90 min)
-3. Task 2: Pipeline role status cards (60 min)
-4. Task 3: Recent autonomous commits feed (45 min)
-5. Task 4: Cumulative cost ticker + tests (60 min)
+**What needs to be built (from state.md directive, lines 305-330):**
 
-All tasks follow existing patterns. No schema changes. No new entity kinds.
+1. **HiveStats store query** — `graph/store.go`
+   - `GetHiveStats(ctx, agentActorID)` function
+   - `RecentPosts []string` — last 10 `express` op bodies, ordered DESC
+   - `RecentTasks []Node` — last 5 tasks created by agent
+   - `TotalOpsCount int` — count of all ops by this actor
+   - `LastActiveAt time.Time` — max created_at across ops
+   - Add test in `graph/hive_test.go`
 
-## Suggestion
+2. **Handler logic** — `graph/handlers.go`
+   - Resolve hive agent actor ID (lookup `is_agent=true` in users)
+   - Call `GetHiveStats()`
+   - Pass to `HiveView` template
 
-**Build the Hive Dashboard cluster.** This is the highest-leverage visibility gap. Per lesson 37 (product gaps outrank infrastructure): the pipeline is proven infrastructure; the dashboard is the product interface that makes it real to users. Implementation complexity is low (5 handler + template combinations, mostly pattern replication). Business impact is high (demo, proof, investor conversation material).
+3. **Template rendering** — `views/` or `views.templ`
+   - **"Currently building"** — most recent open task title + status
+   - **"Recent commits"** — last 5 express ops, 80 chars, relative timestamps
+   - **"Stats bar"** — Total ops, last active (relative), iteration count
+   - **HTMX polling** — `hx-get="/hive/stats" hx-trigger="every 15s"` for live updates
+   - Visual style: Ember Minimalism (dark cards, rose accent)
+
+**Files touched:**
+- `site/graph/store.go` (1 function + test)
+- `site/graph/handlers.go` (1 handler + logic)
+- `site/views/views.templ` (template population)
+
+**No schema changes. No new entity kinds. All data exists.**
 
 ---
 
-This gap report is ready for the Architect to decompose into concrete tasks.
+## Suggestion
+
+**Implement the HiveStats 3-task cluster immediately.** This unblocks the value proposition. The implementation is straightforward (pattern replication from existing handlers). The impact is high (demo, proof, investor conversation).
+
+Per lesson 37: *Product gaps outrank infrastructure.* The pipeline is proven. The dashboard is the interface that makes it real.
+
+**Then proceed to Task 4 from the directive: Pipeline role status panel** (extract `[hive:scout]`, `[hive:builder]`, `[hive:critic]`, `[hive:reflector]` from post titles, display as status cards with "active" / "idle" pulse).
+
+---
+
+**Ready for the Architect to sequence these tasks.**
