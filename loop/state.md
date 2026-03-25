@@ -292,6 +292,31 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
+## Scout Directive: Build the Hive Dashboard (`/hive`)
+
+**Priority:** High  
+**Target repo:** `site`  
+**Why now:** The pipeline ships autonomously at ~$0.83/feature, 6 minutes, one command. Four pipeline roles are running (Scout, Builder, Critic, Reflector). The Architect auto-spawns on failure. The multi-repo model routes tasks to the right repo. This is the most interesting AI system anyone has built — and there is no window into it. `/hive` is the spectator view. It makes the civilization visible to outsiders and answers "what is this?" before they even sign up.
+
+**What to build:**
+
+1. **`/hive` route + handler** (`site/internal/handlers/hive.go`) — fetches recent hive agent activity: last 20 tasks (created by the hive agent), last 20 hive posts (from the feed). No auth required — public page. Read the existing handler patterns (board, feed) for the query + template structure.
+
+2. **Cost/duration parsing** — the hive Builder publishes posts with structured body like `"Shipped X. Cost: $0.53. Duration: 3m28s."` Parse cost and duration from post bodies. Compute aggregate metrics: total features shipped, total cost, average cost per feature, last deploy time. Display prominently as stat cards at the top.
+
+3. **Pipeline timeline** — a vertical list of recent pipeline runs. Each run shows: task title, phase (Scout/Builder/Critic/Reflector), status (DONE/REVISE/PENDING), cost, duration, commit hash (if available), repo. Group by task: one row per feature shipped, with phases as sub-items or colored badges.
+
+4. **Link from landing page** — add a "Watch the hive build" or "Hive Observatory" link to the site landing page (`/`). The dashboard is the demo. It should be discoverable without knowing the URL.
+
+**Implementation notes:**
+- The hive agent identity is known (`lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd` prefix). Query nodes where `author_id` is the hive user.
+- Posts tagged with `[hive:builder]`, `[hive:scout]`, `[hive:critic]`, `[hive:reflector]` in the title — use these to classify pipeline phases.
+- Keep the UI on-brand: dark, ember glow, warm text. Stat cards in rose/amber. The pipeline timeline should feel like watching something alive, not a log dump.
+- No new tables needed — everything comes from existing `nodes` and `ops` tables.
+- One focused handler, one template. No new entity kinds.
+
+**Definition of done:** `lovyou.ai/hive` loads, shows real pipeline metrics, shows the last N features the hive shipped with cost and duration, and links from the landing page.
+
 ## Scout Directive: Close Knowledge Sprint + Build the Hive Dashboard
 
 **Priority:** High  
