@@ -113,6 +113,14 @@ Each primitive is a plugin. Subscribe to event types, receive events, produce mu
 
 **Implementation:** MCP is the bridge. Each primitive is an MCP server. The tick engine calls tools. Or: primitives register as event subscribers via the graph's bus, receive events via webhook/gRPC/MCP, return mutations.
 
+**Primitives all the way down.** A puzzle generator decomposes into: select words → lay out grid → fill intersections → generate clues → format. Each step is a primitive. Each step decomposes further: "fill intersections" is scan → find crossings → select candidates → test fit → backtrack → commit. All the way down to atomics.
+
+Code is already this. Every function is input → process → output. A program is a graph of primitives. The event graph makes it EXPLICIT — every step is an event, every connection is causal, every decision is traceable. The primitives aren't an abstraction over code. They're what code already is, made visible and auditable.
+
+**The Builder is a meta-primitive:** a primitive that creates primitives. The Scout identifies missing primitives. The Critic verifies primitives. The civilization is a graph of primitives reasoning about primitives. The generator function generates more primitives from existing ones — self-derivation.
+
+**What this means for Lovatts:** Their puzzle generator doesn't need to be a monolith. It decomposes into primitives on the graph. Each step is auditable, replaceable, improvable. The hive can modernize one primitive at a time — replace the 20-year-old grid-fill algorithm without touching the clue generator. Granular, traceable, incremental.
+
 ### Agent pub/sub on the event graph
 Agents should subscribe to event types they care about. The Critic subscribes to `hive.builder.committed`. The Guardian subscribes to `*`. The Philosopher subscribes to `council.*`. Currently: agents are invoked by the pipeline. Future: agents react to events.
 
