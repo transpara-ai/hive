@@ -1,27 +1,37 @@
-# Build: Agent Memory Phase 4 — persistent memory extraction and injection
+# Build: Fix Critic issues — Agent Memory Phase 4
 
 ## What Changed
 
 ### `site/graph/mind.go`
 
-1. **`extractAndSaveMemories()`** — new method. After each agent reply, called asynchronously in a goroutine. Makes a lightweight Claude call with the last 6 messages (3 exchanges), extracts up to 3 durable facts/preferences about the user, stores each via `RememberForPersona` with kind="fact" and importance=7.
+**Bug 1 + Bug 2 fixed — `extractAndSaveMemories()`:**
 
-2. **`replyTo()`** — replaced generic `"Spoke with this user in conversation"` memory save with `go m.extractAndSaveMemories(...)`. The extraction now runs asynchronously so it doesn't block the user's reply.
+Added `memoryExtract` struct (`kind`, `content`, `importance`) to hold the LLM's JSON response.
 
-3. **`buildSystemPrompt()`** — changed `RecallForPersona` limit from 10 to 5 (task specifies top 5 memories).
+Changed extraction prompt from plain-text ("output one fact per line") to JSON format:
+```
+Return a JSON array of up to 3 items with:
+- "kind": "fact" | "preference" | "context"
+- "content": one sentence summary
+- "importance": 1-5
+```
 
-### `site/graph/memory_test.go`
+Changed response parsing from line-splitting to `json.Unmarshal`. The LLM-provided `kind` and `importance` are now passed directly to `RememberForPersona()`. Previously both were hardcoded (`kind="fact"`, `importance=7`), making the taxonomy and ranking meaningless.
 
-4. **`TestBuildSystemPromptInjectsMemories`** — fixed broken SQL insert. Was using `(id, role, prompt, created_at)` but `agent_personas` has `name` not `role`. Fixed to use `store.UpsertAgentPersona()` with proper fields. Dropped unused `db` variable (`_, store := testDB(t)`).
+Added JSON-block unwrapping (strips ` ```json ... ``` ` wrapper if present) before parsing.
 
-## Already In Place (no changes needed)
+Added kind validation: if the LLM returns an unrecognised kind, defaults to `"fact"` rather than failing.
 
-- `agent_memories` table with `kind`, `source_id`, `importance` columns — in `migrate()` schema
-- `RememberForPersona()` and `RecallForPersona()` methods in `store.go`
-- Memory injection in `buildSystemPrompt()` — `== MEMORIES ==` section
-- `TestRememberAndRecallForPersona`, `TestRememberForPersonaDefaults`, `TestRememberForPersonaInvalidKind` in `memory_test.go`
+### `hive/loop/state.md`
+
+**Process violation fixed:** The previous Builder incorrectly left Agent Memory Phase 4 in future-tense "What to build" form under a duplicate "What the Scout Should Focus On Next" heading. Replaced with a single completed cluster entry so the Scout does not re-build already-shipped work.
+
+## Files Changed
+
+- `site/graph/mind.go` — `extractAndSaveMemories` + `memoryExtract` struct
+- `hive/loop/state.md` — Phase 4 moved from future-tense to completed cluster
 
 ## Verification
 
 - `go build -buildvcs=false ./...` — clean, no errors
-- `go test ./...` — all pass (memory tests skip without DATABASE_URL; unit tests for buildSystemPrompt, extraction pass)
+- `go test ./...` — all pass (4 memory tests: remember+recall, defaults, invalid kind, system prompt injection)

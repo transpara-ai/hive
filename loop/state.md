@@ -208,46 +208,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Critic Bug Fix Deployed** (231): Fixed progress handler state guard (Critic-caught bug). Critic now assigns fix tasks. Deployed. Full bug lifecycle proven: ship → catch → fix.
 - **First Fully Autonomous Feature** (232): Pipeline shipped Goals hierarchical view. Scout created+assigned → Builder implemented (3m28s, $0.58) → Critic reviewed (REVISE). Deployed. **$0.83 total, 6 min, 0 human intervention.** 4th autonomous commit.
 
-## What the Scout Should Focus On Next
-
-## Agent Memory — Phase 4
-
-**Why this now:** Phases 1-3 of the agent personas sprint are complete. Agents have identities, a discovery page, and Mind routes conversations to persona prompts. But every conversation starts fresh — the agent has no memory of you. This is the gap that makes agent relationships feel hollow. Phase 4 closes it.
-
-**Target repo:** site (current pipeline target — no `--repo` change needed)
-
-**What to build:**
-
-### Task 1: agent_memories table
-In `site/graph/store.go` and `site/graph/schema.sql`:
-- Add table: `agent_memories(id UUID, persona TEXT, kind TEXT, content TEXT, source_id TEXT, importance INT, created_at TIMESTAMPTZ)`
-- kinds: `fact` (user told me), `preference` (user prefers), `context` (what we were working on), `relationship` (how the user relates to this space)
-- Add `Store.RememberForPersona(ctx, persona, kind, content, sourceID string, importance int) error`
-- Add `Store.RecallForPersona(ctx, persona string, limit int) ([]AgentMemory, error)`
-- Auto-create table on startup with `CREATE TABLE IF NOT EXISTS`
-
-### Task 2: Memory injection into Mind
-In `site/graph/mind.go`, function `buildSystemPrompt()`:
-- Call `RecallForPersona(persona, 5)` — top 5 memories by importance
-- If memories exist, prepend to system prompt: `"## What you remember about this user:\n- [memory content]\n..."`
-- Persona is already resolved by this point — reuse the resolved persona name
-
-### Task 3: Memory extraction after reply
-In `site/graph/mind.go`, after a successful agent reply:
-- Call `Reason()` on the exchange with a short extraction prompt: "In one sentence each, what facts/preferences did the user reveal in this exchange? Return as JSON array of {kind, content, importance(1-5)}."
-- Store each result via `RememberForPersona()`
-- Max 3 memories extracted per exchange (BOUNDED invariant)
-
-### Task 4: Test
-Add to `site/graph/store_test.go`:
-- `TestRememberAndRecall` — store 3 memories for a persona, recall top 2 by importance, verify order
-- `TestMemoryInjection` — verify `buildSystemPrompt` includes memory content when memories exist
-
-**Verification:** After shipping, start a conversation with an agent, share your name and a preference. End the conversation. Start a new conversation with the same agent. The agent should reference the prior exchange.
-
-**Accept/Release:** Don't build memory editing UI, memory search, or cross-persona memory sharing — those are Phase 6+. Ship the minimum that proves persistence.
-
-**Invariants:** BOUNDED (max 5 recalled, max 3 extracted), VERIFIED (2 new test functions), IDENTITY (memories keyed on persona name, not ID — persona names are stable slugs here, acceptable).
+- **Agent Memory Phase 4** (233): `agent_memories` table, `RememberForPersona`/`RecallForPersona`, JSON extraction (kind+importance from LLM), memory injection into `buildSystemPrompt`. 4 tests (remember+recall, defaults, invalid kind, system prompt injection).
 
 ## Lessons Learned
 
