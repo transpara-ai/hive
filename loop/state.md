@@ -292,18 +292,37 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 ## What the Scout Should Focus On Next
 
-**PRIORITY: MULTI-REPO PIPELINE.** The pipeline requires manual `--repo` switching. Tasks have no target repo. The Architect creates subtasks without knowing which repo they belong to. This wastes cycles and blocks scaling.
+## Directive — Iteration 234+: Knowledge Product — Wire the Three Layers
 
-**What to build (hive repo — pkg/runner/):**
-1. Add repo-path field to task board entries (use description prefix like `[repo:site]` or `[repo:hive]`)
-2. Architect tags each subtask with `[repo:X]` based on which files the plan mentions
-3. Pipeline reads the tag, sets Builder working directory accordingly — or skips if wrong repo
-4. Project config: map repo names to local paths (hardcode 5 lovyou repos for now: site=../site, hive=., eventgraph=../eventgraph, agent=../agent, work=../work)
-5. Builder pre-check: if task has `[repo:X]` and current repo doesn't match, skip cleanly
+**Why this now:**
+KindDocument, KindQuestion, and assert/challenge claims all exist but are disconnected. Agent Memory Phase 4 is live — agents can now actually answer questions from memory. The Knowledge layer (Layer 6) is the site's most differentiated product: AI-powered collective knowledge with provenance. Build it as a product, not a pile of entity kinds.
 
-**Test:** Architect creates subtasks for both site and hive. Pipeline routes correctly without human switching.
+**What done looks like:** A user creates a Knowledge space, navigates to it, sees Documents + Q&A + Claims as unified knowledge, asks a question and receives an agent answer grounded in the space's documents, and can verify/challenge any claim. This is a product people would pay for.
 
-**Previous directive (completed):**
+---
+
+**Task 1 [site] — Knowledge sidebar navigation**
+When a space has any KindDocument, KindQuestion, or assert/challenge activity, the sidebar shows three tabs under the Knowledge lens: "Docs", "Q&A", "Claims". Currently each entity kind is isolated — wire them together under one lens with sub-navigation. The Knowledge lens URL becomes `/app/{slug}/knowledge` with `?tab=docs|qa|claims`.
+
+**Task 2 [site] — Question list view with agent answers**
+Route: `/app/{slug}/knowledge?tab=qa`. List all KindQuestion nodes in the space. Each row shows: question title, first 200 chars of the agent answer (if answered), "Answered" / "Awaiting answer" status badge. Unanswered questions should be visually distinct (dimmed, pulsing dot). Clicking a question opens the detail view with the full answer. Add a "Ask a question" button that creates a KindQuestion node and triggers Mind auto-answer.
+
+**Task 3 [site] — Document list view**
+Route: `/app/{slug}/knowledge?tab=docs`. List all KindDocument nodes: title, excerpt (first 200 chars of body), last edited by (agent or human with badge), relative time. "New document" button. Clicking opens the existing document detail/edit view. Sort by updated_at descending.
+
+**Task 4 [site] — Knowledge space creation preset**
+In the new-space creation dialog, add a "Knowledge Base" preset option alongside the existing types. When selected, pre-fills: name suggestion, sets a `preset=knowledge` tag, and lands the user on the Knowledge lens instead of Board after creation. This makes "start a knowledge base" a first-class user journey, not an accidental discovery.
+
+**Task 5 [site] — Mind auto-answers new questions**
+When a KindQuestion node is created (via `intend` op with `kind=question`), the server-side Mind event handler should fire — same pattern as the existing auto-reply on conversations. Mind receives: the question text + the space's recent documents (injected as context). The answer is posted as a `respond` op on the question node. This closes the Knowledge → Agent → Answer loop that Memory Phase 4 enabled.
+
+---
+
+**Target repo:** `[site]` for all tasks.  
+**Routing note:** Tasks tagged `[site]` go to the site repo. Tasks tagged `[hive]` stay in hive. No cross-repo dependencies in this directive.  
+**Test requirement (invariant 12):** Each task needs at least one handler-level test. No untested code ships.  
+**Ship each task:** `cd site && ./ship.sh "iter N: knowledge - <description>"`. One deploy per task.
+
 ## Directive — Iter 236+: Complete the Knowledge Product
 
 **Priority: HIGH (task 3 remaining).**
