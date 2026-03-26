@@ -182,6 +182,16 @@ Currently the Scout, Builder, Critic, PM are thin wrappers — Go functions that
 
 **Implementation:** Replace `runner.Runner` methods with `agent.Agent` instances. Each boots with soul + signing key, records events via the graph, uses MCP tools. The runner becomes an orchestrator of agents, not a dispatcher of functions.
 
+### Fix: agent_memories uses persona name, not actor_id (Invariant 11 violation)
+
+`agent_memories` table keys on `persona TEXT` — a mutable display name. Should be `actor_id TEXT` referencing the actor store. Agents ARE actors (ActorID from the actor store). The persona name could change and orphan all memories. The Critic didn't catch this — the Critic's prompt should include Invariant 11 (IDs not names) as a specific check.
+
+**Two fixes needed:**
+1. Migrate `agent_memories.persona` → `agent_memories.actor_id` (resolve existing rows via users table)
+2. Add Invariant 11 to Critic's review checklist — "does any new column store a display name where an ID should be used?"
+
+**Target repo:** `site`
+
 ### Agent pub/sub on the event graph
 Agents should subscribe to event types they care about. The Critic subscribes to `hive.builder.committed`. The Guardian subscribes to `*`. The Philosopher subscribes to `council.*`. Currently: agents are invoked by the pipeline. Future: agents react to events.
 
