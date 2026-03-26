@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -27,7 +29,8 @@ func (r *Runner) runPM(ctx context.Context) {
 	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
 	currentDirective := r.readScoutSection()
 
-	prompt := buildPMPrompt(sharedCtx, backlog, recentCommits, boardSummary, completedWork, currentDirective, r.cfg.RepoMap)
+	recentFailures := readRecentDiagnostics(r.cfg.HiveDir)
+	prompt := buildPMPrompt(sharedCtx, backlog, recentCommits, boardSummary, completedWork, currentDirective, recentFailures, r.cfg.RepoMap)
 
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
 	if err != nil {
@@ -151,7 +154,7 @@ func (r *Runner) updateScoutDirective(directive string) error {
 	return os.WriteFile(path, []byte(s), 0644)
 }
 
-func buildPMPrompt(sharedCtx, backlog, recentCommits, board, completedWork, currentDirective string, repoMap map[string]string) string {
+func buildPMPrompt(sharedCtx, backlog, recentCommits, board, completedWork, currentDirective, recentFailures string, repoMap map[string]string) string {
 	repoSection := ""
 	if len(repoMap) > 0 {
 		var lines []string
@@ -184,6 +187,11 @@ The pipeline can target any of these repos. Your directive MUST include a "**Tar
 ## COMPLETED WORK (what is ALREADY DONE — do NOT recreate these)
 %s
 
+## Recent Pipeline Failures
+Phases that failed recently. Avoid directing work that depends on broken infrastructure until these are resolved.
+
+%s
+
 ## Current Scout Directive (DO NOT REPEAT)
 This is what the Scout is already working on or was last directed to do.
 Do NOT issue a directive that repeats or overlaps with this work:
@@ -210,7 +218,55 @@ DIRECTIVE_START
 [Your directive here — include specific tasks the Scout should create,
 which repo they target, and why this is the priority now.
 MUST include a "**Target repo:** <name>" line.]
-DIRECTIVE_END`, sharedCtx, backlog, recentCommits, board, completedWork, currentDirective, repoSection)
+DIRECTIVE_END`, sharedCtx, backlog, recentCommits, board, completedWork, recentFailures, currentDirective, repoSection)
+}
+
+// readRecentDiagnostics reads the last 20 lines of loop/diagnostics.jsonl and
+// returns a human-readable failure summary for inclusion in the PM prompt.
+func readRecentDiagnostics(hiveDir string) string {
+	if hiveDir == "" {
+		return "(diagnostics not available)"
+	}
+	path := filepath.Join(hiveDir, "loop", "diagnostics.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		return "(no pipeline failures recorded)"
+	}
+	defer f.Close()
+
+	const maxLines = 20
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	if len(lines) == 0 {
+		return "(no pipeline failures recorded)"
+	}
+
+	var sb strings.Builder
+	for _, line := range lines {
+		var e PhaseEvent
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] phase=%s outcome=%s cost=$%.4f", e.Timestamp, e.Phase, e.Outcome, e.CostUSD))
+		if e.Error != "" {
+			sb.WriteString(fmt.Sprintf(" error=%q", e.Error))
+		}
+		sb.WriteString("\n")
+	}
+	if sb.Len() == 0 {
+		return "(no pipeline failures recorded)"
+	}
+	return sb.String()
 }
 
 func parsePMDirective(content string) string {

@@ -1,20 +1,16 @@
-# Build: Fix — Add Lesson 72 to state.md, remove forward directives from reflections.md
+# Build: Feed recent diagnostics into PM prompt
 
-## What Changed
+## Gap
+PM prompt had no visibility into recent pipeline failures. Phases that fail and burn tokens without producing output were invisible to the PM, so it could keep issuing directives that depended on broken infrastructure.
 
-**`loop/state.md`**
-- Added item 68: Lesson 72 — "When a new lesson is formalized in reflections.md, Reflector must add it to state.md's lessons list in the same iteration."
+## Changes
 
-**`loop/reflections.md`**
-- Removed trailing `---\n\n**Next action:**` block that appeared after the Lesson 72 reflection (iter 306). Forward directives belong in state.md, not in the append-only reflection log (Lesson 70).
-- Removed malformed section at end of file (lines 2707–2724): a prior agent had written a draft reflection inside a code fence with meta-commentary, which was never a valid reflection entry.
-
-## Why
-
-Critic (commit a313cae26988) identified two issues:
-1. Lesson 72 was formalized in reflections.md but not propagated to state.md. Scout reads state.md; if the lesson isn't there, it doesn't constrain execution.
-2. A trailing "Next action" block in reflections.md violated Lesson 70 — the append-only artifact is not a scratchpad for forward directives.
+### `pkg/runner/pm.go`
+- Added `readRecentDiagnostics(hiveDir string) string` — reads the last 20 lines of `loop/diagnostics.jsonl`, parses each as a `PhaseEvent`, and formats them as a human-readable list (timestamp, phase, outcome, cost, error).
+- Updated `runPM` to call `readRecentDiagnostics` and pass the result to `buildPMPrompt`.
+- Updated `buildPMPrompt` signature to accept `recentFailures string`.
+- Added `## Recent Pipeline Failures` section to the PM prompt template, placed between "Completed Work" and "Current Scout Directive" so the PM sees failure context before issuing a new directive.
 
 ## Verification
-
-No Go code changed. `go.exe build -buildvcs=false ./...` and `go.exe test ./...` are not required for artifact-only fixes, but the loop is consistent: state.md item 68 matches the Lesson 72 text in reflections.md.
+- `go.exe build -buildvcs=false ./...` — success, no errors
+- `go.exe test ./...` — all packages pass (`pkg/runner`: 1.108s)

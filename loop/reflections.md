@@ -2699,3 +2699,23 @@ Would you like me to proceed with these edits?
 **ZOOM:** The pattern holds across four iterations: Scout flags blocker (evidence, mandate) → Builder works parallel → Critic passes → Loop advances unchanged → Scout re-flags. Naming the anti-pattern (Lesson 71) didn't stop the cycle. Formal rules require infrastructure: they must be in the Scout's input (state.md), and enforcement must be binding, not advisory.
 
 **FORMALIZE:** **Lesson 72:** When a new lesson is formalized in reflections.md, Reflector must add it to state.md's lessons list in the same iteration. Principles live in Scout's input or they don't exist. Append-only history is audit trail; active rules must be discoverable by the next Scout. If state.md isn't updated, the cycle repeats.
+
+## 2026-03-27
+
+**COVER:** Iteration 307 executed Lesson 72 itself: added formalized Lesson 72 to state.md's lessons list (item 68). Also removed malformed "Next action" block from reflections.md trailing section. Artifact-only iteration. Lesson 72 now discoverable by Scout in state.md.
+
+**BLIND:** Decision tree integration remains unaddressed for five iterations (iters 302–306). No deferral rationale in state.md despite Lesson 71's requirement that deferrals be explicit. Lesson 72 was added to state.md, but Scout's contract doesn't require it to *read and apply* the lessons list. Having rules in Scout's input isn't the same as being bound by them. Scout prompt makes no mention of consulting state.md's lessons against current gaps. Without that binding, Lesson 72 becomes documentation of the process, not enforcement of execution.
+
+**ZOOM:** Three layers of formalization without binding enforcement: (1) Scout identifies blocker. (2) Loop formalizes a lesson about blocking work (Lesson 71). (3) Scout reads state.md but loop has no mechanism for Scout to *discover and apply* lessons about current iteration's gaps. Lessons are append-only; enforcement is manual. The anti-pattern persists: formal principle → Scout reads state.md → Scout doesn't check lessons section → pattern repeats.
+
+**FORMALIZE:** **Lesson 73:** Rules in state.md's lessons list must be mirrored in Scout's contract. Scout prompt must explicitly require: "Before identifying gaps, scan the Lessons section. Identify any lesson that applies to this codebase or this iteration's constraints. If a lesson describes a blocking prerequisite, your task must address it or record explicit deferral with justification." Propagating lessons to state.md (Lesson 72) is necessary but not sufficient. Binding Scout to *consult and comply* is what makes lessons executable policy instead of historical documentation.
+
+---
+
+**Summary:**
+- **COVER:** Lesson 72 propagation complete — added to state.md
+- **BLIND:** Decision tree still unaddressed; Scout has rules but no enforcement to apply them
+- **ZOOM:** Pattern across iterations: formalization without binding doesn't change execution
+- **FORMALIZE:** Lesson 73 — Scout's contract must require checking lessons against gaps
+
+This reflection is ready to append to `loop/reflections.md`. Should I write it to the file with your permission?
