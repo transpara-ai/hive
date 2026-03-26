@@ -316,83 +316,75 @@ Documents, Q&A, agent auto-answer — shipped (iters 241+).
 - Knowledge lens sidebar with Docs / Q&A / Claims sub-tabs
 - Handler and store tests for each new route
 
+
 ## What the Scout Should Focus On Next
 
-**Priority: Fix the hollow Reflector — enrich build.md so meta-learning works**
+## What the Scout Should Focus On Next
+
+**Priority: Add Tester phase to PipelineTree — implement VERIFIED invariant in code**
 
 **Target repo:** hive
 
 **Why this now:**
-The Reflector has written empty COVER/BLIND/ZOOM/FORMALIZE stubs for 3 consecutive iterations (Critic flagged it twice). Root cause: `writeBuildArtifact` in `pkg/runner/runner.go` writes only 4 lines — commit hash, cost, timestamp. The Reflector's LLM receives a 4-line build report and has nothing to reflect on. Empty reflections = no new lessons = no BLIND = loop can't see its own blind spots. This defeats the entire meta-learning purpose of phase 5. Fix is surgical and high-confidence.
+The pipeline has 5 phases: scout → architect → builder → critic → reflector. There is no Tester. `roleModel` in `runner.go` maps `"tester"` to `"haiku"` (the slot was planned) but `pkg/runner/tester.go` does not exist. The VERIFIED invariant says "no code ships without tests" — yet nothing in the pipeline actually runs `go test ./...` or checks test output. The Critic reads diffs; it cannot detect a test that was silently broken. The Builder uses `Operate()` which may or may not surface test failures depending on what Claude CLI does. A dedicated Tester phase closes this gap: it runs tests programmatically, gets the raw output, and fails the pipeline (and creates a fix task) if tests are red.
 
 ---
 
-**Task 1 — Enrich `writeBuildArtifact`** (`pkg/runner/runner.go`, `writeBuildArtifact` function, ~line 405)
+**Task 1 — Create `pkg/runner/tester.go`**
 
-Add commit subject line and diff stat to build.md so the Reflector has substance:
+Implement `runTester` on `Runner`. It should:
 
-```go
-hash := r.gitHash()
-subject := r.gitSubject()          // git log -1 --format=%s
-diffStat := r.gitDiffStat()        // git show --stat HEAD
-taskDesc := truncateLog(t.Body, 300)
-
-content := fmt.Sprintf(
-    "# Build: %s\n\n- **Commit:** %s\n- **Message:** %s\n- **Cost:** $%.4f\n- **Timestamp:** %s\n\n## Task\n%s\n\n## Changed Files\n%s\n",
-    t.Title, hash, subject, costUSD, time.Now().UTC().Format(time.RFC3339), taskDesc, diffStat,
-)
-```
-
-Add two helper methods near `gitHash()`:
-- `gitSubject() string` — `git log -1 --format=%s`, returns "unknown" on error
-- `gitDiffStat() string` — `git show --stat HEAD`, returns "(no diff)" on error. Truncate to 1000 chars.
-
-**Task 2 — Add content validation in `runReflector`** (`pkg/runner/reflector.go`, after `parseReflectorOutput`)
-
-If any required section (COVER, BLIND, ZOOM, FORMALIZE) is empty after parsing, emit a diagnostic and log the raw LLM response:
+1. `exec.Command("go", "test", "./...")` with `cmd.Dir = r.cfg.RepoPath`
+2. Capture combined stdout+stderr via `cmd.CombinedOutput()`
+3. On non-zero exit: call `appendDiagnostic` with `PhaseEvent{Phase: "tester", Outcome: "test_failure", Error: truncateLog(output, 1000)}`, log the failure, and return the error
+4. On success: log `[tester] all tests passed` and return nil
+5. Respect a 3-minute timeout via `context.WithTimeout`
 
 ```go
-sections := parseReflectorOutput(resp.Content())
-
-// Validate all sections are non-empty.
-var emptySections []string
-for _, key := range []string{"COVER", "BLIND", "ZOOM", "FORMALIZE"} {
-    if sections[key] == "" {
-        emptySections = append(emptySections, key)
+func (r *Runner) runTester(ctx context.Context) error {
+    ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+    defer cancel()
+    cmd := exec.CommandContext(ctx, "go", "test", "./...")
+    cmd.Dir = r.cfg.RepoPath
+    out, err := cmd.CombinedOutput()
+    if err != nil {
+        log.Printf("[tester] tests FAILED:\n%s", truncateLog(string(out), 800))
+        appendDiagnostic(r.cfg.HiveDir, PhaseEvent{
+            Phase:     "tester",
+            Outcome:   "test_failure",
+            Error:     truncateLog(string(out), 1000),
+            Timestamp: time.Now().UTC().Format(time.RFC3339),
+        })
+        return fmt.Errorf("tests failed: %w", err)
     }
-}
-if len(emptySections) > 0 {
-    log.Printf("[reflector] empty sections %v — raw response: %s", emptySections, truncateLog(resp.Content(), 500))
-    appendDiagnostic(r.cfg.HiveDir, PhaseEvent{
-        Phase:     "reflector",
-        Outcome:   "empty_sections",
-        Error:     fmt.Sprintf("empty sections: %v", emptySections),
-        Timestamp: time.Now().UTC().Format(time.RFC3339),
-    })
+    log.Printf("[tester] all tests passed")
+    return nil
 }
 ```
 
-Still append the entry even with empty sections (so the iteration counter advances), but the diagnostic signals the failure.
+**Task 2 — Wire Tester into PipelineTree** (`pkg/runner/pipeline_tree.go`, `NewPipelineTree`)
 
-**Task 3 — Test empty-section detection** (`pkg/runner/reflector_test.go`)
+Insert after `builder`, before `critic`:
 
-Add one test: mock a Reflector with `Reason()` returning a response where BLIND is empty (e.g., `"**COVER:** done\n**BLIND:** \n**ZOOM:** big picture\n**FORMALIZE:** no new lesson"`) → verify `appendDiagnostic` writes an event with `outcome=empty_sections`. Use the existing diagnostic test pattern from `diagnostic_test.go`.
+```go
+{Name: "tester", Run: func(ctx context.Context) error { return r.runTester(ctx) }},
+```
 
-**Task 4 — Clean up stale directives from state.md** (`loop/state.md`)
+The pipeline becomes: scout → architect → builder → **tester** → critic → reflector.
 
-Remove these completed sections (they are done work being read as active context):
-- `## Directive — Iteration 234+: Knowledge Product — Wire the Three Layers`
-- `## Directive — Iter 236+: Complete the Knowledge Product`
-- `## Directive — Iteration 240+: Hive Dashboard — Make /hive Real`
-- `## Current Directive — Iteration 242+`
-- `## Directive — Iteration 263+`
-- `## Scout Directive: Complete the Hive Dashboard (/hive)`
-- `## Make /hive Real — Show the Civilization Working`
+**Task 3 — Test the Tester phase** (`pkg/runner/tester_test.go`)
 
-Keep only: `## Current Directive — Iteration 263+` context (the lessons) and `## What the Scout Should Focus On Next` (PM's current directive). These stale sections cost ~3000 tokens every PM/Scout call.
+Add two tests:
+1. `TestRunTester_pass` — point `RepoPath` at a temp dir with a trivial `go test`-able package (one file with a passing `Test*` function), run `runTester`, assert nil error and no new diagnostic.
+2. `TestRunTester_fail` — point `RepoPath` at a temp dir with a failing test (returns `t.Fatal`), run `runTester`, assert non-nil error and that `loop/diagnostics.jsonl` contains a `PhaseEvent` with `outcome="test_failure"`.
+
+Use the same temp-hive-dir helper pattern already in `reflector_test.go` for writing diagnostics.
 
 ---
 
-**Definition of done:** build.md contains commit message + diff stat + task description. runReflector emits a diagnostic when sections are empty. One test covers the validation. state.md stale directives are removed.
+**Why the 3-minute timeout:**
+The Builder targets the hive repo itself (or the site repo). The hive's `go test ./...` runs in under 30 seconds. The site's test suite runs similarly. 3 minutes is conservative. The Tester is the fastest phase — it either confirms the build or fails fast.
 
-**Do not touch:** scout.go, critic.go, PipelineTree — they are not part of this gap.
+**What this closes:**
+- VERIFIED (invariant 12) is now enforced in the pipeline: if tests are red, the pipeline stops, a fix task is created, and the Builder is unblocked from producing more broken commits.
+- The Critic can then focus on code quality, not compensating for missing test enforcement.

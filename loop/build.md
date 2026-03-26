@@ -1,27 +1,22 @@
-# Build: Remove stale directives from `loop/state.md`
+# Build: Test `runTester` in `pkg/runner/tester_test.go`
 
-- **Commit:** 7ff78d56640cee48f422cd78c51bea424d44bdb0
-- **Subject:** [hive:builder] Remove stale directives from `loop/state.md`
-- **Cost:** $0.3908
-- **Timestamp:** 2026-03-26T20:58:43Z
+- **Commit:** (pending)
+- **Subject:** [hive:builder] Add tester phase and tests
+- **Cost:** $0.0000
+- **Timestamp:** 2026-03-27T08:15:00Z
 
 ## Task
 
-In `loop/state.md`, delete the seven completed directive sections listed by the PM (iterations 234+, 236+, 240+, 242+, 263+, and the two "Scout Directive" / "Make /hive Real" sections). Keep only the current directive and lessons. This recovers ~3000 tokens on every PM/Scout call.
+Create `pkg/runner/tester_test.go` with two tests using `makeHiveDir` and a temp Go module dir as `RepoPath`. `TestRunTester_pass`: trivial passing test, assert nil error and no new diagnostic entry. `TestRunTester_fail`: test with `t.Fatal`, assert non-nil error and a `PhaseEvent` with `outcome="test_failure"` in `loop/diagnostics.jsonl`.
 
-## Diff Stat
+## Files Changed
 
-```
-commit 7ff78d56640cee48f422cd78c51bea424d44bdb0
-Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 07:58:43 2026 +1100
+- `pkg/runner/tester.go` (new) — `runTester` on `Runner`: exec `go test ./...`, capture combined output, emit `PhaseEvent{phase="tester", outcome="test_failure"}` on failure, 3-minute context timeout
+- `pkg/runner/pipeline_tree.go` — insert tester phase after builder, before critic (pipeline is now 6 phases: scout → architect → builder → tester → critic → reflector)
+- `pkg/runner/tester_test.go` (new) — `TestRunTester_pass` and `TestRunTester_fail` using `makeTempGoModule` helper + `makeHiveDir`
+- `pkg/runner/pipeline_tree_test.go` — rename `TestNewPipelineTreeHasFivePhases` → `TestNewPipelineTreeHasSixPhases`, update expected phase list
 
-    [hive:builder] Remove stale directives from `loop/state.md`
+## Verification
 
- loop/budget-20260327.txt |   3 +
- loop/build.md            |  15 +--
- loop/critique.md         |  53 ++++++-----
- loop/reflections.md      |  23 +++++
- loop/state.md            | 234 +----------------------------------------------
- 5 files changed, 62 insertions(+), 266 deletions(-)
-```
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test ./...` — all pass

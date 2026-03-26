@@ -1,47 +1,35 @@
-Based on my analysis of the codebase, state, and recent commits, here's the Scout gap report:
+## Scout Report: Iteration 320
 
----
+### Gap
 
-## GAP REPORT
+**Missing: Tester phase in PipelineTree — VERIFIED invariant (no code ships without tests) is not enforced in the pipeline.**
 
-**Gap:** The Reflector receives insufficient content to produce meaningful reflections, causing empty COVER/BLIND/ZOOM/FORMALIZE stubs to persist across iterations.
+### Evidence
 
-**Evidence:**
+1. **Pipeline structure** (`pkg/runner/pipeline_tree.go:52-63`): 5 phases exist: scout → architect → builder → critic → reflector. No tester phase.
 
-1. **Code inspection** — `writeBuildArtifact` in `pkg/runner/runner.go:405-413` writes only 4 lines to `loop/build.md`: commit hash, cost, and timestamp. No commit message. No diff stats.
+2. **Role slot exists but unimplemented** (`pkg/runner/runner.go:34`): `roleModel` maps `"tester": "haiku"`, signaling the phase was planned. But `pkg/runner/tester.go` does not exist.
 
-2. **Recent artifacts** — `loop/build.md` from the most recent builder iteration contains:
-   ```
-   # Build: Tests for critique artifact write and 5-phase tree
-   - **Commit:** 0a354ac60a665d0fae3f57df714a78ae6607b664
-   - **Cost:** $0.2278
-   - **Timestamp:** 2026-03-26T20:33:32Z
-   ```
-   That's it. No task context. No changed files.
+3. **Invariant 12 (VERIFIED)** is core to the constitution: "No code ships without tests." Yet the pipeline has no mechanism to run `go test ./...` and fail if tests are red.
 
-3. **Reflector validation gap** — `runReflector` in `pkg/runner/reflector.go:100-156` has no validation after parsing. It writes whatever sections come back from the LLM, even if empty. No diagnostic when BLIND or FORMALIZE are blank.
+4. **State.md explicitly directs** (lines 321-390): Section "What the Scout Should Focus On Next" explicitly identifies this gap with three specific tasks, implementation guidance, and rationale.
 
-4. **Critic flags it twice** — `loop/critique.md` from iteration 315 explicitly states: *"the empty reflection stubs are now three iterations deep — the Reflector is writing structure without substance, which defeats the artifact's purpose."*
+5. **Recent commits** confirm the pipeline infrastructure is mature and ready: artifact writes are wired (build.md enrichment, critique.md artifact, reflector.md append), diagnostics collection is working (PhaseEvent type, appendDiagnostic helper), failure detection is in place.
 
-5. **Missing helpers** — `gitSubject()` and `gitDiffStat()` don't exist. Only `gitHash()` exists.
+### Impact
 
-**Impact:** 
+- **Verification gap**: The Critic reads diffs and can spot code quality issues, but cannot detect broken tests. A test failure could silently ship.
+- **Trust cost**: The pipeline proves autonomy through verified work. Without test enforcement, "verified" is aspirational.
+- **Feedback loop incomplete**: The Builder uses Operate() which may or may not surface test output. Direct test execution closes the loop.
+- **Lesson 34 violation**: "The Scout traverses what exists. Tests don't exist, so the Scout never encounters them." A dedicated Tester phase makes test status visible to the pipeline.
 
-The Reflector's meta-learning (the entire purpose of phase 5) breaks. Without substance in build.md, the LLM has no basis for BLIND (what's missing from the build) or ZOOM (how the iteration connects to larger patterns). Empty reflections compound: no new lessons are extracted, so the loop can't see its own blind spots. This defeats the self-correcting feedback loop that the 5-phase pipeline is designed to create.
+### Scope
 
-**Scope:**
+- `pkg/runner/tester.go` (new) — `runTester(ctx)` function, exec `go test ./...`, capture output, emit diagnostics on failure
+- `pkg/runner/pipeline_tree.go:52-64` (modify) — insert tester phase between builder and critic
+- `pkg/runner/tester_test.go` (new) — two tests: pass case (no error), fail case (test failure → diagnostic written)
+- No changes to site or other repos
 
-- `pkg/runner/runner.go:405-413` — `writeBuildArtifact` function
-- `pkg/runner/runner.go:415-424` — `gitHash()` helper (reference)
-- `pkg/runner/reflector.go:100-156` — `runReflector` function  
-- `pkg/runner/reflector.go:132-143` — section parsing and validation
-- `pkg/runner/reflector_test.go` — test file
-- `loop/reflections.md` — where reflections are appended (artifact validation)
+### Suggestion
 
-**Suggestion:**
-
-Enrich the build artifact so the Reflector has context. Add commit message subject and diff stat to `writeBuildArtifact`. Add two helper methods (`gitSubject()`, `gitDiffStat()`). Add validation in `runReflector` to catch empty sections before writing reflections, emit diagnostics when they occur. Include one test to verify empty-section detection. Optionally clean up stale directives from state.md that were replaced in iteration 242+ (reduces LLM context by ~3000 tokens for Scout/PM calls).
-
----
-
-**Definition of done:** `build.md` contains commit message + diff stat + task description. `runReflector` validates section completeness and emits diagnostics on empty sections. One test covers the validation. Reflections.md entries have substance.
+Implement the Tester phase exactly as specified in state.md (lines 333-389). This closes the VERIFIED invariant enforcement and unblocks the pipeline to run with full confidence. Once Tester is in place, the pipeline is fully specified: scout identifies gaps → architect plans → builder codes → **tester verifies** → critic audits → reflector synthesizes. Each phase has a clear, testable responsibility.
