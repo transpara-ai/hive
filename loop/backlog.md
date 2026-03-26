@@ -80,6 +80,26 @@ The vision: each department gets a space. Each space has agents who learn that d
 
 ---
 
+## FOUNDATIONAL — The hive runs on its own event graph
+
+### The pipeline should be a decision tree, not a for-loop
+
+The 20 primitives that started this project describe a system where every failure is traceable to its root cause. The eventgraph Python package ALREADY HAS THIS IMPLEMENTED:
+
+- **`eventgraph/python/eventgraph/decision.py`** — complete decision tree engine: DecisionNode → InternalNode/LeafNode, Condition/Operator system, evaluate() walks tree mechanically first with LLM fallback, evolve() detects patterns in LLM responses and converts to mechanical branches
+- **`eventgraph/python/eventgraph/primitives.py`** — all 201 primitives as concrete classes with `process(tick, events, snapshot) → list[Mutation]`, event subscriptions, cadence control
+- **Diagnostic traversal** — Ancestry, Descendancy, PathQuery, SubgraphExtract, Timeline primitives
+- **Success/failure criteria** — Expectation, Violation, Severity primitives
+- **`mind-zero-five/pkg/mind/`** — autonomous Plan-Implement-Review-Finish loop with self-recovery
+
+The Go pipeline (`pkg/runner/`) uses NONE of this. It's a for-loop with log output. Failures vanish. No traversal. No criteria. No self-correction.
+
+**What needs to happen:** Port the decision tree engine to Go (it should exist in all languages the ecosystem supports). The pipeline becomes a decision tree where each step has success/failure criteria. Failures trigger diagnostic traversal. Root causes become tasks. The hive fixes itself. See `hive/docs/knowledge-graph-migration.md` for the full design.
+
+**This is the highest-leverage architectural work.** Everything else — features, polish, new products — is built on sand until the pipeline runs on its own substrate.
+
+---
+
 ## Architectural ideas
 
 ### Specs as graph events
