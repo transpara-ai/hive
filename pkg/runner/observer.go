@@ -42,6 +42,7 @@ func (r *Runner) runObserver(ctx context.Context) {
 	}
 
 	r.cost.Record(result.Usage)
+	r.dailyBudget.Record(result.Usage.CostUSD)
 	log.Printf("[observer] observation done (cost=$%.4f)", result.Usage.CostUSD)
 
 	// Parse tasks from the observation.
@@ -111,6 +112,7 @@ You may report up to 2 findings. If everything looks good, say "No issues found.
 		return
 	}
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 
 	tasks := parseObserverTasks(resp.Content())
 	for _, t := range tasks {

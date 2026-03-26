@@ -47,6 +47,7 @@ func (r *Runner) runArchitect(ctx context.Context) {
 	}
 
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[architect] plan ready (cost=$%.4f)", resp.Usage().CostUSD)
 
 	// Parse subtasks from the plan.

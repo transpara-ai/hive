@@ -103,6 +103,7 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	}
 
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[critic] review done (cost=$%.4f)", resp.Usage().CostUSD)
 
 	// Parse the verdict.

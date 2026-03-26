@@ -36,6 +36,7 @@ func (r *Runner) runPM(ctx context.Context) {
 	}
 
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[pm] decision made (cost=$%.4f)", resp.Usage().CostUSD)
 
 	// Parse the directive from the response.

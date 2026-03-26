@@ -29,8 +29,11 @@ func (d *DailyBudget) path() string {
 	return filepath.Join(d.dir, "loop", fmt.Sprintf("budget-%s.txt", d.date))
 }
 
-// Record appends amount to today's budget file.
+// Record appends amount to today's budget file. Safe to call on nil (no-op).
 func (d *DailyBudget) Record(amount float64) {
+	if d == nil {
+		return
+	}
 	p := d.path()
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		log.Printf("[budget] mkdir error: %v", err)

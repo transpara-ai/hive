@@ -126,6 +126,7 @@ func (r *Runner) runReflector(ctx context.Context) {
 	}
 
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[reflector] Reason done (cost=$%.4f)", resp.Usage().CostUSD)
 
 	// Parse the four sections.

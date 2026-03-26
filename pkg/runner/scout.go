@@ -53,6 +53,7 @@ func (r *Runner) runScout(ctx context.Context) {
 	}
 
 	r.cost.Record(resp.Usage())
+	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[scout] Reason done (cost=$%.4f)", resp.Usage().CostUSD)
 
 	// Write the gap report to loop/scout.md for PM and Architect to read.
