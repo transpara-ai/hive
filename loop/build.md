@@ -1,16 +1,18 @@
-# Build: Wire Reflector as phase 5 in PipelineTree
+# Build: Add `writeCritiqueArtifact` to critic.go
 
-**Gap:** Reflector was not wired as phase 5 in PipelineTree, so the loop never appended reflections.md or advanced state.md after Critic PASS.
+## What changed
 
-**Change:** Added `"reflector"` as the fifth phase in `NewPipelineTree` (`pkg/runner/pipeline_tree.go`).
+**`pkg/runner/critic.go`**
+- Extracted inline critique-writing in `reviewCommit` into a new function `writeCritiqueArtifact(hiveDir, subject, verdict, summary string) error`
+- New format: `# Critique: <commit subject>\n\n**Verdict:** PASS | REVISE\n\n**Summary:** <findings>`
+- Replaced the old inline `os.WriteFile` block (flat format) with a call to the new function
+- Error handling unchanged: log on failure, don't halt
 
-The phase temporarily sets `r.cfg.OneShot = true` to bypass the `tick%4` throttle gate in `runReflector`, calls `r.runReflector(ctx)`, then restores the original value. The `r.done = true` side-effect from one-shot mode is harmless — `PipelineTree.Execute` does not check `r.done`.
+## Verification
 
-**Test added:** `TestNewPipelineTreeHasFivePhases` in `pkg/runner/pipeline_tree_test.go` — verifies all five phases (scout, architect, builder, critic, reflector) are present in order.
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test ./...` — all pass (pkg/runner: 1.237s)
 
-**Files changed:**
-- `pkg/runner/pipeline_tree.go` — added reflector phase
-- `pkg/runner/pipeline_tree_test.go` — added `TestNewPipelineTreeHasFivePhases`
+## Why
 
-**Build:** `go.exe build -buildvcs=false ./...` — clean
-**Tests:** `go.exe test -buildvcs=false ./...` — all pass
+Without a properly structured `loop/critique.md`, the Reflector reads empty or malformed critique data. This gives the Reflector a consistent artifact: commit subject in the heading, bold verdict, and full LLM analysis in the summary section.

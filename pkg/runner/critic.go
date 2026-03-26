@@ -114,9 +114,7 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	log.Printf("[critic] verdict: %s", verdict)
 
 	// Write critique artifact.
-	critiquePath := filepath.Join(r.cfg.HiveDir, "loop", "critique.md")
-	critiqueContent := fmt.Sprintf("# Critique\n\nCommit: %s\nVerdict: %s\n\n%s\n", c.hash, verdict, content)
-	if writeErr := os.WriteFile(critiquePath, []byte(critiqueContent), 0644); writeErr != nil {
+	if writeErr := writeCritiqueArtifact(r.cfg.HiveDir, c.subject, verdict, content); writeErr != nil {
 		log.Printf("[critic] write critique artifact error: %v", writeErr)
 	}
 
@@ -221,4 +219,11 @@ func extractIssues(content string) string {
 		return content[len(content)-1000:]
 	}
 	return content
+}
+
+// writeCritiqueArtifact writes loop/critique.md with a structured review record.
+func writeCritiqueArtifact(hiveDir, subject, verdict, summary string) error {
+	content := fmt.Sprintf("# Critique: %s\n\n**Verdict:** %s\n\n**Summary:** %s\n", subject, verdict, summary)
+	path := filepath.Join(hiveDir, "loop", "critique.md")
+	return os.WriteFile(path, []byte(content), 0644)
 }
