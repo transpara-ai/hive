@@ -1,78 +1,82 @@
-Perfect. I have all the context I need. Let me write the Scout report.
+Perfect! I now have a complete picture. Let me write the Scout gap report.
 
 ---
 
-# Scout Report — Iteration 309
+## GAP REPORT — Iteration 310
 
-## Gap
+### Gap
+The autonomous pipeline's failure detection is incomplete. Phases can fail internally but the pipeline never detects them or creates fix tasks, so failures propagate silently and the feedback loop breaks.
 
-The pipeline role has no handler in runTick, blocking autonomous phase coordination and feedback-driven recovery.
+### Evidence
 
-## Evidence
+**Phase 1 (complete):** Infrastructure exists in recent commits:
+- `pipeline_tree.go` (commit 5f0d762) — PipelineTree structure, phases wired
+- `diagnostic.go` (commit 1131217 and follow-ups) — PhaseEvent and appendDiagnostic() working
+- Tests in `pipeline_tree_test.go` (commit b652025) cover failure path
+- PM role reads diagnostics (commit 1f16a05) to feed into prompt
 
-**Current state:**
-- `pkg/runner/runner.go:165-186` — runTick's switch statement covers scout, architect, builder, critic, pm, observer, monitor, reflector. No "pipeline" case. Default falls through to "no handler" log.
-- `pkg/runner/pipeline_tree.go` — does not exist.
-- `pkg/runner/diagnostic.go` — PhaseEvent and appendDiagnostic() are complete (lines 13-52). Ready to emit failure signals.
-- `pkg/runner/runner.go:17` — decision package already imported but unused.
-- `eventgraph/go/pkg/decision/` — tree.go, evaluate.go, evolve.go exist and are tested.
+**Phase 1 gap (explicit):** In `pipeline_tree.go` lines 22-23:
+```
+// Those methods do not return errors today; the wrappers always succeed. Real failure detection is
+// Phase 2 work once the phase methods propagate errors up.
+```
 
-**From state.md (lines 545-577):**
-> The pipeline is still a sequential for-loop. Failures don't trigger branching. Root causes don't become tasks. Until this is wired, the PM optimizes blind.
+**Where Execute is called:** `runner.go` line 178, in `runTick`:
+```go
+case "pipeline":
+    _ = NewPipelineTree(r).Execute(ctx)
+```
 
-**From commit e4643be:**
-> Director mandate: engine before paint — PM must prioritize foundation
+The return value is discarded (`_`). Execute gets errors but the loop doesn't act on them.
 
-**Recent work (iterations 302–308):**
-- PhaseEvent type added (diagnostic.go)
-- appendDiagnostic() added to log failures
-- diagnostics.jsonl infrastructure in place
-- PM prompt updated to read failures and suggest fixes
-- But: no tree to orchestrate phases, no branching on failure, no automatic recovery
+**Missing pieces:**
+1. **countDiagnostics()** — No helper to count lines in diagnostics.jsonl. Execute can't tell if a phase appended errors.
+2. **Failure→FixTask mapping** — Execute catches errors but doesn't call `r.cfg.APIClient.CreateTask()` to create a fix task.
+3. **Test coverage** — No test verifies that a failed phase creates a fix task on the board.
 
-## Impact
+### Impact
 
-**For users (the PM agent):**
-- The PM reads failure diagnostics but has no authority to branch or assign fixes
-- Feedback loop is open: diagnostics go out, but no action comes back
-- The pipeline runs to completion even when early phases fail, wasting tokens on doomed work
+The autonomous pipeline is currently a one-way street: Scout → Architect → Builder → Critic. When the Builder fails (Operate timeout, verification failure, etc.), that failure is logged to diagnostics.jsonl but **no task is created to fix it**. The next Scout cycle sees the same broken state and the loop spins or stalls.
 
-**For product:**
-- Cannot implement autonomous failure recovery (Phase 2)
-- Cannot build pattern detection that learns from repeated failures (Phase 2)
-- Blocks higher-order operations: fixpoint awareness, irreversibility bounds, depth-first search
+Without fix-task creation:
+- Ship → Catch → Fix loop is aspirational, not structural
+- Pipeline can't self-correct (Lesson 59: "Ship → Catch → Auto-fix is next")
+- Failures accumulate invisibly in diagnostics.jsonl while the pipeline keeps running
+- No feedback mechanism to prioritize high-failure areas
 
-**For the hive:**
-- The self-evolve invariant ("agents fix agents") cannot work if the pipeline can't fix itself
+### Scope
 
-## Scope
+**Files involved:**
+- `pkg/runner/pipeline_tree.go` — Add failure detection logic
+- `pkg/runner/diagnostic.go` — Add countDiagnostics() helper
+- `pkg/runner/pipeline_tree_test.go` — Extend tests to cover fix-task creation
 
-**Files to create:**
-- `pkg/runner/pipeline_tree.go` — PipelineTree type, Execute(ctx), phase nodes, failure branches
-- `pkg/runner/pipeline_tree_test.go` — one test: tree with stub phase, verify appendDiagnostic writes on failure
+**No changes needed:**
+- `pkg/runner/runner.go` — runTick already calls Execute, just needs error handling to work
+- `pkg/api/client.go` — CreateTask already exists and works (verified in PM role)
+- Phase methods (runScout, runBuilder, etc.) — Keep their current signatures
 
-**Files to modify:**
-- `pkg/runner/runner.go` — add "pipeline" case to runTick (lines ~176), call PipelineTree.Execute(ctx)
+### Suggestion
 
-**Existing files (do NOT touch):**
-- eventgraph's decision package (already complete)
-- Existing role handlers (scout, architect, builder, critic stay untouched for single-role runs)
-- cmd/hive
-- Agent definitions
+Implement Phase 2 as scoped in `state.md` lines 549-586:
 
-## Suggestion
+1. **Add `countDiagnostics(hiveDir string) int`** in diagnostic.go — count lines in loop/diagnostics.jsonl, return 0 if file doesn't exist
 
-Implement Phase 1 exactly as described in state.md:
+2. **Update `Execute`** to detect failures before/after each phase:
+   - Snapshot diagnostic count before phase
+   - Call phase.Run(ctx)
+   - After: if error returned OR diagnostic count increased → failure detected
+   - On failure: call `pt.cfg.APIClient.CreateTask(pt.cfg.SpaceSlug, "Fix: "+phase.Name+" phase failed", "", "high")` to create a fix task
+   - Then return the error
 
-1. **PipelineTree** models one cycle as a decision tree with:
-   - Root: "run-cycle"
-   - Phase nodes: scout, architect, builder, critic
-   - Each node has success condition (`PhaseEvent.Outcome == "success"`) and failure branch
-   - On phase failure: emit PhaseEvent via appendDiagnostic, create a fix task via APIClient
-   - Phase implementations delegate to existing `runScout`, `runArchitect`, `runBuilder`, `runCritic`
+3. **Add tests** in pipeline_tree_test.go:
+   - Verify countDiagnostics returns 0 for missing file, N for N lines in existing file
+   - Verify Execute returns error when phase.Run returns error
+   - Verify Execute returns error when diagnostic count increases (phase appended error)
+   - Mock APIClient to verify CreateTask was called with correct title
 
-2. **Wire runTick** to use the tree for `role == "pipeline"`. Keep single-role dispatch untouched.
+This closes the feedback loop structurally: if a phase fails, a human-visible fix task appears on the board, and the next Scout cycle can prioritize it.
 
-3. **Test once** with a minimal tree stub that returns failure, verify appendDiagnostic writes to diagnostics.jsonl.
+---
 
-**Scope boundary:** Wire-up only. Don't refactor existing role handlers. Don't add evolve.go pattern detection (that's Phase 2). One test, one decision path: success → continue, failure → diagnostic + task.
+**That's the gap report.** The Architect will now design a specific plan. The Scout's job was to surface the highest-priority missing piece, and that piece is clearly **failure detection that triggers fix-task creation** — it's the structural linchpin that turns error visibility into corrective action.

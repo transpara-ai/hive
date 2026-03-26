@@ -1,6 +1,5 @@
 # Build: Wire pipeline role into runTick in runner.go
 
-- **File changed:** `pkg/runner/runner.go` — added `case "pipeline": _ = NewPipelineTree(r).Execute(ctx)` between the `"architect"` and `"observer"` cases in `runTick`
-- **Build:** `go.exe build -buildvcs=false ./...` — clean
-- **Tests:** `go.exe test ./pkg/runner/...` — ok (1.132s)
-- **Timestamp:** 2026-03-27
+- **Commit:** 666270be0e4d86bf89a23ac1f7e953e8ecceae01
+- **Cost:** $0.2246
+- **Timestamp:** 2026-03-26T19:34:30Z

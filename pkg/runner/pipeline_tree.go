@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 // Phase is a single pipeline phase that can succeed or fail.
@@ -11,10 +14,16 @@ type Phase struct {
 	Run  func(ctx context.Context) error
 }
 
+// FixTasker creates a remediation task when a phase failure is detected.
+type FixTasker interface {
+	CreateTask(ctx context.Context, title string) error
+}
+
 // PipelineTree orchestrates a sequence of phases, emitting diagnostics on failure.
 type PipelineTree struct {
-	cfg    Config
-	phases []Phase
+	cfg        Config
+	phases     []Phase
+	fixTasker  FixTasker
 }
 
 // NewPipelineTree creates a PipelineTree wired to r's phase implementations.
@@ -34,17 +43,45 @@ func NewPipelineTree(r *Runner) *PipelineTree {
 }
 
 // Execute runs each phase in order. On the first failure it emits a PhaseEvent
-// diagnostic and returns the error; subsequent phases are skipped.
+// diagnostic and returns the error; subsequent phases are skipped. A phase that
+// writes new diagnostics internally but returns nil is also treated as a failure.
 func (pt *PipelineTree) Execute(ctx context.Context) error {
 	for _, phase := range pt.phases {
-		if err := phase.Run(ctx); err != nil {
+		prevCount := pt.diagnosticCount()
+		err := phase.Run(ctx)
+		if err != nil {
 			_ = appendDiagnostic(pt.cfg.HiveDir, PhaseEvent{
 				Phase:   phase.Name,
 				Outcome: "failure",
 				Error:   err.Error(),
 			})
+			pt.callFixTasker(ctx, phase.Name)
 			return fmt.Errorf("phase %s failed: %w", phase.Name, err)
+		}
+		if pt.diagnosticCount() > prevCount {
+			pt.callFixTasker(ctx, phase.Name)
+			return fmt.Errorf("phase %s failed: diagnostics written without error return", phase.Name)
 		}
 	}
 	return nil
+}
+
+// diagnosticCount returns the number of newline-terminated lines in diagnostics.jsonl.
+func (pt *PipelineTree) diagnosticCount() int {
+	if pt.cfg.HiveDir == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(pt.cfg.HiveDir, "loop", "diagnostics.jsonl"))
+	if err != nil {
+		return 0
+	}
+	return bytes.Count(data, []byte("\n"))
+}
+
+// callFixTasker calls fixTasker.CreateTask if a tasker is configured.
+func (pt *PipelineTree) callFixTasker(ctx context.Context, phaseName string) {
+	if pt.fixTasker == nil {
+		return
+	}
+	_ = pt.fixTasker.CreateTask(ctx, fmt.Sprintf("Fix: %s phase failed", phaseName))
 }

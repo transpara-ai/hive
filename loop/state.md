@@ -544,34 +544,43 @@ The landing page says "Watch it build →" and links to `/hive`. That page curre
 
 ## What the Scout Should Focus On Next
 
-**Priority: Decision tree pipeline integration — Phase 1**
+## What the Scout Should Focus On Next
+
+**Priority: Pipeline Phase 2 — failure detection and fix-task creation**
 
 **Target repo:** hive
 
-**Why now:** The Director mandated "engine before paint" in commit `e4643be`. Iterations 302–308 built the prerequisite diagnostic infrastructure (PhaseEvent, appendDiagnostic, diagnostics.jsonl, PM reads failures). The foundation is ready. The decision tree engine already exists at `eventgraph/go/pkg/decision/` (tree.go, evaluate.go, evolve.go) and is already imported in `pkg/runner/runner.go` (line 17) for `TokenUsage`. The pipeline is still a sequential for-loop. Failures don't trigger branching. Root causes don't become tasks. Until this is wired, the PM optimizes blind.
+**Why now:** Phase 1 is complete (PipelineTree exists, phases wired, diagnostics.jsonl written on failure, PM reads failures). But `PipelineTree.Execute` always succeeds — the phase wrappers return `nil` unconditionally. The comment in `pipeline_tree.go` says this explicitly: "Real failure detection is Phase 2 work once the phase methods propagate errors up." Without detection, the pipeline silently swallows failures and keeps running. The feedback loop is broken at the last mile.
 
 **What exists (do NOT rebuild):**
-- `eventgraph/go/pkg/decision/` — tree.go, evaluate.go, evolve.go, tests. Complete.
-- `pkg/runner/diagnostic.go` — PhaseEvent struct, appendDiagnostic(). Complete.
-- `pkg/runner/runner.go` — already imports `decision` package (line 17), runTick dispatches by role.
+- `pkg/runner/pipeline_tree.go` — PipelineTree.Execute, Phase struct. Phases return nil.
+- `pkg/runner/diagnostic.go` — appendDiagnostic(), PhaseEvent. Already called from workTask and runArchitect on failure.
+- `pkg/runner/diagnostic_test.go` — covers appendDiagnostic.
+- `pkg/runner/pipeline_tree_test.go` — tests tree failure path.
+- `pkg/api/client.go` — APIClient with CreateTask, CommentTask etc.
 
-**What to build (Phase 1 — minimum viable decision tree):**
+**What the gap is:** The phase wrappers in `NewPipelineTree` all look like `func(ctx context.Context) error { r.runScout(ctx); return nil }`. They never return an error. So even when runBuilder calls `r.appendDiagnostic(PhaseEvent{...})` internally, Execute doesn't know.
 
-1. **`pkg/runner/pipeline_tree.go`** — define a `PipelineTree` that models one pipeline cycle as a decision tree:
-   - Root node: "run-cycle"
-   - Phase nodes: scout, architect, builder, critic — each as a `DecisionNode` with:
-     - Success condition: `PhaseEvent.Outcome == "success"`
-     - Failure branch: emit PhaseEvent via `appendDiagnostic`, create a fix task via APIClient
-   - Wire existing `runScout`, `runArchitect`, `runBuilder(ctx, task)`, `runCritic` calls as leaf actions
+**What to build (3 focused changes):**
 
-2. **Update `runTick` in `runner.go`** — replace the bare `switch r.cfg.Role` for the `"pipeline"` role with `PipelineTree.Execute(ctx)`. Keep existing single-role dispatch untouched (scout/builder/critic still work standalone for `--role` flags).
+1. **`pkg/runner/diagnostic.go`** — add `countDiagnostics(hiveDir string) int` that returns the current line count of `loop/diagnostics.jsonl`. Returns 0 if file doesn't exist. This is the failure signal.
 
-3. **`pkg/runner/pipeline_tree_test.go`** — one test: build a minimal tree with a stub phase that returns failure, verify appendDiagnostic writes an entry to diagnostics.jsonl.
+2. **`pkg/runner/pipeline_tree.go`** — update `Execute` to detect failures:
+   - Before each phase: snapshot `countDiagnostics(pt.cfg.HiveDir)`
+   - Call `phase.Run(ctx)` as before
+   - After: if `phase.Run` returned error OR diagnostic count increased → failure detected
+   - On failure: call `pt.cfg.APIClient.CreateTask(pt.cfg.SpaceSlug, api.CreateTaskRequest{Title: "Fix: " + phase.Name + " phase failed", Priority: "high"})` to create a fix task on the board, then return the error
+   - (Keep the existing appendDiagnostic call in Execute for tree-level failures)
 
-**Scope boundary:** Phase 1 is wire-up, not replacement. Don't refactor the existing role handlers. Don't touch cmd/hive. Don't add the `evolve.go` pattern-detection yet — that's Phase 2. Just: tree orchestrates phases, failures emit diagnostics, one test proves it.
+3. **`pkg/runner/pipeline_tree_test.go`** — extend the existing test (or add a new one):
+   - Verify that when a phase's Run func appends a diagnostic (simulating internal failure), Execute returns an error
+   - Verify that when a phase's Run func returns an error directly, Execute also fails
+   - Mock or stub APIClient.CreateTask to verify it was called with the right title
+
+**Scope boundary:** Don't change signatures of `runScout`, `runBuilder`, `runArchitect`, `runCritic` — they remain void. The detection mechanism works by watching the diagnostics file, not by propagating errors from those methods. Don't touch cmd/hive. Don't add pattern detection or evolve.go yet.
 
 **Done criteria:**
 - `go build ./...` passes
-- `go test ./pkg/runner/...` passes (including the new tree test)
-- `runTick` for `role == "pipeline"` uses the decision tree, not a bare sequential call
-- A failed phase writes a PhaseEvent to diagnostics.jsonl
+- `go test ./pkg/runner/...` passes (including updated tree tests)
+- A simulated phase failure (diagnostic appended mid-phase) causes Execute to return an error AND creates a "Fix: [phase]" task on the board
+- The pipeline loop doesn't spin on a broken phase — it hands off to the builder via a fix task
