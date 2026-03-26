@@ -1,6 +1,11 @@
 package runner
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
@@ -141,5 +146,62 @@ func TestExtractSummary(t *testing.T) {
 	got := extractSummary(long)
 	if len(got) != 500 {
 		t.Errorf("long string should be truncated to 500, got %d", len(got))
+	}
+}
+
+func TestCritiqueArtifactWritten(t *testing.T) {
+	// Set up a minimal git repo with two commits so hash~1 is valid.
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+
+	// Initial commit (so hash~1 exists for the builder commit).
+	if err := os.WriteFile(filepath.Join(repoDir, "init.txt"), []byte("init"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "initial")
+
+	// Builder commit to review.
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "[hive:builder] Add feature")
+
+	// Get the commit hash.
+	hashCmd := exec.Command("git", "log", "--format=%H", "-1")
+	hashCmd.Dir = repoDir
+	hashOut, err := hashCmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	hash := strings.TrimSpace(string(hashOut))
+
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+
+	r := New(Config{
+		HiveDir:  hiveDir,
+		RepoPath: repoDir,
+		Provider: &mockProvider{response: "Looks good.\n\nVERDICT: PASS"},
+	})
+
+	r.reviewCommit(context.Background(), commit{hash: hash, subject: "[hive:builder] Add feature"})
+
+	data, err := os.ReadFile(filepath.Join(hiveDir, "loop", "critique.md"))
+	if err != nil {
+		t.Fatalf("critique.md not written: %v", err)
+	}
+	if !strings.Contains(string(data), "PASS") {
+		t.Errorf("critique.md does not contain PASS:\n%s", string(data))
 	}
 }

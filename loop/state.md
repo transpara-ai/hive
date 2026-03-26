@@ -503,80 +503,25 @@ Roles (`KindRole`) and Teams (`KindTeam`) are entity kinds with no membership mo
 
 ## What the Scout Should Focus On Next
 
-## What the Scout Should Focus On Next
+**Close the pipeline feedback loop — artifact writes + daemon branch hygiene**
 
-**Priority: CRITICAL — PR Workflow, iteration 4 of the same gap. This directive is a hard stop.**
+The pipeline has a silent correctness problem: the Reflector is blind (reads empty build.md and critique.md because neither the Builder nor the Critic write them), and the daemon accumulates branch drift (each PRMode cycle starts from the previous feature branch instead of main).
 
-**Target repo:** `hive`
+**Target repo:** hive
 
-**Context:** The PR workflow has been deferred in iterations 283, 285, and 286. In each cycle, the Builder shipped other hive infrastructure instead. That infrastructure (daemon, budget tracker, error recovery, multi-repo flag) is done and good. The PR workflow remains completely unimplemented. There is no competing infrastructure work — the daemon runs, the budget tracks, the loop recovers from errors. The only open gap is PR workflow.
+**Why now:** PRMode just shipped. The daemon is now running (or will run) with PRMode. Without artifact writes, the Reflector compounds nothing. Without the branch reset, the second and third PRMode cycles create PRs that include all prior iterations' commits — the diffs become unusable for review and the PRs pile up wrong.
 
-**This iteration has exactly one outcome:** PR workflow ships, OR a specific error message (not a reason, not a scope reduction — an actual error string) is documented in loop/build.md explaining what blocked it.
+**Tasks for the Scout to create:**
 
----
+1. **Builder writes loop/build.md after DONE** (`pkg/runner/runner.go`, `workTask()`)
+   After a successful build, write a short summary to `loop/build.md`: task title, commit hash (from `git log -1 --format=%H`), cost, duration. Overwrite on each call. The Reflector reads this artifact — without it, the ZOOM and COVER sections are always empty. One test: `TestBuildArtifactWritten` — mock a DONE action and verify `loop/build.md` is created with the task title.
 
-**Task 1 — Fix critic title compounding** (`pkg/runner/critic.go:118`)
+2. **Critic writes loop/critique.md after review** (`pkg/runner/critic.go`, `reviewCommit()`)
+   After `Reason()` returns, write the full content to `loop/critique.md`. Overwrite on each call (last review wins — matches the loop's one-iteration artifact pattern). Include: commit hash, verdict, full analysis. One test: `TestCritiqueArtifactWritten` — verify the file contains the verdict string after a review.
 
-The current line:
-```go
-title := fmt.Sprintf("Fix: %s", c.subject)
-```
+3. **Daemon resets to main before each cycle** (`cmd/hive/main.go`, `runDaemon()`)
+   At the start of each daemon cycle, when PRMode is enabled and the active repo is not on main, checkout main and pull: `git fetch origin && git checkout main && git pull origin main`. Log the branch before and after. Without this, the second cycle's feature branch starts from the first cycle's feature branch HEAD, making PRs include N prior iterations' commits. One test: add `TestBranchResetOnDaemonCycle` to `pkg/runner/runner_test.go` verifying `buildBranchName` returns empty string when PRMode=false.
 
-Replace with:
-```go
-base := strings.TrimPrefix(c.subject, "Fix: ")
-title := fmt.Sprintf("Fix: %s", base)
-```
+**Why this matters:** The loop is the product. The Reflector's compounding knowledge is what makes the hive smarter over time. If build.md and critique.md are always empty, every reflection says "no artifacts — nothing to reflect on." And if PRMode creates stacked branches, each PR review is impossible — the diff includes everything since the first build, not just the current change.
 
-Add `"strings"` to imports if not present. This is a one-line fix. It is the first task because it is trivial and has caused visible noise in every commit since iteration 226.
-
-**Task 2 — Add `PRMode bool` to `Config` struct** (`pkg/runner/runner.go`)
-
-Find the `Config` struct. Add `PRMode bool`. No other changes to this struct.
-
-**Task 3 — Add `--pr` flag** (`cmd/hive/main.go`)
-
-Find where other bool flags (`--yes`, `--daemon`, `--one-shot`) are defined. Add:
-```go
-flag.BoolVar(&cfg.PRMode, "pr", false, "use PR workflow instead of direct push to main")
-```
-~3 lines. Default false.
-
-**Task 4 — Feature branch and PR creation** (`pkg/runner/runner.go` or new `pkg/runner/pr.go`)
-
-When `cfg.PRMode` is true:
-
-(a) Before the Builder's Operate call (when a task is picked up and a branch doesn't exist yet), create a feature branch:
-```
-git checkout -b feat/YYYYMMDD-{task-slug}
-```
-where `task-slug` is the task title lowercased, spaces→hyphens, truncated to 40 chars.
-
-(b) After successful build verification, push to the feature branch instead of main:
-```
-git push origin feat/YYYYMMDD-{task-slug}
-```
-
-(c) After Critic LGTM (`case "PASS"` in critic.go), create the PR:
-```
-gh pr create --title "{task title}" --body "{task description}" --head feat/YYYYMMDD-{task-slug} --base main
-```
-
-If any of these git/gh commands fail, capture the exact error and log it — do NOT silently eat it.
-
-**Task 5 — Tests** (`pkg/runner/pr_test.go` or `pkg/runner/runner_test.go`)
-
-Three tests:
-1. `TestFeatureBranchName`: call the branch-naming function with a task title, assert format matches `feat/YYYYMMDD-...`
-2. `TestPRModeDisabled`: when `PRMode=false`, no branch creation or PR calls occur
-3. `TestTitleStripping`: `strings.TrimPrefix("Fix: Fix: foo", "Fix: ")` → `"Fix: foo"` (verifies the critic fix)
-
----
-
-**If gh CLI is unavailable:** Run `which gh` and `gh --version`. If either fails, that is the blocker. Document the exact output in loop/build.md and create a task: "Install gh CLI and configure auth in runner environment." Do not silently skip PR creation and call the task done.
-
-**If git auth fails:** Capture the exact git error. Document it. Same: create a task for the exact credential issue.
-
-**Definition of done:** `go test ./pkg/runner/...` passes including the 3 new tests. `--pr` flag is accepted by `cmd/hive`. Title compounding is fixed. If the full PR integration requires an environment fix that can't be done in this iteration, the blocker is documented with an exact error string in loop/build.md.
-
-**Do not create tasks for anything else this iteration.** No hive dashboard tasks, no daemon improvements, no pipeline fixes. One gap, four tasks, one test file.
+**Invariants:** VERIFIED (tests for each artifact write), EXPLICIT (Reflector's dependency on build.md and critique.md must be visible in the code that produces them).

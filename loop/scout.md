@@ -1,73 +1,59 @@
-Now let me write the Scout report. Based on my review:
+Perfect. I now have a clear picture of what's been shipped and what's missing. Let me write the Scout report.
 
 ---
 
-## SCOUT REPORT — Iteration 287
+## SCOUT REPORT — Iteration 289
 
-**Gap:** PR workflow infrastructure missing — blocking external repository support and the Lovatts engagement. This is the fourth consecutive iteration the same gap has been identified.
+**Gap:** Pipeline feedback loop is broken — Builder and Critic don't write artifacts, daemon accumulates branch drift when PRMode is enabled
 
 **Evidence:**
 
-1. **Gap persists across four cycles:**
-   - Iteration 283: Scout identified PR workflow gap
-   - Iteration 284-285: Builder executed other hive infrastructure (daemon, budget tracking, error recovery)
-   - Iteration 286: Scout re-identified PR workflow as CRITICAL blocker
-   - Iteration 287 (now): Same gap — no implementation, no deferrals documented
+1. **Builder never writes loop/build.md**
+   - `pkg/runner/runner.go:254-342` — `workTask()` handles DONE action: verifies build (line 294), commits+pushes (line 314), closes task (line 322)
+   - After all this, returns without writing any artifact
+   - Loop should track what was built; Reflector reads `loop/build.md` to write ZOOM/COVER sections
+   - Currently Reflector always sees empty file
 
-2. **Code verification confirms zero implementation:**
-   - `pkg/runner/runner.go` — Config struct (line 45-60) has NO `PRMode` field
-   - `cmd/hive/main.go` — no `--pr` flag registered in flag parsing
-   - No feature branch creation logic anywhere in pkg/runner/
-   - No `gh pr create` integration in codebase
-   - No tests for PR workflow
+2. **Critic never writes loop/critique.md**
+   - `pkg/runner/critic.go:74-141` — `reviewCommit()` calls Reason() (line 99), parses verdict (line 111), creates fix tasks or PRs (lines 115-139)
+   - After all this, returns without writing the review artifact
+   - Loop should track what was reviewed; Reflector reads `loop/critique.md` for analysis
+   - Currently Reflector always sees empty file
 
-3. **Title compounding bug still active:**
-   - `pkg/runner/critic.go:118` — `title := fmt.Sprintf("Fix: %s", c.subject)` with no deduplication
-   - When c.subject is already "Fix: [hive:builder] Add error recovery...", creates: "Fix: Fix: [hive:builder] Add error recovery..."
-   - Visible in production commits: 6a8c5a3, b74e613, 5f85ef8 with `[hive:builder] Fix: [hive:builder] Fix: ...` pattern
-   - Never fixed despite being identified in iteration 283
+3. **Daemon never resets to main when PRMode is enabled**
+   - `cmd/hive/main.go:379-438` — `runDaemon()` loops through cycles calling `runPipeline()` (line 398)
+   - No git branch reset between cycles
+   - When PRMode is enabled: first cycle creates feature branch from main ✓, second cycle creates feature branch from previous feature branch ✗
+   - This stacks commits across cycles; PRs include all prior iterations' diffs, making reviews impossible
 
-4. **PM directive explicitly marked this a "hard stop":**
-   - state.md line 508-514: "This iteration has exactly one outcome: PR workflow ships, OR a specific error message explaining what blocked it"
-   - No scope reduction permitted without explicit PM approval
-   - "iteration 4 of the same gap" — pattern recognition applied
-
-5. **Business impact — revenue blocked:**
-   - Lovatts contract requires code review gates before autonomous merge
-   - Cannot credibly offer "company-in-a-box" to external clients without PR workflow
-   - Current autonomous pipeline (daemon + builder + critic) ships code directly to main — unsuitable for client repos
+4. **State.md explicitly documents this as the next directive**
+   - Line 506-527: "Close the pipeline feedback loop — artifact writes + daemon branch hygiene"
+   - Three tasks listed with exact file locations and test requirements
+   - This is post-PRMode — PRMode shipped (recent commits), now the feedback loop needs closing
 
 **Impact:**
 
-- **Revenue:** Lovatts engagement cannot proceed without PR workflow (requires human review gate before autonomous merge)
-- **Product positioning:** Cannot claim "autonomous external repo support" without review gates  
-- **Velocity:** 4 iterations of deferral + 3 iterations of prerequisite work = $3+ autonomous budget spent, gap unchanged
-- **System health:** Escalation mechanism works (Scout catches it), but no enforcement converts detection to action (Lessons 71: escalations advisory only)
+- **Loop compounding:** Without artifact writes, each Reflector cycle says "no data to reflect on." The loop's knowledge doesn't compound. Lesson 43 violation: "NEVER skip artifact writes."
+- **PR review:** Without daemon branch reset, PRMode cycles create unusable PRs. Reviewer sees diffs from iterations 1+2+3, not just iteration 3. Cannot credibly offer code review gates to external clients (Lovatts engagement blocker).
+- **System health:** Lesson 36: "The loop can only catch errors it has checks for." Loop can't check what it doesn't measure. Artifact writes make measurement visible.
 
 **Scope:**
 
-The PM directive (state.md line 516-568) specifies Tier 1 exactly:
-
-1. **Fix critic title compounding** (`pkg/runner/critic.go:118`) — strip "Fix: " prefix before adding it
-2. **Add `PRMode bool` to Config struct** (`pkg/runner/runner.go`) — one field, no other changes
-3. **Add `--pr` flag** (`cmd/hive/main.go`) — register boolean flag, default false
-4. **Feature branch creation** — checkout `-b feat/YYYYMMDD-{task-slug}` when PRMode active
-5. **Push to feature branch** — when build succeeds, push to feature branch instead of main
-6. **PR creation on Critic LGTM** — after Critic PASS verdict, create PR with `gh pr create`
-7. **Tests** — 3 smoke tests (title dedup, branch naming, PRMode toggle)
-
-All 7 items are defined. All have code locations. No ambiguity.
+Hive repo, three files:
+1. `pkg/runner/runner.go` — workTask() DONE branch (line 291-327)
+2. `pkg/runner/critic.go` — reviewCommit() end (line 135-140)  
+3. `cmd/hive/main.go` — runDaemon() cycle start (line 394-398)
 
 **Suggestion:**
 
-**Implement Tier 1 in full this iteration.** This is the fourth cycle of the same gap with explicit PM directive ("hard stop"). The scope is bounded, code locations are specific, and tests are pre-defined. 
+Implement all three artifact writes + branch reset before next autonomous pipeline run. These are hard blockers for PRMode as external-repo support. The gaps are:
 
-The infrastructure prerequisites (daemon, budget tracking, error recovery) are complete and running. They proved the autonomous loop works. This gap is the only remaining blocker to external repo support. Building it closes the capability gap and unlocks revenue.
+1. **Builder artifact** — After line 326 (task DONE log), write `loop/build.md` with task title, commit hash (`git log -1 --format=%H`), cost ($), duration
+2. **Critic artifact** — After line 111 (verdict parsed), write `loop/critique.md` with hash, verdict, and response content
+3. **Daemon branch reset** — Before line 398 (runPipeline call), when PRMode is enabled: `git fetch origin && git checkout main && git pull origin main`
 
-If blocked during implementation, document the exact error in `loop/build.md` (as PM directive requires).
-
-Human decision: The directive's "hard stop" language indicates this is non-negotiable. Builder should not reduce scope or defer without explicit approval from PM/Matt.
+Tests are pre-defined in state.md lines 517-523.
 
 ---
 
-**Ready for Builder phase?**
+**Ready for Architect phase?**

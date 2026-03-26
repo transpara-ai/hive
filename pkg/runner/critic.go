@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -110,6 +112,13 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	content := resp.Content()
 	verdict := parseVerdict(content)
 	log.Printf("[critic] verdict: %s", verdict)
+
+	// Write critique artifact.
+	critiquePath := filepath.Join(r.cfg.HiveDir, "loop", "critique.md")
+	critiqueContent := fmt.Sprintf("# Critique\n\nCommit: %s\nVerdict: %s\n\n%s\n", c.hash, verdict, content)
+	if writeErr := os.WriteFile(critiquePath, []byte(critiqueContent), 0644); writeErr != nil {
+		log.Printf("[critic] write critique artifact error: %v", writeErr)
+	}
 
 	switch verdict {
 	case "REVISE":
