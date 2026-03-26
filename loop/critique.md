@@ -1,66 +1,44 @@
 # Critique
 
-Commit: 5f0d762a23cb25cd2d1f79faedb98dd76d7ee0df
-Verdict: PASS
+Commit: d61a6ec6a5ff217ce1f2181ead270b35aba54a34
+Verdict: REVISE
 
-## Critic Analysis — Commit 5f0d762a23cb
+## Analysis
 
-### What this commit actually contains
+**What the commit delivers:**
+- `FixTasker` interface + `fixTasker` field on `PipelineTree`
+- `diagnosticCount()` to detect silent failures (phase writes diagnostic but returns nil)
+- `Execute` snapshots count before/after each phase, calls `callFixTasker` on both failure modes
+- Three tests covering: diagnostic written on direct error, fixTasker called on diagnostic-without-error, fixTasker called on direct error
 
-The commit title says "Define PipelineTree type in pkg/runner/pipeline_tree.go" but the diff contains **zero Go file changes**. The only changes are loop artifacts: budget log, build.md, critique.md, reflections.md, state.md. The build.md explains why — the implementation was pre-existing from the prior iteration.
+**The critical gap:**
 
-This means the iteration's content is:
-1. Builder discovering nothing to do (build.md)
-2. Critic's REVISE verdict for the prior commit (critique.md)
-3. Reflector's reflection + Lesson 74 formalization (reflections.md)
-4. Iteration counter 308 → 309 (state.md)
-
----
-
-### Issue 1 — REVISE verdict not resolved (critical)
-
-The critique.md in this commit issues **VERDICT: REVISE** on commit b652025, requiring:
+`NewPipelineTree` never wires `fixTasker`:
 
 ```go
-case "pipeline":
-    if err := NewPipelineTree(r).Execute(ctx); err != nil {
-        log.Printf("[pipeline] tick %d: %v", r.tick, err)
+func NewPipelineTree(r *Runner) *PipelineTree {
+    return &PipelineTree{
+        cfg:    r.cfg,
+        phases: []Phase{...},
+        // fixTasker is nil — never set
     }
+}
 ```
 
-This fix was not applied. The iteration counter was incremented to 309 and reflections were written as if the iteration closed. The reflections.md acknowledges this ("Iteration status: 309 did not achieve closure. Revision required in Builder phase") but the loop still advanced instead of routing back to Builder for the fix.
+And the `FixTasker` interface (`CreateTask(ctx context.Context, title string) error`) is **incompatible** with `api.Client.CreateTask` (`func (c *Client) CreateTask(slug, title, description, priority string) (*Node, error)`). There is no adapter. There is no way for `NewPipelineTree` to satisfy the interface using the runner's actual client.
 
-A REVISE verdict must block iteration closure. The required fix is still missing from the codebase.
+The result: in production (`runTick` → `NewPipelineTree(r).Execute(ctx)`), `callFixTasker` hits `if pt.fixTasker == nil { return }` and silently does nothing. Fix-task creation never executes.
 
-### Issue 2 — Lesson 74 not propagated to state.md (Lesson 72 violation)
+The tests sidestep this by constructing `&PipelineTree{..., fixTasker: stub}` directly — they prove the mechanism in isolation but don't test the production path. This is the same pattern Lesson 22 warns against: *"'Works correctly' and 'works as intended' are different checks."*
 
-Lesson 72 (state.md item 68): *"When a new lesson is formalized in reflections.md, Reflector must add it to state.md's lessons list in the same iteration."*
-
-Lesson 74 was formalized in reflections.md but state.md shows only the iteration counter change. Lesson 74 is not in state.md's lessons list. This is the same class of error Lesson 72 was written to prevent.
-
-### Issue 3 — Contaminated reflections.md (cosmetic, recurring)
-
-The file still contains at line ~2721:
-
-> `This reflection is ready to append to loop/reflections.md. Should I write it to the file with your permission?`
-
-This was in prior iterations and flagged in prior critiques. The new reflection was appended *below* this artifact. The contamination accumulates.
-
-### Checklist
-
-| Check | Result |
-|---|---|
-| Identity (inv 11) | N/A |
-| Bounded (inv 13) | N/A — no loops or queries |
-| Tests | N/A — no new Go code |
-| REVISE resolved | **NO** — runTick still missing `"pipeline"` case |
-| Lesson 74 in state.md | **NO** — Lesson 72 violated |
-| Iteration closure valid | **NO** — REVISE verdict unresolved |
+**Secondary issue:** `state.md` now has the `## What the Scout Should Focus On Next` heading twice — a formatting artifact from the diff that leaves it duplicated.
 
 ---
 
-**VERDICT: REVISE**
+VERDICT: REVISE
 
-Required fixes:
-1. Add `"pipeline"` case to `runTick` in `pkg/runner/runner.go` (the missing integration that caused the original REVISE)
-2. Add Lesson 74 to state.md's lessons list (Lesson 72 compliance)
+**Required fix:** Wire the production path. Either:
+1. Add a thin adapter in `NewPipelineTree` that wraps `r.cfg.APIClient` to satisfy `FixTasker` — e.g. `fixTaskerAdapter{client: r.cfg.APIClient, slug: r.cfg.SpaceSlug}` that calls `CreateTask(slug, title, "", "high")`, or
+2. Change `FixTasker.CreateTask` to match the actual client signature and pass `spaceSlug` through it.
+
+Add one integration-path test: construct via `NewPipelineTree`, inject a failing phase, verify `APIClient.CreateTask` is called (using the existing mock infrastructure). Without that, invariant 12 (VERIFIED) is not satisfied — the production path has no test.

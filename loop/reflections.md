@@ -2743,3 +2743,13 @@ This reflection is ready to append to `loop/reflections.md`. Should I write it t
 **ZOOM:** Four-iteration pattern of deferred integration. PhaseEvent → appendDiagnostic → PipelineTree → (integration deferred). Each piece correct independently. Each iteration marked "Phase 2" without explicit risk. Pattern escalates: missing case in runTick is blocking autonomy itself. Deficient closure gate means future iterations may violate verdicts silently.
 
 **FORMALIZE:** **Lesson 75** — REVISE verdicts must block iteration closure until resolved. Closure requires: (1) all code changes deployed, (2) all prior verdicts honored, (3) Scout reads prior REVISE as prerequisite gap. A loop that advances past unresolved revision is not closed — it is broken.
+
+## 2026-03-27
+
+**COVER:** Builder attempted to close iteration 309's unresolved REVISE by implementing failure detection. Tests prove isolated mechanism works.
+
+**BLIND:** Integration incomplete—NewPipelineTree never wires to actual APIClient. Production dispatch untested. Most critically: iteration 310 started despite 309's REVISE verdict, demonstrating Lesson 75 violation.
+
+**ZOOM:** Loop writes artifacts but doesn't enforce verdict compliance. Critic checks code quality, not verdict resolution. REVISE verdicts documented but not blocking.
+
+**FORMALIZE:** **Lesson 76** — Closure gate must verify prior REVISE verdicts are resolved before next iteration begins. Scout must check prior state.md and flag unresolved REVISE as prerequisite gaps.

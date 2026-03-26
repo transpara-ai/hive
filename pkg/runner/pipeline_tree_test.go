@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lovyou-ai/hive/pkg/api"
 )
 
 type stubFixTasker struct {
@@ -92,6 +96,46 @@ func TestPipelineTreeFixTaskerCalledOnDiagnosticWithNilReturn(t *testing.T) {
 	const wantTitle = "Fix: scout phase failed"
 	if stub.calls[0] != wantTitle {
 		t.Errorf("CreateTask title = %q, want %q", stub.calls[0], wantTitle)
+	}
+}
+
+// TestNewPipelineTreeWiresFixTasker verifies the production path: NewPipelineTree
+// sets a non-nil fixTasker when the runner has an APIClient. Without this,
+// callFixTasker silently skips task creation on every phase failure.
+func TestNewPipelineTreeWiresFixTasker(t *testing.T) {
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+	client := api.New("http://localhost", "test-key")
+	r := New(Config{HiveDir: hiveDir, APIClient: client, SpaceSlug: "hive"})
+
+	pt := NewPipelineTree(r)
+
+	if pt.fixTasker == nil {
+		t.Fatal("NewPipelineTree: fixTasker is nil when APIClient is set — fix tasks will never be created")
+	}
+}
+
+// TestClientFixTaskerCallsAPI verifies the adapter forwards CreateTask to the
+// api.Client with the right slug and title, bridging the interface mismatch.
+func TestClientFixTaskerCallsAPI(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"op":"intend","node":{"id":"new-1","kind":"task","title":"Fix: scout phase failed","created_at":"","updated_at":""}}`))
+	}))
+	defer srv.Close()
+
+	ft := &clientFixTasker{
+		client: api.New(srv.URL, "test-key"),
+		slug:   "hive",
+	}
+
+	if err := ft.CreateTask(context.Background(), "Fix: scout phase failed"); err != nil {
+		t.Fatalf("CreateTask returned error: %v", err)
+	}
+	if !strings.Contains(gotPath, "/hive/") {
+		t.Errorf("request path %q does not contain space slug", gotPath)
 	}
 }
 

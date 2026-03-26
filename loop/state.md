@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 310, 2026-03-27.
+Last updated: Iteration 311, 2026-03-27.
 
 ## Current System State
 
@@ -541,8 +541,6 @@ The landing page says "Watch it build →" and links to `/hive`. That page curre
 
 **Ship as:** `iter 295: /hive live dashboard — pipeline activity visible to all`
 
-
-## What the Scout Should Focus On Next
 
 ## What the Scout Should Focus On Next
 

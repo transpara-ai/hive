@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/lovyou-ai/hive/pkg/api"
 )
 
 // Phase is a single pipeline phase that can succeed or fail.
@@ -26,11 +28,26 @@ type PipelineTree struct {
 	fixTasker  FixTasker
 }
 
+// clientFixTasker adapts an api.Client to the FixTasker interface.
+type clientFixTasker struct {
+	client *api.Client
+	slug   string
+}
+
+func (f *clientFixTasker) CreateTask(_ context.Context, title string) error {
+	_, err := f.client.CreateTask(f.slug, title, "", "high")
+	return err
+}
+
 // NewPipelineTree creates a PipelineTree wired to r's phase implementations.
 // Each phase delegates to the corresponding Runner method. Those methods do not
 // return errors today; the wrappers always succeed. Real failure detection is
 // Phase 2 work once the phase methods propagate errors up.
 func NewPipelineTree(r *Runner) *PipelineTree {
+	var ft FixTasker
+	if r.cfg.APIClient != nil {
+		ft = &clientFixTasker{client: r.cfg.APIClient, slug: r.cfg.SpaceSlug}
+	}
 	return &PipelineTree{
 		cfg: r.cfg,
 		phases: []Phase{
@@ -39,6 +56,7 @@ func NewPipelineTree(r *Runner) *PipelineTree {
 			{Name: "builder", Run: func(ctx context.Context) error { r.runBuilder(ctx); return nil }},
 			{Name: "critic", Run: func(ctx context.Context) error { r.runCritic(ctx); return nil }},
 		},
+		fixTasker: ft,
 	}
 }
 
