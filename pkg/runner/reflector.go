@@ -146,7 +146,15 @@ func (r *Runner) runReflector(ctx context.Context) {
 			raw = raw[:500]
 		}
 		log.Printf("[reflector] empty sections in response: %s", raw)
-		r.appendDiagnostic(PhaseEvent{Phase: "reflector", Outcome: "empty_sections"})
+		usage := resp.Usage()
+		r.appendDiagnostic(PhaseEvent{
+			Phase:        "reflector",
+			Outcome:      "empty_sections",
+			CostUSD:      usage.CostUSD,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+		})
+		return
 	}
 
 	// Append to reflections.md.

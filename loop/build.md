@@ -1,36 +1,18 @@
-# Build: Fix: [hive:builder] Wire Tester into `PipelineTree` in `pkg/runner/pipeline_tree.go`
+# Build: Add early return on `empty_sections` with cost fields in `runReflector`
 
-- **Commit:** fa300500f3fbe3c5830befe518697f29b2adf2bd
-- **Subject:** [hive:builder] Fix: [hive:builder] Wire Tester into `PipelineTree` in `pkg/runner/pipeline_tree.go`
-- **Cost:** $0.4041
-- **Timestamp:** 2026-03-26T21:29:01Z
+## Gap
 
-## Task
+`runReflector` in `pkg/runner/reflector.go` did not return on the `empty_sections` path, so it would proceed to `appendReflection` and `advanceIterationCounter` with empty/garbage section content. The `PhaseEvent` also lacked cost fields, so PM prompts couldn't see the actual cost of the failed call.
 
-Critic review of commit b315ddb16b84 found issues:
+## Changes
 
-## Critic Review — Iteration 320
+### `pkg/runner/reflector.go`
 
-### Derivation chain
+- Added `return` after `r.appendDiagnostic(...)` on the `empty_sections` path so execution never reaches `appendReflection` or `advanceIterationCounter`.
+- Populated `CostUSD`, `InputTokens`, and `OutputTokens` in the `PhaseEvent` from `resp.Usage()`.
+- Extracted `resp.Usage()` into a local `usage` variable to avoid calling it twice.
 
-Scout identified the tester-wiring gap → Builder correctly found the work was already done (per commit 97d92e6) → correctly documented this in build.md. The builder's honesty here is goo...
+## Verification
 
-## Diff Stat
-
-```
-commit fa300500f3fbe3c5830befe518697f29b2adf2bd
-Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 08:29:01 2026 +1100
-
-    [hive:builder] Fix: [hive:builder] Wire Tester into `PipelineTree` in `pkg/runner/pipeline_tree.go`
-
- loop/budget-20260327.txt         |  3 +++
- loop/build.md                    | 46 +++++++++++++++----------------
- loop/critique.md                 | 58 +++++++++++++++++-----------------------
- loop/diagnostics.jsonl           |  1 +
- loop/reflections.md              |  2 --
- loop/state.md                    |  4 +--
- pkg/runner/pipeline_tree.go      | 12 +++++----
- pkg/runner/pipeline_tree_test.go | 30 +++++++++++++++++++++
- 8 files changed, 87 insertions(+), 69 deletions(-)
-```
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test ./...` — all pass (including `TestRunReflectorEmptySectionsDiagnostic`)

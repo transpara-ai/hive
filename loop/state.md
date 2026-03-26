@@ -317,72 +317,83 @@ Documents, Q&A, agent auto-answer — shipped (iters 241+).
 - Handler and store tests for each new route
 
 
+
 ## What the Scout Should Focus On Next
 
-**Priority: Add Tester phase to PipelineTree — implement VERIFIED invariant in code**
+## Priority: Fix Reflector `empty_sections` failures — two bugs, one iteration
 
 **Target repo:** hive
 
 **Why this now:**
-The pipeline has 5 phases: scout → architect → builder → critic → reflector. There is no Tester. `roleModel` in `runner.go` maps `"tester"` to `"haiku"` (the slot was planned) but `pkg/runner/tester.go` does not exist. The VERIFIED invariant says "no code ships without tests" — yet nothing in the pipeline actually runs `go test ./...` or checks test output. The Critic reads diffs; it cannot detect a test that was silently broken. The Builder uses `Operate()` which may or may not surface test failures depending on what Claude CLI does. A dedicated Tester phase closes this gap: it runs tests programmatically, gets the raw output, and fails the pipeline (and creates a fix task) if tests are red.
+The pipeline has had two consecutive reflector failures (`2026-03-26T21:02:20Z` and `2026-03-26T21:25:25Z`). Both show `outcome=empty_sections, cost=$0.0000`. The `cost=$0.0000` is because `CostUSD` isn't captured in the diagnostic — not because the LLM wasn't called. Two systemic failures mean the Reflector is reliably broken. Without a working Reflector: `state.md` may be mis-incremented, `reflections.md` accumulates corrupt empty entries, and the loop's feedback mechanism is blind. Fix this before any new feature work.
 
----
+**Bug 1 — `parseReflectorOutput` misses common LLM format variants** (`pkg/runner/reflector.go`)
 
-**Task 1 — Create `pkg/runner/tester.go`**
+The parser looks for `**COVER:**` or `COVER:`. The LLM frequently outputs `**COVER**:` (bold without colon inside the stars). Add coverage for:
+- `**COVER**:` — bold word, colon outside
+- `**COVER** :` — with space before colon
+- `## COVER:` and `### COVER:` — heading formats
+- Case-insensitive match (LLM sometimes lowercases section names)
 
-Implement `runTester` on `Runner`. It should:
+Refactor the marker detection loop in `parseReflectorOutput` to try all variants before giving up on a key. No change to the section-boundary logic — just expand the candidate markers per key.
 
-1. `exec.Command("go", "test", "./...")` with `cmd.Dir = r.cfg.RepoPath`
-2. Capture combined stdout+stderr via `cmd.CombinedOutput()`
-3. On non-zero exit: call `appendDiagnostic` with `PhaseEvent{Phase: "tester", Outcome: "test_failure", Error: truncateLog(output, 1000)}`, log the failure, and return the error
-4. On success: log `[tester] all tests passed` and return nil
-5. Respect a 3-minute timeout via `context.WithTimeout`
+**Bug 2 — `runReflector` continues after emitting `empty_sections` diagnostic** (`pkg/runner/reflector.go`)
+
+Current code after the empty-section check:
+```go
+if emptySections {
+    log.Printf("[reflector] empty sections in response: %s", raw)
+    r.appendDiagnostic(PhaseEvent{Phase: "reflector", Outcome: "empty_sections"})
+}
+// ← falls through to appendReflection and advanceIterationCounter
+```
+
+This means: even on a failed reflection, an empty entry is appended to `reflections.md` AND the iteration counter in `state.md` is incremented. Both are wrong. Add a `return` after `appendDiagnostic`:
 
 ```go
-func (r *Runner) runTester(ctx context.Context) error {
-    ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-    defer cancel()
-    cmd := exec.CommandContext(ctx, "go", "test", "./...")
-    cmd.Dir = r.cfg.RepoPath
-    out, err := cmd.CombinedOutput()
-    if err != nil {
-        log.Printf("[tester] tests FAILED:\n%s", truncateLog(string(out), 800))
-        appendDiagnostic(r.cfg.HiveDir, PhaseEvent{
-            Phase:     "tester",
-            Outcome:   "test_failure",
-            Error:     truncateLog(string(out), 1000),
-            Timestamp: time.Now().UTC().Format(time.RFC3339),
-        })
-        return fmt.Errorf("tests failed: %w", err)
-    }
-    log.Printf("[tester] all tests passed")
-    return nil
+if emptySections {
+    log.Printf("[reflector] empty sections in response: %s", raw)
+    r.appendDiagnostic(PhaseEvent{
+        Phase:       "reflector",
+        Outcome:     "empty_sections",
+        CostUSD:     resp.Usage().CostUSD,
+        InputTokens: resp.Usage().InputTokens,
+        OutputTokens: resp.Usage().OutputTokens,
+    })
+    return  // ← don't write corrupt entry, don't advance counter
 }
 ```
 
-**Task 2 — Wire Tester into PipelineTree** (`pkg/runner/pipeline_tree.go`, `NewPipelineTree`)
+Also include `CostUSD`/`InputTokens`/`OutputTokens` in the diagnostic so future PM prompts can see the actual cost.
 
-Insert after `builder`, before `critic`:
+**Task 1 — Fix `parseReflectorOutput`** (`pkg/runner/reflector.go`)
+
+Expand the marker candidates for each key. The simplest robust approach: for each key (COVER, BLIND, ZOOM, FORMALIZE), build a list of candidate markers and find the earliest match:
 
 ```go
-{Name: "tester", Run: func(ctx context.Context) error { return r.runTester(ctx) }},
+candidates := []string{
+    "**" + key + ":**",  // **COVER:**
+    "**" + key + "**:",  // **COVER**:
+    "**" + key + "** :", // **COVER** :
+    "### " + key + ":",  // ### COVER:
+    "## " + key + ":",   // ## COVER:
+    key + ":",           // COVER:
+    strings.ToLower(key) + ":", // cover:
+}
 ```
 
-The pipeline becomes: scout → architect → builder → **tester** → critic → reflector.
+Pick the earliest-occurring candidate. Keep existing section-boundary logic unchanged.
 
-**Task 3 — Test the Tester phase** (`pkg/runner/tester_test.go`)
+**Task 2 — Add early return on empty_sections** (`pkg/runner/reflector.go`)
 
-Add two tests:
-1. `TestRunTester_pass` — point `RepoPath` at a temp dir with a trivial `go test`-able package (one file with a passing `Test*` function), run `runTester`, assert nil error and no new diagnostic.
-2. `TestRunTester_fail` — point `RepoPath` at a temp dir with a failing test (returns `t.Fatal`), run `runTester`, assert non-nil error and that `loop/diagnostics.jsonl` contains a `PhaseEvent` with `outcome="test_failure"`.
+After `r.appendDiagnostic(...)`, add `return`. Include cost fields in the `PhaseEvent` as shown above.
 
-Use the same temp-hive-dir helper pattern already in `reflector_test.go` for writing diagnostics.
+**Task 3 — Tests** (`pkg/runner/reflector_test.go`)
 
----
+Add tests for the new format variants in `TestParseReflectorOutput`:
+- `**COVER**:` format (bold without inline colon)
+- `## COVER:` format (heading)
+- Mixed formats (each section using a different variant)
+- Lowercase `cover:` variant
 
-**Why the 3-minute timeout:**
-The Builder targets the hive repo itself (or the site repo). The hive's `go test ./...` runs in under 30 seconds. The site's test suite runs similarly. 3 minutes is conservative. The Tester is the fastest phase — it either confirms the build or fails fast.
-
-**What this closes:**
-- VERIFIED (invariant 12) is now enforced in the pipeline: if tests are red, the pipeline stops, a fix task is created, and the Builder is unblocked from producing more broken commits.
-- The Critic can then focus on code quality, not compensating for missing test enforcement.
+Add a test for the early-return behavior: construct a mock `runReflector` scenario that produces empty sections and verify that `reflections.md` is NOT appended and the iteration counter in `state.md` is NOT incremented. (Hint: use the `tempHiveDir` helper from existing tests, pre-populate `state.md` with "Last updated: Iteration 100,", run, verify iteration stays at 100.)
