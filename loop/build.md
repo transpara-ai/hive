@@ -1,26 +1,23 @@
-# Build Report
+# Build Report — Iteration 291
 
-**Task:** Fix: [hive:builder] Critic writes loop/critique.md after review
-**Verdict:** False alarm — both the code and test already existed in commit 47ba066
+## What this build does
 
-## What Was Fixed
+Fixes two issues identified by the Critic in commit 0bf51a3:
 
-The Critic's REVISE verdict identified two issues:
-1. Scout report (loop/scout.md) falsely claimed "Critic never writes loop/critique.md" — the code at `pkg/runner/critic.go:116-121` was already writing the file
-2. `TestCritiqueArtifactWritten` was claimed missing — the test was present in `pkg/runner/runner_test.go:152-207` and passes
+1. **Planning noise removed from `loop/reflections.md`** — Two interactive planning sections ("Should I proceed?") were committed into the append-only permanent record. Both removed:
+   - Lines after the Iteration 288 reflection (the "What also needs updating:" block)
+   - Lines after the Iteration 289 reflection (the "What needs updating:" block + trailing empty iteration skeleton)
 
-## Changes Made
+2. **Lesson 68 added to `loop/state.md`** — The Iteration 289 reflection defined Lesson 68 ("Feedback loop infrastructure is a critical path blocker...") but never persisted it to the lessons section of state.md. Added as item 65 in the numbered list (Lesson 68 by name) after Lesson 67.
 
-- `loop/scout.md` — Corrected item 2: marked Critic artifact as FIXED, not missing
-- `loop/state.md` — Updated directive: marked Critic artifact item as DONE, updated preamble to reflect remaining gaps (Builder artifact + daemon branch reset only)
-- `loop/build.md` — This file (Builder artifact)
+## Files changed
+
+| File | Change |
+|------|--------|
+| `loop/reflections.md` | Removed two "Should I proceed?" planning sections + trailing empty iteration block |
+| `loop/state.md` | Added Lesson 68 after Lesson 67 in the lessons section |
 
 ## Verification
 
-- `go.exe build -buildvcs=false ./...` — passes (no compilation errors)
-- `go.exe test ./...` — all pass, including `TestCritiqueArtifactWritten`
-
-## Remaining Gaps (from state.md directive)
-
-1. Builder still doesn't write loop/build.md after DONE (`workTask()`, `runner.go`)
-2. Daemon still doesn't reset to main before each PRMode cycle (`runDaemon()`, `cmd/hive/main.go`)
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test ./...` — all pass

@@ -2542,14 +2542,6 @@ Human decision required (from Scout): **Should Tier 1 ship in iteration 285, or 
 
 **FORMALIZE:** **Lesson 73:** "Escalation enforcement requires Critic verification against scope, not just code review. When Scout escalates N items (blocking a revenue path), Critic must verify all N were delivered or explicitly flag the delta for next cycle. Passing partial delivery because 'the subset is well-built' defeats escalation closure. The loop's upstream detection (Scout) works; downstream verification (Critic) must match it. Without this, blocking gaps leak into next cycle disguised as 'separate scope.'"
 
----
-
-**What also needs updating:**
-- `loop/state.md` — update "Last updated: Iteration 288, 2026-03-27" (already correct)
-- Add new lesson 73 to state.md lessons section
-
-I need your permission to write these files. Should I proceed?
-
 ## 2026-03-27
 
 **COVER:** Scout identified three infrastructure gaps (Builder/Critic artifact writes, daemon branch reset for PRMode). Builder shipped code quality fix (title deduplication via `TrimPrefix`), verified PRMode config exists. Critic passed. Autonomous cycle completed end-to-end.
@@ -2560,11 +2552,3 @@ I need your permission to write these files. Should I proceed?
 
 **FORMALIZE:** **Lesson 68:** "Feedback loop infrastructure is a critical path blocker. When Scout identifies that measurement systems are missing (artifact writes, feedback channels), Critic must verify these are implemented before marking DONE. Absence of feedback infrastructure is a system defect, not a code quality issue. The loop depends on measurement to reflect on itself (Lesson 43). Without artifacts, the loop is blind to its own operation."
 
----
-
-**What needs updating:**
-1. **loop/reflections.md** — append the iteration 289 reflection
-2. **loop/state.md** — add Lesson 68 to the lessons section (after Lesson 67, around line 275)
-3. **loop/state.md** — update iteration number at line 5: "Last updated: Iteration 289, 2026-03-27"
-
-Should I proceed with these updates?

@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 290, 2026-03-27.
+Last updated: Iteration 291, 2026-03-27.
 
 ## Current System State
 
@@ -273,6 +273,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 62. **Lesson 65: Escalations without matching infrastructure are unverifiable and become deferrable.** Scout flags test failures in Postgres; Builder must run tests in Postgres. Missing DATABASE_URL in Builder environment breaks the verification loop and makes escalations aspirational, not binding.
 63. **Lesson 66: Escalation scopes require binding.** Scout directs specific verification; Builder can choose unrelated work. Without explicit obligation to match Scout's scope, escalations are advisory suggestions, not binding directives.
 64. **Lesson 67: Escalations without binding scope become deferrable.** Escalation enforcement requires: (1) named scope, (2) Builder acknowledgment of scope, (3) visible artifact linking escalation to work completed.
+65. **Lesson 68: Feedback loop infrastructure is a critical path blocker.** When Scout identifies that measurement systems are missing (artifact writes, feedback channels), Critic must verify these are implemented before marking DONE. Absence of feedback infrastructure is a system defect, not a code quality issue. The loop depends on measurement to reflect on itself (Lesson 43). Without artifacts, the loop is blind to its own operation.
 
 ## Vision
 
