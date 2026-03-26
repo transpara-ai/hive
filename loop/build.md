@@ -1,19 +1,21 @@
-# Build: Fix: [hive:builder] Wire clientFixTasker into NewPipelineTree
+# Build: Wire failure detection into PipelineTree.Execute
 
 ## What changed
 
 **`pkg/runner/pipeline_tree.go`**
-- Added `clientFixTasker` struct — adapts `*api.Client` to the `FixTasker` interface, bridging the signature mismatch (`CreateTask(slug, title, description, priority string)` → `CreateTask(ctx, title) error`)
-- Updated `NewPipelineTree` to wire `fixTasker` from the runner's `APIClient` when non-nil; previously `fixTasker` was always nil so `callFixTasker` silently did nothing in production
-
-**`pkg/runner/pipeline_tree_test.go`**
-- Added `TestNewPipelineTreeWiresFixTasker` — verifies the production path: `NewPipelineTree` with a real `*api.Client` produces a non-nil `fixTasker`
-- Added `TestClientFixTaskerCallsAPI` — verifies the adapter calls through to the API with the right slug using an `httptest.Server`
-
-**`loop/state.md`**
-- Removed duplicate `## What the Scout Should Focus On Next` heading (formatting artifact from prior diff)
+- `FixTasker` interface with `CreateTask(ctx, title)` — adapted to `api.Client`
+- `clientFixTasker` adapter wires the interface to `api.Client.CreateTask(slug, title, "", "high")`
+- `fixTasker FixTasker` field on `PipelineTree`
+- `NewPipelineTree`: sets `fixTasker` from `r.cfg.APIClient` when non-nil
+- `Execute`: snapshots `diagnosticCount` before each phase; on error OR count increase, calls `callFixTasker` then returns error
+- Updated stale comment in `NewPipelineTree` — Phase 2 is done, no longer pending
 
 ## Verification
 
 - `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test ./...` — all pass (5 pipeline_tree tests green)
+- `go.exe test ./...` — all pass (pkg/runner: 1.143s)
+  - `TestPipelineTreeFailureWritesDiagnostic`
+  - `TestPipelineTreeFixTaskerCalledOnDiagnosticWithNilReturn`
+  - `TestNewPipelineTreeWiresFixTasker`
+  - `TestClientFixTaskerCallsAPI`
+  - `TestPipelineTreeFixTaskerCalledOnDirectError`

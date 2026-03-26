@@ -40,9 +40,8 @@ func (f *clientFixTasker) CreateTask(_ context.Context, title string) error {
 }
 
 // NewPipelineTree creates a PipelineTree wired to r's phase implementations.
-// Each phase delegates to the corresponding Runner method. Those methods do not
-// return errors today; the wrappers always succeed. Real failure detection is
-// Phase 2 work once the phase methods propagate errors up.
+// Each phase delegates to the corresponding Runner method. Execute detects
+// failures via direct error returns and by monitoring the diagnostics count.
 func NewPipelineTree(r *Runner) *PipelineTree {
 	var ft FixTasker
 	if r.cfg.APIClient != nil {
