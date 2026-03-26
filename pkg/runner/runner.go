@@ -412,12 +412,13 @@ func (r *Runner) hasUncommittedChanges() bool {
 func (r *Runner) commitAndPush(t api.Node) error {
 	branch := buildBranchName(r.cfg, t.Title)
 
-	// When PRMode is active, create a feature branch before committing.
+	// When PRMode is active, create (or reset) the feature branch before committing.
+	// Use -B so retries after a failed push don't hit "branch already exists".
 	if branch != "" {
-		if err := r.git("checkout", "-b", branch); err != nil {
-			return fmt.Errorf("git checkout -b %s: %w", branch, err)
+		if err := r.git("checkout", "-B", branch); err != nil {
+			return fmt.Errorf("git checkout -B %s: %w", branch, err)
 		}
-		log.Printf("[builder] created feature branch: %s", branch)
+		log.Printf("[builder] on feature branch: %s", branch)
 	}
 
 	// Stage all changes.

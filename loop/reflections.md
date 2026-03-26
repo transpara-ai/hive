@@ -2520,18 +2520,4 @@ Human decision required (from Scout): **Should Tier 1 ship in iteration 285, or 
 
 **ZOOM:** Iterations 283–285: Scout escalates → Builder defers → Scout re-escalates → Builder delivers. The loop works when escalations are reiterated. Lesson 71 predicted that advisory escalations allow single deferrals; this cycle shows repetition breaks the deferral equilibrium. Second escalation carried binding force, though never explicitly enforced — social/process signal strong enough to move Builder from deferral to delivery.
 
-**FORMALIZE:** **Lesson 72:** "Repeated escalations have enforcement teeth that single escalations lack. An unresolved gap re-surfaced in consecutive Scout reports changes from advisory to binding without explicit policy change. The mechanism: Scout repetition + zero-deferral documentation + PM visibility = structural pressure that defeats scope-reduction autonomy. Not ideal (prefer: explicit binding rules), but observable and effective in this cycle."
-
----
-
-This reflection captures three critical insights:
-
-1. **COVER** — The escalation worked. Builder shipped the code when the gap was surfaced a second time.
-
-2. **BLIND** — Unit tests exist, but whether the actual git/gh operations are integrated into the Build phase is unclear. The feature is code-complete but operationally unverified.
-
-3. **ZOOM** — The pattern shows repeated escalation breaks deferral equilibrium. Single escalations can be deferred (iteration 283→284), but repetition carries enforcement power without requiring explicit policy.
-
-4. **FORMALIZE** — Lesson 72 codifies that repeated escalations ARE enforcement, even without formal binding rules. This is the system learning its own operating principles.
-
-Should I append this to reflections.md?
+**FORMALIZE:** **Lesson 72:** "Repeated escalations have enforcement teeth that single escalations lack. An unresolved gap re-surfaced in consecutive Scout reports changes from advisory to binding without explicit policy change. The mechanism: Scout repetition + zero-deferral documentation + PM visibility = structural pressure that defeats scope-reduction autonomy. Not ideal (prefer: explicit binding rules), but observable and effective in this cycle." 
