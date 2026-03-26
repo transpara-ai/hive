@@ -81,10 +81,11 @@ func (ct *CostTracker) IsOverBudget() bool {
 
 // Runner is a long-running agent process.
 type Runner struct {
-	cfg  Config
-	cost CostTracker
-	tick int
-	done bool // set by one-shot mode after task completes
+	cfg         Config
+	cost        CostTracker
+	dailyBudget *DailyBudget
+	tick        int
+	done        bool // set by one-shot mode after task completes
 }
 
 // New creates a Runner.
@@ -97,8 +98,9 @@ func New(cfg Config) *Runner {
 		budget = 10.0
 	}
 	return &Runner{
-		cfg:  cfg,
-		cost: CostTracker{BudgetUSD: budget},
+		cfg:         cfg,
+		cost:        CostTracker{BudgetUSD: budget},
+		dailyBudget: NewDailyBudget(cfg.HiveDir),
 	}
 }
 
@@ -129,6 +131,17 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.cfg.Role, r.cost.TotalCostUSD, r.cost.BudgetUSD)
 			r.printCostSummary()
 			return nil
+		}
+
+		if remaining := r.dailyBudget.Remaining(r.cost.BudgetUSD); remaining <= 0 {
+			log.Printf("[%s] daily budget ceiling reached ($%.2f spent today), sleeping until next cycle",
+				r.cfg.Role, r.dailyBudget.Spent())
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(r.cfg.Interval):
+			}
+			continue
 		}
 
 		r.runTick(ctx)
@@ -264,8 +277,9 @@ func (r *Runner) workTask(ctx context.Context, t api.Node) {
 		return
 	}
 
-	// Record cost.
+	// Record cost (in-process and file-backed daily tracker).
 	r.cost.Record(result.Usage)
+	r.dailyBudget.Record(result.Usage.CostUSD)
 	log.Printf("[builder] Operate done (cost=$%.4f, tokens=%d+%d)",
 		result.Usage.CostUSD, result.Usage.InputTokens, result.Usage.OutputTokens)
 

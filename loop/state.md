@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 270, 2026-03-26.
+Last updated: Iteration 275, 2026-03-26.
 
 ## Current System State
 
@@ -269,6 +269,10 @@ Deploy: `fly deploy --remote-only` from site repo.
 58. **The Critic validates the entire architecture.** When the Critic independently catches a bug the human missed, the three-role system proves its value.
 59. **Ship → Catch → Fix is proven. Ship → Catch → Auto-fix is next.** Critic's fix tasks need to be small enough for the Builder to complete within the 10-minute timeout.
 60. **The pipeline ships product. $0.83/feature, 6 minutes, one command.** The constraint is no longer "can it work" but "what should it build next."
+61. **Lesson 64: Bottleneck synthesis requires binding response contracts.** Scout must receive explicit accept/defer/renegotiate from Builder, not implicit deferral. Without Strategy Arbiter role, blocking prerequisites become invisible backlog. Enforce Scout-Builder handoff as documented contract, not advisory flag.
+62. **Lesson 65: Escalations without matching infrastructure are unverifiable and become deferrable.** Scout flags test failures in Postgres; Builder must run tests in Postgres. Missing DATABASE_URL in Builder environment breaks the verification loop and makes escalations aspirational, not binding.
+63. **Lesson 66: Escalation scopes require binding.** Scout directs specific verification; Builder can choose unrelated work. Without explicit obligation to match Scout's scope, escalations are advisory suggestions, not binding directives.
+64. **Lesson 67: Escalations without binding scope become deferrable.** Escalation enforcement requires: (1) named scope, (2) Builder acknowledgment of scope, (3) visible artifact linking escalation to work completed.
 
 ## Vision
 
@@ -293,57 +297,15 @@ Deploy: `fly deploy --remote-only` from site repo.
 ## Completed Directives
 
 ### Knowledge Product (DONE)
-Documents, Q&A, agent auto-answer — shipped.
+Documents, Q&A, agent auto-answer — shipped (iters 241+).
 
-**Why now:** Agent memory (iter 233), grounded chat (iters 88, a82), agent personas (iter 18c), and hive dashboard (iter 240) are shipped. The agent stack is functionally complete. The next high-leverage unlock is making agents genuinely useful for knowledge work — not just chat, but structured Q&A grounded in a space's documents. This is Layer 6 depth and directly differentiates lovyou.ai from "AI chat with a doc attachment."
-
-**Target repo:** `site`
-
-**Gap:** Knowledge spaces exist but have no document management, no Q&A entity kind, and no agent-powered auto-answer. The `assert/challenge/verify/retract` ops are there but knowledge workers need: documents to ground answers, questions as first-class entities, and agents that answer automatically.
-
-**Tasks for the Scout to create (in order):**
-
-1. **Document entity kind** (`KindDocument`)
-   - Add `KindDocument` constant to `site/internal/graph/kinds.go`
-   - Add `document` to the `intend` op allowlist (same pattern as task/post/thread)
-   - Add `DocumentsView` template in `site/internal/templates/` — list view with title, body preview, author, created date
-   - Add `handleDocuments` handler in `site/internal/handlers/` wired to `/app/{slug}/documents`
-   - Add "Documents" to Knowledge lens sidebar nav
-   - Documents are the ground truth corpus for agent answers
-
-2. **Question entity kind with auto-answer** (`KindQuestion`)
-   - Add `KindQuestion` constant; add `ask` op (creates a question node)
-   - Add `QuestionsView` template — list with question title, answer body, status (unanswered/answered), agent badge on answered
-   - Add `handleQuestions` handler wired to `/app/{slug}/questions`
-   - Modify `site/internal/mind/mind.go` (or equivalent auto-reply trigger): when a Question node is created in any space, trigger Mind the same way task assignment does — call Claude with the space's documents as context, post the answer as a respond op on the question node
-   - This closes the loop: user asks → agent answers grounded in documents
-
-3. **Knowledge lens reorganization**
-   - Update the Knowledge lens sidebar to show three sections: Documents, Q&A, Claims
-   - Each section links to its respective view
-   - Claims remain (assert/challenge/verify/retract already works)
-
-4. **Knowledge space preset**
-   - When creating a space, add a "Knowledge Base" template option that pre-enables Documents + Q&A + Claims lenses
-   - Small UX change in space creation form (`site/internal/templates/space_create.templ` or equivalent)
-
-**Verification the Scout must confirm before marking DONE:**
-- A document can be created in a Knowledge space and appears in the Documents list
-- A question can be asked and Mind auto-answers it (check the auto-reply trigger path in `site/internal/handlers/` or `site/internal/mind/`)
-- The auto-answer is grounded in the space's documents (verify Mind prompt construction includes document bodies)
-- At least one test covers the question auto-answer trigger path
-
-**Files to read first:**
-- `site/internal/graph/kinds.go` — entity kind constants
-- `site/internal/mind/` — auto-reply trigger logic (how task assignment triggers Mind)
-- `site/internal/handlers/knowledge.go` — existing Knowledge handler
-- `site/internal/templates/knowledge*.templ` — existing Knowledge templates
-
-**Why this beats alternatives:**
-- Hive-as-a-service (Lovatts) requires VM orchestration — 10+ iterations of infrastructure before any user value
-- More UX polish — diminishing returns on a solid UI
-- Social layer additions — Phase 1-3 already complete; marginal value of Phase 4
-- Knowledge Q&A with agent answers is a **complete, shippable user story in 4 iterations** that demonstrates the platform's core differentiator: agents that participate in collective knowledge creation
+**What shipped:**
+- `KindDocument` and `KindQuestion` entity kinds in `site/graph/`
+- Knowledge tab routing: `/app/{slug}/knowledge?tab=docs|qa|claims`
+- Document list view and Q&A list view with agent-answered status badges
+- Mind auto-answer trigger: new `KindQuestion` nodes fire Mind with space documents as context; answer posted as `respond` op
+- Knowledge lens sidebar with Docs / Q&A / Claims sub-tabs
+- Handler and store tests for each new route
 
 ## Current Directive — Iteration 242+
 
@@ -370,79 +332,6 @@ The PM role was added (iter 241 infra commit) to read completed tasks. But it do
 Lesson 60: "The constraint is no longer 'can it work' but 'what should it build next.'" The autonomous pipeline ships at $0.83/feature in 6 minutes. But it's only as good as its directive. Right now, a human PM (this conversation) is the bottleneck — we write the directive manually. Closing this loop makes the pipeline fully autonomous. That's the precondition for "company in a box" and the Lovatts engagement.
 
 **Ship as:** `iter 242: PM writes directive to state.md`
-
-## Directive — Iteration 241+: Knowledge Product — Wire the Three Layers
-
-**Priority: High.**
-The agent stack is now complete: agent memory (Phase 4), document grounding, persona routing. The platform's most differentiated capability — AI answers grounded in your space's documents, claims with evidence trails — exists as infrastructure but has no user-facing product surface. This directive builds it.
-
-**What done looks like:** A user creates a Knowledge space, sees Docs + Q&A + Claims as a unified lens, asks a question and receives an agent answer grounded in the space's documents, and can verify or challenge any claim with evidence. This is a product people would pay for and describe to others.
-
----
-
-### Task 1 [site] — Knowledge sidebar navigation
-
-When a space contains any `KindDocument`, `KindQuestion`, or assert/challenge activity, the sidebar shows three sub-tabs under the Knowledge lens: **Docs**, **Q&A**, **Claims**. Currently each entity kind is siloed. Wire them together under one lens with tab navigation. The Knowledge lens URL becomes `/app/{slug}/knowledge` with `?tab=docs|qa|claims`. Default tab: `docs` if documents exist, else `qa`.
-
-Files: `site/graph/handlers.go` (route logic), `site/graph/views.templ` (Knowledge lens nav).
-
----
-
-### Task 2 [site] — Document list view
-
-Route: `/app/{slug}/knowledge?tab=docs`
-
-List all `KindDocument` nodes in the space: title, excerpt (first 200 chars of body), last edited by (agent or human with badge), relative timestamp. "New document" button creates a node and redirects to the detail/edit view. Sort by `updated_at DESC`. Empty state: "No documents yet — add the first one."
-
-Files: `site/graph/store.go` (add `ListDocuments(ctx, spaceID) []Node` with LIMIT 100), `site/graph/views.templ`.
-
-Test: one handler test in `handlers_test.go` — GET `/app/{slug}/knowledge?tab=docs` returns 200 with document rows.
-
----
-
-### Task 3 [site] — Q&A list view with agent answers
-
-Route: `/app/{slug}/knowledge?tab=qa`
-
-List all `KindQuestion` nodes: question title, first 200 chars of agent answer (body of the `respond` op if one exists), "Answered" / "Awaiting answer" status badge. Unanswered questions are visually distinct (dimmed, pulsing dot). "Ask a question" button creates a `KindQuestion` node via `intend` op with `kind=question` and triggers Mind auto-answer (see Task 4).
-
-Files: `site/graph/store.go` (add `ListQuestions(ctx, spaceID)` that JOINs respond ops to get answer status — LIMIT 100), `site/graph/views.templ`.
-
-Test: one handler test — GET `/app/{slug}/knowledge?tab=qa` returns 200 with question rows.
-
----
-
-### Task 4 [site] — Mind auto-answers new questions
-
-When a `KindQuestion` node is created (via `intend` op with `kind=question`), the server-side Mind event handler fires — same event-driven pattern as the existing auto-reply on conversations (`graph/handlers.go` → `triggerMindReply`). Mind receives: the question text + the space's recent documents (first 3 documents injected as context, same grounding mechanism as chat). The answer is posted as a `respond` op on the question node body.
-
-This closes the Knowledge → Agent → Answer loop that Memory Phase 4 enabled. The Q&A tab in Task 3 will immediately show answers appearing after question creation.
-
-Files: `site/graph/handlers.go` (extend mind trigger to handle `intend` ops with `kind=question`), `site/graph/mind.go` (or equivalent).
-
-Test: extend existing mind handler test — after creating a `KindQuestion` node, verify a `respond` op exists on that node.
-
----
-
-### Task 5 [site] — Knowledge space creation preset
-
-In the new-space creation dialog (`/app/new`), add a "Knowledge Base" preset alongside existing types. When selected: pre-fills a name suggestion, adds a `preset=knowledge` tag, and after creation lands on `/app/{slug}/knowledge?tab=docs` instead of the Board. This makes "start a knowledge base" a first-class user journey.
-
-Files: `site/graph/views.templ` (new-space form), `site/graph/handlers.go` (redirect on preset tag).
-
----
-
-### Implementation notes
-
-- Code lives in `site/graph/` — NOT `site/internal/handlers/`
-- No new tables, no new ops (use existing `intend`, `respond`)
-- All store queries require `LIMIT` (invariant 13 BOUNDED)
-- Use `actor_id` not agent name for identity checks (invariant 11 IDENTITY)
-- Each task ships with at least one test (invariant 12 VERIFIED)
-
-**Target repo:** `site`
-**Deploy:** `cd site && ./ship.sh "iter 241: Knowledge product — docs, Q&A, agent answers"`
-**Invariants to check:** VERIFIED (tests on each new handler), BOUNDED (LIMIT 100 on all list queries), IDENTITY (actor_id not name).
 
 ## Directive — Iteration 240+: Hive Dashboard — Make `/hive` Real
 
@@ -611,28 +500,34 @@ Roles (`KindRole`) and Teams (`KindTeam`) are entity kinds with no membership mo
 **Target repo:** `site`
 **Ship as:** `iter 263: fix invite test isolation + role membership`
 
+
 ## What the Scout Should Focus On Next
 
-**Priority: Knowledge Product — Documents, Q&A, and Agent Auto-Answer**
+## What the Scout Should Focus On Next
+
+**Priority: Per-Space Agent Personas**
 
 **Target repo:** `site`
 
-The agent stack is complete (memory, grounded chat, event-driven reply). The Knowledge layer has `assert/challenge/verify/retract` but no document management and no Q&A entity kind. A user cannot create a document, ask a question, or receive an agent-grounded answer. This is the platform's core differentiator and it is not yet usable.
+The agent stack is complete — memory, grounded chat, event-driven auto-reply (Mind). But every space in the platform talks to the same generic Mind with the same system prompt. A dev team space gets the same agent as an art collective. This is the last major gap before the agent layer feels like a product rather than a demo.
+
+Per-space personas are the concrete product differentiator: each space owner can name their agent, give it a role, and write a system prompt. The agent introduces itself, uses its name in replies, and its memory is scoped to the space. This enables the "company in a box" vision — departments each get their own specialist.
 
 **Tasks for the Scout to create (in order):**
 
-1. **Knowledge sidebar tab navigation** — Wire `/app/{slug}/knowledge?tab=docs|qa|claims` with three sub-tabs under the Knowledge lens. Files: `site/internal/handlers/knowledge.go`, Knowledge templates. Default tab is `docs` if documents exist, else `qa`.
+1. **`agent_personas` table** — In `site/graph/store.go` (or schema file), add an `agent_personas` table: `id`, `space_id` (FK to spaces), `name` (varchar 80), `system_prompt` (text), `model` (varchar, default `claude-sonnet-4-6`), `created_at`. Add `UpsertAgentPersona(ctx, spaceID, name, prompt, model)` and `GetAgentPersona(ctx, spaceID) (*AgentPersona, error)`. One store test: upsert then get, verify name round-trips. Apply BOUNDED: one row per space (upsert, not insert).
 
-2. **Document entity kind + list view** — Add `KindDocument` constant to kinds.go, add `document` to the `intend` op allowlist, implement `ListDocuments(ctx, spaceID)` with LIMIT 100, add `DocumentsView` template (title, excerpt, author badge, timestamp), wire to `/app/{slug}/knowledge?tab=docs`. One handler test: GET returns 200 with document rows.
+2. **Persona settings UI** — In space settings (`/app/{slug}/settings`), add an "Agent" section below the existing settings. Fields: agent name (text input, placeholder "Mind"), system prompt (textarea, placeholder "You are a helpful agent for this space..."), save button (HTMX POST to `/app/{slug}/settings/agent`). Wire `handleAgentSettings` in `site/graph/handlers.go`. Render current persona values if set. One handler test: POST with name+prompt → 200 and persona persisted.
 
-3. **Question entity kind + list view** — Add `KindQuestion` constant, add `ask` op or extend `intend` allowlist with `kind=question`, implement `ListQuestions(ctx, spaceID)` with JOIN on respond ops for answer status, add `QuestionsView` template (question title, answer excerpt, Answered/Awaiting badge). One handler test: GET returns 200 with question rows.
+3. **Mind auto-reply uses persona** — In `triggerMindReply` (wherever it lives in `site/graph/handlers.go`), call `GetAgentPersona(ctx, spaceID)` before building the Mind prompt. If a persona exists: prepend `"You are [name]. [system_prompt]"` to the Mind system prompt. If none: use existing default. The persona name also replaces "Mind" in the auto-reply attribution (the display name shown in chat). No new tables — piggyback on the existing `users` row for the agent, just inject the persona text at call time.
 
-4. **Mind auto-answers new questions** — When a `KindQuestion` node is created, fire the existing `triggerMindReply` event-driven pattern (same path as conversation auto-reply in `handlers.go`). Inject the space's three most recent documents as context into the Mind prompt. Answer is posted as a `respond` op on the question node. Verify: ask a question → Mind answers with document grounding.
+4. **Persona intro message** — When `UpsertAgentPersona` is called for the first time (no prior persona for this space), trigger a Mind message in the most recent conversation in that space: `"Hi, I'm [name]. [first sentence of system_prompt]. Ask me anything."` This is fired as a background goroutine after the settings save, same pattern as `triggerMindReply`. Verify: set persona → open most recent conversation → intro message appears. One test: first upsert triggers intro, second upsert (update) does not.
 
 **Verification before DONE:**
-- A document can be created and appears in the Docs tab
-- A question can be asked and Mind auto-answers it within the Q&A tab
-- The auto-answer prompt includes document bodies (grep `triggerMindReply` call site)
-- At least one test covers the question auto-answer trigger path
+- Space settings page has an "Agent" section with name + prompt fields
+- Saving a persona name changes what Mind calls itself in new replies
+- A new persona triggers one intro message in the most recent space conversation
+- `GetAgentPersona` returns nil (not error) when no persona is set (safe fallback)
+- All new store methods have at least one test
 
-**Why now:** The autonomous pipeline ships features at $0.83/iteration. The Knowledge Q&A product is 4 concrete tasks with clear files, a complete spec, and existing infrastructure. It closes the loop: agent memory (iter 233) + document grounding + Q&A = a product people describe to others and would pay for.
+**Why now:** Lesson 27 says the differentiator is who participates, not the chat UI. Right now "who" is always the same generic Mind. Per-space personas make each community feel like it has its own agent colleague — the product becomes alive in a way it currently isn't. This is also the foundation for "company in a box": each department's agent learns its domain through its configured prompt and accumulated memory. Four concrete tasks, all in `site`, all using existing infrastructure.
