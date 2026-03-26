@@ -239,17 +239,17 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 
 	var roles []string
 	if hasFixes {
-		log.Printf("[pipeline] fix tasks found — Builder fixes, Critic reviews")
-		roles = []string{"builder", "critic"}
+		log.Printf("[pipeline] fix tasks found — Builder fixes, Critic reviews, Reflector records")
+		roles = []string{"builder", "critic", "reflector"}
 	} else if hasWork {
-		log.Printf("[pipeline] assigned tasks found — Builder works, Critic reviews")
-		roles = []string{"builder", "critic"}
+		log.Printf("[pipeline] assigned tasks found — Builder works, Critic reviews, Reflector records")
+		roles = []string{"builder", "critic", "reflector"}
 	} else {
 		// Full pipeline: PM directs → Scout reports → Architect plans+creates tasks → Builder implements → Critic reviews
 		// Scout writes a gap report (not tasks). PM reads backlog + Scout report and directs Architect.
 		// Architect reads the direction and creates right-sized tasks. Builder works them.
-		log.Printf("[pipeline] no work — full pipeline: PM → Scout → Architect → Builder → Critic")
-		roles = []string{"pm", "scout", "architect", "builder", "critic"}
+		log.Printf("[pipeline] no work — full pipeline: PM → Scout → Architect → Builder → Critic → Reflector")
+		roles = []string{"pm", "scout", "architect", "builder", "critic", "reflector"}
 	}
 
 	for _, role := range roles {

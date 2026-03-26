@@ -23,9 +23,10 @@ func (r *Runner) runPM(ctx context.Context) {
 	backlog := r.readBacklog()
 	recentCommits := r.recentGitLog()
 	boardSummary := r.boardSummary()
+	completedWork := r.completedTasksSummary()
 	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
 
-	prompt := buildPMPrompt(sharedCtx, backlog, recentCommits, boardSummary)
+	prompt := buildPMPrompt(sharedCtx, backlog, recentCommits, boardSummary, completedWork)
 
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
 	if err != nil {
@@ -58,6 +59,32 @@ func (r *Runner) runPM(ctx context.Context) {
 	if r.cfg.OneShot {
 		r.done = true
 	}
+}
+
+// completedTasksSummary returns recently completed tasks so the PM knows what's done.
+func (r *Runner) completedTasksSummary() string {
+	tasks, err := r.cfg.APIClient.GetTasks(r.cfg.SpaceSlug, "")
+	if err != nil {
+		return "(completed tasks unavailable)"
+	}
+
+	var completed []string
+	for _, t := range tasks {
+		if t.Kind != "task" {
+			continue
+		}
+		if t.State == "done" {
+			completed = append(completed, fmt.Sprintf("- [DONE] %s", t.Title))
+			if len(completed) >= 30 {
+				break
+			}
+		}
+	}
+
+	if len(completed) == 0 {
+		return "No recently completed tasks."
+	}
+	return fmt.Sprintf("Recently completed (%d tasks):\n%s", len(completed), strings.Join(completed, "\n"))
 }
 
 func (r *Runner) readBacklog() string {
@@ -108,7 +135,7 @@ func (r *Runner) updateScoutDirective(directive string) error {
 	return os.WriteFile(path, []byte(newContent), 0644)
 }
 
-func buildPMPrompt(sharedCtx, backlog, recentCommits, board string) string {
+func buildPMPrompt(sharedCtx, backlog, recentCommits, board, completedWork string) string {
 	return fmt.Sprintf(`You are the PM. You decide WHAT the hive should build next.
 
 ## Institutional Knowledge
@@ -120,7 +147,10 @@ func buildPMPrompt(sharedCtx, backlog, recentCommits, board string) string {
 ## Recent Commits (what was recently built)
 %s
 
-## Current Board
+## Current Board (open tasks)
+%s
+
+## COMPLETED WORK (what is ALREADY DONE — do NOT recreate these)
 %s
 
 ## Your Task
@@ -141,7 +171,7 @@ DIRECTIVE_START
 [Your directive here — include specific tasks the Scout should create,
 which repo they target, and why this is the priority now.
 Write it as if you're updating state.md directly.]
-DIRECTIVE_END`, sharedCtx, backlog, recentCommits, board)
+DIRECTIVE_END`, sharedCtx, backlog, recentCommits, board, completedWork)
 }
 
 func parsePMDirective(content string) string {
