@@ -63,7 +63,12 @@ func (r *Runner) runArchitect(ctx context.Context) {
 	// Parse subtasks from the plan.
 	subtasks := parseArchitectSubtasks(resp.Content())
 	if len(subtasks) == 0 {
-		log.Printf("[architect] no subtasks found in plan")
+		// Log first 500 chars of the plan so we can debug parser failures.
+		preview := resp.Content()
+		if len(preview) > 500 {
+			preview = preview[:500]
+		}
+		log.Printf("[architect] no subtasks found in plan. Preview:\n%s", preview)
 		// Complete the milestone so PM doesn't re-create it.
 		if milestone != nil {
 			_ = r.cfg.APIClient.CommentTask(r.cfg.SpaceSlug, milestone.ID,
