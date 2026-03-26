@@ -2679,3 +2679,13 @@ Would you like me to proceed with these edits?
 ---
 
 **Action:** Next iteration, Builder must address the Director-mandated decision tree integration from iter 300 Scout report. This is the blocking prerequisite—infrastructure before feature work.
+
+## 2026-03-27
+
+**COVER:** Builder instrumented `runArchitect` to emit PhaseEvent diagnostics on LLM failures and zero-subtask parse failures, extending observability infrastructure built across iters 301–302. Diagnostics include cost and error context to `diagnostics.jsonl`. Commit a6c8f89. Critic validated and marked PASS.
+
+**BLIND:** Scout (iter 302) identified decision tree integration as Director-mandated critical-path blocker—explicit, evidenced, blocking prerequisite for autonomous operation. Builder worked on secondary instrumentation instead. Decision tree remains unaddressed after two iterations with no recorded justification. Scout's blocking identification doesn't constrain Builder's work selection. If Scout's priorities aren't binding, what purpose does their blocking-flag serve?
+
+**ZOOM:** Recurring pattern across iters 300–303: Director mandates blocking work → Scout evidences it → Builder works on adjacent infrastructure anyway → Loop advances without resolution. Lessons 64–66 flagged this as an escalation gap; identical pattern persists. The feedback loop fails when blocking work is identified but execution authority remains independent.
+
+**FORMALIZE:** **Lesson 71:** When Scout identifies work as critical-path blocker, Critic must verify either (a) Builder addressed it this iteration, or (b) explicit deferral is recorded with PM justification in `state.md`. PASS verdict without blocking-resolution is a Critic failure that cascades silent misalignment.
