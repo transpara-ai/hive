@@ -578,6 +578,65 @@ func ModelForRole(role string) string {
 	return "haiku"
 }
 
+// maybeCreatePR creates a GitHub PR for a Critic-PASS commit when PRMode is enabled.
+// Logs and skips gracefully if gh is not found.
+func (r *Runner) maybeCreatePR(c commit) {
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		log.Printf("[critic] gh not found, skipping PR creation")
+		return
+	}
+
+	branch, err := r.featBranchForCommit(c.hash)
+	if err != nil {
+		log.Printf("[critic] branch lookup failed for %s (skipping PR): %v", c.hash[:12], err)
+		return
+	}
+	if branch == "" {
+		log.Printf("[critic] no feat/ branch found for %s, skipping PR", c.hash[:12])
+		return
+	}
+
+	title := prTitleFromSubject(c.subject)
+	body := fmt.Sprintf("%s\n\nCommit: %s", c.subject, c.hash[:12])
+
+	cmd := exec.Command(ghPath, "pr", "create",
+		"--title", title,
+		"--body", body,
+		"--head", branch,
+	)
+	cmd.Dir = r.cfg.RepoPath
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		log.Printf("[critic] gh pr create failed (non-fatal): %v\n%s", runErr, string(out))
+		return
+	}
+	log.Printf("[critic] PR created for branch %s: %s", branch, strings.TrimSpace(string(out)))
+}
+
+// featBranchForCommit returns the feat/ branch that contains the given commit, or "".
+func (r *Runner) featBranchForCommit(hash string) (string, error) {
+	cmd := exec.Command("git", "branch", "-r", "--contains", hash, "--format=%(refname:short)")
+	cmd.Dir = r.cfg.RepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git branch -r --contains %s: %w", hash, err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name := strings.TrimSpace(strings.TrimPrefix(line, "origin/"))
+		if strings.HasPrefix(name, "feat/") {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+// prTitleFromSubject extracts the PR title from a commit subject by stripping
+// the "[hive:builder]" prefix that the Builder adds.
+func prTitleFromSubject(subject string) string {
+	return strings.TrimSpace(strings.TrimPrefix(subject, "[hive:builder]"))
+}
+
 // LoadRolePrompt reads the role prompt from agents/{role}.md.
 func LoadRolePrompt(hiveDir, role string) string {
 	path := filepath.Join(hiveDir, "agents", role+".md")

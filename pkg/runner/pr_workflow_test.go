@@ -59,6 +59,24 @@ func TestBranchSlug(t *testing.T) {
 	})
 }
 
+// TestPRTitleFromSubject asserts that the [hive:builder] prefix is stripped.
+func TestPRTitleFromSubject(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"[hive:builder] Add OAuth integration", "Add OAuth integration"},
+		{"[hive:builder]  Fix: something  ", "Fix: something"},
+		{"no prefix here", "no prefix here"},
+	}
+	for _, tt := range tests {
+		got := prTitleFromSubject(tt.input)
+		if got != tt.want {
+			t.Errorf("prTitleFromSubject(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 // TestPRModeToggle asserts that PRMode=false skips branch creation
 // (buildBranchName returns "", so no git checkout -b is needed).
 func TestPRModeToggle(t *testing.T) {

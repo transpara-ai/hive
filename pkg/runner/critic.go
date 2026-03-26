@@ -134,6 +134,9 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 
 	case "PASS":
 		log.Printf("[critic] PASS: %s", c.hash[:12])
+		if r.cfg.PRMode {
+			r.maybeCreatePR(c)
+		}
 	}
 }
 
