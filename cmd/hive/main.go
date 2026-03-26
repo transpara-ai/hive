@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -279,6 +280,12 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		roles = []string{"pm", "scout", "architect", "builder", "critic", "reflector"}
 	}
 
+	// Generate MCP config for knowledge server so agents can search.
+	mcpConfigPath := writeMCPConfig(hiveDir, repoMap)
+	if mcpConfigPath != "" {
+		log.Printf("[pipeline] MCP knowledge server configured: %s", mcpConfigPath)
+	}
+
 	activeRepo := absRepo // default repo; may be overridden by PM directive
 
 	// Always check state.md for target repo — even when tasks exist.
@@ -327,11 +334,16 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		log.Printf("[pipeline] ── %s ── (repo: %s)", role, filepath.Base(activeRepo))
 
 		model := runner.ModelForRole(role)
-		provider, err := intelligence.New(intelligence.Config{
+		providerCfg := intelligence.Config{
 			Provider:     "claude-cli",
 			Model:        model,
 			MaxBudgetUSD: budget,
-		})
+		}
+		// Give Operate-capable roles (builder, observer) access to the knowledge server.
+		if mcpConfigPath != "" && (role == "builder" || role == "observer") {
+			providerCfg.MCPConfigPath = mcpConfigPath
+		}
+		provider, err := intelligence.New(providerCfg)
 		if err != nil {
 			return fmt.Errorf("provider for %s: %w", role, err)
 		}
@@ -480,6 +492,55 @@ func writeDaemonStatus(path, line string) {
 	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
 		log.Printf("[daemon] warning: could not write status file %s: %v", path, err)
 	}
+}
+
+// writeMCPConfig generates a temporary MCP config JSON file pointing at the
+// knowledge server. Returns the absolute path, or "" if it can't be created.
+func writeMCPConfig(hiveDir string, repoMap map[string]string) string {
+	if hiveDir == "" {
+		return ""
+	}
+
+	siteDir := ""
+	workspace := filepath.Dir(hiveDir)
+	if p, ok := repoMap["site"]; ok {
+		siteDir = p
+	} else {
+		siteDir = filepath.Join(workspace, "site")
+	}
+
+	// Use go run to launch the knowledge server — no pre-build needed.
+	goPath := "go"
+	if p, err := exec.LookPath("go.exe"); err == nil {
+		goPath = p
+	}
+
+	config := map[string]any{
+		"mcpServers": map[string]any{
+			"knowledge": map[string]any{
+				"command": goPath,
+				"args":    []string{"run", "-buildvcs=false", filepath.Join(hiveDir, "cmd", "mcp-knowledge")},
+				"env": map[string]string{
+					"HIVE_DIR":  hiveDir,
+					"SITE_DIR":  siteDir,
+					"WORKSPACE": workspace,
+				},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return ""
+	}
+
+	configPath := filepath.Join(hiveDir, "loop", "mcp-knowledge.json")
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return ""
+	}
+
+	abs, _ := filepath.Abs(configPath)
+	return abs
 }
 
 // parseRepos parses a "name=path,name=path" string into a map of absolute paths.
