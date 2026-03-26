@@ -160,6 +160,17 @@ SUBTASK_DESCRIPTION: <2-3 sentences, specific files and changes>`, sharedCtx, re
 }
 
 func parseArchitectSubtasks(content string) []architectSubtask {
+	// Try strict format first.
+	tasks := parseSubtasksStrict(content)
+	if len(tasks) > 0 {
+		return tasks
+	}
+	// Fall back to markdown parsing (numbered lists, bold titles, etc.).
+	return parseSubtasksMarkdown(content)
+}
+
+// parseSubtasksStrict parses SUBTASK_TITLE:/SUBTASK_PRIORITY:/SUBTASK_DESCRIPTION: format.
+func parseSubtasksStrict(content string) []architectSubtask {
 	var tasks []architectSubtask
 	var current architectSubtask
 
@@ -188,4 +199,139 @@ func parseArchitectSubtasks(content string) []architectSubtask {
 		}
 	}
 	return tasks
+}
+
+// parseSubtasksMarkdown parses common LLM output formats:
+// - "1. **Title** — description"
+// - "1. Title\n   description"
+// - "### Task 1: Title\ndescription"
+// - "- **Title**: description"
+func parseSubtasksMarkdown(content string) []architectSubtask {
+	var tasks []architectSubtask
+	lines := strings.Split(content, "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		title := ""
+
+		// Match: "1. **Title** — desc" or "1. **Title**: desc" or "1. Title"
+		if len(line) > 2 && line[0] >= '1' && line[0] <= '9' && (line[1] == '.' || (len(line) > 2 && line[2] == '.')) {
+			// Strip number prefix: "1. " or "1) "
+			after := line
+			for j := 0; j < len(after) && (after[j] >= '0' && after[j] <= '9'); j++ {
+				after = after[j+1:]
+			}
+			after = strings.TrimLeft(after, ".) ")
+			title, _ = extractTitleAndDesc(after)
+		}
+
+		// Match: "### Title" or "## Task N: Title"
+		if title == "" && strings.HasPrefix(line, "#") {
+			h := strings.TrimLeft(line, "# ")
+			h = strings.TrimPrefix(h, "Task ")
+			// Strip leading number: "1: Title" or "1 — Title"
+			for j := 0; j < len(h) && h[j] >= '0' && h[j] <= '9'; j++ {
+				if j+1 < len(h) && (h[j+1] == ':' || h[j+1] == '.') {
+					h = strings.TrimSpace(h[j+2:])
+					break
+				}
+			}
+			title = h
+		}
+
+		// Match: "- **Title**" or "* **Title**"
+		if title == "" && (strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")) {
+			after := strings.TrimLeft(line, "-* ")
+			if strings.HasPrefix(after, "**") {
+				title, _ = extractTitleAndDesc(after)
+			}
+		}
+
+		if title == "" {
+			continue
+		}
+
+		// Collect description from following lines until next task or blank line.
+		var descLines []string
+		for i+1 < len(lines) {
+			next := strings.TrimSpace(lines[i+1])
+			if next == "" {
+				break
+			}
+			// Stop if next line looks like another task.
+			if len(next) > 2 && next[0] >= '1' && next[0] <= '9' && (next[1] == '.' || (len(next) > 2 && next[2] == '.')) {
+				break
+			}
+			if strings.HasPrefix(next, "#") || strings.HasPrefix(next, "- **") || strings.HasPrefix(next, "* **") {
+				break
+			}
+			if strings.HasPrefix(next, "SUBTASK_") {
+				break
+			}
+			i++
+			descLines = append(descLines, next)
+		}
+
+		desc := strings.Join(descLines, " ")
+		// Also check if title line itself had a description after — or :
+		if desc == "" {
+			_, inlineDesc := extractTitleAndDesc(line)
+			desc = inlineDesc
+		}
+
+		tasks = append(tasks, architectSubtask{
+			title:    title,
+			desc:     desc,
+			priority: "high",
+		})
+	}
+
+	// Cap at 6 tasks — more than that means the parser grabbed noise.
+	if len(tasks) > 6 {
+		tasks = tasks[:6]
+	}
+	return tasks
+}
+
+// extractTitleAndDesc splits "**Bold title** — description" or "**Bold**: desc" into parts.
+func extractTitleAndDesc(s string) (title, desc string) {
+	s = strings.TrimSpace(s)
+	// Bold: **title** — desc
+	if strings.HasPrefix(s, "**") {
+		end := strings.Index(s[2:], "**")
+		if end >= 0 {
+			title = strings.TrimSpace(s[2 : end+2])
+			rest := strings.TrimSpace(s[end+4:])
+			rest = strings.TrimLeft(rest, "—–-:. ")
+			return title, rest
+		}
+	}
+	// Bold: __title__ — desc
+	if strings.HasPrefix(s, "__") {
+		end := strings.Index(s[2:], "__")
+		if end >= 0 {
+			title = strings.TrimSpace(s[2 : end+2])
+			rest := strings.TrimSpace(s[end+4:])
+			rest = strings.TrimLeft(rest, "—–-:. ")
+			return title, rest
+		}
+	}
+	// Backtick: `title` — desc
+	if strings.HasPrefix(s, "`") {
+		end := strings.Index(s[1:], "`")
+		if end >= 0 {
+			title = strings.TrimSpace(s[1 : end+1])
+			rest := strings.TrimSpace(s[end+2:])
+			rest = strings.TrimLeft(rest, "—–-:. ")
+			return title, rest
+		}
+	}
+	// No formatting — take first sentence or up to 80 chars.
+	if idx := strings.IndexAny(s, ".;—–"); idx > 0 && idx < 80 {
+		return strings.TrimSpace(s[:idx]), strings.TrimSpace(s[idx+1:])
+	}
+	if len(s) > 80 {
+		return s[:80], ""
+	}
+	return s, ""
 }
