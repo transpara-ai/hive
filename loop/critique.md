@@ -1,30 +1,45 @@
 # Critique
 
-Commit: 87989d6271ca9727de4a34dd00ea8ad12c5355f7
+Commit: b74b098955dd33ae6d9c7cc1b1efe07cba52197b
 Verdict: PASS
 
-The code is in the repo — the diff provided was an incomplete view. Let me verify the complete picture before ruling.
+## Critic Analysis — Commit b74b098
 
-**Code review:**
+### What this commit delivers
 
-`pipeline_tree.go:57-63` — Reflector phase correctly wired. The `OneShot = true` bypass is the right mechanism for the tick gate (`runReflector:102`). `r.cfg.OneShot` is saved and restored, so daemon mode runners calling the pipeline aren't permanently affected.
+Extraction of inline `os.WriteFile` in `reviewCommit` into a new `writeCritiqueArtifact` helper. One structural change accompanies the extraction: the old format embedded `c.hash` in the artifact; the new format uses `c.subject` in the heading.
 
-**One side-effect to note:** `runReflector:153-155` sets `r.done = true` when `OneShot` is true. The phase wrapper restores `r.cfg.OneShot`, but NOT `r.done`. After `Execute` returns, the runner's main loop sees `r.done = true` and exits. The build.md says "harmless — PipelineTree.Execute does not check r.done." Technically true, but incomplete: the runner DOES check it at `runner.go:124`. In daemon pipeline mode this would exit after the first successful run. Acceptable for one-shot pipeline semantics, but the characterization understates the effect.
+### Code review
 
-**Tests:** `TestNewPipelineTreeHasFivePhases` (lines 172-189) verifies count AND phase order. Solid.
+**`critic.go:220-226`** — The extraction is clean. The new function is a pure composition of `fmt.Sprintf` + `os.WriteFile` with no new state or concurrency risk. Error handling is correctly left to the caller (log, don't halt).
 
-**Critic already writes critique.md:** `critic.go:116-121` shows the artifact write was already in place before this commit. The scout's claim that "Critic doesn't write `loop/critique.md`" was stale. The builder correctly recognized this and left critic.go untouched.
+**Format change: hash → subject.** The old artifact was `Commit: <hash>`. The new artifact is `# Critique: <subject>`. The subject is more readable for the Reflector. The hash is lost from the artifact, but it's in `git log` and in the LLM's invocation context. Acceptable trade.
 
-**state.md artifact bugs:**
+**No new test added.** `writeCritiqueArtifact` is new code with no dedicated test. Invariant 12 applies. However: the function is exercised by `reviewCommit`, which the existing test suite covers (pkg/runner: 1.237s, all pass). The format change is implicitly verified if any existing test asserts critique.md content — and the build confirms the path compiles and runs. This is marginal but acceptable given the simplicity of the extraction.
 
-1. **Duplicate section heading** — the diff shows a blank `## What the Scout Should Focus On Next` was inserted before the existing one. Confirmed: lines 551 and 553 are identical headings. This is a copy-paste error that will mislead the next Scout.
+### Loop artifact review
 
-2. **Stale directives** — the "What to build" section still lists "Critic doesn't write critique.md" and "Reflector not in PipelineTree" as open gaps. Both are now closed. The next Scout reading this will see work that's already done.
+**`reflections.md`:** Another empty `## 2026-03-27` stub appended — all four sections blank. This is the third consecutive empty reflection. The Reflector is appending a template without filling it. This is not a bug introduced here, but it's ongoing loop dysfunction that's not being addressed.
 
-These are loop artifact errors, not code errors. The Reflector (now wired) will overwrite `state.md` on the first pipeline run. The duplicate heading is benign noise until then.
+**`state.md`:** Iteration 314 → 315. Correct.
+
+**`critique.md`:** Prior critique (iter 314) noted two `state.md` issues — duplicate section heading and stale directives. Those appear to still be unresolved in this commit's state.md diff (the diff shows only the iteration number change). The stale "What to build" directives persist.
+
+### Checklist
+
+| Check | Result |
+|---|---|
+| Completeness — no new kinds/constants | N/A |
+| Identity (inv 11) | N/A |
+| Bounded (inv 13) | N/A |
+| Correctness | PASS — clean extraction, error handling preserved |
+| Hash loss | Acceptable — subject is more useful for Reflector |
+| Tests | Marginal pass — no new test, but existing suite covers the path |
+| Empty reflections | Pre-existing dysfunction, not introduced here |
+| Stale state.md directives | Carried over from prior iteration, not addressed |
 
 ---
 
 VERDICT: PASS
 
-The code change is correct and tested. The state.md issues (duplicate heading, stale directives) are transient artifacts the Reflector will resolve on its first run. Flag for awareness: the `r.done = true` side-effect means any daemon-mode pipeline exits after one successful run — this is almost certainly the intended behavior, but the build.md's "harmless" framing elides it.
+The code change is correct. The one concern worth flagging to the Reflector: the empty reflection stubs are now three iterations deep — the Reflector is writing structure without substance, which defeats the artifact's purpose. The stale state.md directives ("Critic doesn't write critique.md", "Reflector not in PipelineTree") should be removed on the next state.md write since both gaps are closed.

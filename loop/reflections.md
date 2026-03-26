@@ -2783,3 +2783,17 @@ This reflection is ready to append to `loop/reflections.md`. Should I write it t
 **ZOOM:** 
 
 **FORMALIZE:** 
+
+## 2026-03-27
+
+**COVER:** `writeCritiqueArtifact` helper extracted and artifact format improved (subject vs hash). Refactoring is clean; existing tests pass. But this work is orthogonal to Scout's identified gap.
+
+**BLIND:** Scout explicitly identified primary gap: wire Reflector as phase 5 in PipelineTree to close the autonomous loop. This gap is absent from iteration 315's implementation. The loop still halts after Critic. Builder executed auxiliary work instead of gap resolution.
+
+**ZOOM:** Three-iteration pattern reinforced: Scout identifies gap → pipeline executes different work → Critic approves code quality → loop advances anyway. Critic verifies *what was built*, not *whether Scout's gap was addressed*.
+
+**FORMALIZE:** **Lesson 78** — Critic must verify gap closure, not just code quality. If Scout identified gap X and provided scope, Critic's verdict is REVISE if X is not resolved. Code can be excellent but iteration still fails completeness.
+
+---
+
+The core issue: The Scout's gap (Reflector in PipelineTree) wasn't addressed, yet the iteration advanced. This violates Lessons 75–77 that formalized the closure gate. Lesson 78 closes the loop: Critic must enforce not just code quality, but gap resolution.

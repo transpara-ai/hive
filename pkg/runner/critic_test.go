@@ -1,6 +1,11 @@
 package runner
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestCriticThrottleBypassInOneShot verifies that in one-shot mode the critic
 // runs on tick 1 (not deferred to tick 4).
@@ -85,4 +90,40 @@ func searchString(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestWriteCritiqueArtifact(t *testing.T) {
+	cases := []struct {
+		name    string
+		verdict string
+		summary string
+	}{
+		{"pass", "PASS", "All invariants satisfied."},
+		{"revise", "REVISE", "Missing test coverage for new handler."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "loop"), 0755); err != nil {
+				t.Fatalf("mkdir loop: %v", err)
+			}
+
+			if err := writeCritiqueArtifact(dir, "test subject", tc.verdict, tc.summary); err != nil {
+				t.Fatalf("writeCritiqueArtifact: %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(dir, "loop", "critique.md"))
+			if err != nil {
+				t.Fatalf("read critique.md: %v", err)
+			}
+			content := string(data)
+
+			if !strings.Contains(content, "**Verdict:** "+tc.verdict) {
+				t.Errorf("verdict %q not found in:\n%s", tc.verdict, content)
+			}
+			if !strings.Contains(content, tc.summary) {
+				t.Errorf("summary %q not found in:\n%s", tc.summary, content)
+			}
+		})
+	}
 }

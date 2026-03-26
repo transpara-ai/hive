@@ -1,18 +1,17 @@
-# Build: Add `writeCritiqueArtifact` to critic.go
+# Build: Tests for critique artifact write and 5-phase tree
 
-## What changed
+## Gap
+VERIFIED invariant: `writeCritiqueArtifact` and 5-phase pipeline tree had no tests.
 
-**`pkg/runner/critic.go`**
-- Extracted inline critique-writing in `reviewCommit` into a new function `writeCritiqueArtifact(hiveDir, subject, verdict, summary string) error`
-- New format: `# Critique: <commit subject>\n\n**Verdict:** PASS | REVISE\n\n**Summary:** <findings>`
-- Replaced the old inline `os.WriteFile` block (flat format) with a call to the new function
-- Error handling unchanged: log on failure, don't halt
+## Changes
+
+### `pkg/runner/critic_test.go`
+- Added `os`, `path/filepath`, `strings` imports
+- Added `TestWriteCritiqueArtifact`: tests PASS and REVISE cases by calling `writeCritiqueArtifact` with a temp dir, then reading back `loop/critique.md` and asserting the verdict and summary strings are present
+
+### `pkg/runner/pipeline_tree_test.go`
+- Already contained `TestNewPipelineTreeHasFivePhases` with the correct 5-phase assertion and "reflector" name check — no change needed
 
 ## Verification
-
 - `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test ./...` — all pass (pkg/runner: 1.237s)
-
-## Why
-
-Without a properly structured `loop/critique.md`, the Reflector reads empty or malformed critique data. This gives the Reflector a consistent artifact: commit subject in the heading, bold verdict, and full LLM analysis in the summary section.
+- `go.exe test ./pkg/runner/...` — ok (1.169s)
