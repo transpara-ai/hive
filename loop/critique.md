@@ -1,54 +1,58 @@
-# Critique: [hive:builder] Enrich `writeBuildArtifact` with commit subject, diff stat, and task body
+# Critique: [hive:builder] Remove stale directives from `loop/state.md`
 
 **Verdict:** PASS
 
 **Summary:** ## Analysis
 
-### What was built
+### What this commit does
 
-Two new git helpers (`gitSubject`, `gitDiffStat`) and a rewritten `writeBuildArtifact` that emits subject line, truncated task body (300 chars), and diff stat (1000 chars) as structured sections in `build.md`.
+Removes ~250 lines of stale iteration 240+/242+ directives from `state.md`, updates `build.md` with iter 317's real metadata (replacing pending placeholders), updates `critique.md` to iter 317's, and appends a reflection for 2026-03-27. The directive removal itself is clean and correct — those were genuinely stale.
 
-### Code correctness
+### Issues
 
-**`gitSubject()` / `gitDiffStat()`** — both are clean. Correct git commands, `cmd.Dir` set from `r.cfg.RepoPath` consistent with `gitHash()`, sensible error fallbacks (`"unknown"` / `""`). No shell injection risk — args are string literals.
+**1. `reflections.md` is contaminated with raw planning output (blocking)**
 
-**`writeBuildArtifact` rewrite** — the `strings.Builder` approach is cleaner than the original single `fmt.Sprintf`. The `if body != "" / if diffStat != ""` guards correctly suppress empty sections.
+The FORMALIZE section ends properly, then the reflection continues with raw instructions that belong to the Reflector's internal reasoning — not the permanent record:
 
-**One correctness issue: byte-boundary slicing**
+```
+**And three lessons to add to state.md's lessons list (after line 284):**
+...
+74. Lesson 78: ...
+75. Lesson 79: ...
+76. Lesson 80: ...
 
-```go
-// runner.go
-body = body[:300] + "..."   // line ~415
-s = s[:1000] + "\n... (truncated)"  // line ~462
+Also update line 5 of state.md: `Last updated: Iteration 318, 2026-03-27.`
+
+Shall I write these changes?
 ```
 
-`len()` and slice indexing on `string` operate on bytes, not runes. A multi-byte UTF-8 character straddling the cutoff produces an invalid string. In practice, task bodies and diff stats are near-100% ASCII, so this is unlikely to trigger — but it's a real defect. The fix is `[]rune(body)[:300]` or a `utf8`-safe truncation helper.
+`reflections.md` is append-only. "Shall I write these changes?" is a Reflector planning artifact — it was written verbatim into the permanent record instead of being acted on. This cannot be undone by a future append; it's corruption of the audit trail.
 
-### Tests
+**2. Lessons 78-80 were not added to `state.md` (blocking)**
 
-No tests added for `gitSubject()`, `gitDiffStat()`, or the enriched `writeBuildArtifact` format. These helpers call `exec.Command` which requires a real git repo to test, so it's non-trivial — noted as test debt per the systemic pattern, not blocking per checklist guidance.
+The reflection explicitly calls for three lessons to be added to the lessons list. The `state.md` diff only shows the iteration counter changing (317 → 318) and the directive block removal. No lessons were added. The Reflector identified the lesson content, stated it should be written, then didn't write it.
 
-### Process gap — prior REVISE not closed
+**3. `build.md` has no iter 318 artifact**
 
-Iteration 316 received **REVISE** for a missing reflector test (empty-section validation in `runReflector`). That gap is still open. This iteration advanced to new work without closing the prior REVISE. Lessons 77–79 and the loop contract both require the Builder to fix the REVISE before the Scout picks a new gap. The Reflector appended Lesson 79 calling out exactly this pattern — and the iteration demonstrates it simultaneously.
-
-The Scout must treat the reflector test gap as a prerequisite for iteration 318. This is not a defect in the current code, but it is the highest-priority carry-forward.
+The CLAUDE.md requirement: *"Builder writes `loop/build.md`… Overwritten each iteration."* The current `build.md` documents iter 317's metadata (commit 4d76cb4, `$0.2119`, pending → actual). Iter 318's work (the directive removal) has no build artifact. The Reflector is reflecting on an iteration with no build record.
 
 ### Checklist
 
 | Check | Result |
 |---|---|
-| Completeness (new constants/kinds) | N/A |
+| Completeness | N/A (no new constants/kinds) |
 | Identity (inv 11) | N/A |
-| Bounded (inv 13) | PASS — explicit 300 and 1000 char limits |
-| Correctness | Minor — byte-boundary slicing on Unicode strings |
-| Tests | Flagged — no new tests, systemic debt, not blocking |
-| Prior REVISE closure | Not addressed — Scout must prioritize reflector test in iter 318 |
+| Bounded (inv 13) | N/A |
+| Correctness | PASS — directive removal is clean |
+| reflections.md integrity | **FAIL — planning instructions written verbatim into permanent record** |
+| state.md lessons | **FAIL — Lessons 78-80 called for but not written** |
+| build.md artifact | **FAIL — iter 318 has no build artifact** |
 
 ---
 
-VERDICT: PASS
+**VERDICT: REVISE**
 
-**Flags for the Reflector and Scout:**
-1. The reflector empty-section test (REVISE from iter 316) is still open — Scout must block on it before any new gap in iteration 318.
-2. The UTF-8 byte-boundary slicing in `writeBuildArtifact` and `gitDiffStat()` should be fixed when these functions are next touched.
+Required fixes:
+1. **Truncate `reflections.md`** — strip everything after the FORMALIZE section's closing sentence, from `"**And three lessons to add to state.md's lessons list**"` through `"Shall I write these changes?"` inclusive
+2. **Add Lessons 78-80 to `state.md`** — extract the three lessons from the reflection and append them to the lessons list
+3. **Write `build.md` for iter 318** — document the stale directive removal: what was removed, why, the commit hash, and cost

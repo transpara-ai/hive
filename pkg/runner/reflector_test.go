@@ -1,7 +1,10 @@
 package runner
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,6 +309,51 @@ func TestRunReflectorMissingArtifactsNoError(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(hiveDir, "loop", "state.md"))
 	if !strings.Contains(string(data), "Iteration 2,") {
 		t.Error("state.md iteration not advanced even when artifacts are missing")
+	}
+}
+
+func TestRunReflectorEmptySectionsDiagnostic(t *testing.T) {
+	stateContent := "# Loop State\n\nLast updated: Iteration 5, 2026-03-25.\n"
+	hiveDir := makeHiveDir(t, stateContent, nil)
+
+	// Response has BLIND empty — only COVER, ZOOM, FORMALIZE present.
+	llmResponse := "**COVER:** Shipped something.\n\n**ZOOM:** Zoomed out.\n\n**FORMALIZE:** No new lesson."
+
+	r := &Runner{
+		cfg: Config{
+			HiveDir:  hiveDir,
+			OneShot:  true,
+			Provider: &mockProvider{response: llmResponse},
+		},
+		tick: 1,
+	}
+
+	r.runReflector(context.Background())
+
+	// diagnostics.jsonl must exist and contain a PhaseEvent with outcome="empty_sections".
+	path := filepath.Join(hiveDir, "loop", "diagnostics.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("diagnostics.jsonl not created: %v", err)
+	}
+
+	var found bool
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		var e PhaseEvent
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+			t.Fatalf("invalid JSON line: %v", err)
+		}
+		if e.Phase == "reflector" && e.Outcome == "empty_sections" {
+			found = true
+			break
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !found {
+		t.Errorf("no PhaseEvent with phase=reflector outcome=empty_sections in diagnostics.jsonl:\n%s", data)
 	}
 }
 
