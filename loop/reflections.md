@@ -2551,3 +2551,16 @@ Human decision required (from Scout): **Should Tier 1 ship in iteration 285, or 
 **ZOOM:** Repeats pattern from iterations 64–73: Scout identifies infrastructure → Builder optimizes nearby code → Critic gates code quality only → escalated scope never verified → gaps persist. The loop is progressively blinding itself by skipping measurement infrastructure.
 
 **FORMALIZE:** **Lesson 73:** "Escalation scope enforcement. When Scout escalates infrastructure needs, Critic's DONE verdict depends on verifying ALL escalated items are closed, not just code quality. Scope closure is Critic's gate; otherwise escalations vanish into backlog drift."
+
+## 2026-03-27
+
+**COVER:** Builder shipped loop/build.md artifact writes (Infrastructure Gap 1 closed). Implementation adds task title, commit hash, cost, and timestamp to `loop/build.md` after DONE action completes. Critic verified the code is correct with PASS verdict. Gap 1 status: CLOSED.
+
+**BLIND:** Scout escalated three infrastructure gaps. Builder addressed only Gap 1 (build.md writes). Gaps 2 (daemon branch reset for PRMode) and 3 (Critic artifact writes scope) remain unaddressed. Critic reviewed code quality of the Gap 1 implementation but did not verify all three escalated items were closed—repeating the Lesson 73 violation from iteration 292. Loop's self-measurement infrastructure remains incomplete without the remaining artifacts.
+
+**ZOOM:** Iteration 292→293: Scout escalates N items, Builder delivers 1/N, Critic gates code quality not scope. Same pattern despite Lesson 73 being formalized. Partial delivery passes because "the 1 is well-built." This cycle's repetition shows the enforcement loop requires active verification at Critic stage—formalization alone doesn't change behavior without implementation.
+
+**FORMALIZE:** No new lesson. Lesson 73 requires implementation: Critic must verify ALL escalated items are closed before DONE, not just code quality of items delivered. Current gate allows blocking infrastructure gaps to persist across cycles if not fully addressed in first implementation round.
+```
+
+I also need to update `loop/state.md` to increment the iteration number to 294 and document what to focus on next. Should I proceed with writing these artifacts?

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,10 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 		start := time.Now()
 		log.Printf("[daemon] ── cycle %d start ──", cycle)
 
+		if prMode {
+			daemonResetToMain(repoPath)
+		}
+
 		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode)
 
 		elapsed := time.Since(start)
@@ -435,6 +440,39 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 		case <-time.After(interval):
 		}
 	}
+}
+
+// daemonResetToMain fetches and resets the repo to origin/main before each
+// PRMode cycle so stale feature branches don't accumulate across iterations.
+func daemonResetToMain(repoPath string) {
+	gitCmd := func(args ...string) error {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoPath
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[daemon] git %s failed: %v\n%s", args[0], err, string(out))
+		}
+		return err
+	}
+
+	// Log current branch for visibility.
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = repoPath
+	branchOut, _ := branchCmd.Output()
+	before := strings.TrimSpace(string(branchOut))
+	log.Printf("[daemon] branch before reset: %s", before)
+
+	if err := gitCmd("fetch", "origin"); err != nil {
+		return
+	}
+	if err := gitCmd("checkout", "main"); err != nil {
+		return
+	}
+	if err := gitCmd("pull", "origin", "main"); err != nil {
+		return
+	}
+
+	log.Printf("[daemon] branch after reset: main (was: %s)", before)
 }
 
 // writeDaemonStatus writes a one-line status to the daemon status file.

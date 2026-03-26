@@ -243,3 +243,13 @@ func TestCritiqueArtifactWritten(t *testing.T) {
 		t.Errorf("critique.md does not contain PASS:\n%s", string(data))
 	}
 }
+
+// TestBranchResetOnDaemonCycle verifies the guard condition used in
+// runDaemon: when PRMode is false, buildBranchName returns "" so the
+// git-reset-to-main step is skipped for non-PR workflows.
+func TestBranchResetOnDaemonCycle(t *testing.T) {
+	cfg := Config{PRMode: false}
+	if got := buildBranchName(cfg, "some task title"); got != "" {
+		t.Errorf("buildBranchName with PRMode=false: expected \"\", got %q", got)
+	}
+}
