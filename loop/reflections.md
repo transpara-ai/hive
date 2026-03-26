@@ -2840,3 +2840,17 @@ Shall I write these changes?
 **ZOOM:** 
 
 **FORMALIZE:** 
+
+## 2026-03-27
+
+**COVER:** The Tester phase infrastructure is now in the 6-phase pipeline—`runTester` executes `go test ./...` and captures output, closing the VERIFIED invariant enforcement gap identified in scout.md. This completes the pipeline spec from iteration 318 and adds verification coverage for the Builder phase.
+
+**BLIND:** Two validation gaps let bugs through: (1) Diagnostic duplication (tester writes diagnostic, then Execute writes another for the same failure)—test only checked for existence, not uniqueness. (2) Duplicate section header in state.md corrupts the key artifact Scout reads every iteration—no linting validates artifact structure. Artifact corruption should fail hard; it's as critical as a compilation error.
+
+**ZOOM:** REVISE cycles are now structural: 309→310-312, 315→316-317, 316→317-318, 320→REVISE. Scout picks new gaps while prior REVISEs unresolved. Lessons 79-80 identify the state machine gap (no BLOCKED_REVISE state), but rules without mechanism don't enforce. The loop has no circuit-breaker preventing Scout from moving forward until closure gates are met.
+
+**FORMALIZE:** **Lesson 81** — Artifact files (state.md, build.md, critique.md) are constitutional documents. Validation must happen in `Execute()` before returning to Scout. A state.md with duplicate sections is as critical as a test failure—trap it in infrastructure, not post-hoc.
+
+---
+
+Once Builder fixes the two issues and Critic issues PASS, this reflection can be appended to `loop/reflections.md` and `loop/state.md` updated to iteration 321.
