@@ -1,23 +1,53 @@
-# Build Report — Iteration 282: artifact numbering fix
+# Build Report — Fix: Tests — title dedup, branch naming, PRMode toggle
 
 ## Gap
+Critic review of commit 775f17d found three issues:
+1. Commit title claimed code deliverables but the diff was doc-only
+2. AI response leakage in `reflections.md` (meta-commentary committed verbatim)
+3. Fourth iteration of the PR workflow gap with no closure
 
-Critic review of commit b74e61332acd found an artifact integrity defect: `build.md` was headed "Iteration 280 Fix" while `state.md` was updated to "Iteration 281" — the same class of defect the iteration was created to fix.
+## What Changed
 
-## Root Cause
+### `loop/reflections.md`
+Removed AI self-narration leakage (9 lines) from the first `## 2026-03-27` block.
+The entry ended with a stray code fence followed by:
+```
+This reflection:
+- **COVER**: Explains what Scout found...
+...
+Ready for the Builder phase?
+```
+These were not reflection content — they were LLM meta-commentary committed verbatim.
+Fix: strip the code fence and the six commentary lines, leaving the FORMALIZE entry intact.
 
-The artifact cleanup (iteration 281) correctly fixed three defects in `reflections.md`. The Reflector correctly bumped `state.md` to 281. But `build.md` was headed "Iteration 280 Fix" (indicating a sub-iteration of 280), not "Iteration 281" (a full numbered iteration). The two artifacts contradicted each other.
+### `pkg/runner/runner.go`
+Wired `buildBranchName` into `commitAndPush`. When `PRMode=true`:
+1. `git checkout -b feat/YYYYMMDD-{slug}` before staging
+2. `git push --set-upstream origin {branch}` instead of plain `git push`
 
-## Changes
+Previously `buildBranchName` existed but was never called — PRMode was a dead field.
 
-### `loop/build.md`
+### `cmd/hive/main.go`
+Added `--pr` boolean flag. Passed through `prMode` to:
+- `runRunner` (single-role mode)
+- `runPipeline` (sets `PRMode: role == "builder" && prMode`)
+- `runDaemon` (propagates to each pipeline cycle)
 
-Overwritten with this report. Previous header "# Build Report — Iteration 280 Fix: reflections.md artifact cleanup" is superseded — that iteration was 281, consistent with `state.md: Iteration 281`.
-
-No code changes. This is an artifact-only fix.
+The existing helpers (`branchSlug`, `buildBranchName`, `fixTitle`) and tests
+(`TestFixTitleDedup`, `TestBranchSlug`, `TestPRModeToggle`) were already present
+from a prior commit — this change wires them into the live execution path.
 
 ## Verification
 
-- `go.exe build -buildvcs=false ./...` — ✓ clean (no code changed)
-- `go.exe test -buildvcs=false ./...` — ✓ all pass (cached)
-- Invariants 11, 12, 13 — not applicable (no code, no queries, no IDs)
+```
+go.exe build -buildvcs=false ./...   → clean
+go.exe test ./...                    → ok pkg/runner (0.464s), all others cached/ok
+```
+
+All three PR workflow tests pass:
+- `TestFixTitleDedup` — fixTitle never produces "Fix: Fix: ..."
+- `TestBranchSlug` — branch format, special-char stripping, 40-char truncation
+- `TestPRModeToggle` — PRMode=false returns "", PRMode=true returns "feat/..." prefix
+
+## Not Done (separate scope)
+- `gh pr create` after Critic PASS (requires gh CLI integration, separate task)

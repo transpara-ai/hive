@@ -2499,15 +2499,6 @@ I also need to update `loop/state.md` to set iteration to 272. Can you grant wri
 **ZOOM:** Pattern confirmed: iterations 275–282 escalated "continuous autonomous operation," built prerequisites, then administrative work (282: artifact cleanup) accumulated while operation gap persisted. Prerequisite ≠ Operation. Infrastructure ready ≠ Operation verified. The loop distinguishes neither in binding timeline nor in escalation closure criteria.
 
 **FORMALIZE:** Lesson 70: "Done" requires disambiguation. Code-shipped (tests pass, artifact created) ≠ Operation-verified (deployed, unattended run validated, human approval removed). Current escalation scope titled "autonomous operation" but satisfied by "infrastructure prerequisites." Either bind the scope or split the escalation into two: Infrastructure (deliver code) and Operation (validate deployed behavior).
-```
-
-This reflection:
-- **COVER**: Explains what Scout found and how it connects to the escalation history
-- **BLIND**: Highlights the hybrid state (unattended but human-blocked) and the invisible artifact compounding bug
-- **ZOOM**: Names the recurring pattern of prerequisite accumulation without operation closure
-- **FORMALIZE**: Codifies the disambiguation principle as Lesson 70, providing the rule to prevent future scope drift
-
-Ready for the Builder phase?
 
 ## 2026-03-27
 
@@ -2520,3 +2511,27 @@ Ready for the Builder phase?
 **FORMALIZE:** **Lesson 71:** "Escalations require enforcement. Advisory escalations allow indefinite deferrals if Builder holds scope-reduction discretion unchecked. Either: (a) escalations become binding (Builder implements or returns cost/timeline/risk reasoning to PM), or (b) establish explicit approval gate on scope reduction before Builder proceeds. Without either, blocking gaps cycle indefinitely."
 
 Human decision required (from Scout): **Should Tier 1 ship in iteration 285, or should deferral authority be formally granted?** Two iterations of zero progress on a revenue-blocking gap signals either architectural problem or explicit deprioritization. Only one of those should be invisible.
+
+## 2026-03-27
+
+**COVER:** PR workflow Tier 1 shipped: title dedup fix (fixTitle strips "Fix: " before adding), PRMode bool field added to Config, branch naming functions (branchSlug + buildBranchName) with 40-char truncation, and three comprehensive unit tests (title dedup, branch naming, PRMode toggle). Closes the escalation cycle: iteration 283 flagged blocker, iteration 284 deferred, iteration 285 shipped full scope. Escalation enforcement worked — second iteration of the same gap forced implementation.
+
+**BLIND:** Tests are unit-level (fixTitle returns correct string, branchSlug formats correctly, PRMode returns branch vs empty). No integration tests verify actual git checkout -b or gh pr create operations. buildBranchName is defined but integration into Build() phase unclear — may be wired but untested in production. Feature-complete in code shape but operational integration unverified. Lovatts engagement still blocked until actual branch creation and PR submission validated.
+
+**ZOOM:** Iterations 283–285: Scout escalates → Builder defers → Scout re-escalates → Builder delivers. The loop works when escalations are reiterated. Lesson 71 predicted that advisory escalations allow single deferrals; this cycle shows repetition breaks the deferral equilibrium. Second escalation carried binding force, though never explicitly enforced — social/process signal strong enough to move Builder from deferral to delivery.
+
+**FORMALIZE:** **Lesson 72:** "Repeated escalations have enforcement teeth that single escalations lack. An unresolved gap re-surfaced in consecutive Scout reports changes from advisory to binding without explicit policy change. The mechanism: Scout repetition + zero-deferral documentation + PM visibility = structural pressure that defeats scope-reduction autonomy. Not ideal (prefer: explicit binding rules), but observable and effective in this cycle."
+
+---
+
+This reflection captures three critical insights:
+
+1. **COVER** — The escalation worked. Builder shipped the code when the gap was surfaced a second time.
+
+2. **BLIND** — Unit tests exist, but whether the actual git/gh operations are integrated into the Build phase is unclear. The feature is code-complete but operationally unverified.
+
+3. **ZOOM** — The pattern shows repeated escalation breaks deferral equilibrium. Single escalations can be deferred (iteration 283→284), but repetition carries enforcement power without requiring explicit policy.
+
+4. **FORMALIZE** — Lesson 72 codifies that repeated escalations ARE enforcement, even without formal binding rules. This is the system learning its own operating principles.
+
+Should I append this to reflections.md?

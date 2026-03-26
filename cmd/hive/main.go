@@ -62,6 +62,7 @@ func run() error {
 	budget := flag.Float64("budget", 10.0, "Daily budget in USD")
 	agentID := flag.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
 	oneShot := flag.Bool("one-shot", false, "Work one task then exit (for testing)")
+	prMode := flag.Bool("pr", false, "Create a feature branch and open a PR instead of pushing directly to main")
 
 	// Shared flags.
 	repo := flag.String("repo", "", "Path to repo for Operate (default: current dir)")
@@ -79,14 +80,14 @@ func run() error {
 	}
 	if *daemon {
 		repoMap := parseRepos(*repos, *repo)
-		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval)
+		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode)
 	}
 	if *pipeline || *role == "pipeline" {
 		repoMap := parseRepos(*repos, *repo)
-		return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap)
+		return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode)
 	}
 	if *role != "" {
-		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot)
+		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
 	}
 	if *human != "" {
 		return runLegacy(*human, *idea, *storeDSN, *autoApprove, *repo)
@@ -101,7 +102,7 @@ func run() error {
 
 // ─── Runner mode ─────────────────────────────────────────────────────
 
-func runRunner(role, space, apiBase, repoPath string, budget float64, agentID string, oneShot bool) error {
+func runRunner(role, space, apiBase, repoPath string, budget float64, agentID string, oneShot, prMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -153,6 +154,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 		RolePrompt: rolePrompt,
 		BudgetUSD:  budget,
 		OneShot:    oneShot,
+		PRMode:     prMode,
 	})
 
 	log.Printf("hive agent starting: role=%s model=%s space=%s repo=%s agent-id=%s one-shot=%v",
@@ -203,7 +205,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 // ─── Pipeline mode ───────────────────────────────────────────────────
 
 // runPipeline runs Scout → Builder → Critic in sequence. One full cycle.
-func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string) error {
+func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -345,6 +347,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			BudgetUSD:  budget,
 			OneShot:    true,
 			NoPush:     role == "builder",
+			PRMode:     role == "builder" && prMode,
 			RepoMap:    repoMap,
 		})
 
@@ -376,7 +379,7 @@ const (
 // runDaemon loops runPipeline at the given interval until SIGINT/SIGTERM.
 // On pipeline failure it retries after a short backoff. After 3 consecutive
 // failures it halts. Writes loop/daemon.status after each cycle.
-func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration) error {
+func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -392,7 +395,7 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 		start := time.Now()
 		log.Printf("[daemon] ── cycle %d start ──", cycle)
 
-		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap)
+		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode)
 
 		elapsed := time.Since(start)
 

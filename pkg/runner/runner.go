@@ -410,6 +410,16 @@ func (r *Runner) hasUncommittedChanges() bool {
 }
 
 func (r *Runner) commitAndPush(t api.Node) error {
+	branch := buildBranchName(r.cfg, t.Title)
+
+	// When PRMode is active, create a feature branch before committing.
+	if branch != "" {
+		if err := r.git("checkout", "-b", branch); err != nil {
+			return fmt.Errorf("git checkout -b %s: %w", branch, err)
+		}
+		log.Printf("[builder] created feature branch: %s", branch)
+	}
+
 	// Stage all changes.
 	if err := r.git("add", "-A"); err != nil {
 		return fmt.Errorf("git add: %w", err)
@@ -424,6 +434,15 @@ func (r *Runner) commitAndPush(t api.Node) error {
 	// Push (unless NoPush — pipeline pushes after Critic PASS).
 	if r.cfg.NoPush {
 		log.Printf("[builder] committed (no push — waiting for Critic): %s", msg)
+		return nil
+	}
+
+	// When on a feature branch, push with upstream tracking set.
+	if branch != "" {
+		if err := r.git("push", "--set-upstream", "origin", branch); err != nil {
+			return fmt.Errorf("git push feature branch: %w", err)
+		}
+		log.Printf("[builder] pushed feature branch: %s", branch)
 		return nil
 	}
 
