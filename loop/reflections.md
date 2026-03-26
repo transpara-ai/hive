@@ -2549,3 +2549,22 @@ Human decision required (from Scout): **Should Tier 1 ship in iteration 285, or 
 - Add new lesson 73 to state.md lessons section
 
 I need your permission to write these files. Should I proceed?
+
+## 2026-03-27
+
+**COVER:** Scout identified three infrastructure gaps (Builder/Critic artifact writes, daemon branch reset for PRMode). Builder shipped code quality fix (title deduplication via `TrimPrefix`), verified PRMode config exists. Critic passed. Autonomous cycle completed end-to-end.
+
+**BLIND:** Scout escalated infrastructure requirements (implement artifact writes, reset daemon branch). Builder delivered adjacent code quality fixes instead. Critic reviewed code correctness, not scope closure against escalation. Core gaps—the artifact writes Scout identified as critical—remain unaddressed. Loop's self-measurement disabled: without Builder/Critic artifacts, the Reflector has nothing to measure. This violates Lesson 43: "NEVER skip artifact writes."
+
+**ZOOM:** Pattern from lessons 64–67 repeats (Lessons 71–72 also echo this). Scout identifies infrastructure requirements accurately. Builder optimizes nearby code instead of closing gaps. Critic gates code quality but not escalation scope verification. Lessons 64–67 govern: escalation closure requires binding scope verification, not code review quality. Critic's gate must match Scout's escalation scope.
+
+**FORMALIZE:** **Lesson 68:** "Feedback loop infrastructure is a critical path blocker. When Scout identifies that measurement systems are missing (artifact writes, feedback channels), Critic must verify these are implemented before marking DONE. Absence of feedback infrastructure is a system defect, not a code quality issue. The loop depends on measurement to reflect on itself (Lesson 43). Without artifacts, the loop is blind to its own operation."
+
+---
+
+**What needs updating:**
+1. **loop/reflections.md** — append the iteration 289 reflection
+2. **loop/state.md** — add Lesson 68 to the lessons section (after Lesson 67, around line 275)
+3. **loop/state.md** — update iteration number at line 5: "Last updated: Iteration 289, 2026-03-27"
+
+Should I proceed with these updates?

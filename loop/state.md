@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 289, 2026-03-27.
+Last updated: Iteration 290, 2026-03-27.
 
 ## Current System State
 
@@ -503,25 +503,24 @@ Roles (`KindRole`) and Teams (`KindTeam`) are entity kinds with no membership mo
 
 ## What the Scout Should Focus On Next
 
-**Close the pipeline feedback loop — artifact writes + daemon branch hygiene**
+**Close the pipeline feedback loop — Builder artifact + daemon branch hygiene**
 
-The pipeline has a silent correctness problem: the Reflector is blind (reads empty build.md and critique.md because neither the Builder nor the Critic write them), and the daemon accumulates branch drift (each PRMode cycle starts from the previous feature branch instead of main).
+The pipeline has two remaining gaps: the Builder doesn't write build.md, and the daemon accumulates branch drift in PRMode. The Critic artifact (critique.md) was fixed in commit 47ba066 — `TestCritiqueArtifactWritten` passes.
 
 **Target repo:** hive
 
-**Why now:** PRMode just shipped. The daemon is now running (or will run) with PRMode. Without artifact writes, the Reflector compounds nothing. Without the branch reset, the second and third PRMode cycles create PRs that include all prior iterations' commits — the diffs become unusable for review and the PRs pile up wrong.
+**Why now:** PRMode is live. Without the Builder artifact, the Reflector's ZOOM/COVER sections are always empty. Without the branch reset, PRMode cycles stack commits across iterations — the diffs become unusable.
 
 **Tasks for the Scout to create:**
 
 1. **Builder writes loop/build.md after DONE** (`pkg/runner/runner.go`, `workTask()`)
    After a successful build, write a short summary to `loop/build.md`: task title, commit hash (from `git log -1 --format=%H`), cost, duration. Overwrite on each call. The Reflector reads this artifact — without it, the ZOOM and COVER sections are always empty. One test: `TestBuildArtifactWritten` — mock a DONE action and verify `loop/build.md` is created with the task title.
 
-2. **Critic writes loop/critique.md after review** (`pkg/runner/critic.go`, `reviewCommit()`)
-   After `Reason()` returns, write the full content to `loop/critique.md`. Overwrite on each call (last review wins — matches the loop's one-iteration artifact pattern). Include: commit hash, verdict, full analysis. One test: `TestCritiqueArtifactWritten` — verify the file contains the verdict string after a review.
+2. ~~**Critic writes loop/critique.md after review**~~ — **DONE** (commit 47ba066, `TestCritiqueArtifactWritten` passes)
 
 3. **Daemon resets to main before each cycle** (`cmd/hive/main.go`, `runDaemon()`)
    At the start of each daemon cycle, when PRMode is enabled and the active repo is not on main, checkout main and pull: `git fetch origin && git checkout main && git pull origin main`. Log the branch before and after. Without this, the second cycle's feature branch starts from the first cycle's feature branch HEAD, making PRs include N prior iterations' commits. One test: add `TestBranchResetOnDaemonCycle` to `pkg/runner/runner_test.go` verifying `buildBranchName` returns empty string when PRMode=false.
 
-**Why this matters:** The loop is the product. The Reflector's compounding knowledge is what makes the hive smarter over time. If build.md and critique.md are always empty, every reflection says "no artifacts — nothing to reflect on." And if PRMode creates stacked branches, each PR review is impossible — the diff includes everything since the first build, not just the current change.
+**Why this matters:** The loop is the product. The Reflector's compounding knowledge is what makes the hive smarter over time. If build.md is always empty, every reflection says "no artifacts — nothing to reflect on." And if PRMode creates stacked branches, each PR review is impossible — the diff includes everything since the first build, not just the current change.
 
-**Invariants:** VERIFIED (tests for each artifact write), EXPLICIT (Reflector's dependency on build.md and critique.md must be visible in the code that produces them).
+**Invariants:** VERIFIED (tests for each artifact write), EXPLICIT (Reflector's dependency on build.md must be visible in the code that produces it).

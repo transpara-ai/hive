@@ -14,11 +14,10 @@ Perfect. I now have a clear picture of what's been shipped and what's missing. L
    - Loop should track what was built; Reflector reads `loop/build.md` to write ZOOM/COVER sections
    - Currently Reflector always sees empty file
 
-2. **Critic never writes loop/critique.md**
-   - `pkg/runner/critic.go:74-141` — `reviewCommit()` calls Reason() (line 99), parses verdict (line 111), creates fix tasks or PRs (lines 115-139)
-   - After all this, returns without writing the review artifact
-   - Loop should track what was reviewed; Reflector reads `loop/critique.md` for analysis
-   - Currently Reflector always sees empty file
+2. ~~**Critic never writes loop/critique.md**~~ — **FIXED** (commit 47ba066)
+   - `pkg/runner/critic.go:116-121` — writes critique.md after Reason() returns
+   - `TestCritiqueArtifactWritten` in `runner_test.go` covers the write — passes
+   - This gap is closed; remove from future Scout traversals
 
 3. **Daemon never resets to main when PRMode is enabled**
    - `cmd/hive/main.go:379-438` — `runDaemon()` loops through cycles calling `runPipeline()` (line 398)
