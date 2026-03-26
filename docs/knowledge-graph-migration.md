@@ -401,3 +401,29 @@ Memory ┘                                                        Memory ┘
 **Complication:** Repo conflicts if two Builders edit the same file. Mitigated by: Architect decomposes into non-overlapping tasks, Go compilation catches conflicts, Critic reviews the merge.
 
 **When:** After the knowledge layer is live and agents can self-reflect on pipeline performance. The Memory agent will likely be the one to notice "we're spending 40 minutes on 6 tasks that could run in parallel" and create the task itself.
+
+### Event-Driven Pipeline (replace polling)
+
+The pipeline is poll-based. Every run: check board → run PM → Scout → Architect → Builder → Critic → Reflector. When Architect produces no tasks, Builder/Critic/Reflector run on nothing. We added a stopgap (skip downstream roles when board is empty), but the architecture is wrong.
+
+**The problem:** No-op cycles cost $0.40-0.90 to discover there's no work. The daemon mode polls every 30 minutes. That's $20-40/day just checking if there's something to do.
+
+**What it should be:** Events on the graph trigger agents. No events = no cost.
+
+```
+PM creates goal         → event: goal.created    → triggers Scout
+Scout creates report    → event: document.created(tag=scout-report) → triggers Architect
+Architect creates tasks → event: task.created     → triggers Builder
+Builder commits         → event: task.completed   → triggers Critic
+Critic reviews          → event: review.created   → triggers Reflector (or Builder on REVISE)
+```
+
+No tasks = nothing triggers = zero cost. The graph is the bus. Agents are subscribers.
+
+**This is what the eventgraph was designed for.** The `event` package has event types, the `store` has append/subscribe, the bus exists. The pipeline bypasses its own architecture because the runner was built as a quick loop, not as an event consumer.
+
+**Implementation:** Each agent registers event subscriptions (like `AgentDef.WatchPatterns`). The daemon becomes an event loop: poll the graph for new events since last cursor, dispatch to matching agents. Or use webhooks from lovyou.ai — the site posts events, the hive reacts.
+
+**Dependency:** Requires the knowledge graph migration (Phase 2) — once PM directives are goal nodes and Scout reports are document nodes on the graph, their creation IS the event that triggers the next agent. The .md files can't emit events. The graph can.
+
+**When:** After Phase 2 of the knowledge graph migration ships. The transition: poll loop → event loop. Same agents, same logic, different trigger mechanism.
