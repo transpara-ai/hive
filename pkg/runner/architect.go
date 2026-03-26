@@ -286,7 +286,7 @@ func parseSubtasksMarkdown(content string) []architectSubtask {
 
 		// Match: "- **Title**" or "* **Title**"
 		if title == "" && (strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")) {
-			after := strings.TrimLeft(line, "-* ")
+			after := strings.TrimSpace(line[2:])
 			if strings.HasPrefix(after, "**") {
 				title, _ = extractTitleAndDesc(after)
 			}

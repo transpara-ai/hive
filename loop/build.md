@@ -1,26 +1,20 @@
-# Build: Normalize LLM response before parsing — strip fences, guard zero-value
-
-## Gap
-LLM responses wrapped in markdown code fences were reaching `parseArchitectSubtasks` unparsed. Subtasks with empty titles could reach `CreateTask` violating the API contract. The markdown fallback silently consumed preamble text when strict markers were present but strict parsing failed.
+# Build: Fix parseSubtasksMarkdown test coverage + reflection artifact (iter 300 REVISE)
 
 ## Changes
 
+### `pkg/runner/architect_test.go`
+- Added `TestParseSubtasksMarkdown` with 4 cases: numbered list with bold title, heading format (`### Title`), bullet with bold title (`- **Title**`), and empty input.
+
 ### `pkg/runner/architect.go`
+- Fixed bug in `parseSubtasksMarkdown` bullet matcher: `strings.TrimLeft(line, "-* ")` was stripping the `**` bold markers along with the bullet prefix, causing bold-titled bullets to produce empty titles. Replaced with `strings.TrimSpace(line[2:])` which trims only the 2-char bullet prefix.
 
-**`normalizeArchitectResponse(content string) string`** (new function)
-- Strips opening code fence line (` ```json `, ` ```text `, or plain ` ``` `)
-- Strips closing ` ``` `
-- Called at the top of `parseArchitectSubtasks` before any parsing
-
-**`parseArchitectSubtasks`**
-- Calls `normalizeArchitectResponse` first
-- Adds debug log when `SUBTASK_TITLE:` markers are present but strict parsing returns 0 tasks — exposes format mismatches rather than silently falling through to markdown
-
-**`runArchitect`**
-- Guards against subtasks with empty titles before calling `CreateTask`
-- Logs and skips empty-title subtasks
+### `loop/reflections.md`
+- Replaced two empty 2026-03-27 entries with the Iteration 300 reflection (COVER/BLIND/ZOOM/FORMALIZE filled).
 
 ## Verification
 
-- `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test ./...` — all pass including `TestParseArchitectSubtasks/fence-wrapped_response`
+```
+go.exe build -buildvcs=false ./...  — OK
+go.exe test -buildvcs=false ./...   — all pass
+  pkg/runner: TestParseSubtasksMarkdown (4 cases), TestParseArchitectSubtasks (4 cases)
+```

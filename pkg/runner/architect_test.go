@@ -5,6 +5,60 @@ import (
 	"testing"
 )
 
+func TestParseSubtasksMarkdown(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantCount  int
+		wantTitles []string
+	}{
+		{
+			name: "numbered list with bold title and dash",
+			input: `1. **Add event store migration** — Create the SQL migration file for the agent_memories table.
+2. **Implement MemoryStore interface** — Add pkg/store/memory_store.go with the interface and pgMemoryStore.
+3. **Wire MemoryStore into agent loop** — Update loop.go to inject the store before each Reason() call.`,
+			wantCount:  3,
+			wantTitles: []string{"Add event store migration", "Implement MemoryStore interface", "Wire MemoryStore into agent loop"},
+		},
+		{
+			name: "heading format",
+			input: `### Add persona resolver
+Implement pkg/store/persona_store.go resolving actor IDs to display names at render time.
+
+### Wire resolver into templates
+Update the render pipeline to call persona_store before writing HTML.`,
+			wantCount:  2,
+			wantTitles: []string{"Add persona resolver", "Wire resolver into templates"},
+		},
+		{
+			name: "bullet with bold title",
+			input: `- **Add budget enforcement** — Extend pkg/resources/budget.go with daily cap logic.
+- **Hook budget into runner** — Call budget.Check() before each Reason() call in runner.go.`,
+			wantCount:  2,
+			wantTitles: []string{"Add budget enforcement", "Hook budget into runner"},
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSubtasksMarkdown(tt.input)
+			if len(got) != tt.wantCount {
+				t.Fatalf("parseSubtasksMarkdown returned %d tasks, want %d\ninput:\n%s", len(got), tt.wantCount, tt.input)
+			}
+			for i, title := range tt.wantTitles {
+				if got[i].title != title {
+					t.Errorf("task[%d].title = %q, want %q", i, got[i].title, title)
+				}
+			}
+		})
+	}
+}
+
 func TestParseArchitectSubtasks(t *testing.T) {
 	tests := []struct {
 		name        string

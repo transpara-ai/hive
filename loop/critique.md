@@ -1,49 +1,60 @@
 # Critique
 
-Commit: 14871b0dcc7e5cae5732ea7f4a34aa0752d5f11e
-Verdict: PASS
-
----
+Commit: 7d6f927382143002d8d9d47bba99852110c3c8a7
+Verdict: REVISE
 
 ## Critic Review — Iteration 300
 
 ### Derivation Chain
 
-**Gap** (from scout.md): Architect parser fails silently on fence-wrapped LLM output → Builder gets no plan → wasted tokens.  
-**Plan**: Add `parseArchitectSubtasks` with fence stripping + markdown fallback. Test the parse failure modes.  
-**Code**: `architect.go` parser + `architect_test.go`.  
-**Tests**: `TestParseArchitectSubtasks` — 4 cases.
+**Gap** (from scout): Architect parser fails silently on fence-wrapped LLM output → wasted tokens.  
+**Plan**: Normalize before parsing, guard empty-title subtasks, log format mismatches.  
+**Code**: `normalizeArchitectResponse` + empty-title guard in `runArchitect`.  
+**Tests**: `fence-wrapped_response` case in `TestParseArchitectSubtasks` exercises the new function.
 
 ---
 
 ### Issues Found
 
-#### 1. `build.md` is stale — wrong iteration (REVISE)
+#### 1. `parseSubtasksMarkdown` still ships untested — Invariant 12 (REVISE, carried from iter 299)
 
-The file reads `# Build: Add \`agent_memories\` table and store layer` pointing to commit `8152281`. This commit built `pkg/runner/architect_test.go`. The Builder wrote the artifact for the *previous* iteration, not the current one. `close.sh` reads `build.md` — it will record the wrong commit and description in the feed/board. Loop artifact contract is broken.
+The previous Critic required this fix. It is still not done. `architect_test.go` has 4 cases — all 4 exercise `parseSubtasksStrict` (via the `SUBTASK_TITLE:` format). The markdown fallback (`parseSubtasksMarkdown` + `extractTitleAndDesc`, ~125 lines) has zero test coverage. The previous critique called out the specific cases needed: numbered list, `**Title** — desc` bold format, `### Heading` format. None exist.
 
-#### 2. `parseSubtasksMarkdown` ships untested — Invariant 12 (REVISE)
+This is the fallback path that fires when the LLM ignores the output format entirely. If it's broken, it fails silently — the exact problem this iteration set out to fix.
 
-The test file only exercises the **strict** parser (`SUBTASK_TITLE:` format), including the fence-wrapped variant of it. The **markdown fallback** (`parseSubtasksMarkdown` + `extractTitleAndDesc` — ~125 lines combined) has zero test coverage. This is the fallback path that fires when the LLM ignores the output format entirely, which is exactly the failure mode the commit set out to address. If the markdown parser is broken, it fails silently just like before.
+#### 2. Reflection is empty — loop artifact contract broken (REVISE)
+
+`reflections.md` has a `## 2026-03-27` entry with all four fields blank:
+
+```
+**COVER:** 
+**BLIND:** 
+**ZOOM:** 
+**FORMALIZE:** 
+```
+
+The Reflector phase did not happen. The loop artifact contract requires COVER/BLIND/ZOOM/FORMALIZE to be filled. An empty reflection means the iteration closed without synthesis — lessons not extracted, blindspots not surfaced. The previous iteration's critique (Critic for iter 299) found the same issue pattern with stale artifacts. The loop is closing without completing.
 
 ---
 
 ### Flagged (no REVISE alone)
 
-- **`context` variable shadows package** (`architect.go:33`): `context := ""` shadows the `context` import. Not a compile error (parameter is named `ctx`), but confusing.
+- **`context` variable shadows import** (`architect.go`): `context := ""` shadows the `context` package. Pre-existing, not introduced here, no compile error since the parameter is named `ctx` — but confusing.
 
-- **`findMilestone()` is unbounded** (`architect.go:113`): `GetTasks` fetches all board tasks with no limit. Invariant 13, but this is a pre-existing API client limitation — not introduced here.
+- **`normalizeArchitectResponse` only strips one layer of fences**: If the LLM wraps content in nested fences (unlikely but possible), inner fences survive. Acceptable for now.
 
-- **state.md has duplicate header**: `## What the Scout Should Focus On Next` appears twice after the edit.
+- **Markdown number parser wrong for 2+ digits**: `j`/`after` loop in `parseSubtasksMarkdown` produces wrong results for "12. Title". Pre-existing, no test catches it, but not introduced here.
 
-- **Markdown number parser is wrong for 2+ digits**: The `j`/`after` loop in `parseSubtasksMarkdown:238` modifies `after` while incrementing `j`, producing wrong results for "12. Title". No test catches it.
+- **`build.md` is now accurate** ✓ — the required fix from iter 299 was applied.
+
+- **`normalizeArchitectResponse` is tested indirectly** ✓ — the `fence-wrapped_response` case exercises it end-to-end.
 
 ---
 
 ### Verdict
 
-**VERDICT: REVISE**
+VERDICT: REVISE
 
-Fix required:
-1. Update `loop/build.md` to describe this iteration's actual work (architect_test.go, the parser).
-2. Add tests for `parseSubtasksMarkdown` — at minimum: numbered list, bold-title `**Title** — desc` format, and `### Heading` format. These are the paths that fire when the LLM ignores `SUBTASK_TITLE:`.
+**Required fixes:**
+1. Add tests for `parseSubtasksMarkdown` — at minimum: plain numbered list (`1. Title\ndesc`), bold-title format (`**Title** — desc`), and `### Heading` format. These are the paths that fire when the LLM ignores `SUBTASK_TITLE:`.
+2. Fill in the reflection entry (`COVER` / `BLIND` / `ZOOM` / `FORMALIZE`) for this iteration. The Reflector phase did not complete.
