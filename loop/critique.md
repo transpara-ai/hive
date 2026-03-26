@@ -1,19 +1,41 @@
-# Critique: [hive:builder] Fix: [hive:builder] Wire Tester into `PipelineTree` in `pkg/runner/pipeline_tree.go`
+# Critique: [hive:builder] Add early return on `empty_sections` with cost fields in `runReflector`
 
-**Verdict:** PASS
+**Verdict:** REVISE
 
-**Summary:** All three required fixes verified:
+**Summary:** ## Critic Review — Iteration 323
 
-**Fix 1 — `reflections.md` trailing note:** Gone. File ends cleanly at the `---` separator after Lesson 81. ✓
+### Derivation chain
 
-**Fix 2 — `state.md` duplicate header:** Confirmed removed. Lines 319–320 show exactly one `## What the Scout Should Focus On Next` header. ✓
+Scout identified two bugs: (1) parser missing `**KEY**:` format variants, and (2) no early return on `empty_sections`. Builder scoped to bug #2 only — the early return + cost fields. The build report accurately describes the scope. The code change is small and correct: +8 lines to `runReflector`, adds cost fields and a `return`.
 
-**Fix 3 — Double diagnostic:** The guard at `pipeline_tree.go:78` (`if pt.diagnosticCount() <= prevCount`) correctly suppresses the second write when `runTester` has already written one. `tester.go` retains its `test_failure` diagnostic (the informative one); `Execute` only writes the generic `failure` fallback when nothing was written yet. This is option (b) from the prior REVISE — valid. ✓
+### Code correctness
 
-**Test coverage:** `TestPipelineTreeTesterFailureWritesExactlyOneDiagnostic` simulates a phase that self-reports a diagnostic then returns an error, and asserts count == 1. `countDiagnostics` is defined in `diagnostic.go` — the helper exists. ✓
+The production fix is correct:
+- `usage := resp.Usage()` extracted to avoid double-call. ✓
+- `CostUSD`, `InputTokens`, `OutputTokens` populated in `PhaseEvent`. ✓
+- `return` added after `appendDiagnostic` — execution cannot reach `appendReflection` or `advanceIterationCounter`. ✓
+- `Timestamp` not set in `PhaseEvent` — handled correctly by `appendDiagnostic` which sets it if empty (diagnostic.go:26-28). ✓
 
-**One observation, non-blocking:** The `diagnostics.jsonl` picked up a second `reflector/empty_sections` entry from the iteration that produced this fix. That's historically accurate — the Reflector ran before the state.md was corrected. Not a defect.
+### Test coverage (VERIFIED — invariant 12)
 
-No new issues. Derivation chain is clean: gap → REVISE with 3 specific items → all 3 applied → tested.
+`TestRunReflectorEmptySectionsDiagnostic` exists and was passing before this commit. It verifies the diagnostic write. But the **new behavioral claim** of this commit is: *when sections are empty, `reflections.md` is not written and `state.md` counter is not incremented*. The test does not verify either of these absences.
 
-VERDICT: PASS
+Specifically:
+- No assertion that `reflections.md` does not exist (or was not appended to) after the `empty_sections` path.
+- No assertion that `state.md` still reads `Iteration 5,` (the initial value) after the call — i.e., that the counter was not bumped.
+
+If someone removed the `return`, the existing test would still pass. The derivation (early return prevents corruption) has no verification.
+
+**Invariant 12 applies directly:** "If the Critic can't point to a test that covers the change, REVISE." The change is the early return — and the test doesn't cover it.
+
+### Scope note (not a REVISE)
+
+Bug #1 (parser not handling `**COVER**:` format) remains open. This means the loop will keep emitting `empty_sections` diagnostics — the early return now handles those gracefully, but the root cause is unresolved. That's a legitimate one-bug-per-iteration choice; it belongs on the Scout's radar for iteration 324.
+
+---
+
+VERDICT: REVISE
+
+**Required fix:** Add two assertions to `TestRunReflectorEmptySectionsDiagnostic`:
+1. After `runReflector` returns, assert `reflections.md` does NOT exist (or is empty) — the early return must prevent the append.
+2. Assert `state.md` still contains `Iteration 5,` — the counter must NOT have been incremented.

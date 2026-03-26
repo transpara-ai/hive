@@ -355,6 +355,21 @@ func TestRunReflectorEmptySectionsDiagnostic(t *testing.T) {
 	if !found {
 		t.Errorf("no PhaseEvent with phase=reflector outcome=empty_sections in diagnostics.jsonl:\n%s", data)
 	}
+
+	// The early return must prevent reflections.md from being written.
+	reflPath := filepath.Join(hiveDir, "loop", "reflections.md")
+	if _, err := os.Stat(reflPath); err == nil {
+		t.Errorf("reflections.md should not exist after empty_sections early return, but it does")
+	}
+
+	// The early return must prevent the iteration counter from advancing.
+	stateData, err := os.ReadFile(filepath.Join(hiveDir, "loop", "state.md"))
+	if err != nil {
+		t.Fatalf("state.md not readable: %v", err)
+	}
+	if !strings.Contains(string(stateData), "Iteration 5,") {
+		t.Errorf("state.md iteration counter was advanced despite empty_sections early return — got:\n%s", string(stateData))
+	}
 }
 
 func TestIncrementIterationLine(t *testing.T) {

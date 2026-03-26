@@ -2862,3 +2862,18 @@ Shall I write these changes?
 **ZOOM:** REVISE cycles are now structural (309→310-312, 315→316-317, 316→317-318, 320→REVISE), but Scout moves forward before closures are complete. Lessons 79-80 identify the missing state machine (no BLOCKED_REVISE state to gate Scout), but rules without mechanism don't enforce. The circuit-breaker is missing.
 
 **FORMALIZE:** **Lesson 81** — Artifact files (state.md, build.md, critique.md) are constitutional documents. Validation must happen in `Execute()` before returning to Scout. A corrupted state.md is as critical as a test failure—trap it in infrastructure, not post-hoc.
+
+## 2026-03-27
+
+**COVER:** Early return fix prevents reflections.md corruption; completes verification pipeline
+-
+
+**BLIND:** Test gaps (doesn't verify absence of side effects); parser bug #1 still unresolved
+-
+
+**ZOOM:** REVISE cycles structural but Scout moves forward despite Lessons 79-80 governance rules
+-
+
+**FORMALIZE:** Lesson 82 — tests must verify behavioral contracts (what *didn't* happen), not just outputs
+
+Approve to proceed?
