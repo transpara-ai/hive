@@ -1,23 +1,21 @@
-# Critique: [hive:builder] False completion epidemic: 268/478 done tasks have incomplete children � board integrity unreliable
+# Critique: [hive:builder] close.sh: critique nodes posted with causes=[] � Invariant 2 violation on every iteration
 
 **Verdict:** PASS
 
-**Summary:** All checks complete. Here's the derivation trace:
+**Summary:** **Derivation trace:**
 
-**Gap → Plan → Code → Test:**
-- Gap: 268/478 done tasks had incomplete children — board integrity violated
-- Fix: gate in `UpdateNodeState` at store layer, blocks completion when `COUNT(*) FROM nodes WHERE parent_id = $1 AND state != 'done'` > 0
-- Handler: both callsites (`handleOp "complete"` and `handleNodeState`) return 422 on `ErrChildrenIncomplete`
-- Tests: three cases — basic parent/child gate, leaf node pass-through, partial multi-child blocking
+- **Gap**: Critique claim nodes were posted with `causes=[]` — Invariant 2 violated on every iteration because `createTask` returned `error` (no ID) and `assertCritique` received `causeIDs` (build doc), not the task node ID.
+- **Fix**: `createTask` now returns `(string, error)` — the task node ID. `main()` threads it into `taskCauseIDs` for `assertCritique`. Fallback to build doc ID when task creation fails (non-fatal path).
+- **Test**: `TestAssertCritiqueCarriesTaskNodeIDasCause` sends `[]string{"task-node-abc123"}` to `assertCritique`, captures the HTTP body, and asserts `received["causes"] == "task-node-abc123"`. Correct.
+- **Existing test updated**: `TestCreateTaskSendsKindTask` updated to `_, err := createTask(...)` — compiles, no regression.
 
 **Invariant checks:**
-- **Invariant 11 (IDENTITY):** Query uses `parent_id = $1` with node ID, not name. ✓
-- **Invariant 12 (VERIFIED):** Three tests cover the gate: `TestUpdateNodeStateChildGate`, `TestUpdateNodeStateChildGateLeafNode`, `TestUpdateNodeStateChildGateMultipleChildren`. ✓
+- **Invariant 2 (CAUSALITY)**: Every critique claim now cites a declared cause — the task node ID. When task creation fails, falls back to build doc ID (still a cause, not empty). ✓
+- **Invariant 11 (IDENTITY)**: Cause is a node ID (`taskNodeID = result.Node.ID`), never a name. ✓
+- **Invariant 12 (VERIFIED)**: Test exists and exercises the specific new behavior. ✓
 
-**Design check:** Enforcement is at store layer — single point, all future callers get the gate. ✓
+**One edge case confirmed correct**: When `createTask` returns `("", err)`, `taskNodeID == ""` triggers the fallback. The nil-check on `taskNodeID` is the right guard, not checking `err` (which is already consumed for logging above).
 
-**build.md matches actual diff:** Yes. Every claim in build.md is verified in the code at the expected locations.
-
-**One minor note, not blocking:** The `SELECT COUNT` and `UPDATE` are not in a transaction (TOCTOU). Under concurrent task completion, a race could momentarily allow a parent to complete before a newly-added child is seen. In practice, the hive's sequential task model makes this unlikely, and the dangerous direction (incorrect PASS) requires a child to be *created* between the count and update — improbable. Acceptable tradeoff.
+The code is minimal, correct, and the test pins the invariant.
 
 VERDICT: PASS

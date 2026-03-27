@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,5 +129,63 @@ func TestHandleGetClaims(t *testing.T) {
 	result := s.handleGet(map[string]any{"id": "loop/claims"})
 	if !strings.Contains(result, "Ship what you build") {
 		t.Errorf("knowledge.get(loop/claims) missing expected content\ngot: %s", result)
+	}
+}
+
+// TestHandleSearchFindsDeepClaims verifies that knowledge_search finds claims
+// located beyond the 4000-char file-content window. This is the core bug:
+// claims.md is 72KB but search previously truncated at 4000 chars, making
+// Lesson 109+ invisible.
+func TestHandleSearchFindsDeepClaims(t *testing.T) {
+	s, loopDir := newTestServer(t)
+
+	// Build a file where the target claim is well past 4000 chars.
+	var b strings.Builder
+	b.WriteString("# Knowledge Claims\n\n")
+	for i := 1; i <= 60; i++ {
+		b.WriteString(fmt.Sprintf("## Lesson %d: Filler lesson for padding\n\nFiller body to push content window past 4000 characters.\n\n---\n\n", i))
+	}
+	// This claim is beyond 4000 chars — previously invisible to search.
+	b.WriteString("## Lesson 109: Infrastructure iterations must declare themselves\n\nThis deep claim must be findable.\n\n---\n\n")
+
+	if err := os.WriteFile(filepath.Join(loopDir, "claims.md"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s.buildTree()
+
+	result := s.handleSearch(map[string]any{"query": "lesson 109"})
+	if strings.Contains(result, "No results") {
+		t.Errorf("knowledge_search for 'lesson 109' returned no results; deep claims not indexed\ngot: %s", result)
+	}
+	if !strings.Contains(result, "loop/claims/") {
+		t.Errorf("result should reference an individual claim ID, got: %s", result)
+	}
+}
+
+// TestHandleGetIndividualClaim verifies that an individual claim can be
+// retrieved by its loop/claims/<slug> ID.
+func TestHandleGetIndividualClaim(t *testing.T) {
+	s, loopDir := newTestServer(t)
+
+	content := "# Knowledge Claims\n\n## CAUSALITY invariant: every event must declare causes\n\nEvery node posted must include a causes array.\n\n---\n\n"
+	if err := os.WriteFile(filepath.Join(loopDir, "claims.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s.buildTree()
+
+	// Find the claim's ID via search first.
+	searchResult := s.handleSearch(map[string]any{"query": "causality"})
+	if strings.Contains(searchResult, "No results") {
+		t.Fatalf("search for 'causality' found nothing\ngot: %s", searchResult)
+	}
+
+	// Extract an ID from the result and fetch it directly.
+	node := s.findTopic("loop/claims/causality-invariant-every-event-must-declare-causes")
+	if node == nil {
+		t.Fatal("individual claim topic not found by expected slug ID")
+	}
+	result := s.handleGet(map[string]any{"id": node.ID})
+	if !strings.Contains(result, "causes array") {
+		t.Errorf("handleGet(individual claim) missing body content\ngot: %s", result)
 	}
 }

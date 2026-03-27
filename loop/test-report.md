@@ -1,71 +1,51 @@
-# Test Report: False completion epidemic — child gate enforcement
+# Test Report: Iteration 373 — close.sh: critique nodes posted with causes=[]
 
-**Date:** 2026-03-28
+- **Result:** PASS
+- **Tests run:** 36
+- **New tests added:** 3
+- **Timestamp:** 2026-03-28
 
 ## What Was Tested
 
-Builder added `ErrChildrenIncomplete` enforcement to `UpdateNodeState` and 422 responses in both completion handler paths (`handleOp` case `"complete"` and `handleNodeState`). Builder also wrote `TestUpdateNodeStateChildGate` covering the basic single-child case.
+The fix in iteration 373 changed `createTask` to return `(string, error)` — the task node ID —
+so `main()` can pass it as `causes` to `assertCritique`. This satisfies Invariant 2: a critique
+of a build task must declare that task as its cause.
 
-Tester added 5 targeted tests covering gaps in the Builder's coverage.
+### Existing tests (all passing)
 
-## Tests Run
+All 33 pre-existing tests pass unchanged, including:
+- `TestAssertCritiqueCarriesTaskNodeIDasCause` — verifies assertCritique uses the task node ID as causes
+- `TestCreateTaskSendsKindTask` — verifies intend op sends explicit `kind=task`
+- `TestAssertCritiqueSendsCauses` / `TestAssertCauseIDsMultipleJoined` — cause wiring paths
 
-### Pre-existing (Builder wrote)
-**`TestUpdateNodeStateChildGate`** — `site/graph/store_test.go`
-- Parent with one incomplete child → `ErrChildrenIncomplete`
-- Complete child → parent now completable
-- Result: **PASS** ✓
+### New tests added
 
-### Added by Tester
+**`TestCreateTaskReturnsNodeID`** — verifies `createTask` returns the node ID from the server
+response. This is the critical path: if the ID is not returned, `taskCauseIDs` is empty and
+the fallback to `buildDocID` silently re-introduces the causality gap.
 
-**`TestUpdateNodeStateChildGateLeafNode`** — `site/graph/store_test.go`
-- Leaf node (zero children) → completes without error
-- Critical: the fix must not block leaf nodes. `COUNT(*) = 0 → incomplete = 0` path confirmed.
-- Result: **PASS** ✓
+**`TestCreateTaskEmptyResponseIDReturnsEmpty`** — verifies the guard at `main.go:238-241`:
+when the server returns `{}` (no `node.id`), `createTask` returns `("", nil)` without
+attempting the `complete` op. Caller falls back gracefully.
 
-**`TestUpdateNodeStateChildGateMultipleChildren`** — `site/graph/store_test.go`
-- 2 children, only 1 done → still blocked by `ErrChildrenIncomplete`
-- Both done → parent completes
-- Result: **PASS** ✓
+**`TestCreateTaskSendsCompleteOp`** — verifies that `createTask` sends two requests:
+1. `op=intend kind=task` (creates the task)
+2. `op=complete node_id=<returned-id>` (marks it done)
 
-**`TestUpdateNodeStateNonDoneSkipsGate`** — `site/graph/store_test.go`
-- Parent with incomplete child → setting to `StateReview` (non-done) does NOT trigger gate
-- Confirms the `if state == StateDone` guard is correctly scoped
-- Result: **PASS** ✓
+Without the `complete` op the task stays in-progress on the board indefinitely.
 
-**`TestHandlerCompleteOpChildrenIncomplete`** — `site/graph/handlers_test.go`
-- `POST /app/{slug}/op` with `{"op":"complete","node_id":"..."}` when parent has incomplete child
-- Verifies handler returns **422 Unprocessable Entity** (not 500)
-- Result: **PASS** ✓
+## Coverage Notes
 
-**`TestHandlerNodeStateChildrenIncomplete`** — `site/graph/handlers_test.go`
-- `POST /app/{slug}/node/{id}/state` with `state=done` when parent has incomplete child
-- Verifies `handleNodeState` returns **422 Unprocessable Entity** (not 500)
-- Result: **PASS** ✓
+The `main()` fallback path (`taskCauseIDs = causeIDs` when `taskNodeID == ""`) is exercised
+indirectly: `TestCreateTaskEmptyResponseIDReturnsEmpty` confirms the empty-ID case, and
+`TestAssertCritiqueCarriesTaskNodeIDasCause` confirms the non-empty-ID case. The fallback
+itself lives in `main()` which is not unit-testable, but both branches of the condition are
+covered by the function-level tests.
 
-## Coverage Summary
+## Edge Cases Covered
 
-| Path | Tested? |
-|------|---------|
-| `UpdateNodeState` single incomplete child → rejected | ✓ (Builder) |
-| `UpdateNodeState` child completed → parent accepted | ✓ (Builder) |
-| `UpdateNodeState` leaf node (no children) → accepted | ✓ (Tester) |
-| `UpdateNodeState` multiple children, partial → rejected | ✓ (Tester) |
-| `UpdateNodeState` multiple children, all done → accepted | ✓ (Tester) |
-| `UpdateNodeState` non-done state skips gate | ✓ (Tester) |
-| `handleOp` "complete" → 422 on `ErrChildrenIncomplete` | ✓ (Tester) |
-| `handleNodeState` state=done → 422 on `ErrChildrenIncomplete` | ✓ (Tester) |
-
-## Pre-existing Failures (not regressions)
-
-`go test ./graph/` shows 9 pre-existing failures unrelated to this feature:
-- Duplicate key violations from stale test DB data (slug conflicts)
-- `TestReportsAndResolve`: SQL scan error on `Op` type (pre-existing schema mismatch)
-- `TestReposts`: nil pointer dereference (pre-existing)
-- `TestHivePage`: content string mismatch (pre-existing)
-
-All gate-related tests isolated and confirmed passing. No regressions introduced.
-
-## Verdict
-
-**PASS.** The child gate enforces correctly across all tested scenarios. Both HTTP completion paths return 422 as specified. No regressions on new tests.
+- `createTask` with valid node ID in response → returns the ID ✓
+- `createTask` with empty/missing node ID in response → returns `("", nil)` ✓
+- `createTask` sends `complete` op with correct `node_id` ✓
+- `assertCritique` with `taskNodeID` as causes → causes field = taskNodeID ✓
+- `assertCritique` with `nil` causes → no causes field sent ✓

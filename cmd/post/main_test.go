@@ -746,6 +746,91 @@ func TestCreateTaskSendsKindTask(t *testing.T) {
 	}
 }
 
+// TestCreateTaskReturnsNodeID verifies that createTask returns the task node ID
+// from the server response. This is the critical new behaviour: the caller needs
+// this ID to pass as causes to assertCritique so the critique is causally linked
+// to the build task (Invariant 2: CAUSALITY).
+func TestCreateTaskReturnsNodeID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/hive/op" {
+			http.NotFound(w, r)
+			return
+		}
+		// Both intend and complete respond with a node ID.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"node":{"id":"task-node-xyz"}}`))
+	}))
+	defer srv.Close()
+
+	nodeID, err := createTask("lv_testkey", srv.URL, "Fix: causality gap", "details")
+	if err != nil {
+		t.Fatalf("createTask() error: %v", err)
+	}
+	if nodeID != "task-node-xyz" {
+		t.Errorf("createTask() nodeID = %q, want %q — node ID must be returned so critique can declare it as a cause",
+			nodeID, "task-node-xyz")
+	}
+}
+
+// TestCreateTaskEmptyResponseIDReturnsEmpty verifies that createTask returns
+// ("", nil) when the server responds with an empty node ID. This happens when
+// the server doesn't return a node in the response body. The caller (main) must
+// fall back gracefully — the task was created but the ID is unknown.
+func TestCreateTaskEmptyResponseIDReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`)) // no node.id
+	}))
+	defer srv.Close()
+
+	nodeID, err := createTask("lv_testkey", srv.URL, "Fix: something", "details")
+	if err != nil {
+		t.Fatalf("createTask() unexpected error: %v", err)
+	}
+	if nodeID != "" {
+		t.Errorf("createTask() nodeID = %q, want empty string when response has no node ID", nodeID)
+	}
+}
+
+// TestCreateTaskSendsCompleteOp verifies that createTask sends a second request
+// to complete the task after creating it. The complete op must carry the node_id
+// returned by the intend op — without this the task stays in-progress on the board.
+func TestCreateTaskSendsCompleteOp(t *testing.T) {
+	var requests []map[string]string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/hive/op" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]string
+		json.Unmarshal(body, &payload)
+		requests = append(requests, payload)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"node":{"id":"task-888"}}`))
+	}))
+	defer srv.Close()
+
+	if _, err := createTask("lv_testkey", srv.URL, "Fix: task complete", "details"); err != nil {
+		t.Fatalf("createTask() error: %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 requests (intend + complete), got %d", len(requests))
+	}
+	complete := requests[1]
+	if complete["op"] != "complete" {
+		t.Errorf("second request op = %q, want %q", complete["op"], "complete")
+	}
+	if complete["node_id"] != "task-888" {
+		t.Errorf("complete node_id = %q, want %q — must use the ID returned by intend", complete["node_id"], "task-888")
+	}
+}
+
 // TestEnsureSpaceExisting verifies that ensureSpace returns nil (without creating)
 // when the API responds with 200 OK.
 func TestEnsureSpaceExisting(t *testing.T) {

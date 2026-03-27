@@ -95,10 +95,11 @@ type toolContent struct {
 type topic struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`
-	Kind     string  `json:"kind"` // "category", "file", "primitive", "grammar", "post"
+	Kind     string  `json:"kind"` // "category", "file", "primitive", "grammar", "post", "claim"
 	Summary  string  `json:"summary,omitempty"`
 	Children []topic `json:"children,omitempty"`
-	Path     string  `json:"path,omitempty"` // file path for "file" kind
+	Path     string  `json:"path,omitempty"`    // file path for "file" kind
+	Content  string  `json:"content,omitempty"` // in-memory content for "claim" kind
 }
 
 type knowledgeServer struct {
@@ -239,14 +240,103 @@ func (s *knowledgeServer) buildHiveLoop() topic {
 	for _, f := range files {
 		p := filepath.Join(s.hiveDir, "loop", f.name)
 		if _, err := os.Stat(p); err == nil {
-			t.Children = append(t.Children, topic{
+			child := topic{
 				ID: "loop/" + strings.TrimSuffix(f.name, ".md"), Name: f.name, Kind: "file",
 				Summary: f.summary, Path: p,
-			})
+			}
+			// Parse claims.md into individual searchable claim topics so that
+			// knowledge_search("Lesson 109") finds the specific claim rather than
+			// only matching within the first 4000 chars of the full file.
+			if f.name == "claims.md" {
+				child.Children = parseClaims(p)
+			}
+			t.Children = append(t.Children, child)
 		}
 	}
 
 	return t
+}
+
+// parseClaims splits a claims.md file into individual topic nodes, one per
+// "## Title" section. This lets knowledge_search find specific claims by
+// keyword without being limited by the 4000-char file-content window.
+func parseClaims(path string) []topic {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	seen := map[string]int{}
+	var claims []topic
+
+	sections := strings.Split(string(data), "\n## ")
+	for i, section := range sections {
+		if i == 0 {
+			continue // skip preamble before first ##
+		}
+		lines := strings.SplitN(section, "\n", 2)
+		title := strings.TrimSpace(lines[0])
+		if title == "" {
+			continue
+		}
+		body := ""
+		if len(lines) > 1 {
+			body = strings.TrimSpace(lines[1])
+		}
+
+		slug := claimSlug(title)
+		base := slug
+		if n := seen[base]; n > 0 {
+			slug = fmt.Sprintf("%s-%d", base, n+1)
+		}
+		seen[base]++
+
+		claims = append(claims, topic{
+			ID:      "loop/claims/" + slug,
+			Name:    title,
+			Kind:    "claim",
+			Summary: claimSummary(body),
+			Content: "## " + title + "\n\n" + body,
+		})
+	}
+	return claims
+}
+
+// claimSlug converts a claim title into a URL-safe, lowercase slug (max 60 chars).
+func claimSlug(title string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(title) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	s := b.String()
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if len(s) > 60 {
+		s = strings.TrimRight(s[:60], "-")
+	}
+	return s
+}
+
+// claimSummary extracts the first meaningful line from a claim body,
+// skipping metadata lines like "**State:** claimed | **Author:** hive".
+func claimSummary(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "---" || strings.HasPrefix(line, "**State:") {
+			continue
+		}
+		if len(line) > 120 {
+			return line[:120] + "..."
+		}
+		return line
+	}
+	return ""
 }
 
 func (s *knowledgeServer) buildBlog() topic {
@@ -357,6 +447,11 @@ func (s *knowledgeServer) handleGet(args map[string]any) string {
 		return fmt.Sprintf("Topic %q not found", id)
 	}
 
+	// In-memory content node (individual claim, etc.)
+	if node.Content != "" {
+		return node.Content
+	}
+
 	if node.Path == "" {
 		// Category node — return summary + children list
 		var sb strings.Builder
@@ -399,6 +494,13 @@ func (s *knowledgeServer) handleSearch(args map[string]any) string {
 			strings.Contains(strings.ToLower(t.Summary), query) ||
 			strings.Contains(strings.ToLower(t.ID), query) {
 			results = append(results, fmt.Sprintf("- **%s** (`%s`) — %s", t.Name, t.ID, t.Summary))
+			return
+		}
+		// Match on in-memory content (individual claim nodes)
+		if t.Content != "" {
+			if strings.Contains(strings.ToLower(t.Content), query) {
+				results = append(results, fmt.Sprintf("- **%s** (`%s`) — %s", t.Name, t.ID, t.Summary))
+			}
 			return
 		}
 		// Match on file content (first 4000 chars)

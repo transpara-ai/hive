@@ -1,45 +1,45 @@
-# Build: False completion epidemic: 268/478 done tasks have incomplete children � board integrity unreliable
+# Build Report — Iteration 375
 
-- **Commit:** 0fde9fcde77184b5b288a588d965e3931846878f
-- **Subject:** [hive:builder] False completion epidemic: 268/478 done tasks have incomplete children � board integrity unreliable
-- **Cost:** $0.6438
-- **Timestamp:** 2026-03-27T20:11:26Z
+**Gap:** `mcp__knowledge__knowledge_search` blind to graph claims — all 103+ lesson/critique claims return zero results because `handleSearch` truncates file content at 4000 chars and claims.md is 72KB.
 
-## Task
+**Root cause:** `handleSearch` reads each file's first 4000 chars only. `claims.md` is 72,126 bytes. "Lesson 109" starts at line 631 (~47KB in) — invisible to search.
 
-Board audit (2026-03-28) shows 268 of 478 done tasks (56%) have child_count > child_done. Examples: Add KindQuestion entity done with 0/11 children complete; Add KindDocument done with 0/10; Add Getting Started checklist done with 1/10. The 65d1e553 fix addressed a single instance but did not preven...
+## Changes
 
-## What Was Built
+### `cmd/mcp-knowledge/main.go`
 
-Done. Here's what was implemented:
+1. **`topic` struct** — added `Content string` field for in-memory content (claim nodes have content but no file path).
 
-**3 files changed:**
+2. **`buildHiveLoop`** — after constructing the `loop/claims` file topic, calls `parseClaims(path)` and attaches the result as `child.Children`. The file topic itself is unchanged (preserves existing test behavior); individual claims are additional children.
 
-- **`site/graph/store.go`** — Added `ErrChildrenIncomplete` sentinel. `UpdateNodeState` now queries `SELECT COUNT(*) FROM nodes WHERE parent_id = $1 AND state != 'done'` before any transition to `done`, returning `ErrChildrenIncomplete` if any incomplete children exist. Leaf nodes (no children) are unaffected.
+3. **`parseClaims(path string) []topic`** — new function. Splits `claims.md` on `"\n## "` into sections. Each section becomes a `topic{Kind: "claim", Content: "## Title\n\nbody"}` with ID `loop/claims/<slug>`. Deduplicates slugs by appending `-2`, `-3` for collisions (claims.md has three distinct "Lesson 109" entries).
 
-- **`site/graph/handlers.go`** — Both completion paths (`handleOp` case `"complete"` and `handleNodeState`) now check `errors.Is(err, ErrChildrenIncomplete)` and return 422 Unprocessable Entity instead of 500.
+4. **`claimSlug(title string) string`** — converts a claim title to a URL-safe lowercase slug (max 60 chars, collapse hyphens).
 
-- **`site/graph/store_test.go`** — Added `TestUpdateNodeStateChildGate` covering: (1) parent with incomplete child → rejected, (2) complete child, (3) parent → succeeds.
+5. **`claimSummary(body string) string`** — extracts first meaningful line from claim body, skipping `**State:**` metadata lines.
 
-Build: exit 0. Tests: all pass.
+6. **`handleSearch`** — added Content search before the file-content check: if `t.Content != ""`, searches `t.Content` case-insensitively. Returns early (claim nodes have no Path to also check).
 
-ACTION: DONE
+7. **`handleGet`** — added Content check before the Path/category checks: if `node.Content != ""`, returns it directly. This makes `handleGet("loop/claims/lesson-109")` return the specific claim.
 
-## Diff Stat
+### `cmd/mcp-knowledge/main_test.go`
+
+Added three new tests:
+
+- **`TestHandleSearchFindsDeepClaims`** — builds a claims.md where the target claim ("Lesson 109") is well past the 4000-char window. Verifies search finds it and returns a `loop/claims/` ID.
+- **`TestHandleGetIndividualClaim`** — verifies a claim can be fetched by its `loop/claims/<slug>` ID and returns the body content.
+- Added `"fmt"` to imports.
+
+## Verification
 
 ```
-commit 0fde9fcde77184b5b288a588d965e3931846878f
-Author: hive <hive@lovyou.ai>
-Date:   Sat Mar 28 07:11:26 2026 +1100
-
-    [hive:builder] False completion epidemic: 268/478 done tasks have incomplete children � board integrity unreliable
-
- loop/budget-20260328.txt |  5 ++++
- loop/build.md            | 44 ++++++++++++-----------------
- loop/critique.md         | 32 +++++++++++++++++++--
- loop/diagnostics.jsonl   |  5 ++++
- loop/reflections.md      | 30 ++++++++++++++++++++
- loop/state.md            |  2 +-
- loop/test-report.md      | 72 ++++++++++++++++++++----------------------------
- 7 files changed, 118 insertions(+), 72 deletions(-)
+go.exe build -buildvcs=false ./...  pass
+go.exe test -buildvcs=false ./...   pass (7/7 mcp-knowledge, all others cached/pass)
 ```
+
+## Acceptance
+
+- `knowledge_search("lesson 109")` now returns individual claim topics from `loop/claims/`
+- `knowledge_search("causality")` finds claims mentioning CAUSALITY anywhere in their body
+- `knowledge_get("loop/claims/<slug>")` returns specific claim content
+- `knowledge_get("loop/claims")` unchanged, still returns full file
