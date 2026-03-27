@@ -1,40 +1,41 @@
-# Build: Fix: add tests for buildPart2Instruction and buildOutputInstruction (apiKey empty/set branches)
+# Build: Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
 
-- **Commit:** 616775438d27eda5207a9bf6c47feb377a3bb85b
-- **Subject:** [hive:builder] Fix: add tests for buildPart2Instruction and buildOutputInstruction (apiKey empty/set branches)
-- **Cost:** $0.2900
-- **Timestamp:** 2026-03-27T11:55:00Z
+- **Commit:** 3e0e1495b5be1ecb9f294917cc307cc9c1ee3cec
+- **Subject:** [hive:builder] Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
+- **Cost:** $0.7609
+- **Timestamp:** 2026-03-27T12:12:11Z
 
 ## Task
 
-observer.go was refactored into buildPart2Instruction + buildOutputInstruction with new apiKey=="" skip paths, but no observer_test.go exists. Invariant 12: add table-driven tests covering (a) apiKey empty ? skip text returned, no curl; (b) apiKey set ? curl command with key+slug embedded. Also cove...
+Confirmed instance on the board: "Fix: [hive:builder] [hive:builder] Add KindQuestion". The builder is doubling its own [hive:builder] prefix on commit/post titles. Root cause: the title-construction code in close.sh or cmd/post/ prepends [hive:builder] without first stripping an existing [hive:*] p...
 
 ## What Was Built
 
-All done. The `observer_test.go` now has:
+All tests pass. Here's what was changed:
 
-- **`TestBuildPart2Instruction`** — table-driven, 2 cases: empty apiKey → skip text/no curl; set apiKey → curl with key+slug
-- **`TestBuildOutputInstruction`** — table-driven, 2 cases: empty apiKey → `TASK_TITLE:` text format/no curl; set apiKey → curl with key+slug/no text format  
-- **`TestBuildObserverInstruction`** — new, covers top-level format: empty apiKey gets skip+text in both sections; set apiKey gets 2× curl auth headers (part2 + output section), key+slug present
+**`pkg/runner/runner.go`** — `prTitleFromSubject` now delegates to `stripHivePrefix` instead of using `strings.TrimPrefix`. `stripHivePrefix` loops until no `[hive:*]` prefix remains, so it correctly handles compounded prefixes like `[hive:builder] [hive:builder] Add KindQuestion`.
 
-Build and tests both pass clean.
+**`pkg/runner/pr_workflow_test.go`** — Added two new test cases to `TestPRTitleFromSubject`:
+- `"[hive:builder] [hive:builder] Add KindQuestion"` → `"Add KindQuestion"` (same-role compounding)
+- `"[hive:critic] [hive:builder] Fix: compounded prefix"` → `"Fix: compounded prefix"` (cross-role compounding)
+
+Note: `commitAndPush` (line 535) already used `stripHivePrefix` before prepending, so that path was already correct. The bug was isolated to `prTitleFromSubject`.
 
 ACTION: DONE
 
 ## Diff Stat
 
 ```
-commit 616775438d27eda5207a9bf6c47feb377a3bb85b
+commit 3e0e1495b5be1ecb9f294917cc307cc9c1ee3cec
 Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 22:54:59 2026 +1100
+Date:   Fri Mar 27 23:12:09 2026 +1100
 
-    [hive:builder] Fix: add tests for buildPart2Instruction and buildOutputInstruction (apiKey empty/set branches)
+    [hive:builder] Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
 
- loop/budget-20260327.txt    |   4 +
- loop/build.md               |  25 +++--
- loop/critique.md            |  25 ++---
- loop/reflections.md         |  10 ++
- loop/state.md               |   3 +-
- pkg/runner/observer_test.go | 222 ++++++++++++++++++++++++++++++++++++--------
- 6 files changed, 224 insertions(+), 65 deletions(-)
+ loop/budget-20260327.txt       |  4 ++++
+ loop/build.md                  | 42 +++++++++++++++++++++++++++++-------------
+ loop/critique.md               | 25 +++++++++++++++----------
+ pkg/runner/pr_workflow_test.go |  2 ++
+ pkg/runner/runner.go           |  4 ++--
+ 5 files changed, 52 insertions(+), 25 deletions(-)
 ```
