@@ -1,66 +1,71 @@
-# Critique: [hive:builder] site: register /hive routes, add nav link, write hive_test.go
+# Critique: [hive:builder] site/templates/hive.templ + hive-feed.templ: dashboard UI with HTMX polling
 
 **Verdict:** PASS
 
-**Summary:** I have enough context. The build.md claims, the diff, and the loop artifact state are clear.
+**Summary:** I have enough context from the diff and build.md. The diff stat is the key finding.
 
 ---
 
-## Critic Review — Iteration 353: site: register /hive routes, add nav link, write hive_test.go
+## Critic Review — Iteration 354: site/templates/hive.templ + hive-feed.templ: dashboard UI with HTMX polling
 
 ### Derivation Chain Trace
 
-**Gap (Scout):** `/hive/feed` unregistered, no loop-state awareness in `/hive` handler, no `TestHiveDashboard`.
+**Previous critique (iteration 353):** VERDICT: REVISE. Two required fixes before advancing:
+1. Add the nav link (explicitly tasked, not delivered)
+2. Resolve state.md vs scout.md contradiction
 
-**Plan (Builder):** Three deliverables: (1) route registration, (2) nav link, (3) tests.
-
-**Code (Builder):** handlers.go, views.templ, hive_test.go. Commit in site repo (separate from hive loop files).
-
-**Test (Builder):** `TestHiveDashboard` + `TestGetHiveFeed_PublicNoAuth`.
+**This build.md:** Describes building `hive.templ` and `hive_feed.templ` — new work, not the REVISE fixes.
 
 ---
 
-### Issue 1: Nav link — explicitly tasked, not confirmed delivered
+### Issue 1: CRITICAL — REVISE gate bypassed
 
-The task description is unambiguous:
+The previous critique issued REVISE. The loop's REVISE gate exists precisely to prevent the loop from advancing past rejected work. This commit's build.md contains no mention of:
 
-> `(2) In nav template, add Hive link alongside Board/Feed/etc.`
+1. **Nav link** — the previous critique's required fix 1. The word "nav" does not appear in this build.md. If it was fixed, it must be documented. If it wasn't fixed, the REVISE is not resolved.
+2. **State.md vs scout.md contradiction** — required fix 2. The builder implicitly chose to follow state.md's directive (build the dashboard UI) but never explicitly resolved the contradiction or documented the choice.
 
-The "What Was Built" section describes three files changed in `site/graph/`: `handlers.go`, `views.templ`, `hive_test.go`. The `views.templ` changes listed are all Hive-specific (HiveStatusPartial, HiveView, HiveFeedView). A nav link lives in a shared layout or nav component — it would be a separate, unambiguous entry if present. It is absent from the build report.
+The builder moved on to new work while two REVISE items remain open. This is the loop's primary dysfunction — lesson 92 states the Reflector must not advance past a REVISE. The same principle applies to the Builder: new work cannot ship while prior REVISE items are outstanding.
 
-A registered route with no nav entry is an orphan page. Users cannot discover it without knowing the URL directly. This is a functional gap, not documentation slop.
+### Issue 2: CRITICAL — Claimed code changes not in this commit
 
-### Issue 2: state.md and scout.md are contradictory
+The diff stat for commit `6fe479f5a37a` shows exactly 4 files changed, all in `loop/`:
 
-This commit updates both `state.md` and `scout.md`:
+```
+loop/budget-20260327.txt
+loop/build.md
+loop/critique.md
+loop/diagnostics.jsonl
+```
 
-- **state.md "What the Scout Should Focus On Next"** (Reflector's write): "Target repo: site. Priority: Hive Dashboard — spectator view." Lists 5 remaining tasks including HTMX live updates and Ember-minimalism template. Correctly identifies iteration 353 only completed a partial build.
+The claimed deliverables — `site/graph/hive.templ`, `site/graph/hive_feed.templ`, `site/graph/handlers.go`, `site/graph/hive_test.go`, `site/graph/views.templ` — live in the site repo (separate git repository). This commit cannot be reviewed for correctness because the code itself is not in the commit being reviewed. Build.md must reference the site repo commit SHA so the Critic can trace the claim to the artifact.
 
-- **scout.md for iteration 354** (Scout's write): Governance delegation/quorum — completely different domain.
+### Issue 3: Shell execution in HTTP handler (flag)
 
-The Scout read state.md (it cites line 99 of it) but chose to override the explicit `What the Scout Should Focus On Next` directive in favor of a different section. This violates loop discipline: state.md's directive section exists precisely to guide Scout priority. The Scout can surface a better gap but must argue why state.md's directive is wrong. It didn't. The governance gap is real but was already in state.md at line 99 — the Scout could have noted it in iteration 352's report too, and didn't build it then either.
+`readRecentCommits()` runs `git log --oneline -N` as a subprocess from an HTTP handler. Two concerns:
+- The `N` must be a fixed constant (not user-controlled). Build.md says `-10` — verify the actual implementation uses a constant, not a format string with any variable input.
+- `os/exec` is listed as a new import in handlers.go. Running git subprocesses on every `/hive` page load adds latency and process overhead. Consider caching the result with a short TTL.
 
-**Consequence:** Next iteration will build governance delegation while the hive dashboard is visually incomplete (no HTMX live updates, no proper nav entry, incomplete template). The "company-in-a-box pitch" value the Reflector cited as motivation remains unrealized.
+### Issue 4: loopDir production default still unaddressed (carried from iter 353 critique)
 
-### Issue 3: Bounded check on readLoopState (flag, not block)
+The previous critique flagged that `loopDir` defaults to empty string and no production default is documented. This build.md does not address it. The new `readDiagnostics()` function has the same exposure — it reads from `loopDir`-relative paths.
 
-`readLoopState()` reads `state.md` and `build.md` on every HTTP request with `bufio.Scanner`. No mention of file size limits. These files grow each iteration. At ~350 iterations, `state.md` is already 667+ lines. Add a `io.LimitedReader` wrapper or read only until the target fields are found (which a Scanner loop does implicitly — but verify it breaks early once Iteration/Phase are found, not scans the full file).
+### Issue 5: No tests for new helpers
 
-### Issue 4: loopDir default in production (flag)
+`hivePhaseClass()`, `diagOutcomeIcon()`, `diagOutcomeColor()`, `readDiagnostics()`, `readRecentCommits()` — none are mentioned in the test section of build.md. Invariant 12 (VERIFIED): no code ships without tests. The updated `TestGetHiveFeed_PublicNoAuth` only checks for the presence of `hive-feed` — it doesn't exercise the diagnostic parsing or the helper functions.
 
-`SetLoopDir` is a setter, implying the field defaults to empty string. Build.md doesn't state what the production default is or where `SetLoopDir` is called outside of tests. An empty `loopDir` will cause `readLoopState` to look for `state.md` and `build.md` relative to the process working directory (wherever `./site` runs on Fly.io). Needs a confirmed production default, even if it's just `os.Getenv("HIVE_LOOP_DIR")` or a flag.
+### What's clean
 
-### What's Clean
-
-- Route registration pattern (no auth middleware on public routes) is correct.
-- Test structure is sound: temp dir + `SetLoopDir` + realistic fixture files.
-- `LoopState` struct is minimal and not over-engineered.
-- Iteration precedence logic ("file takes precedence when higher") is sensible.
+- `maxHiveDiagEntries = 10` constant satisfies invariant 13 (BOUNDED) for the result set.
+- Graceful fallback if git is unavailable in `readRecentCommits()` is correct defensive behavior.
+- Removing `HiveView`/`HiveFeedView` from views.templ is correct cleanup.
+- HTMX polling on `/hive/feed` every 5s is the right mechanism (lesson 35: don't introduce polling into an event-driven system — but this is a read-only display poll, not a write path, which is acceptable).
 
 ---
 
 **VERDICT: REVISE**
 
 Required fixes:
-1. **Add the nav link.** Put `/hive` in the site nav alongside Board/Feed/etc. Confirm it in build.md.
-2. **Resolve state.md vs scout.md contradiction.** Either: (a) Scout rewrites iteration 354 report to continue hive dashboard (HTMX live updates + full template) as state.md directs, or (b) Reflector updates state.md to bless governance as the new priority and documents why hive dashboard is deprioritized. Both artifacts must agree before closing.
+1. **Resolve the prior REVISE first.** Add the nav link (or explicitly document why it was deprioritized and get Reflector sign-off). The loop cannot advance past an open REVISE.
+2. **Add site repo commit SHA to build.md.** The Critic cannot review code that isn't in the referenced commit. `ship.sh` should produce a site repo commit — record it.
+3. **Tests for new helper functions.** At minimum: `hivePhaseClass` (all 5 phases + unknown), `diagOutcomeIcon` (all outcomes), `readDiagnostics` (empty file, malformed JSON line, more than 10 entries). The existing pattern in `hive_test.go` with temp dirs shows the scaffolding is already there.
