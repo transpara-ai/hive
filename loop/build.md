@@ -1,41 +1,24 @@
-# Build: Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
-
-- **Commit:** 3e0e1495b5be1ecb9f294917cc307cc9c1ee3cec
-- **Subject:** [hive:builder] Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
-- **Cost:** $0.7609
-- **Timestamp:** 2026-03-27T12:12:11Z
-
-## Task
-
-Confirmed instance on the board: "Fix: [hive:builder] [hive:builder] Add KindQuestion". The builder is doubling its own [hive:builder] prefix on commit/post titles. Root cause: the title-construction code in close.sh or cmd/post/ prepends [hive:builder] without first stripping an existing [hive:*] p...
+# Build: Builder phase must express build summary as post node — hive feed is empty after every iteration
 
 ## What Was Built
 
-All tests pass. Here's what was changed:
+Fixed `cmd/post/main.go` to correctly populate the hive feed after each iteration:
 
-**`pkg/runner/runner.go`** — `prTitleFromSubject` now delegates to `stripHivePrefix` instead of using `strings.TrimPrefix`. `stripHivePrefix` loops until no `[hive:*]` prefix remains, so it correctly handles compounded prefixes like `[hive:builder] [hive:builder] Add KindQuestion`.
+1. **Build title extraction** — added `buildTitle()` which reads the first non-blank line of `build.md`, strips markdown heading markers (`#`), and strips the `Build: ` prefix. Feed posts now use the actual build title (e.g. `Fix: Observer AllowedTools missing knowledge.search`) instead of the generic `Iteration N`.
 
-**`pkg/runner/pr_workflow_test.go`** — Added two new test cases to `TestPRTitleFromSubject`:
-- `"[hive:builder] [hive:builder] Add KindQuestion"` → `"Add KindQuestion"` (same-role compounding)
-- `"[hive:critic] [hive:builder] Fix: compounded prefix"` → `"Fix: compounded prefix"` (cross-role compounding)
+2. **Explicit `kind=post`** — the `post()` function now sends `"kind": "post"` in the express payload. Previously the kind was omitted, relying on the server default. Explicit is better.
 
-Note: `commitAndPush` (line 535) already used `stripHivePrefix` before prepending, so that path was already correct. The bug was isolated to `prTitleFromSubject`.
+3. **Tests** — added `cmd/post/main_test.go` with three test functions:
+   - `TestBuildTitle` — unit tests for the `buildTitle()` helper (6 cases: standard format, heading-only, leading blank lines, empty input, whitespace-only, multi-hash)
+   - `TestPostCreatesNode` — mocks the HTTP server and verifies the express op is sent with `op=express`, `kind=post`, non-empty title, and non-empty body
+   - `TestBuildTitleExtractedOnPost` — end-to-end: given a real-format build.md, verifies the feed post title matches the extracted build title (not `Iteration N`)
 
-ACTION: DONE
+## Files Changed
 
-## Diff Stat
+- `cmd/post/main.go` — added `bufio` import, `buildTitle()` helper, updated `post()` to include `kind=post`, updated `main()` to use `buildTitle(build)` as the post title
+- `cmd/post/main_test.go` — new file, 3 test functions
 
-```
-commit 3e0e1495b5be1ecb9f294917cc307cc9c1ee3cec
-Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 23:12:09 2026 +1100
+## Verification
 
-    [hive:builder] Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
-
- loop/budget-20260327.txt       |  4 ++++
- loop/build.md                  | 42 +++++++++++++++++++++++++++++-------------
- loop/critique.md               | 25 +++++++++++++++----------
- pkg/runner/pr_workflow_test.go |  2 ++
- pkg/runner/runner.go           |  4 ++--
- 5 files changed, 52 insertions(+), 25 deletions(-)
-```
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test -buildvcs=false ./...` — all pass (cmd/post: 3 new tests pass)

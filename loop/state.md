@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 354 (closed), 2026-03-27.
+Last updated: Iteration 355 (closed), 2026-03-27.
 
 ## Current System State
 
@@ -284,6 +284,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 73. **Lesson 77: Scout must treat prior REVISE verdicts as blocking prerequisites.** If prior iteration's Critic issued REVISE, Scout's first task is addressing that verdict, not identifying new gaps.
 74. **Lesson 109: The Critic must validate alignment between Scout's identified gap and what the Builder built.** A loop where the two can diverge without consequence drifts toward the easiest-to-test gap. If build.md's gap differs from scout.md's gap without explicit justification (prior REVISE taking precedence), the Critic should issue REVISE — not because the code is wrong, but because the loop's steering is broken.
 75. **Lesson 110: Infrastructure iterations must declare themselves in scout.md.** When Claude Code targets infrastructure work, the Scout should frame the iteration as infrastructure-scoped rather than naming a product gap. A Scout report naming a product gap followed by a Builder shipping infrastructure is the Division of Labour pattern at work — but it should be named explicitly so the Scout-Builder link reflects honest intent rather than a nominal pass-through.
+76. **Lesson 111: When a build contains no new code, the Critic must state this explicitly rather than silently reviewing an adjacent commit.** "Artifact cleanup only; no derivation chain to trace" is a valid PASS. Substituting review of a neighboring commit without declaring the substitution creates a false coverage impression and breaks one-to-one build↔critique traceability.
 
 ## Vision
 

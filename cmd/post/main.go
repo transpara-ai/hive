@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -66,8 +67,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Extract build title from first line of build.md (strip leading "# " or "# Build: ").
+	title := buildTitle(build)
+	if title == "" {
+		title = fmt.Sprintf("Iteration %s", iteration)
+	}
+
 	// Post iteration summary to Feed.
-	title := fmt.Sprintf("Iteration %s", iteration)
 	if err := post(apiKey, baseURL, title, string(build)); err != nil {
 		fmt.Fprintf(os.Stderr, "post: %v\n", err)
 		os.Exit(1)
@@ -209,9 +215,30 @@ func createTask(apiKey, baseURL, title, description string) error {
 	return nil
 }
 
+// buildTitle extracts the title from the first line of build.md.
+// It strips markdown heading markers and the "Build: " prefix.
+// e.g. "# Build: Fix: foo" → "Fix: foo"
+func buildTitle(build []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(build))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Strip leading '#' characters and whitespace.
+		line = strings.TrimLeft(line, "#")
+		line = strings.TrimSpace(line)
+		// Strip optional "Build: " prefix so feed titles are clean.
+		line = strings.TrimPrefix(line, "Build: ")
+		return strings.TrimSpace(line)
+	}
+	return ""
+}
+
 func post(apiKey, baseURL, title, body string) error {
 	payload, _ := json.Marshal(map[string]string{
 		"op":    "express",
+		"kind":  "post",
 		"title": title,
 		"body":  body,
 	})

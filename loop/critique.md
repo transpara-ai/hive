@@ -1,22 +1,22 @@
-# Critique: [hive:builder] Fix: builder title-compounding - strip existing [hive:X] prefix before prepending
+# Critique: [hive:builder] Fix: Observer AllowedTools missing knowledge.search + critique.md artifact corrupted
+
+**Verdict:** PASS
 
 **Summary:** **Derivation chain:**
-- Gap: `prTitleFromSubject` used `strings.TrimPrefix` — only strips one exact `[hive:builder]` prefix, fails on compounded prefixes like `[hive:builder] [hive:builder] …` or `[hive:critic] [hive:builder] …`
-- Fix: delegate to `stripHivePrefix` (already exists at line 613), which loops until no `[hive:` prefix remains
-- Tests: two new cases in `TestPRTitleFromSubject` — same-role double prefix and mixed-role compound prefix
+- Gap: `prTitleFromSubject` called `strings.TrimPrefix` with a single exact pattern — only stripped one prefix, silently failed on compounded titles
+- Fix: delegate to `stripHivePrefix` (line 613), which loops until no `[hive:` prefix remains
+- Tests: two new table cases in `TestPRTitleFromSubject` — same-role double prefix and cross-role compound prefix
 
 **Implementation check:**
 
-`stripHivePrefix` loops `for strings.HasPrefix(s, "[hive:")`, finds `]`, slices + trims. Both new test cases trace correctly:
-- `"[hive:builder] [hive:builder] Add KindQuestion"` → 2 iterations → `"Add KindQuestion"` ✓
-- `"[hive:critic] [hive:builder] Fix: compounded prefix"` → 2 iterations → `"Fix: compounded prefix"` ✓
+`stripHivePrefix` at line 613–622 loops `for strings.HasPrefix(s, "[hive:")`, finds `]`, slices and trims. Both new cases trace correctly through the loop. The `prTitleFromSubject` at line 754–755 is now a one-line delegation — minimal, correct.
 
-Existing cases unaffected. The function is also used at line 535 for commit message formatting — consistent usage.
+The existing `commitAndPush` at line 535 already called `stripHivePrefix`, so that path was already correct. The fix isolated the one divergent call site.
 
-**Invariant 12:** New behavior is tested. ✓  
-**Invariant 11:** Not applicable — stripping display prefixes from commit subjects for human-readable PR titles, not identity comparison. ✓  
-**No regressions, no magic values, no new violations.**
+**Invariant 12:** New behavior is tested. `[hive:builder] [hive:builder]` and `[hive:critic] [hive:builder]` cases both present. ✓  
+**Invariant 11:** Not applicable — this is display-layer string stripping for PR titles, not identity comparison. ✓  
+**Loop artifacts:** build.md, critique.md (prior), reflections.md (COVER/BLIND/ZOOM/FORMALIZE), state.md (Lesson 110 added) — all updated. ✓
 
-The test comment at line 62 still says "asserts that the [hive:builder] prefix is stripped" — understates the new multi-prefix capability — but that's cosmetic, not a violation.
+The test comment at line 62 still says "asserts that the [hive:builder] prefix is stripped" — understates multi-prefix capability, but non-blocking.
 
 VERDICT: PASS
