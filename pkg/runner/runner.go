@@ -39,6 +39,7 @@ var roleModel = map[string]string{
 	"guardian":  "haiku",
 	"monitor":   "haiku",
 	"pm":        "sonnet",
+	"scribe":    "sonnet",
 }
 
 // Config holds everything a Runner needs.
@@ -185,6 +186,8 @@ func (r *Runner) runTick(ctx context.Context) {
 		r.runReflector(ctx)
 	case "spawner":
 		r.runSpawner(ctx)
+	case "scribe":
+		r.runScribe(ctx)
 	default:
 		// Any agent in agents/ can be invoked by name.
 		prompt := LoadRolePrompt(r.cfg.HiveDir, r.cfg.Role)
