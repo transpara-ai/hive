@@ -68,6 +68,8 @@ func TestPRTitleFromSubject(t *testing.T) {
 		{"[hive:builder] Add OAuth integration", "Add OAuth integration"},
 		{"[hive:builder]  Fix: something  ", "Fix: something"},
 		{"no prefix here", "no prefix here"},
+		{"[hive:builder] [hive:builder] Add KindQuestion", "Add KindQuestion"},
+		{"[hive:critic] [hive:builder] Fix: compounded prefix", "Fix: compounded prefix"},
 	}
 	for _, tt := range tests {
 		got := prTitleFromSubject(tt.input)

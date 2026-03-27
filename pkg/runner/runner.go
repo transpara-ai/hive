@@ -750,9 +750,9 @@ func (r *Runner) featBranchForCommit(hash string) (string, error) {
 }
 
 // prTitleFromSubject extracts the PR title from a commit subject by stripping
-// the "[hive:builder]" prefix that the Builder adds.
+// any leading [hive:*] prefix (handles compounded prefixes like [hive:builder] [hive:builder]).
 func prTitleFromSubject(subject string) string {
-	return strings.TrimSpace(strings.TrimPrefix(subject, "[hive:builder]"))
+	return stripHivePrefix(subject)
 }
 
 // LoadRolePrompt reads the role prompt from agents/{role}.md.
