@@ -252,7 +252,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 	}
 
 	// Create a runner that all state machine transitions use.
-	makeRunner := func(role string) *runner.Runner {
+	makeRunner := func(role string) (*runner.Runner, error) {
 		model := runner.ModelForRole(role)
 		providerCfg := intelligence.Config{
 			Provider:     "claude-cli",
@@ -262,7 +262,10 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		if mcpConfigPath != "" {
 			providerCfg.MCPConfigPath = mcpConfigPath
 		}
-		provider, _ := intelligence.New(providerCfg)
+		provider, err := intelligence.New(providerCfg)
+		if err != nil {
+			return nil, fmt.Errorf("provider for %s: %w", role, err)
+		}
 
 		return runner.New(runner.Config{
 			Role:       role,
@@ -278,17 +281,16 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			NoPush:     role == "builder",
 			PRMode:     role == "builder" && prMode,
 			RepoMap:    repoMap,
-		})
+		}), nil
 	}
 
 	// Run the pipeline as a state machine.
 	// Events drive transitions. Transitions invoke agents. No for-loop.
-	sm := runner.NewPipelineStateMachine(makeRunner("builder"))
-
-	// Before running, update the runner factory so each state gets the right role.
-	// The state machine calls runTick which dispatches by cfg.Role.
-	smRunner := makeRunner("builder") // base runner — state machine overrides Role per state
-	sm = runner.NewPipelineStateMachine(smRunner)
+	smRunner, err := makeRunner("builder") // base runner — state machine overrides Role per state
+	if err != nil {
+		return err
+	}
+	sm := runner.NewPipelineStateMachine(smRunner)
 
 	if err := sm.Run(ctx); err != nil {
 		log.Printf("[pipeline] state machine error: %v", err)
