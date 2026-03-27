@@ -3566,3 +3566,37 @@ Zooming to the structural level: the `parseAction` DONE→PROGRESS fix is the si
 Lesson 139 — A default of DONE in task-state parsing is a structural lie: it asserts completion without evidence. The correct default is PROGRESS — the agent has done something, but the loop does not know if it finished. Only an explicit `ACTION: DONE` in the output is evidence of completion. This aligns the task state machine with the principle of explicit optionality: silence is not consent, error outputs are not confirmations, and partial responses are not completions. Applied broadly: any state machine whose terminal state can be reached by default (rather than by explicit signal) will produce false completions under error conditions.
 
 Lesson 140 — Commit messages and build.md titles must describe the actual diff, not the task that motivated the session. When a builder re-enters after REVISE, the revised work may differ substantially from the original task description. Writing the commit title before verifying what changed produces titles that corrupt the git log. The audit trail's integrity depends on commit messages being accurate post-hoc descriptions of changes, not pre-hoc descriptions of intentions. Rule: the builder must read the diff before writing the commit message.
+
+## 2026-03-28 — Iteration 374
+
+**COVER:** The MCP knowledge_search blind spot is closed. For over a dozen iterations, Lesson 113 was confirmed in every session: "Both knowledge_search queries returned No results." The root cause was a 4,000-character file-content truncation in `handleSearch`. `claims.md` is 72KB — 103+ lessons and 37+ critique claims existed beyond the truncation window and returned zero results silently.
+
+The fix: `buildHiveLoop` now calls `parseClaims()` on `claims.md` and attaches individual claim nodes as children of the `loop/claims` topic (one node per `## ` section). Each claim is a `topic{Kind:"claim", Content:...}` node with a deterministic slug ID (e.g., `loop/claims/lesson-109`). `handleSearch` checks `t.Content` for claim nodes, bypassing the file-path truncation path entirely. `handleGet` returns content for individual claim nodes by slug. Deduplication handles the three "Lesson 109" variants in claims.md.
+
+Two new tests close the gap: `TestHandleSearchFindsDeepClaims` synthesizes 60-lesson preamble to push content past 4,000 chars, then searches — directly exercises the bug. `TestHandleGetIndividualClaim` traces slug derivation end-to-end. All 7 tests pass. Critic verdict: PASS, no REVISE cycle. Builder cost: $0.86.
+
+This closes a structural gap that invalidated every prior Reflector instruction to "search knowledge for prior lessons before reflecting." The instruction was always followed; the index was always lying.
+
+**BLIND:** Five gaps.
+
+(1) **Governance delegation — 19th+ consecutive infrastructure iteration.** Scout identified delegation/quorum as the gap. Builder addressed knowledge_search indexing. Lesson 129 communicated this directly to Matt; Lessons 133, 136, 137 restated it. Further documentation has reached zero marginal value. Named for completeness only.
+
+(2) **Searchable ≠ read.** The fix makes claims discoverable via MCP. It does not ensure that Builders or Scouts call `knowledge_search` before acting. Lesson 143 formalized this: lessons are written to reflections.md but the phases that need them read scout.md and build.md. The tool is fixed; the usage discipline is unchanged. The Reflector's prompt says "Search first." The Builder's prompt does not.
+
+(3) **Scout counter 20 iterations stale.** Scout labels the current gap "Iteration 354"; state.md records 374 closed. Root cause unchanged: Scout reads state.md but iteration counter does not increment when a Builder diverges from the scout target. The Governance delegation gap has been "open since iteration 354" for 20 iterations.
+
+(4) **`loop/claims` parent topic returns truncated raw content.** The Critic noted: `knowledge_get("loop/claims")` returns the first 8,000 bytes of claims.md, not a list of child nodes. Individual claim nodes are accessible by slug or search, but there is no browsable index. An agent calling `knowledge_get` on the parent gets a partial view, not the full claims tree.
+
+(5) **`claimSummary` slices bytes, not runes.** `line[:120]` (bytes) could corrupt a multi-byte UTF-8 character at the boundary. Claims are ASCII-heavy so this is safe in practice but is an identified defect. The Critic named it; the fix was deferred. It is a known-unsafe operation documented and unaddressed.
+
+**ZOOM:** The fix was correctly scoped: one implementation file, one test file, no schema changes, no new abstractions. The bug was a boundary condition in a content indexer; the fix belongs exactly where it was made (at parse time, not at query time).
+
+The higher-level zoom: this is the highest-leverage infrastructure fix of the last twenty iterations. Every prior lesson (Lessons 101–143) was invisible to agents querying the index. If Builder had found Lesson 139 ("default DONE is structural lie") before iteration 370, the false-completion epidemic might have been shorter. If Builder had found Lesson 134 ("omitempty on state fields is an API violation") before iteration 368, the three-iteration causes fix might have been one. The claims index fix is retroactively high-value — it makes 43+ lessons available to every future Builder session.
+
+But the value is latent until it is exercised. The loop now has a working index; it does not have a discipline. The gap between "lessons are searchable" and "lessons influence action" is the same as the gap between "documentation exists" and "documentation is read."
+
+The selection-pressure zoom: 19 consecutive infrastructure iterations since Lesson 129. Each individual fix is correct and real. The cumulative effect is a loop that continuously improves its own plumbing while the product gap widens. This is not a failure mode — it is a demonstrated stable property of the loop under its current incentive structure. The incentive structure selects for closeable gaps. Governance delegation is not closeable in one iteration.
+
+**FORMALIZE:** Lesson 144 — Fixing a search index is necessary but not sufficient for institutional memory to influence action. Claims are now discoverable via `knowledge_search`. But Builders read scout.md and build.md — they do not automatically query MCP. The gap between "lessons are indexed" and "lessons are read before acting" is a process gap, not a tooling gap. Fix pattern: add a mandatory `knowledge_search` step to the Builder prompt before any implementation decision. Without it, the index is a resource visited only by the Reflector.
+
+Lesson 145 — File-content truncation in a search index is a silent failure mode worse than an empty index. When a search index truncates file content at N characters and the file exceeds N, the index returns zero results — not partial results. Callers cannot distinguish "no matching lessons" from "lesson exists beyond the window." The correct invariant: search result stability must be independent of file size. Test for this explicitly: generate content that exceeds the truncation boundary and verify results are unchanged. If results change with file size, the search is not a reliable index — it is a variable-coverage sampling function with no indicator of coverage failure.

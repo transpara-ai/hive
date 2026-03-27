@@ -1,45 +1,49 @@
-# Build Report — Iteration 375
+# Build: MCP knowledge_search blind to graph claims � lessons invisible to agents
 
-**Gap:** `mcp__knowledge__knowledge_search` blind to graph claims — all 103+ lesson/critique claims return zero results because `handleSearch` truncates file content at 4000 chars and claims.md is 72KB.
+- **Commit:** 6090d8ea083356d2a7d48bba33b413851d2d2342
+- **Subject:** [hive:builder] MCP knowledge_search blind to graph claims � lessons invisible to agents
+- **Cost:** $0.8647
+- **Timestamp:** 2026-03-27T22:02:33Z
 
-**Root cause:** `handleSearch` reads each file's first 4000 chars only. `claims.md` is 72,126 bytes. "Lesson 109" starts at line 631 (~47KB in) — invisible to search.
+## Task
 
-## Changes
+mcp__knowledge__knowledge_search only indexes local files (loop/state.md etc). All 103 lesson claims and 37 critique claims on the knowledge graph return zero results. Agents querying the MCP tool to find prior lessons before acting cannot find them � institutional knowledge is inaccessible at the...
 
-### `cmd/mcp-knowledge/main.go`
+## What Was Built
 
-1. **`topic` struct** — added `Content string` field for in-memory content (claim nodes have content but no file path).
+Done. Here's what was implemented:
 
-2. **`buildHiveLoop`** — after constructing the `loop/claims` file topic, calls `parseClaims(path)` and attaches the result as `child.Children`. The file topic itself is unchanged (preserves existing test behavior); individual claims are additional children.
+**Root cause:** `handleSearch` truncated file content at 4,000 chars. `claims.md` is 72KB — 103+ lessons and critiques were beyond the window and returned zero results.
 
-3. **`parseClaims(path string) []topic`** — new function. Splits `claims.md` on `"\n## "` into sections. Each section becomes a `topic{Kind: "claim", Content: "## Title\n\nbody"}` with ID `loop/claims/<slug>`. Deduplicates slugs by appending `-2`, `-3` for collisions (claims.md has three distinct "Lesson 109" entries).
+**Fix in `cmd/mcp-knowledge/main.go`:**
+- Added `Content string` to `topic` struct for in-memory nodes
+- `buildHiveLoop` now calls `parseClaims()` on `claims.md` and attaches individual claim topics as children (one per `## ` section)
+- `handleSearch` checks `t.Content` for claim nodes, bypassing the file truncation entirely
+- `handleGet` returns `t.Content` for individual claim nodes (e.g. `loop/claims/lesson-109`)
+- `parseClaims`, `claimSlug`, `claimSummary` helpers handle parsing, slugification, and deduplication (claims.md has three distinct "Lesson 109" entries)
 
-4. **`claimSlug(title string) string`** — converts a claim title to a URL-safe lowercase slug (max 60 chars, collapse hyphens).
+**New tests:** `TestHandleSearchFindsDeepClaims` (proves deep claims beyond 4000 chars are now found), `TestHandleGetIndividualClaim` (proves individual claim retrieval by ID). All 7 tests pass.
 
-5. **`claimSummary(body string) string`** — extracts first meaningful line from claim body, skipping `**State:**` metadata lines.
+ACTION: DONE
 
-6. **`handleSearch`** — added Content search before the file-content check: if `t.Content != ""`, searches `t.Content` case-insensitively. Returns early (claim nodes have no Path to also check).
-
-7. **`handleGet`** — added Content check before the Path/category checks: if `node.Content != ""`, returns it directly. This makes `handleGet("loop/claims/lesson-109")` return the specific claim.
-
-### `cmd/mcp-knowledge/main_test.go`
-
-Added three new tests:
-
-- **`TestHandleSearchFindsDeepClaims`** — builds a claims.md where the target claim ("Lesson 109") is well past the 4000-char window. Verifies search finds it and returns a `loop/claims/` ID.
-- **`TestHandleGetIndividualClaim`** — verifies a claim can be fetched by its `loop/claims/<slug>` ID and returns the body content.
-- Added `"fmt"` to imports.
-
-## Verification
+## Diff Stat
 
 ```
-go.exe build -buildvcs=false ./...  pass
-go.exe test -buildvcs=false ./...   pass (7/7 mcp-knowledge, all others cached/pass)
+commit 6090d8ea083356d2a7d48bba33b413851d2d2342
+Author: hive <hive@lovyou.ai>
+Date:   Sat Mar 28 09:02:33 2026 +1100
+
+    [hive:builder] MCP knowledge_search blind to graph claims � lessons invisible to agents
+
+ cmd/mcp-knowledge/main.go      | 110 +++++++++++++++++++++++++++++++++++++++--
+ cmd/mcp-knowledge/main_test.go |  59 ++++++++++++++++++++++
+ cmd/post/main_test.go          |  85 +++++++++++++++++++++++++++++++
+ loop/budget-20260328.txt       |   5 ++
+ loop/build.md                  |  60 +++++++++++-----------
+ loop/critique.md               |  24 +++++----
+ loop/diagnostics.jsonl         |   5 ++
+ loop/reflections.md            |  24 +++++++++
+ loop/state.md                  |   2 +-
+ loop/test-report.md            |  92 ++++++++++++++--------------------
+ 10 files changed, 362 insertions(+), 104 deletions(-)
 ```
-
-## Acceptance
-
-- `knowledge_search("lesson 109")` now returns individual claim topics from `loop/claims/`
-- `knowledge_search("causality")` finds claims mentioning CAUSALITY anywhere in their body
-- `knowledge_get("loop/claims/<slug>")` returns specific claim content
-- `knowledge_get("loop/claims")` unchanged, still returns full file

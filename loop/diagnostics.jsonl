@@ -150,3 +150,8 @@
 {"phase":"critic","outcome":"critique.pass","duration_secs":48.0684301,"cost_usd":1.4491589999999999,"timestamp":"2026-03-27T20:35:35Z"}
 {"phase":"reflector","outcome":"reflection.done","duration_secs":233.9375396,"cost_usd":1.8213530999999998,"timestamp":"2026-03-27T20:39:29Z"}
 {"phase":"observer","outcome":"audit.done","duration_secs":330.2811951,"cost_usd":2.3626831499999996,"timestamp":"2026-03-27T20:44:59Z"}
+{"phase":"builder","outcome":"task.done","duration_secs":391.1628779,"cost_usd":0.8646746999999998,"timestamp":"2026-03-27T22:02:33Z"}
+{"phase":"tester","outcome":"tests.pass","duration_secs":133.9006351,"cost_usd":1.2516314999999998,"timestamp":"2026-03-27T22:04:47Z"}
+{"phase":"critic","outcome":"critique.pass","duration_secs":133.2888644,"cost_usd":1.5191200499999997,"timestamp":"2026-03-27T22:07:01Z"}
+{"phase":"reflector","outcome":"reflection.done","duration_secs":207.0387491,"cost_usd":1.8327551999999998,"timestamp":"2026-03-27T22:10:28Z"}
+{"phase":"observer","outcome":"audit.done","duration_secs":577.7904234,"cost_usd":2.93260365,"timestamp":"2026-03-27T22:20:06Z"}

@@ -1,51 +1,58 @@
-# Test Report: Iteration 373 — close.sh: critique nodes posted with causes=[]
+# Test Report: MCP knowledge_search deep claims fix
 
-- **Result:** PASS
-- **Tests run:** 36
-- **New tests added:** 3
-- **Timestamp:** 2026-03-28
+- **Iteration:** Build 6090d8e — MCP knowledge_search blind to graph claims
+- **Tester:** Tester agent
+- **Result:** PASS — 18/18 tests, 0 failures
 
 ## What Was Tested
 
-The fix in iteration 373 changed `createTask` to return `(string, error)` — the task node ID —
-so `main()` can pass it as `causes` to `assertCritique`. This satisfies Invariant 2: a critique
-of a build task must declare that task as its cause.
+The fix parses `claims.md` into individual in-memory `topic` nodes so that
+`knowledge_search` is no longer limited by the 4000-char file-content window.
+Tests cover the core fix, edge cases, and helper functions.
 
-### Existing tests (all passing)
+## Test Coverage
 
-All 33 pre-existing tests pass unchanged, including:
-- `TestAssertCritiqueCarriesTaskNodeIDasCause` — verifies assertCritique uses the task node ID as causes
-- `TestCreateTaskSendsKindTask` — verifies intend op sends explicit `kind=task`
-- `TestAssertCritiqueSendsCauses` / `TestAssertCauseIDsMultipleJoined` — cause wiring paths
+### Pre-existing tests (7) — all pass
 
-### New tests added
+| Test | What it checks |
+|------|----------------|
+| `TestBuildHiveLoopIncludesClaimsWhenPresent` | claims.md indexed when file exists |
+| `TestBuildHiveLoopOmitsClaimsWhenAbsent` | claims not in tree when file absent |
+| `TestHandleSearchFindsClaims` | basic claim content found by search |
+| `TestHandleTopicsReturnsLoopChildren` | claims.md listed in loop children |
+| `TestHandleGetClaims` | knowledge.get(loop/claims) returns file content |
+| `TestHandleSearchFindsDeepClaims` | **core bug**: claims beyond 4000 chars now found |
+| `TestHandleGetIndividualClaim` | individual claim retrieved by slug ID |
 
-**`TestCreateTaskReturnsNodeID`** — verifies `createTask` returns the node ID from the server
-response. This is the critical path: if the ID is not returned, `taskCauseIDs` is empty and
-the fallback to `buildDocID` silently re-introduces the causality gap.
+### New tests added (11) — all pass
 
-**`TestCreateTaskEmptyResponseIDReturnsEmpty`** — verifies the guard at `main.go:238-241`:
-when the server returns `{}` (no `node.id`), `createTask` returns `("", nil)` without
-attempting the `complete` op. Caller falls back gracefully.
+| Test | What it checks |
+|------|----------------|
+| `TestParseClaimsDuplicateTitles` | Three "Lesson 109" titles get unique slugs: base, base-2, base-3 |
+| `TestClaimSlugTruncation` | Slug <= 60 chars, no trailing hyphen after truncation |
+| `TestClaimSlugSpecialChars` | Colons, parens, em-dashes collapsed to single hyphens |
+| `TestClaimSummaryLongLine` | Line > 120 chars truncated to 120 + "..." |
+| `TestClaimSummaryAllMetadata` | Body with only `**State:**` lines returns empty summary |
+| `TestParseClaimsEmptyFile` | Empty file -> 0 claims, no panic |
+| `TestParseClaimsNoSections` | File with no `##` headings -> 0 claims |
+| `TestHandleSearchResultCap` | 15 matching claims -> at most 10 returned |
+| `TestHandleSearchEmptyQuery` | Empty query -> error string, no panic |
+| `TestHandleGetEmptyID` | Empty id -> error string, no panic |
+| `TestClaimChildrenVisibleInTopics` | Individual claim nodes appear as children of loop/claims |
 
-**`TestCreateTaskSendsCompleteOp`** — verifies that `createTask` sends two requests:
-1. `op=intend kind=task` (creates the task)
-2. `op=complete node_id=<returned-id>` (marks it done)
+## Edge Cases Verified
 
-Without the `complete` op the task stays in-progress on the board indefinitely.
+- **Deduplication:** Three "Lesson 109" entries get distinct IDs (base, base-2, base-3). Confirmed.
+- **Slug truncation:** Long titles don't leave trailing hyphens at the 60-char cut. Confirmed.
+- **Result cap:** handleSearch hard-caps at 10 results regardless of match count. Confirmed.
+- **Null inputs:** Empty query and empty ID return error strings, not panics. Confirmed.
+- **Empty/degenerate files:** parseClaims handles empty and no-section files cleanly. Confirmed.
+- **Children navigation:** knowledge.topics(loop/claims) surfaces individual claim nodes. Confirmed.
 
 ## Coverage Notes
 
-The `main()` fallback path (`taskCauseIDs = causeIDs` when `taskNodeID == ""`) is exercised
-indirectly: `TestCreateTaskEmptyResponseIDReturnsEmpty` confirms the empty-ID case, and
-`TestAssertCritiqueCarriesTaskNodeIDasCause` confirms the non-empty-ID case. The fallback
-itself lives in `main()` which is not unit-testable, but both branches of the condition are
-covered by the function-level tests.
-
-## Edge Cases Covered
-
-- `createTask` with valid node ID in response → returns the ID ✓
-- `createTask` with empty/missing node ID in response → returns `("", nil)` ✓
-- `createTask` sends `complete` op with correct `node_id` ✓
-- `assertCritique` with `taskNodeID` as causes → causes field = taskNodeID ✓
-- `assertCritique` with `nil` causes → no causes field sent ✓
+- `parseClaims`, `claimSlug`, `claimSummary` — fully covered
+- `handleSearch` content-branch for claim nodes — covered by deep-claim test
+- `handleGet` in-memory content branch — covered by individual-claim test
+- `handleTopics` children traversal — covered by topics and children tests
+- File I/O error paths (parseClaims on missing file) — exercised; returns nil cleanly

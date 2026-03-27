@@ -189,3 +189,191 @@ func TestHandleGetIndividualClaim(t *testing.T) {
 		t.Errorf("handleGet(individual claim) missing body content\ngot: %s", result)
 	}
 }
+
+// TestParseClaimsDuplicateTitles verifies that duplicate ## headings in
+// claims.md produce unique slug IDs (-2, -3 suffixes) rather than colliding.
+// The real claims.md has three distinct "Lesson 109" entries.
+func TestParseClaimsDuplicateTitles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claims.md")
+	content := "# Claims\n\n## Lesson 109: some rule\n\nBody A.\n\n---\n\n## Lesson 109: some rule\n\nBody B.\n\n---\n\n## Lesson 109: some rule\n\nBody C.\n\n---\n\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	claims := parseClaims(path)
+	if len(claims) != 3 {
+		t.Fatalf("expected 3 claims, got %d", len(claims))
+	}
+
+	ids := map[string]bool{}
+	for _, c := range claims {
+		if ids[c.ID] {
+			t.Errorf("duplicate claim ID: %s", c.ID)
+		}
+		ids[c.ID] = true
+	}
+
+	// First occurrence gets the base slug; subsequent get -2, -3.
+	base := "loop/claims/lesson-109-some-rule"
+	if claims[0].ID != base {
+		t.Errorf("first claim ID = %q, want %q", claims[0].ID, base)
+	}
+	if claims[1].ID != base+"-2" {
+		t.Errorf("second claim ID = %q, want %q", claims[1].ID, base+"-2")
+	}
+	if claims[2].ID != base+"-3" {
+		t.Errorf("third claim ID = %q, want %q", claims[2].ID, base+"-3")
+	}
+}
+
+// TestClaimSlugTruncation verifies that claimSlug truncates at 60 chars and
+// does not leave a trailing hyphen after truncation.
+func TestClaimSlugTruncation(t *testing.T) {
+	// 70-char title — slug must be ≤ 60 chars with no trailing hyphen.
+	title := "This is a very long claim title that definitely exceeds sixty characters limit"
+	slug := claimSlug(title)
+	if len(slug) > 60 {
+		t.Errorf("slug len = %d, want ≤ 60; slug = %q", len(slug), slug)
+	}
+	if strings.HasSuffix(slug, "-") {
+		t.Errorf("slug has trailing hyphen: %q", slug)
+	}
+}
+
+// TestClaimSlugSpecialChars verifies that colons, parens, and other
+// non-alphanumeric characters are collapsed to single hyphens.
+func TestClaimSlugSpecialChars(t *testing.T) {
+	cases := []struct {
+		title string
+		want  string
+	}{
+		{"CAUSALITY: events must declare causes", "causality-events-must-declare-causes"},
+		{"Rule (v2.0) — enforce it", "rule-v2-0-enforce-it"},
+		{"---leading hyphens---", "leading-hyphens"},
+	}
+	for _, tc := range cases {
+		got := claimSlug(tc.title)
+		if got != tc.want {
+			t.Errorf("claimSlug(%q) = %q, want %q", tc.title, got, tc.want)
+		}
+	}
+}
+
+// TestClaimSummaryLongLine verifies that a body line exceeding 120 chars is
+// truncated with "..." rather than returned in full.
+func TestClaimSummaryLongLine(t *testing.T) {
+	long := strings.Repeat("x", 130)
+	got := claimSummary(long)
+	if len(got) > 123 { // 120 + "..."
+		t.Errorf("summary not truncated: len=%d", len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("truncated summary should end with '...', got: %q", got)
+	}
+}
+
+// TestClaimSummaryAllMetadata verifies that a body consisting entirely of
+// metadata lines returns an empty string rather than metadata noise.
+func TestClaimSummaryAllMetadata(t *testing.T) {
+	body := "**State:** claimed | **Author:** hive\n---\n\n**State:** verified\n"
+	got := claimSummary(body)
+	if got != "" {
+		t.Errorf("all-metadata body should return empty summary, got: %q", got)
+	}
+}
+
+// TestParseClaimsEmptyFile verifies that parseClaims returns nil (not a
+// panic) when given an empty file.
+func TestParseClaimsEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claims.md")
+	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	claims := parseClaims(path)
+	if len(claims) != 0 {
+		t.Errorf("expected no claims from empty file, got %d", len(claims))
+	}
+}
+
+// TestParseClaimsNoSections verifies that a file with no ## headings
+// (only a # title or body text) produces no claim topics.
+func TestParseClaimsNoSections(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claims.md")
+	if err := os.WriteFile(path, []byte("# Knowledge Claims\n\nNo sections here.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	claims := parseClaims(path)
+	if len(claims) != 0 {
+		t.Errorf("expected no claims when file has no ## sections, got %d", len(claims))
+	}
+}
+
+// TestHandleSearchResultCap verifies that handleSearch returns at most 10
+// results even when more than 10 claims match the query.
+func TestHandleSearchResultCap(t *testing.T) {
+	s, loopDir := newTestServer(t)
+
+	var b strings.Builder
+	b.WriteString("# Claims\n\n")
+	for i := 1; i <= 15; i++ {
+		b.WriteString(fmt.Sprintf("## Matching lesson %d\n\nThis claim contains the word searchword.\n\n---\n\n", i))
+	}
+	if err := os.WriteFile(filepath.Join(loopDir, "claims.md"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s.buildTree()
+
+	result := s.handleSearch(map[string]any{"query": "searchword"})
+	count := strings.Count(result, "loop/claims/")
+	if count > 10 {
+		t.Errorf("handleSearch returned %d results, want ≤ 10", count)
+	}
+	if count == 0 {
+		t.Errorf("handleSearch returned no results for 'searchword'")
+	}
+}
+
+// TestHandleSearchEmptyQuery verifies that an empty query returns an error
+// string rather than panicking or returning unrelated results.
+func TestHandleSearchEmptyQuery(t *testing.T) {
+	s, _ := newTestServer(t)
+	result := s.handleSearch(map[string]any{"query": ""})
+	if !strings.Contains(result, "Error") && !strings.Contains(result, "required") {
+		t.Errorf("empty query should return an error, got: %q", result)
+	}
+}
+
+// TestHandleGetEmptyID verifies that an empty id returns an error string.
+func TestHandleGetEmptyID(t *testing.T) {
+	s, _ := newTestServer(t)
+	result := s.handleGet(map[string]any{"id": ""})
+	if !strings.Contains(result, "Error") && !strings.Contains(result, "required") {
+		t.Errorf("empty id should return an error, got: %q", result)
+	}
+}
+
+// TestClaimChildrenVisibleInTopics verifies that individual claim nodes
+// (loop/claims/<slug>) appear as children when listing the loop/claims topic.
+func TestClaimChildrenVisibleInTopics(t *testing.T) {
+	s, loopDir := newTestServer(t)
+
+	content := "# Claims\n\n## Alpha claim\n\nBody alpha.\n\n---\n\n## Beta claim\n\nBody beta.\n\n---\n\n"
+	if err := os.WriteFile(filepath.Join(loopDir, "claims.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s.buildTree()
+
+	result := s.handleTopics(map[string]any{"parent": "loop/claims"})
+	if result == "(no children)" {
+		t.Fatal("expected claim children under loop/claims, got none")
+	}
+	if !strings.Contains(result, "Alpha claim") {
+		t.Errorf("Alpha claim not listed in loop/claims children\ngot: %s", result)
+	}
+	if !strings.Contains(result, "Beta claim") {
+		t.Errorf("Beta claim not listed in loop/claims children\ngot: %s", result)
+	}
+}
