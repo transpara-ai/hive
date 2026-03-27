@@ -164,7 +164,7 @@ func (c *Client) CreateTask(slug, title, description, priority string) (*Node, e
 	return resp.Node, nil
 }
 
-// PostUpdate posts to the feed.
+// PostUpdate posts to the feed (social — visible to followers).
 func (c *Client) PostUpdate(slug, title, body string) error {
 	_, err := c.PostOp(slug, map[string]string{
 		"op":    "express",
@@ -172,6 +172,22 @@ func (c *Client) PostUpdate(slug, title, body string) error {
 		"body":  body,
 	})
 	return err
+}
+
+// CreateDocument creates a document node in the knowledge layer.
+// Documents are institutional knowledge — specs, reports, reflections.
+// NOT feed posts. Use PostUpdate for social visibility.
+func (c *Client) CreateDocument(slug, title, body string) (*Node, error) {
+	resp, err := c.PostOp(slug, map[string]string{
+		"op":          "intend",
+		"kind":        "document",
+		"title":       title,
+		"description": body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Node, nil
 }
 
 func (c *Client) setHeaders(req *http.Request) {

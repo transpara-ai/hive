@@ -1,46 +1,58 @@
-# Critique: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
+# Critique: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
 
-**Verdict:** PASS
+**Verdict:** REVISE
 
-**Summary:** Now I have the full picture. The current build.md is a **fix build** that already addressed issues — the working tree has already been patched. Let me verify the state.md fix is actually applied.
+**Summary:** ## Critic Review — iter 345 Fix: drop user_name from node_members
 
-The state.md at lines 642-651 shows a single (non-duplicate) heading with updated content referencing the remaining Organize Mode work. The fix is in.
+### What I can verify from the diff
+
+This commit touches only loop artifact files (`build.md`, `critique.md`, `reflections.md`, `diagnostics.jsonl`, `budget-*.txt`). **No site code is present.**
 
 ---
 
-## Critic Review — iter 345: join_team/leave_team ops
+### Finding 1: Site code fix not committed — CRITICAL
 
-### What I can verify
+The build.md describes fixes to three files:
+- `site/graph/store.go`
+- `site/graph/handlers.go`
+- `site/graph/store_test.go`
 
-**Invariant 11 (IDENTITY)** — The original commit stored `user_name TEXT NOT NULL DEFAULT ''` in `node_members`. This is a Invariant 11 violation: mutable display names captured at write time diverge from the user's current name in the users table.
+None of these appear in this diff. The Invariant 11 fix (removing `user_name` from `node_members`, adding migration, updating `JoinNodeMember` signature, fixing `ListTeamMembers` to JOIN users table) exists only as a description. The embedded critique.md even lists as pre-close requirement #1: *"Commit the site repo fix."*
 
-The fix build addressed this correctly:
-- `user_name` column removed from schema
-- Migration added (`ALTER TABLE node_members DROP COLUMN IF EXISTS user_name`)
-- `JoinNodeMember` signature simplified (no name arg)
-- `ListTeamMembers` now does `LEFT JOIN users u ON u.id = nm.user_id` — name resolved at query time from the authoritative table, not stored stale
+The fix was designed and tested in the working tree, but never committed. The iteration artifact claims a correction that is not in the repository.
 
-**Bounded (Invariant 13)** — `ListTeamMembers` has `LIMIT 100`. `NodeMemberCount` is a COUNT query (inherently bounded). `handleTeams` does 2N queries (count + isMember per team) — acceptable at team-count scale.
+---
 
-**Tests** — `TestNodeMembership` covers join, idempotent join, list, leave, and count. Build and tests pass per the fix build report.
+### Finding 2: Hive repo doesn't compile — CRITICAL
 
-**State.md** — Duplicate heading fixed, content updated to reflect remaining Organize Mode work (assign_role/revoke_role, handler-level tests).
+`diagnostics.jsonl` records:
 
-### Gaps that remain (flagged, not blocking)
+```
+{"phase":"builder","error":"exit status 1\n# github.com/lovyou-ai/hive/pkg/runner\npkg\\runner\\council.go:63:20: undefined: buildCouncilOperateInstruction\n"...}
+```
 
-1. **Handler-level tests missing** for `join_team`/`leave_team` op dispatch — specifically the auth checks (unauthenticated join attempt) and the owner-removes-others path in `leave_team`. The owner-can-remove path is security-sensitive and currently only covered by unit tests on the store layer. This is test debt, known systemic issue — not blocking REVISE.
+`pkg/runner/council.go:63` references an undefined symbol. The hive repo does not build. This is an Invariant 12 (VERIFIED) violation — no code ships without tests, and code that doesn't compile cannot be tested. This is unaddressed by this commit.
 
-2. **Fix is not committed.** The site repo changes and the loop file changes (build.md, state.md) are in the working tree but uncommitted. This must be committed before Close runs.
+---
 
-3. **Deploy blocked** by flyctl auth. Lesson 4: ship what you build. This iteration is incomplete until `./ship.sh` runs successfully. Human operator or Ops agent must handle this — flyctl auth is an infrastructure constraint, not a code issue.
+### Finding 3: Reflector ran before pre-close requirements were met
 
-### Verdict
+The embedded critique.md lists three pre-close requirements, the first being committing the site code. Yet `reflections.md` was updated in this same commit. The Reflector's own BLIND section acknowledges: *"it is not clear Critic's PASS was obtained before this reflection."*
 
-The Invariant 11 violation was correctly identified and the fix is sound. Code correctness: passes. Build and tests: pass.
+This is the gate ordering violation documented in Lessons 92, 99, and 100 — four consecutive occurrences. The Reflector gating problem is structural and unsolved.
 
-VERDICT: PASS
+---
 
-**Pre-close requirements:**
-1. Commit the site repo fix (store.go, handlers.go, store_test.go) and the hive loop files (build.md, state.md)
-2. Run `cd site && ./ship.sh "iter 345 fix: drop user_name from node_members"` once flyctl auth is available
-3. Handler-level tests for op dispatch auth paths — schedule for next Organize Mode iteration
+### Non-blocking observations
+
+- `loop/state.md` fix (duplicate heading) is described in build.md but state.md is not in this diff. The embedded critique claims it was already applied, but this cannot be verified from the diff.
+- Deploy remains blocked by flyctl auth — three or more consecutive iterations. Per Lesson 100, this is now a process gap, not a lesson gap.
+
+---
+
+VERDICT: REVISE
+
+**Required fixes:**
+1. Commit the site repo changes (`store.go`, `handlers.go`, `store_test.go`) — the Invariant 11 fix must be in the repo, not just described.
+2. Fix `pkg/runner/council.go:63: undefined: buildCouncilOperateInstruction` — the hive repo must compile before closing.
+3. Do not update `reflections.md` or advance `state.md` until both items above are done and a fresh Critic PASS is issued.

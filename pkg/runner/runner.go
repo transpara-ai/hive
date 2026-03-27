@@ -442,7 +442,7 @@ func (r *Runner) writeBuildArtifact(t api.Node, costUSD float64, operateSummary 
 	// Also post to graph as a document — knowledge goes on the graph.
 	if r.cfg.APIClient != nil {
 		title := fmt.Sprintf("Build: %s", t.Title)
-		_ = r.cfg.APIClient.PostUpdate(r.cfg.SpaceSlug, title, truncateForPost(content, 2000))
+		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, title, truncateForPost(content, 2000))
 	}
 }
 

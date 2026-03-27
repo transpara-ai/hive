@@ -222,15 +222,19 @@ func extractIssues(content string) string {
 }
 
 // writeCritiqueArtifact writes loop/critique.md with a structured review record.
-func (r *Runner) writeCritiqueArtifact(subject, verdict, summary string) error {
+func writeCritiqueArtifact(hiveDir, subject, verdict, summary string) error {
 	content := fmt.Sprintf("# Critique: %s\n\n**Verdict:** %s\n\n**Summary:** %s\n", subject, verdict, summary)
-	path := filepath.Join(r.cfg.HiveDir, "loop", "critique.md")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	path := filepath.Join(hiveDir, "loop", "critique.md")
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func (r *Runner) writeCritiqueArtifact(subject, verdict, summary string) error {
+	if err := writeCritiqueArtifact(r.cfg.HiveDir, subject, verdict, summary); err != nil {
 		return err
 	}
-
 	// Also post to graph as a document.
 	if r.cfg.APIClient != nil {
+		content := fmt.Sprintf("# Critique: %s\n\n**Verdict:** %s\n\n**Summary:** %s\n", subject, verdict, summary)
 		title := fmt.Sprintf("Critique: %s — %s", verdict, subject)
 		_ = r.cfg.APIClient.PostUpdate(r.cfg.SpaceSlug, title, truncateForPost(content, 2000))
 	}
