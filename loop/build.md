@@ -1,20 +1,25 @@
-# Build: Fix Critic REVISE items (observer + reflector diagnostics)
+# Build: Fix: tests for buildPart2Instruction / buildOutputInstruction
 
-**Status:** DONE
+- **Commit:** pending
+- **Subject:** [hive:builder] Fix: add tests for buildPart2Instruction and buildOutputInstruction
+- **Timestamp:** 2026-03-27
 
-## Changes
+## Task
 
-### `pkg/runner/observer.go`
-- Added `"mcp__knowledge__knowledge_search"` to `AllowedTools` in `runObserver` so the instruction's `knowledge.search` reference is valid (was a lie — tool not in allowed list).
-- Added `if apiKey == ""` guard in `runObserver` — logs a warning when `LOVYOU_API_KEY` is not set.
-- Refactored `buildObserverInstruction` into three functions: `buildObserverInstruction`, `buildPart2Instruction`, `buildOutputInstruction`. When `apiKey == ""`, Part 2 and the output section skip authenticated curl commands and substitute a skip notice or text-format fallback.
+Critic review of commit 476874249de2 found that the observer refactor introduced `buildPart2Instruction` and `buildOutputInstruction` with no test coverage. Fix task: `a6fea8e36c1b51aeab693448e97bf6e2`.
 
-### `pkg/runner/reflector.go`
-- Added `r.appendDiagnostic(PhaseEvent{Phase: "reflector", Outcome: "empty_sections", Preview: ...})` in the `emptySections` early-return path in `runReflectorReason`. This was missing — `TestRunReflectorEmptySectionsDiagnostic` expected `diagnostics.jsonl` to be written on partial LLM output but the early return was silent.
+## What Was Built
 
-### `loop/critique.md`
-- Removed duplicate bare `VERDICT: REVISE` line at bottom. The `**Verdict:** REVISE` header at the top is the canonical location.
+Created `pkg/runner/observer_test.go` with 4 tests:
+
+1. **`TestBuildPart2Instruction_NoAPIKey`** — verifies skip message is returned and no curl auth command is emitted when apiKey is empty.
+2. **`TestBuildPart2Instruction_WithAPIKey`** — verifies API key and space slug appear in output and curl auth command is present.
+3. **`TestBuildOutputInstruction_NoAPIKey`** — verifies text task format (TASK_TITLE:) is returned and no curl auth command when apiKey is empty.
+4. **`TestBuildOutputInstruction_WithAPIKey`** — verifies curl POST with API key and space slug is returned, no text task format.
 
 ## Verification
+
 - `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test -buildvcs=false ./...` — all pass (7 packages with tests)
+- `go.exe test ./...` — all pass
+
+ACTION: DONE
