@@ -75,7 +75,7 @@ func TestRunArchitectParseFailureWritesDiagnostic(t *testing.T) {
 	}
 }
 
-func TestRunArchitectParseFailurePreviewTruncatedAt1000(t *testing.T) {
+func TestRunArchitectParseFailurePreviewTruncatedAt2000(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"nodes":[]}`))
@@ -86,8 +86,8 @@ func TestRunArchitectParseFailurePreviewTruncatedAt1000(t *testing.T) {
 		"scout.md": "## Scout\nGap: missing feature X",
 	})
 
-	// Build a response longer than 1000 chars with no subtask markers.
-	longResponse := strings.Repeat("x", 1500)
+	// Build a response longer than 2000 chars with no subtask markers.
+	longResponse := strings.Repeat("x", 2500)
 
 	r := New(Config{
 		HiveDir:   hiveDir,
@@ -111,8 +111,48 @@ func TestRunArchitectParseFailurePreviewTruncatedAt1000(t *testing.T) {
 	if err := json.Unmarshal(data[:len(data)-1], &got); err != nil {
 		t.Fatalf("invalid JSON: %v\ncontent: %s", err, data)
 	}
-	if len(got.Preview) != 1000 {
-		t.Errorf("Preview length = %d, want 1000", len(got.Preview))
+	if len(got.Preview) != 2000 {
+		t.Errorf("Preview length = %d, want 2000", len(got.Preview))
+	}
+}
+
+func TestRunArchitectErrorFieldContainsLLMResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"nodes":[]}`))
+	}))
+	defer srv.Close()
+
+	hiveDir := makeHiveDir(t, "# State\n", map[string]string{
+		"scout.md": "## Scout\nGap: missing feature X",
+	})
+
+	llmResponse := "This is the raw LLM response with no parseable subtasks."
+
+	r := New(Config{
+		HiveDir:   hiveDir,
+		SpaceSlug: "test",
+		APIClient: api.New(srv.URL, "test-key"),
+		Provider: &mockCostProvider{
+			response: llmResponse,
+			usage:    decision.TokenUsage{InputTokens: 100, OutputTokens: 50, CostUSD: 0.0042},
+		},
+		OneShot: true,
+	})
+
+	r.runArchitect(context.Background())
+
+	data, err := os.ReadFile(filepath.Join(hiveDir, "loop", "diagnostics.jsonl"))
+	if err != nil {
+		t.Fatalf("diagnostics.jsonl not written: %v", err)
+	}
+
+	var got PhaseEvent
+	if err := json.Unmarshal(data[:len(data)-1], &got); err != nil {
+		t.Fatalf("invalid JSON: %v\ncontent: %s", err, data)
+	}
+	if got.Error != llmResponse {
+		t.Errorf("Error field = %q, want %q", got.Error, llmResponse)
 	}
 }
 

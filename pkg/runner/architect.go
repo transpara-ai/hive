@@ -113,19 +113,20 @@ func (r *Runner) runArchitect(ctx context.Context) {
 	// Parse subtasks from the plan.
 	subtasks := parseArchitectSubtasks(resp.Content())
 	if len(subtasks) == 0 {
-		// Capture first 1000 chars of the LLM response for diagnostics.
+		// Capture first 2000 chars of the LLM response for diagnostics.
 		preview := resp.Content()
-		if len(preview) > 1000 {
-			preview = preview[:1000]
+		if len(preview) > 2000 {
+			preview = preview[:2000]
 		}
 		log.Printf("[architect] no subtasks found in plan. Preview:\n%s", preview)
 		// Emit diagnostic when a real LLM call (cost > 0) produced no parseable subtasks.
-		// Include the preview so PM/Scout can diagnose format failures without re-running.
+		// Error is set to the raw LLM response so PM/Scout can diagnose format failures
+		// without re-running. Preview holds the same content (truncated).
 		if usage := resp.Usage(); usage.CostUSD > 0 {
 			r.appendDiagnostic(PhaseEvent{
 				Phase:        "architect",
 				Outcome:      "failure",
-				Error:        "no subtasks parsed from plan",
+				Error:        preview,
 				Preview:      preview,
 				CostUSD:      usage.CostUSD,
 				InputTokens:  usage.InputTokens,
@@ -360,7 +361,16 @@ func parseArchitectSubtasks(content string) []architectSubtask {
 		log.Printf("[architect] strict format markers present but strict parse returned 0 tasks — falling back to markdown")
 	}
 	// Fall back to markdown parsing (numbered lists, bold titles, etc.).
-	return parseSubtasksMarkdown(content)
+	if tasks := parseSubtasksMarkdown(content); len(tasks) > 0 {
+		return tasks
+	}
+	// Last resort: find the first '[' — handles LLMs that prepend prose before a JSON array.
+	if idx := strings.Index(content, "["); idx >= 0 {
+		if tasks := parseSubtasksJSON(content[idx:]); len(tasks) > 0 {
+			return tasks
+		}
+	}
+	return nil
 }
 
 // parseSubtasksStrict parses SUBTASK_TITLE:/SUBTASK_PRIORITY:/SUBTASK_DESCRIPTION: format.

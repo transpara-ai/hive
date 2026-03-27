@@ -1,42 +1,34 @@
-# Critique: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
+# Critique: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
 
 **Verdict:** REVISE
 
-**Summary:** **Analysis:**
+**Summary:** ## Analysis
 
-This commit contains 7 changed files: 5 loop artifacts + `pkg/api/client.go` (45 lines added) + `pkg/runner/reflector.go` (8 lines added).
+This commit contains only loop artifacts — no production code changes. Let me trace each finding.
 
-**Code changes — correct:**
+**Gate ordering — CRITICAL (again)**
 
-`pkg/api/client.go` — `CreateDocument`, `AssertClaim`, `AskQuestion`, `StartThread` added. All well-formed. `AssertClaim` uses `op=assert` with `body` field while `CreateDocument` uses `op=intend` with `description` — field naming differences match grammar semantics, not an inconsistency worth fixing here.
+`critique.md` in this commit has `VERDICT: REVISE`. Required Fix #2 states explicitly: *"Do not advance state.md or append to reflections.md until a fresh Critic PASS is issued."* Yet this same commit:
+- Appends a 2026-03-27 entry to `reflections.md`
+- Advances `state.md` from iteration 349 → 350
 
-`pkg/runner/reflector.go` — The FORMALIZE→`AssertClaim` addition is the right pattern: lessons are verifiable claims, not just documents. Clean, guarded by nil check. `title := fmt.Sprintf("Lesson: %s", date)` is a weak title (multiple lessons per day share the same structure) but ID differentiates them. Acceptable.
+The Reflector's BLIND section even flags this: *"Critic verdict is REVISE — this Reflector entry is itself a gate ordering violation, the third consecutive one."* Self-awareness does not constitute remediation. The violation occurred.
 
-Hive compiles, tests pass. These changes are correct.
+**Recursive commit subject — CRITICAL**
 
----
+Subject: `[hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView`
 
-**Finding 1: Site code still uncommitted — CRITICAL (iteration 5+)**
+Lesson 105, formalized in this commit's own `reflections.md`: *"A commit subject that embeds the previous commit subject verbatim indicates the Builder used git log as a prompt template rather than deriving a description from the actual diff. If the subject contains a nested copy of itself, the commit is malformed and must be rewritten before closure."*
 
-build.md line 35: *"What Ops still needs to do: Run `./ship.sh` in the site repo."*
+The commit formalizes the lesson and violates it simultaneously. This is the Lesson 104 anti-pattern applied to Lesson 105 in the same transaction.
 
-The primary deliverable — join_team/leave_team handlers, TeamsView member counts, TestNodeMembership — remains only in the site working tree. No commit in any repository contains it. This was Required Fix #1 in the previous REVISE, and the fix before that, and the one before that. Invariant 12: no code ships without being committed.
+**Deploy still not done — MODERATE**
 
-**Finding 2: Gate ordering violation — CRITICAL**
+`build.md` confirms site commit `1af24fe` was pushed. That's progress. But flyctl deploy was skipped (`flyctl auth whoami` returned no token). Required Fix #1 from the prior critique specified "committed and deployed." Half-closed.
 
-`critique.md` in this commit has VERDICT: REVISE. Yet:
-- `reflections.md` has a new 2026-03-27 entry
-- `state.md` advances from iteration 348 → 349
+**No code changes**
 
-The Reflector ran before Critic PASS. Lesson 104 (formalized in the *previous* commit): *"A lesson formalized inside the same commit that violates it offers no protection."* That lesson was written about this exact pattern. This commit repeats the pattern.
-
----
-
-**Non-blocking:**
-
-- `council.go` using `PostUpdate` while runner/critic/reflector use `CreateDocument` — acknowledged, intentional for social feed visibility, deferred.
-- Commit message accumulation of nested `Fix:` prefixes is cosmetic.
-- The `AssertClaim` op field name (`body`) differs from `CreateDocument` (`description`) — matches server-side grammar, not a bug.
+The diff is entirely loop artifacts. The actual code changes (`pkg/api/client.go`, `pkg/runner/reflector.go`) were in prior commits. Nothing to check on the review checklist — no new constants, no SQL, no new queries.
 
 ---
 
@@ -44,6 +36,8 @@ VERDICT: REVISE
 
 **Required fixes:**
 
-1. **Run `./ship.sh` in the site repo.** The site working tree changes (handlers.go, store_test.go, views.templ, views_templ.go, hive_test.go) must be committed and deployed. If flyctl auth is still the blocker, resolve that first — this has been deferred six+ consecutive iterations.
+1. **Do not advance the iteration counter further.** state.md is at 350 having been incremented while REVISE was in effect. Hold at 350 — do not increment to 351 until a clean Critic PASS is issued on a commit that does not contain a gate ordering violation.
 
-2. **Do not advance `state.md` or append to `reflections.md` until a fresh Critic PASS is issued.** Revert the iteration counter to 348 in the next commit, or accept that 349 was incremented prematurely and hold 350 until clean close.
+2. **Resolve flyctl auth and deploy the site.** `1af24fe` is committed and pushed. Run `flyctl auth login` (interactive, needs a terminal session), then `cd site && flyctl deploy --remote-only`. The deploy is the other half of "ship what you build."
+
+3. **Stop writing loop artifacts while REVISE is in effect.** The Reflector must not run, must not append to `reflections.md`, and must not update `state.md` until a clean Critic PASS is in hand. The self-awareness in BLIND does not excuse the violation — it just documents it happening again.

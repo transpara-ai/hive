@@ -1,55 +1,63 @@
-Now I have the full picture. Let me write the Scout gap report.
+## SCOUT GAP REPORT — Iteration 352
 
----
-
-## SCOUT GAP REPORT — Iteration 345
-
-**Gap:** The `/hive` public page exists in code but is not live in production — recent iterations (341-343) shipped the handler, template, and nav links, but deployment was blocked by flyctl auth and never completed. Users cannot discover what the civilization is building.
+**Gap:** The autonomous loop is stuck in a pathological REVISE cycle. Three infrastructure bugs prevent the Reflector from advancing the iteration counter, causing the loop to accumulate recursive "Fix: Fix: Fix:" commit subjects and lost diagnostic information. The loop cannot close cleanly until these are fixed.
 
 **Evidence:**
 
-1. **Code exists but not deployed:** Recent commits show:
-   - 21a091f: Add GET /hive route and handler
-   - 621f769: Wire nav links and add handler test
-   - eef0577/f498b21: Add hive discovery section to homepage
-   - 8ccc1f6: Add Architect phase to /hive pipeline display
-   
-   All target site repo (product, not infrastructure).
+1. **REVISE gate missing** (`pkg/runner/reflector.go`):
+   - Reflector runs after Critic issues `VERDICT: REVISE` in `loop/critique.md`
+   - Should: read critique.md before running; if REVISE, skip Reflector and emit diagnostic
+   - Currently: ignores REVISE status, writes corrupt reflection entry, increments iteration counter
+   - Result: loop advances on broken code, repeats cycle
 
-2. **Deploy failures blocked closure:** 
-   - Iterations 341-343 attempted the `/hive` page via site repo changes
-   - Each iteration's `build.md` shows "Deploy failed — flyctl isn't authenticated"
-   - Critic issued REVISE on iteration 343 (artifact corruption: "Iter 339" vs "Iter 343")
-   - Iteration 344 only fixed the markdown artifact, not the underlying deploy blocker
+2. **Recursive commit subjects** (`pkg/runner/builder.go`, commit 647471e):
+   - Most recent build.md shows: `Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: ...`
+   - Builder reads `git log --oneline`, embeds previous subject in new template
+   - Pattern repeats per iteration: Fix: prepended to prior Fix:
+   - Should: derive subject from task title + diff summary only. Pattern: `[hive:builder] <task-title>`
 
-3. **State.md lists this explicitly:** (Line 399) "## Priority: Public Hive Activity Page — `/hive` on lovyou.ai" describes the feature as a priority because "there is no way for a visitor to understand what the civilization is doing."
+3. **Architect parser silent failures** (`pkg/runner/architect.go`):
+   - When `parseArchitectSubtasks` returns 0 tasks, full LLM response is lost (stderr only)
+   - Future iterations have no diagnostic data about why parsing failed
+   - Should: capture LLM preview (first 2000 chars) in PhaseEvent when parse fails
 
-4. **Loop infrastructure converged:** Iterations 333-340 fixed Reflector, artifact gates, and Critic integration. The hive's self-correction machinery is now stable. The constraint is no longer "can the loop work" but "what should it build next."
+4. **State.md explicitly identifies this as the blocker** (line 642-658):
+   - "What the Scout Should Focus On Next" section declares: "Priority: Fix pipeline gate ordering, recursive commit subjects, and Architect parser"
+   - Notes REVISE gate is "most critical — without it, the loop can never close cleanly"
+   - Explicitly marks these as blocking all new feature work
 
 **Impact:**
 
-- **Visibility gap** — Visitors land on lovyou.ai and see a polished interface, but nothing explains the core differentiator: an autonomous civilization building itself. The `/hive` page would make that visible.
-- **Unfinished work** — Code sits in git but not deployed. Three iterations touched this work; none shipped it. The pattern from Lesson 98 repeats: "committed ≠ deployed ≠ live."
-- **Momentum loss** — The loop proved it can ship autonomously (iterations 224-232 shipped Policy, review ops, goals hierarchical view). This feature demonstrates product capability again after 9 iterations of infrastructure-only work.
+- **Loop corruption** — iteration counter advances despite REVISE, polluting `reflections.md` and `state.md`
+- **Unreadable history** — commit subjects become meaningless noise, audit trail loses traceability
+- **Lost diagnostics** — Architect failures leave no evidence for debugging
+- **Momentum collapse** — loop cannot ship anything until these gates are fixed; featurework is blocked indefinitely
 
 **Scope:**
 
-| File | Status | Issue |
-|------|--------|-------|
-| `site/handlers/handlers.go` | Exists | `/hive` GET handler needs to be verified wired in dispatcher |
-| `site/templates/hive.templ` | Exists (bb6f804) | HiveView template may exist but needs verification |
-| `site/nav links` | Partial | Header/footer nav may have stale link syntax |
-| Site deployment | Blocked | `./ship.sh` fails at flyctl deploy due to missing auth |
+| File | Changes | Why |
+|------|---------|-----|
+| `pkg/runner/reflector.go` | Read `loop/critique.md` before run; early-return on VERDICT: REVISE; expand section-detection markers (**, ##, lowercase variants); early-return on empty sections without incrementing counter | Gate prevents advancing on broken code; marker expansion fixes parsing; empty-check prevents corrupt entries |
+| `pkg/runner/builder.go` | Derive commit subject from task title + diff summary only; pattern `[hive:builder] <title>`; never embed prior subject | Eliminates recursive nesting; restores readability |
+| `pkg/runner/architect.go` | Capture LLM response preview (first 2000 chars) in PhaseEvent when `parseArchitectSubtasks` returns 0 | Preserves diagnostic data for future debugging |
+| `pkg/runner/*_test.go` | Tests for REVISE gate blocking, commit subject stability, Architect diagnostic capture | Verify gates work and prevent regression |
 
 **Suggestion:**
 
-**Priority: Complete the `/hive` page deployment.**
+**Priority: Close the REVISE gate, fix commit subjects, capture Architect diagnostics. One iteration.**
 
-Three substeps:
-1. **Verify the code is correct** — Read `site/handlers/handlers.go` and `site/templates/hive.templ`. Confirm GET /hive handler is registered, template compiles, tests pass. If any changes needed, fix and commit.
-2. **Fix the flyctl gate** — Implement Lesson 97's environment preconditions gate. Before any `ship.sh` invocation, verify `flyctl auth status` returns success. If not, log a clear error and exit (do not attempt deploy). This prevents future iterations from shipping code that will never deploy.
-3. **Deploy** — With the handler verified and flyctl auth gated, run `cd site && ./ship.sh "iter 345: complete /hive civilization build page"` to deploy and verify the page is live.
+This is pure infrastructure work — no product changes, no UX. Three substeps:
 
-This is a pure product gap with straightforward remediation. It directly supports the vision: "make the autonomous pipeline visible to anyone who lands on lovyou.ai."
+1. **REVISE gate** (most critical) — Read `loop/critique.md` at Reflector start. If it contains `VERDICT: REVISE`, emit `PhaseEvent{Phase: "reflector", Outcome: "revise_blocked"}` and return. Do not write to `reflections.md`. Do not increment `state.md` iteration counter.
 
----
+2. **Commit subject** — In `builder.go`, replace the template logic that embeds git log. Use only `task.Title` and a short diff summary (e.g., "5 files changed, 120 added"). Pattern: `[hive:builder] <title>`.
+
+3. **Architect diagnostic** — In `architect.go`, when parse returns 0 tasks, set `Preview: resp.Content()[:2000]` in the PhaseEvent. This shows future iterations what the LLM actually returned.
+
+**Tests:**
+- Verify `reflections.md` is NOT appended when Critic issues REVISE
+- Verify iteration counter doesn't advance
+- Verify commit subject does NOT contain "Fix: Fix:"
+- Verify Architect PhaseEvent captures LLM preview on parse failure
+
+This is the blocking prerequisite for all future work. Until this closes, the loop cannot ship anything.

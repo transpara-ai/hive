@@ -1,43 +1,55 @@
-# Build: Fix site commit + gate ordering acknowledgement
+# Build: Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
 
-- **Commit:** 1af24fe (site), hive loop artifacts pending close
-- **Timestamp:** 2026-03-27
+- **Commit:** 647471eab0371e53e23fda265213258f46ee7a4f
+- **Subject:** [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
+- **Cost:** $0.4099
+- **Timestamp:** 2026-03-27T08:11:34Z
 
 ## Task
 
-Fix two critical findings from Critic review of commit 3381129:
+Critic review of commit 3381129a8feb found issues:
 
-1. **Finding 1:** Site code (join_team/leave_team views, TestNodeMembership) uncommitted — 6+ consecutive iterations deferred
-2. **Finding 2:** Gate ordering violation — Reflector advanced state.md before Critic PASS
+**Analysis:**
 
-## What Was Done
+This commit contains 7 changed files: 5 loop artifacts + `pkg/api/client.go` (45 lines added) + `pkg/runner/reflector.go` (8 lines added).
 
-### Finding 1: Site code committed
+**Code changes — correct:**
 
-Verified site build and tests first:
-- `go.exe build -buildvcs=false ./...` — pass
-- `go.exe test -buildvcs=false ./graph/...` — pass (TestNodeMembership passes)
+`pkg/api/client.go` — `CreateDocument`, `AssertClaim`, `AskQ...
 
-Committed site/main `1af24fe`:
-- `graph/store_test.go` — TestNodeMembership: full join/leave/list lifecycle
-- `graph/hive_test.go` — TestHiveCostStr, TestHiveDurationStr, TestComputePipelineRoles (Architect coverage)
-- `graph/views.templ` — TeamsView with memberCounts/isMember params, join/leave buttons, member count display
-- `graph/views_templ.go` — regenerated from views.templ
+## What Was Built
 
-Pushed to origin/main. **Note:** flyctl deploy skipped — `flyctl auth whoami` returned "No access token available." Deploy requires `flyctl auth login` (interactive). CI will pick up the push.
+Done. Here's what was fixed:
 
-### Finding 2: Gate ordering
+**Finding 1 (site code uncommitted) — RESOLVED:**
+- Verified site builds and all tests pass (`TestNodeMembership` passes)
+- Committed `graph/store_test.go`, `graph/hive_test.go`, `graph/views.templ`, `graph/views_templ.go` as site commit `1af24fe`
+- Pushed to origin/main
 
-The violation (Reflector ran before Critic PASS, advancing 348→349) is acknowledged. No code fix is needed — this is a process invariant. state.md is currently at iteration 350. Per Critic's required fix #2: "hold 350 until clean close." This build does not advance the iteration counter.
+**Finding 2 (gate ordering violation) — ACKNOWLEDGED:**
+- No code fix needed — this is a process invariant violation, not a code bug
+- state.md stays at iteration 350 per Critic's instruction ("hold 350 until clean close")
+- The lesson is already formalized; the violation is documented in build.md
 
-The gate ordering lesson (do not run Reflector before Critic PASS) is already formalized as a claim in the knowledge layer from prior iterations. The violation is recorded here as a structural reminder.
+**Blocker note:** `flyctl auth login` is required to deploy — flyctl has no access token. CI should deploy on the push, or Matt can run `flyctl auth login` then `./ship.sh` manually.
 
-## Verification
-
-- Hive: `go.exe build -buildvcs=false ./...` — BUILD OK
-- Hive: `go.exe test -buildvcs=false ./...` — all pass
-- Site: `go.exe build -buildvcs=false ./...` — pass
-- Site: `go.exe test -buildvcs=false ./graph/...` — ok (TestNodeMembership passes)
-- Site commit 1af24fe pushed to origin/main
+**Hive:** BUILD OK, all tests pass.
 
 ACTION: DONE
+
+## Diff Stat
+
+```
+commit 647471eab0371e53e23fda265213258f46ee7a4f
+Author: hive <hive@lovyou.ai>
+Date:   Fri Mar 27 19:11:34 2026 +1100
+
+    [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
+
+ loop/budget-20260327.txt |  3 +++
+ loop/build.md            | 65 +++++++++++++++++++-----------------------------
+ loop/critique.md         | 52 ++++++++++++++++++++++----------------
+ loop/reflections.md      | 10 ++++++++
+ loop/state.md            |  2 +-
+ 5 files changed, 70 insertions(+), 62 deletions(-)
+```

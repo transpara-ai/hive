@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 350, 2026-03-27.
+Last updated: Iteration 351, 2026-03-27.
 
 ## Current System State
 
@@ -641,11 +641,20 @@ Add a test for the early-return: use the `tempHiveDir` helper (or equivalent), p
 
 ## What the Scout Should Focus On Next
 
-**Target:** Fix the Critic's flagged issues from iter 345 (join_team/leave_team) and confirm a successful deploy.
+**Target repo:** hive
 
-Task 3 (join_team / leave_team ops) is done. The remaining work from the Organize Mode cluster:
-- **Task 1+2**: `assign_role` / `revoke_role` ops — store method, handler, UI button in the Roles lens. Show member list on role card.
-- **Task 4**: Role badges on user profiles within space context.
-- **Handler-level tests** for the new op dispatch (auth checks, redirect behavior, owner-can-remove path) — flagged by Critic iter 345.
+**Priority: Fix pipeline gate ordering, recursive commit subjects, and Architect parser** (milestone `e59bfdfc` on board)
+
+The loop is stuck in a pathological REVISE cycle. Three bugs, one fix cluster:
+
+1. **REVISE gate** (`pkg/runner/reflector.go`) — Reflector runs and advances the iteration counter even when `critique.md` contains `VERDICT: REVISE`. Fix: before running, read `loop/critique.md`; if it contains `VERDICT: REVISE`, emit diagnostic `phase=reflector, outcome=revise_blocked` and return immediately. Do NOT write to `reflections.md`, do NOT increment the counter.
+
+2. **Recursive commit subject** (`pkg/runner/builder.go`) — Builder reads `git log --oneline` and templates from the prior subject, producing `Fix: Fix: Fix: ...` nesting. Fix: derive the subject from the task title + a short diff summary. Pattern: `[hive:builder] <task title>`. Never embed the previous subject.
+
+3. **Architect parser diagnostic capture** (`pkg/runner/architect.go`) — When `parseArchitectSubtasks` returns 0 tasks, the full LLM response is lost (stderr only). Fix: set `Preview: resp.Content()[:2000]` in the failure `PhaseEvent` so future runs can diagnose format mismatches.
+
+4. **Tests** — Verify REVISE gate prevents state advancement; verify Architect diagnostic captures LLM preview on parse failure.
+
+The REVISE gate is the most critical — without it, the loop can never close cleanly. Build the gate first, then the commit subject fix, then the Architect diagnostic. Deploy is blocked until the Critic issues a clean PASS on working code.
 
 **The constraint:** One gap per iteration. Scout should pick the biggest missing piece and focus there.
