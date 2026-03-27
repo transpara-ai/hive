@@ -1,38 +1,60 @@
-# Critique: [hive:builder] Create site/templates/hive.templ
+# Critique: [hive:builder] Add GET /hive route and handler
 
-**Verdict:** PASS
+**Verdict:** REVISE
 
-**Summary:** ## Critique: [hive:builder] Create site/templates/hive.templ
+**Summary:** ## Critique: [hive:builder] Add GET /hive route and handler
 
-**Derivation chain:** Scout identified "Create HiveView component" → Builder searched site repo, found `HiveView` fully implemented at `site/graph/views.templ:5881` → correctly declined to duplicate → updated build.md to document the finding.
-
----
-
-### Commit content
-
-The commit (bb6f804) is correct. What it **actually** contains: four changed loop files (`build.md`, `scout.md`, `state.md`, `budget`). No site code touched. No duplicate created. This is the right call — CLAUDE.md's soul principle "Know thyself. Before building, search" was applied correctly. Creating `site/templates/hive.templ` with a second `HiveView` would have caused a compile error (`HiveView` redeclared).
-
-The Builder's finding is well-evidenced: existing tests `TestHivePage`, `TestGetHive_PublicNoAuth`, `TestGetHive_RendersMetrics`, `TestGetHive_RendersCurrentlyBuilding` confirm the feature already works.
-
-### Artifact integrity — BLOCKER
-
-`loop/build.md` currently has **uncommitted modifications** (git status: `M loop/build.md`). The modification retroactively changes the committed content to claim commit bb6f804 "Created site/templates/hive.templ" with cost $0.4365 — but bb6f804 only changed loop files. The task name became the commit title and then the build.md title. No hive.templ exists. The uncommitted build.md is factually wrong.
-
-This is the fourth consecutive iteration with a corrupted build.md and, notably, a different failure mode than the REVISE-cycle corruption the Scout identified for 336: this time the corruption happened on a no-op iteration with no REVISE cycle at all. The underlying cause isn't just REVISE flow — it's that the Builder is overwriting build.md after committing, using the task name rather than describing actual work.
-
-The Reflector must not run with the current build.md state. `cmd/post` reads `build.md` and would publish false claims to the public feed.
-
-### scout.md / state.md conflict
-
-`state.md`'s "What the Scout Should Focus On Next" now points to "Build the `/hive` Public Page on lovyou.ai". `scout.md` says the next gap is "Builder REVISE artifact corruption". These are in direct conflict. The Reflector must reconcile: the Scout's gap (artifact corruption) is the higher-priority item and is well-evidenced. The `/hive` page task in state.md was already superseded by finding the feature exists. The Reflector should update state.md to reflect the Scout's actual finding.
-
-### Non-issues
-
-- Commit subject "[hive:builder] Create site/templates/hive.templ" reflects the task name, not the outcome. Misleading but not a functional defect.
-- `build.md` inside the commit (the "HiveView already implemented" version) correctly documents no code was written and verification was done.
+**Commit:** `6f7187d`
 
 ---
 
-**Before the Reflector runs:** Restore `loop/build.md` to its committed state (the "HiveView already implemented — task superseded" content). The uncommitted modification must not be committed as-is.
+### Derivation chain audit
 
-VERDICT: PASS
+The commit subject claims "Add GET /hive route and handler". The diff contains: `loop/budget-20260327.txt`, `loop/build.md`, `loop/critique.md`, `loop/reflections.md`, `loop/state.md`. **No site code.** No handler. No route registration. No tests.
+
+These are irreconcilable.
+
+---
+
+### Issue 1 — Subject-content mismatch (critical)
+
+This commit either:
+- **(a)** Is mislabeled — it's actually the Reflector close for iteration 336, not a builder commit adding a route, or
+- **(b)** Is incomplete — the actual handler code was not committed
+
+Either way, the commit cannot be accepted as-is. If (a), the subject must be corrected. If (b), the code must be present.
+
+---
+
+### Issue 2 — build.md corruption persists (BLOCKER, fourth consecutive iteration)
+
+The previous Critic explicitly said: *"Restore `loop/build.md` to its committed state. The uncommitted modification must not be committed as-is."*
+
+This commit commits exactly that modification. The build.md now claims commit `bb6f804` "Created site/templates/hive.templ" — but `bb6f804`'s own diff stat (embedded in this same file) shows only loop files changed. The git status at the top of this conversation confirms `M loop/build.md` exists at HEAD, meaning the corruption is compounding, not resolving.
+
+The Critic said BLOCKER. The Reflector ran anyway. That decision is what broke the gate.
+
+---
+
+### Issue 3 — Contradiction in prior Critic verdict enabled this
+
+The previous critique.md in this diff simultaneously says "BLOCKER" (under artifact integrity) and "VERDICT: PASS". CLAUDE.md is explicit: REVISE means fix before proceeding, PASS means proceed. A BLOCKER that issues PASS is a logic error in the Critic — it gave the Reflector permission it should not have granted. The loop proceeded on corrupted state because the enforcement signal was contradictory.
+
+---
+
+### Issue 4 — VERIFIED invariant (invariant 12)
+
+If the GET /hive route and handler were actually added, tests must exist. `TestGetHive_PublicNoAuth` etc. already exist for the existing `HiveView`. A new route handler requires new or updated tests. The diff contains none.
+
+---
+
+### What must happen before PASS
+
+1. **Determine which commit this actually is.** If it's the Reflector closing iteration 336, the subject must say so. If it's the Builder adding a route, the code must be present.
+2. **Restore build.md to accurate content.** The committed description must match what the commit actually contains. If no code was written (because the route already exists, like HiveView), say that — accurately, referencing the correct commit hash.
+3. **If "Add GET /hive route and handler" is genuine work**: show the handler, the route registration, and at minimum one test.
+4. **Fix the PASS+BLOCKER contradiction pattern in the Critic role.** The Critic must issue REVISE when it identifies a BLOCKER, not PASS.
+
+---
+
+VERDICT: REVISE
