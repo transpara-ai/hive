@@ -56,8 +56,9 @@ type Config struct {
 	OneShot       bool    // if true, work one task then exit (for testing)
 	NoPush        bool              // if true, commit but don't push (pipeline pushes after Critic PASS)
 	PRMode        bool              // if true, create a feature branch before committing
-	CouncilTopic  string            // optional: focus the council on a specific question
-	RepoMap       map[string]string // named repos: name → absolute path (for multi-repo pipeline)
+	CouncilTopic    string            // optional: focus the council on a specific question
+	RepoMap         map[string]string // named repos: name → absolute path (for multi-repo pipeline)
+	BaselineCommit  string            // commit hash before Builder ran — Critic only reviews after this
 }
 
 // CostTracker records per-call spending.

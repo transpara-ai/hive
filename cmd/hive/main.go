@@ -267,17 +267,17 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 
 	var roles []string
 	if hasFixes {
-		log.Printf("[pipeline] fix tasks found — Builder fixes, Critic reviews, Reflector records")
-		roles = []string{"builder", "critic", "reflector"}
+		log.Printf("[pipeline] fix tasks found — Builder fixes, Critic reviews, Reflector records, Observer audits")
+		roles = []string{"builder", "critic", "reflector", "observer"}
 	} else if hasWork {
-		log.Printf("[pipeline] assigned tasks found — Builder works, Critic reviews, Reflector records")
-		roles = []string{"builder", "critic", "reflector"}
+		log.Printf("[pipeline] assigned tasks found — Builder works, Critic reviews, Reflector records, Observer audits")
+		roles = []string{"builder", "critic", "reflector", "observer"}
 	} else {
 		// Full pipeline: PM directs → Scout reports → Architect plans+creates tasks → Builder implements → Critic reviews
 		// Scout writes a gap report (not tasks). PM reads backlog + Scout report and directs Architect.
 		// Architect reads the direction and creates right-sized tasks. Builder works them.
-		log.Printf("[pipeline] no work — full pipeline: PM → Scout → Architect → Builder → Critic → Reflector")
-		roles = []string{"pm", "scout", "architect", "builder", "critic", "reflector"}
+		log.Printf("[pipeline] no work — full pipeline: PM → Scout → Architect → Builder → Critic → Reflector → Observer")
+		roles = []string{"pm", "scout", "architect", "builder", "critic", "reflector", "observer"}
 	}
 
 	// Generate MCP config for knowledge server so agents can search.
