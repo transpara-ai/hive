@@ -1,36 +1,33 @@
-# Build Report — Fix: Architect Operate path missing causes
+# Build: Fix: Architect Operate path does not thread causes
 
-## Gap
-`buildArchitectOperateInstruction` never received the milestone ID, so the curl template the LLM executes omitted `causes`. Since claude-cli implements `IOperator`, this is the production path. The test covered only the fallback (Reason) path.
+## Task
 
-## Changes
+`buildArchitectOperateInstruction` did not accept a milestone ID and the curl template it provided to the LLM omitted the `causes` field. In production (`claude-cli` implements `IOperator`), `canOperate=true` and the fallback `Reason()` path is never reached — so subtasks created in production had no causality link.
 
-### `pkg/runner/architect.go`
+## What Was Built
 
-**Call site**: Extract `milestoneID` before calling `buildArchitectOperateInstruction`, pass it as a third argument.
+This fix was already implemented in commit `274999c` (the immediately prior commit). Verification confirms the implementation is complete and correct.
 
-**`buildArchitectOperateInstruction`** signature changed from `(context, spaceSlug string)` to `(context, spaceSlug, milestoneID string)`.
+**Fix** (`pkg/runner/architect.go`):
+- `buildArchitectOperateInstruction` accepts `milestoneID string` as 3rd parameter
+- When non-empty, injects `,"causes":["<milestoneID>"]` into the curl payload template
+- Also adds explicit LLM instruction: "set causes on every task"
+- Call site (`runArchitect`) extracts `milestone.ID` and passes it through
 
-When `milestoneID != ""`, a `causesSuffix` of `,"causes":["<ID>"]` is injected into the curl payload template, so the LLM's generated commands produce:
-
-```json
-{"op":"intend","kind":"task","title":"...","description":"...","priority":"high","causes":["milestone-42"]}
-```
-
-When no milestone is present (Scout fallback path), `causesSuffix` is empty and the payload is unchanged.
-
-### `pkg/runner/architect_test.go`
-
-Added `mockCaptureOperator` — implements `intelligence.Provider` + `decision.IOperator`. Captures `OperateTask.Instruction` for assertion.
-
-Added `TestRunArchitectOperateInstructionIncludesCauses` — creates a milestone, runs `runArchitect` with the capture operator, asserts the instruction contains `"causes":["milestone-42"]`.
+**Tests** (`pkg/runner/architect_test.go`):
+- `mockCaptureOperator` — implements `decision.IOperator`, captures `OperateTask.Instruction`
+- `TestRunArchitectOperateInstructionIncludesCauses` — asserts instruction contains `"causes":["milestone-42"]` when Operate path is taken
+- `TestRunArchitectSubtasksHaveCauses` — asserts subtasks created via Reason() fallback path also carry `causes:[milestoneID]`
 
 ## Verification
 
 ```
-go.exe build -buildvcs=false ./...   ✓ no errors
-go.exe test -buildvcs=false ./...    ✓ all pass
+go.exe build -buildvcs=false ./...  → OK (no errors)
+go.exe test ./...                   → all pass
 ```
 
-New test: `TestRunArchitectOperateInstructionIncludesCauses` — PASS
-Existing test: `TestRunArchitectSubtasksHaveCauses` — PASS (fallback path unaffected)
+Both new tests pass:
+- `TestRunArchitectSubtasksHaveCauses` PASS
+- `TestRunArchitectOperateInstructionIncludesCauses` PASS
+
+ACTION: DONE

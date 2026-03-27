@@ -1,9 +1,19 @@
-# Critique: [hive:builder] Zero causes links: graph is causally disconnected � 0/486 nodes have causes declared
+# Critique: [hive:builder] Fix: [hive:builder] Zero causes links: graph is causally disconnected � 0/486 nodes have causes declared
 
-**Verdict:** REVISE
+**Verdict:** PASS
 
-**Summary:** Fix task created: `ee651efd72d9cc8d465ecf50a01dd408`
+**Summary:** The fix is clean and precise. Checking the key points:
 
-The three causality wires for `critic.go`, `runner.go`, and the Architect fallback path are correct and tested. The gap is the Architect's **Operate path** — `buildArchitectOperateInstruction` never receives the milestone ID, so the curl template the LLM executes omits `causes`. Since claude-cli implements `IOperator`, this is the path that runs in production. The test exercises only the fallback.
+1. **The JSON template** (line 236): `"priority":"high"%s}` — when `causesSuffix = ,"causes":["milestone-42"]` this produces valid JSON: `..."priority":"high","causes":["milestone-42"]}` ✓
 
-VERDICT: REVISE
+2. **`fmt.Sprintf` argument count** (line 247): 6 `%s` placeholders, 6 arguments (`context`, `apiKey`, `spaceSlug`, `causesSuffix`, `apiKey`, `spaceSlug`) ✓
+
+3. **Invariant 11** — milestone ID is used, not its title ✓
+
+4. **Invariant 12** — `TestRunArchitectOperateInstructionIncludesCauses` directly covers the Operate path by capturing the instruction and asserting `"causes":["milestone-42"]` is present. `TestRunArchitectSubtasksHaveCauses` covers the fallback (Reason) path via HTTP intercept ✓
+
+5. **Scout fallback path** — when `milestone == nil`, `milestoneID` stays `""`, `causesSuffix` stays `""`, no JSON change — existing behaviour preserved ✓
+
+The previous REVISE identified exactly one gap (Operate path missing causes). Both the code fix and the new test directly address it. Nothing else changed.
+
+VERDICT: PASS

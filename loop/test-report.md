@@ -1,57 +1,54 @@
-# Test Report: Zero causes links — Invariant 2 causality chain
+# Test Report: Fix Architect Operate path causality (Invariant 2)
 
-**Build ref:** 8a13ac7f2f2fc395041446e39413b2cb3ea9ce09
-**Tester:** hive:tester
-**Timestamp:** 2026-03-28
+- **Build:** Fix: [hive:builder] Zero causes links: graph is causally disconnected
+- **Commit:** 274999c35fdcbc4a82b4700e79b91d247f2d496c
+- **Result:** PASS — all tests green
 
 ## What Was Tested
 
-The iteration added `causes []string` to `CreateTask`, `CreateDocument`, and `AssertClaim`, then wired causality through the critic→fix-task and build-document→task chains.
+The fix added `milestoneID` to `buildArchitectOperateInstruction` so the curl template the Architect gives to the LLM includes `"causes":["<milestoneID>"]`. Two paths through `runArchitect` create tasks: the Operate path and the Reason/fallback path. Both needed causality wires. The fix covered the Operate path (previously missing); the Reason path was already covered by a prior iteration.
 
-## Tests Already Present (Builder-written)
+## Tests Run
 
-| Test | File | Verdict |
-|------|------|---------|
-| `TestCreateTaskSendsCauses` | `pkg/api/client_test.go` | PASS |
-| `TestCreateTaskNilCausesOmitted` | `pkg/api/client_test.go` | PASS |
-| `TestCreateDocumentSendsCauses` | `pkg/api/client_test.go` | PASS |
-| `TestAssertClaimSendsCauses` | `pkg/api/client_test.go` | PASS |
-| `TestPostOpStringFieldsPreserved` | `pkg/api/client_test.go` | PASS |
-| `TestReviewCommitFixTaskHasCauses` | `pkg/runner/critic_test.go` | PASS |
+### New tests (this iteration)
 
-## Coverage Gaps Found
+| Test | File | Result |
+|------|------|--------|
+| `TestRunArchitectOperateInstructionIncludesCauses` | `pkg/runner/architect_test.go` | PASS |
+| `TestRunArchitectSubtasksHaveCauses` | `pkg/runner/architect_test.go` | PASS |
+| `TestWriteBuildArtifactDocumentCauses` | `pkg/runner/runner_test.go` | PASS |
 
-Two paths were untested: `writeBuildArtifact` calling `CreateDocument` with causes, and `runArchitect` creating subtasks with causes when a milestone exists. Both are Invariant 2 violations if wrong.
+**TestRunArchitectOperateInstructionIncludesCauses** — Core fix test. Sets up a milestone with ID `milestone-42`, uses `mockCaptureOperator` to intercept the `OperateTask.Instruction`, and asserts the instruction contains `"causes":["milestone-42"]`. Directly verifies the Operate path embeds the causes suffix. Would have failed before the fix (milestoneID was not passed to `buildArchitectOperateInstruction`).
 
-## Tests Added
+**TestRunArchitectSubtasksHaveCauses** — Integration test of the Reason/fallback path. Uses a real `mockProvider` that returns SUBTASK_ format, captures all HTTP POST bodies to the fake API server, and asserts every `op=intend` request includes `"causes":["milestone-77"]`.
 
-### `TestWriteBuildArtifactDocumentCauses` — `pkg/runner/runner_test.go`
+**TestWriteBuildArtifactDocumentCauses** — Verifies `writeBuildArtifact` calls `CreateDocument` with `causes:[task.ID]`, so build documents are causally linked to the task that triggered the build.
 
-Verifies that `writeBuildArtifact` calls `CreateDocument` with `causes: [task.ID]`. Previously the three existing build artifact tests used `Config` with no `APIClient`, so the `CreateDocument` call was silently skipped. This test wires a mock HTTP server and confirms the causality field is present and contains the triggering task ID.
-
-**Result:** PASS
-
-### `TestRunArchitectSubtasksHaveCauses` — `pkg/runner/architect_test.go`
-
-Verifies that when the Architect decomposes a milestone into subtasks (via the `Reason()` fallback path), each created subtask carries `causes: [milestoneID]`. Previously only failure paths were tested (no parseable subtasks). This test provides a milestone with a >200-char body, a provider returning valid `SUBTASK_TITLE:` format, and verifies all `intend` ops include the milestone ID in `causes`.
-
-**Result:** PASS
-
-## Full Suite Results
+### Full suite
 
 ```
-ok  github.com/lovyou-ai/hive/pkg/api     (all 5 tests)
-ok  github.com/lovyou-ai/hive/pkg/runner  (all tests, including 2 new)
+ok  github.com/lovyou-ai/hive/cmd/mcp-graph       1.355s
+ok  github.com/lovyou-ai/hive/cmd/mcp-knowledge   0.711s
+ok  github.com/lovyou-ai/hive/cmd/post            1.403s
+ok  github.com/lovyou-ai/hive/pkg/api             1.301s
+ok  github.com/lovyou-ai/hive/pkg/authority       0.807s
+ok  github.com/lovyou-ai/hive/pkg/hive            1.029s
+ok  github.com/lovyou-ai/hive/pkg/loop            0.982s
+ok  github.com/lovyou-ai/hive/pkg/resources       0.856s
+ok  github.com/lovyou-ai/hive/pkg/runner          4.041s
+ok  github.com/lovyou-ai/hive/pkg/workspace       0.540s
 ```
+
+No regressions.
+
+## Edge Cases Considered
+
+- **No milestone present** — `buildArchitectOperateInstruction` receives `milestoneID=""`, `causesSuffix` is empty, no `"causes"` key in the curl payload. Correct: without a milestone parent there is no causal ancestor to declare.
+- **Operate path vs Reason path** — two distinct code paths, both tested for causality.
+- **mockCaptureOperator vs mockProvider** — Operate path requires `IOperator`; Reason path uses `IProvider`. Tests use appropriate mocks so coverage is unambiguous.
 
 ## Coverage Notes
 
-- `writeBuildArtifact` with `APIClient = nil` (causes skipped) is implicitly covered by existing tests — no gap there
-- Architect `Operate()` path (canOperate=true) creates tasks via curl in the LLM — not unit-testable without a real operator; causality in that path relies on the Architect's prompt instruction
-- Multiple-cause scenarios (len(causes) > 1) not tested; the mechanism is identical to single-cause and covered by the API-layer tests
-
-## Verdict
-
-**PASS** — causality chain is fully wired and verified for the three paths added in this iteration.
-
-@Critic
+- `buildArchitectOperateInstruction`: the only change is injecting `causesSuffix`; tested directly by `TestRunArchitectOperateInstructionIncludesCauses`.
+- `runArchitect` Operate path milestone ID extraction: covered by the same test.
+- No untested code paths introduced.
