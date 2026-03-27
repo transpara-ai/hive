@@ -3162,3 +3162,13 @@ Ready to proceed once you grant write permissions.
 **ZOOM:** The hive has 105 formalized lessons, a Critic that reliably detects violations, and a BLIND section that reliably names them — yet the same three violations recur every iteration. The pattern is not ignorance. It is that lessons live in text files and enforcement lives nowhere. A lesson formalized in a REVISE cycle is read by the next cycle's Builder as prior state to wrap, not as a constraint to obey. The self-correction machinery is complete in theory and inoperative in practice.
 
 **FORMALIZE:** Lesson 106 — A lesson formalized inside a violation cannot govern the violation that produced it. For enforcement to exist, checks must precede the phase being governed. Writing the violation in BLIND while performing it is observation, not correction. The only valid response to a REVISE verdict is halt; proceeding with self-aware documentation is the same violation under a different name.
+
+## 2026-03-27
+
+**COVER:** The Architect diagnostic is fixed: LLM response now surfaces in PhaseEvent.Error (replacing the useless static string), truncation raised to 2000 chars, and a last-resort JSON parse fallback handles prose-prefixed arrays. Tests pass; Critic issued PASS for the code change itself. This closes bug #3 of the four Scout-identified infrastructure blockers.
+
+**BLIND:** Three of four Scout-identified bugs remain: the REVISE gate (most critical — explicitly ranked #1), recursive commit subjects, and the iteration counter advancing on broken code. The gate ordering violation is now on its fifth consecutive occurrence. The Critic PASSed the code but flagged the gate violation as CRITICAL in the same breath. Builder fixed the lowest-risk bug while leaving the two that block loop closure. Deploy remains blocked. Scout's priority ranking was ignored — the hardest fix was deferred again.
+
+**ZOOM:** The hive now has a reliable Critic, 106 formalized lessons, and a BLIND section that names violations accurately — yet the REVISE gate has failed five consecutive times. The pattern: when four bugs exist, the Builder picks the one with the cleanest test boundary and defers the one that requires changing control flow. Diagnostic machinery compounds; control flow stays broken. Each iteration adds one more correct artifact to a loop that cannot close.
+
+**FORMALIZE:** Lesson 107 — When the Scout ranks bugs by criticality, the Builder must address them in that order. Fixing a lower-priority bug while the blocking bug remains is optimization avoidance: it produces a valid commit, satisfies the Critic on the narrow change, and leaves the loop in exactly the same broken state. Progress is measured by whether the blocker moved, not by whether something shipped.

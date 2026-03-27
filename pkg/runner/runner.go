@@ -522,7 +522,7 @@ func (r *Runner) commitAndPush(t api.Node) error {
 	}
 
 	// Commit.
-	msg := fmt.Sprintf("[hive:%s] %s", r.cfg.Role, t.Title)
+	msg := fmt.Sprintf("[hive:%s] %s", r.cfg.Role, stripHivePrefix(t.Title))
 	if err := r.git("commit", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
@@ -596,6 +596,19 @@ func pickHighestPriority(nodes []api.Node) api.Node {
 		}
 	}
 	return best
+}
+
+// stripHivePrefix removes leading [hive:xxx] prefixes from s, handling nested
+// duplicates produced by prior commit message formatting.
+func stripHivePrefix(s string) string {
+	for strings.HasPrefix(s, "[hive:") {
+		end := strings.Index(s, "]")
+		if end == -1 {
+			break
+		}
+		s = strings.TrimSpace(s[end+1:])
+	}
+	return s
 }
 
 func parseAction(summary string) string {

@@ -435,3 +435,23 @@ func TestWorkTaskBuildVerifyFailureWritesDiagnostic(t *testing.T) {
 		t.Errorf("diagnostics.jsonl missing error field:\n%s", body)
 	}
 }
+
+func TestStripHivePrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"no prefix unchanged", "add feature X", "add feature X"},
+		{"single prefix stripped", "[hive:builder] add feature X", "add feature X"},
+		{"double nested prefix stripped", "[hive:builder] [hive:builder] add feature X", "add feature X"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripHivePrefix(tt.input)
+			if got != tt.expect {
+				t.Errorf("stripHivePrefix(%q) = %q, want %q", tt.input, got, tt.expect)
+			}
+		})
+	}
+}
