@@ -323,6 +323,60 @@ func (c *Client) StartThread(slug, title, body string) (*Node, error) {
 	return resp.Node, nil
 }
 
+// Agent is an agent definition from the lovyou.ai database.
+type Agent struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Display     string `json:"display"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Prompt      string `json:"prompt"`
+	Model       string `json:"model"`
+	Active      bool   `json:"active"`
+}
+
+// ListAgents fetches all active agents from the space.
+func (c *Client) ListAgents(slug string) ([]Agent, error) {
+	u := fmt.Sprintf("%s/app/%s/people?format=agents", c.base, slug)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	var resp struct {
+		Agents []Agent `json:"agents"`
+	}
+	if err := c.do(req, &resp); err != nil {
+		return nil, fmt.Errorf("ListAgents: %w", err)
+	}
+	return resp.Agents, nil
+}
+
+// GetAgent fetches an agent by ID. Falls back to name match if ID not found.
+func (c *Client) GetAgent(slug, idOrName string) (*Agent, error) {
+	agents, err := c.ListAgents(slug)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range agents {
+		if a.ID == idOrName || a.Name == idOrName {
+			return &a, nil
+		}
+	}
+	return nil, fmt.Errorf("agent %q not found", idOrName)
+}
+
+// AssignTask assigns a task to a specific agent by ID or name.
+func (c *Client) AssignTask(slug, nodeID, assignee string) error {
+	_, err := c.PostOp(slug, map[string]string{
+		"op":       "assign",
+		"node_id":  nodeID,
+		"assignee": assignee,
+	})
+	return err
+}
+
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")

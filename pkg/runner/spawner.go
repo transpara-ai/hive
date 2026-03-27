@@ -11,16 +11,26 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
 )
 
-// InvokeAgent runs any agent by name using their role prompt from agents/{name}.md.
+// InvokeAgent runs any agent by name. Reads persona from the graph first
+// (lovyou.ai agent_personas table), falls back to agents/{name}.md file.
 // This is how pipeline roles communicate with the broader hive — 50+ agents
 // available on demand, not hardcoded in the pipeline sequence.
-// The Observer can invoke the Philosopher. The PM can invoke the Council.
-// The Spawner creates new agents. Any role can call any agent.
 func (r *Runner) InvokeAgent(ctx context.Context, name, task string) (string, error) {
-	// Load the agent's role prompt.
-	prompt := LoadRolePrompt(r.cfg.HiveDir, name)
+	// Graph first: read agent from the API.
+	var prompt, model string
+	if r.cfg.APIClient != nil {
+		if agent, err := r.cfg.APIClient.GetAgent(r.cfg.SpaceSlug, name); err == nil {
+			prompt = agent.Prompt
+			model = agent.Model
+			log.Printf("[invoke:%s] loaded from graph (model=%s)", name, model)
+		}
+	}
+	// Fallback: local file.
 	if prompt == "" {
-		return "", fmt.Errorf("agent %q not found in agents/", name)
+		prompt = LoadRolePrompt(r.cfg.HiveDir, name)
+	}
+	if prompt == "" {
+		return "", fmt.Errorf("agent %q not found (graph or agents/)", name)
 	}
 
 	op, canOperate := r.cfg.Provider.(decision.IOperator)
