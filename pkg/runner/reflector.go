@@ -321,7 +321,7 @@ func (r *Runner) appendReflection(entry string) error {
 	// Also post to graph as a document.
 	if r.cfg.APIClient != nil {
 		title := fmt.Sprintf("Reflection: %s", time.Now().UTC().Format("2006-01-02"))
-		_ = r.cfg.APIClient.PostUpdate(r.cfg.SpaceSlug, title, truncateForPost(entry, 2000))
+		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, title, truncateForPost(entry, 2000))
 	}
 	return nil
 }

@@ -236,7 +236,7 @@ func (r *Runner) writeCritiqueArtifact(subject, verdict, summary string) error {
 	if r.cfg.APIClient != nil {
 		content := fmt.Sprintf("# Critique: %s\n\n**Verdict:** %s\n\n**Summary:** %s\n", subject, verdict, summary)
 		title := fmt.Sprintf("Critique: %s — %s", verdict, subject)
-		_ = r.cfg.APIClient.PostUpdate(r.cfg.SpaceSlug, title, truncateForPost(content, 2000))
+		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, title, truncateForPost(content, 2000))
 	}
 	return nil
 }
