@@ -373,7 +373,8 @@ func readRecentReflections(hiveDir string) string {
 }
 
 // readFromGraph reads the latest node matching a title prefix from the graph.
-// Returns body content, or "" if not found or API unavailable.
+// Only returns nodes created within the last 2 hours (avoids stale data from prior cycles).
+// Returns body content, or "" if not found, stale, or API unavailable.
 func (r *Runner) readFromGraph(titlePrefix string) string {
 	if r.cfg.APIClient == nil {
 		return ""
@@ -381,6 +382,12 @@ func (r *Runner) readFromGraph(titlePrefix string) string {
 	node := r.cfg.APIClient.LatestByTitle(r.cfg.SpaceSlug, titlePrefix)
 	if node == nil {
 		return ""
+	}
+	// Ignore stale nodes — only use data from the current cycle window.
+	if created, err := time.Parse(time.RFC3339, node.CreatedAt); err == nil {
+		if time.Since(created) > 2*time.Hour {
+			return ""
+		}
 	}
 	return node.Body
 }
