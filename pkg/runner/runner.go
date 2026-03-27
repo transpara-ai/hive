@@ -568,6 +568,19 @@ func (r *Runner) Push() error {
 	return r.git("push")
 }
 
+// HasChanges returns true if the repo has uncommitted changes.
+func (r *Runner) HasChanges() bool {
+	return r.hasUncommittedChanges()
+}
+
+// CommitAll stages all changes and commits with the given message.
+func (r *Runner) CommitAll(msg string) error {
+	if err := r.git("add", "-A"); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	return r.git("commit", "-m", msg)
+}
+
 func (r *Runner) git(args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.cfg.RepoPath

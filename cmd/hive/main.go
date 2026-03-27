@@ -303,17 +303,39 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
-	// Push after the full cycle. Code stays local until Critic has reviewed.
+	// Push ALL repos that have uncommitted changes — not just activeRepo.
+	// The Builder may have modified any repo via Operate().
 	log.Printf("[pipeline] ── pushing ──")
-	pusher := runner.New(runner.Config{RepoPath: activeRepo})
-	if err := pusher.Push(); err != nil {
-		log.Printf("[pipeline] push error: %v", err)
-	} else {
-		log.Printf("[pipeline] pushed to remote")
+	needsDeploy := false
+	for name, repoPath := range repoMap {
+		pusher := runner.New(runner.Config{RepoPath: repoPath})
+		if pusher.HasChanges() {
+			log.Printf("[pipeline] %s has changes — committing and pushing", name)
+			commitMsg := fmt.Sprintf("[hive:pipeline] autonomous changes in %s", name)
+			if err := pusher.CommitAll(commitMsg); err != nil {
+				log.Printf("[pipeline] %s commit error: %v", name, err)
+				continue
+			}
+			if err := pusher.Push(); err != nil {
+				log.Printf("[pipeline] %s push error: %v", name, err)
+			} else {
+				log.Printf("[pipeline] %s pushed", name)
+				if name == "site" {
+					needsDeploy = true
+				}
+			}
+		}
+	}
+	// Also push activeRepo if not in the map.
+	if _, inMap := repoMap[filepath.Base(activeRepo)]; !inMap {
+		pusher := runner.New(runner.Config{RepoPath: activeRepo})
+		if err := pusher.Push(); err != nil {
+			log.Printf("[pipeline] push error: %v", err)
+		}
 	}
 
-	// Deploy if the target repo is site. Ship what you build.
-	if repoName := filepath.Base(activeRepo); repoName == "site" {
+	// Deploy if site was modified. Ship what you build.
+	if needsDeploy || filepath.Base(activeRepo) == "site" {
 		log.Printf("[pipeline] ── deploying site ──")
 		deployCmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("HOME"), ".fly", "bin", "flyctl"), "deploy", "--remote-only")
 		deployCmd.Dir = activeRepo
