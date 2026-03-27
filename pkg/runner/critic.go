@@ -232,11 +232,11 @@ func (r *Runner) writeCritiqueArtifact(subject, verdict, summary string) error {
 	if err := writeCritiqueArtifact(r.cfg.HiveDir, subject, verdict, summary); err != nil {
 		return err
 	}
-	// Also post to graph as a document.
+	// Critique is a claim — a verifiable assertion about code quality.
 	if r.cfg.APIClient != nil {
-		content := fmt.Sprintf("# Critique: %s\n\n**Verdict:** %s\n\n**Summary:** %s\n", subject, verdict, summary)
+		content := fmt.Sprintf("**Verdict:** %s\n\n%s", verdict, summary)
 		title := fmt.Sprintf("Critique: %s — %s", verdict, subject)
-		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, title, content)
+		_, _ = r.cfg.APIClient.AssertClaim(r.cfg.SpaceSlug, title, content)
 	}
 	return nil
 }
