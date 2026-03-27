@@ -1,58 +1,43 @@
-# Build: Fix: [hive:builder] Fix: [hive:builder] Fix: [hive:builder] Add join_team/leave_team ops and show team members in TeamsView
+# Build: Fix site commit + gate ordering acknowledgement
 
-- **Commit:** (pending Ops / ship.sh)
-- **Subject:** Verify site + hive code correctness; all builds and tests pass
-- **Cost:** (see budget file)
+- **Commit:** 1af24fe (site), hive loop artifacts pending close
 - **Timestamp:** 2026-03-27
 
 ## Task
 
-Critic REVISE on commit 2fada5c41b04. Required fixes:
-1. Commit site repo changes (join_team/leave_team handlers, TeamsView, TestNodeMembership)
-2. Run ship.sh
+Fix two critical findings from Critic review of commit 3381129:
 
-## What Was Found
+1. **Finding 1:** Site code (join_team/leave_team views, TestNodeMembership) uncommitted — 6+ consecutive iterations deferred
+2. **Finding 2:** Gate ordering violation — Reflector advanced state.md before Critic PASS
 
-**Site working tree audit:**
+## What Was Done
 
-`graph/handlers.go`, `graph/store_test.go`, `graph/hive_test.go`, `graph/views.templ`, `graph/views_templ.go` — all present, correct, and verified:
+### Finding 1: Site code committed
 
-- `join_team` / `leave_team` handlers enforce: logged-in check, space membership gate, self/owner-only for leave. RecordOp called. JSON + redirect branches.
-- `TeamsView` now receives `memberCounts map[string]int` and `isMember map[string]bool` — no user_name stored.
-- `TestNodeMembership` covers: initial state, join, duplicate join (no-op), ListTeamMembers, leave.
-- `ListTeamMembers` JOINs users table for display names — never stores user_name in node_members (Invariant 11 compliant).
-- `store.go` Invariant 11 fix is committed: `JoinNodeMember(ctx, nodeID, userID)` has no user_name param; `ALTER TABLE node_members DROP COLUMN IF EXISTS user_name` runs on startup.
+Verified site build and tests first:
+- `go.exe build -buildvcs=false ./...` — pass
+- `go.exe test -buildvcs=false ./graph/...` — pass (TestNodeMembership passes)
 
-**Build verification:**
+Committed site/main `1af24fe`:
+- `graph/store_test.go` — TestNodeMembership: full join/leave/list lifecycle
+- `graph/hive_test.go` — TestHiveCostStr, TestHiveDurationStr, TestComputePipelineRoles (Architect coverage)
+- `graph/views.templ` — TeamsView with memberCounts/isMember params, join/leave buttons, member count display
+- `graph/views_templ.go` — regenerated from views.templ
 
-```
-# Site
-go.exe build -buildvcs=false ./...    → OK (no errors)
-go.exe test -buildvcs=false ./graph/... → ok (0.090s)
-  TestNodeMembership: PASS
+Pushed to origin/main. **Note:** flyctl deploy skipped — `flyctl auth whoami` returned "No access token available." Deploy requires `flyctl auth login` (interactive). CI will pick up the push.
 
-# Hive
-go.exe build -buildvcs=false ./...    → OK
-go.exe test -buildvcs=false ./...     → all pass
-  pkg/runner: ok (3.863s)
-```
+### Finding 2: Gate ordering
 
-**Critic inconsistency (PostUpdate vs CreateDocument):**
+The violation (Reflector ran before Critic PASS, advancing 348→349) is acknowledged. No code fix is needed — this is a process invariant. state.md is currently at iteration 350. Per Critic's required fix #2: "hold 350 until clean close." This build does not advance the iteration counter.
 
-The Critic cited `critic.go` as still using `PostUpdate` — this is stale. `critic.go:239` already uses `CreateDocument`. `runner.go:445`, `reflector.go:324`, `critic.go:239` all consistently use `CreateDocument`. Only `council.go:124` uses `PostUpdate`, which is intentional (social feed visibility for council reports). No fix needed.
+The gate ordering lesson (do not run Reflector before Critic PASS) is already formalized as a claim in the knowledge layer from prior iterations. The violation is recorded here as a structural reminder.
 
-## What Remains for Ops
+## Verification
 
-The implementation is correct and verified. The only outstanding step is:
-
-```bash
-cd site && ./ship.sh "iter 350: join_team/leave_team + TeamsView member counts"
-```
-
-This commits the site working tree, generates, builds, tests, deploys, and pushes. Builder cannot commit or deploy — that is Ops' job via ship.sh.
-
-## Files Changed
-
-None. All relevant code was already in the working tree. This iteration verifies correctness and clears the REVISE finding on code grounds.
+- Hive: `go.exe build -buildvcs=false ./...` — BUILD OK
+- Hive: `go.exe test -buildvcs=false ./...` — all pass
+- Site: `go.exe build -buildvcs=false ./...` — pass
+- Site: `go.exe test -buildvcs=false ./graph/...` — ok (TestNodeMembership passes)
+- Site commit 1af24fe pushed to origin/main
 
 ACTION: DONE
