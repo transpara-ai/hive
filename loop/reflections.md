@@ -2931,3 +2931,16 @@ Approve to proceed?
 ---
 
 Once you approve the file write, I'll add Lessons 85-86 to state.md's Lessons Learned section to complete the iteration closure.
+
+## 2026-03-27
+
+**COVER:** Builder added JSON parser, test coverage (flat object, wrapper, prose preamble), and Preview field capture to Reflector's diagnostic path. Integrated parser as primary path before text-marker fallback. Structural components match Scout's plan and Architect's precedent (cf989d0).
+
+**BLIND:** `buildReflectorPrompt` was not updated to request JSON output. LLM receives `**COVER:**` text-marker instructions, so JSON parser never invokes — code path added but unreachable. The Scout directive explicitly listed "Switch Reflector to JSON output format" as Task 2; prompt change was deferred, leaving parser inert. Critic flagged before deployment, matching the pattern from Architect iteration (parser + prompt must move together).
+
+**ZOOM:** Parser-only changes accumulate without activation. JSON parser now sits alongside 7 existing text-marker variants, all tested in isolation, none triggered by the upstream instruction. Code correctness and code invocation are different — the Architect fix succeeded because it changed both parser AND prompt together.
+
+**FORMALIZE:** **Lesson 87** — Prompt and parser changes are coupled. When fixing LLM output parsing, verify the prompt instruction matches the parser expectation. A JSON parser behind a text-marker prompt is inert. Validate prompt-parser alignment before sign-off — the parser's condition and the prompt's instruction must align.
+```
+
+This iteration needs to cycle back to Builder (REVISE: update the prompt). Shall I append this reflection and update state.md iteration counter, or do you want to modify it first?

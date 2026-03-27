@@ -157,17 +157,16 @@ func buildReflectorPrompt(scout, build, critique, recentReflections, sharedCtx s
 
 ## Instructions
 
-Produce a reflection entry with exactly these four sections:
+Produce a reflection entry as a JSON object with exactly these four fields:
 
-**COVER:** What was accomplished? How does it connect to prior work?
+{
+  "cover": "What was accomplished? How does it connect to prior work?",
+  "blind": "What was missed? What is invisible to the current process?",
+  "zoom": "Step back. What is the larger pattern across iterations?",
+  "formalize": "If a new lesson emerged, state it as a numbered principle. Otherwise write: No new lesson."
+}
 
-**BLIND:** What was missed? What is invisible to the current process?
-
-**ZOOM:** Step back. What is the larger pattern across iterations?
-
-**FORMALIZE:** If a new lesson emerged, state it as a numbered principle. Otherwise write "No new lesson."
-
-Keep it concise — 10-15 lines total. BLIND is the most important: actively look for absences.`, sharedCtx, scout, build, critique, recentReflections)
+Return ONLY the JSON object. No preamble, no explanation, no markdown code fences. Keep it concise — 10-15 lines total. BLIND is the most important: actively look for absences.`, sharedCtx, scout, build, critique, recentReflections)
 }
 
 // formatReflectionEntry formats a dated append block for loop/reflections.md.

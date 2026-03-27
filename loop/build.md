@@ -1,28 +1,28 @@
-# Build: Add regression tests for JSON format and Preview field
+# Build: Add regression tests for JSON Reflector parsing
 
-- **Commit:** ce363bb8aae8232629d02d2f8302d0aa02abf417
-- **Subject:** [hive:builder] Add regression tests for JSON format and Preview field
-- **Cost:** $0.1749
-- **Timestamp:** 2026-03-26T22:57:06Z
+- **Commit:** d4129710523c688905d92ae01fcf48fbb5be7e0c
+- **Subject:** [hive:builder] Add regression tests for JSON Reflector parsing
+- **Cost:** $0.5364
+- **Timestamp:** 2026-03-27T03:56:56Z
 
 ## Task
 
-In `pkg/runner/architect_test.go`, add test cases to `TestParseArchitectSubtasks` covering: JSON array input `[{"title":"...","description":"...","priority":"high"}]`, `{"tasks":[...]}` wrapper, and a prose preamble followed by SUBTASK_TITLE markers (verifying preamble doesn't corrupt parsing). Also...
+In `pkg/runner/reflector_test.go`, add test cases to `TestParseReflectorOutput` for: (a) valid flat JSON `{"cover":"...","blind":"...","zoom":"...","formalize":"..."}`, (b) wrapper JSON `{"reflection":{...}}`, (c) prose preamble before the JSON block (LLM says something then dumps JSON), and (d) con...
 
 ## Diff Stat
 
 ```
-commit ce363bb8aae8232629d02d2f8302d0aa02abf417
+commit d4129710523c688905d92ae01fcf48fbb5be7e0c
 Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 09:57:06 2026 +1100
+Date:   Fri Mar 27 14:56:55 2026 +1100
 
-    [hive:builder] Add regression tests for JSON format and Preview field
+    [hive:builder] Add regression tests for JSON Reflector parsing
 
- loop/budget-20260327.txt     |  3 +++
- loop/build.md                | 47 ++++++++++++++++++++++++++----------
- loop/critique.md             | 57 +++++++++++++++-----------------------------
- loop/reflections.md          | 14 +++++++++++
- loop/state.md                |  2 +-
- pkg/runner/architect_test.go | 32 +++++++++++++++++++++++++
- 6 files changed, 103 insertions(+), 52 deletions(-)
+ loop/budget-20260327.txt     |  4 +++
+ loop/build.md                | 44 +++++++++----------------
+ loop/scout.md                | 43 +++++++++++--------------
+ loop/state.md                | 26 +++++++++++++--
+ pkg/runner/reflector.go      | 77 ++++++++++++++++++++++++++++++++++++++++----
+ pkg/runner/reflector_test.go | 63 ++++++++++++++++++++++++++++++++++++
+ 6 files changed, 197 insertions(+), 60 deletions(-)
 ```

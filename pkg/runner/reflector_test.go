@@ -272,10 +272,10 @@ func TestBuildReflectorPrompt(t *testing.T) {
 		t.Error("prompt missing shared context")
 	}
 
-	// Must contain the four section headings the Reflector is expected to produce.
-	for _, section := range []string{"COVER", "BLIND", "ZOOM", "FORMALIZE"} {
-		if !contains(prompt, section) {
-			t.Errorf("prompt missing section heading: %s", section)
+	// Must contain the four JSON field names the Reflector is expected to produce.
+	for _, field := range []string{"cover", "blind", "zoom", "formalize"} {
+		if !contains(prompt, field) {
+			t.Errorf("prompt missing JSON field: %s", field)
 		}
 	}
 
