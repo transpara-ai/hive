@@ -338,6 +338,7 @@ func assertScoutGap(apiKey, baseURL string) error {
 
 	payload, _ := json.Marshal(map[string]string{
 		"op":    "assert",
+		"kind":  "claim",
 		"title": gapTitle,
 		"body":  body,
 	})

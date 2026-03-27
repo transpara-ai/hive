@@ -1,45 +1,42 @@
-# Build: Fix: KindClaim graph nodes not synced to MCP knowledge index
+# Build: Fix: [hive:builder] KindClaim graph nodes not synced to MCP knowledge index - assert op and knowledge_search are disconnected
+
+- **Commit:** 35a41236c4c6e25ab92e3765bfa7309962a793a8
+- **Subject:** [hive:builder] Fix: [hive:builder] KindClaim graph nodes not synced to MCP knowledge index - assert op and knowledge_search are disconnected
+- **Cost:** $0.4930
+- **Timestamp:** 2026-03-27T13:33:32Z
 
 ## Task
 
-`knowledge_search` returned zero results despite claims being asserted to the graph via the `assert` op. The two systems were disconnected: KindClaim nodes live in Postgres (graph store), but the MCP knowledge server reads only markdown files from the filesystem. Fix task `c5dca156`.
+Critic review of commit de17e45f90f0 found issues:
+
+Fix task created: `c5dca156`.
 
 ## What Was Built
 
-Two mechanisms bridge the gap:
+Build passes, all tests pass. The fix was already implemented across two commits:
 
-**1. `cmd/post/main.go` — `syncClaims()`** (commit de17e45)
-- Fetches all KindClaim nodes from `/app/hive/knowledge?tab=claims&limit=200`
-- Formats them as markdown (title, state, author, body per claim)
-- Writes to `loop/claims.md`
-- Called from `main()` after `syncMindState`, non-fatal
+1. **de17e45** — added `syncClaims()` to `cmd/post/main.go` (fetches KindClaim nodes from API → writes `loop/claims.md`) and added `claims.md` to the MCP knowledge server's topic index.
 
-**2. `cmd/mcp-knowledge/main.go` — claims.md indexed** (commit de17e45)
-- Added `{"claims.md", "Asserted knowledge claims — lessons, decisions, invariants from the graph store (synced by cmd/post)"}` to `buildHiveLoop()`
-- `os.Stat` guard: only appears in tree after first `close.sh` run that writes the file
+2. **4d0680c** — added `assertScoutGap()` to `cmd/post/main.go` (creates a permanent KindClaim node for each Scout gap so gaps survive `scout.md` being overwritten).
 
-**3. `cmd/post/main.go` — `assertScoutGap()`** (commit 4d0680c)
-- Reads `loop/scout.md`, extracts `**Gap:**` line and iteration number
-- POSTs `op=assert` to create a permanent KindClaim node for each Scout gap
-- Gap survives `scout.md` being overwritten next iteration
-- Called from `main()` after `syncClaims()`, non-fatal
-
-**4. `cmd/post/main_test.go` — 2 additional tests added** (working tree)
-- `TestAssertScoutGapNoGapLine` — assertScoutGap returns error when no `**Gap:**` line
-- `TestAssertScoutGapAPIError` — assertScoutGap returns error on HTTP 4xx
-
-## Verification
-
-```
-go.exe build -buildvcs=false ./...  ✓ (no errors)
-go.exe test -count=1 ./cmd/post/ ./cmd/mcp-knowledge/  ✓ (all pass)
-```
-
-## Flow After This Fix
-
-1. Scout asserts gap to graph via `assertScoutGap()` → KindClaim node in Postgres
-2. `close.sh` runs `cmd/post` → `syncClaims` fetches from API → writes `loop/claims.md`
-3. MCP knowledge server indexes `loop/claims.md` as `loop/claims` topic
-4. `knowledge_search "iteration gap title"` finds the claim
+Working tree also has 2 additional edge-case tests for `assertScoutGap` (no-gap-line and API-error paths). All 13 tests pass across `cmd/post` and `cmd/mcp-knowledge`.
 
 ACTION: DONE
+
+## Diff Stat
+
+```
+commit 35a41236c4c6e25ab92e3765bfa7309962a793a8
+Author: hive <hive@lovyou.ai>
+Date:   Sat Mar 28 00:33:32 2026 +1100
+
+    [hive:builder] Fix: [hive:builder] KindClaim graph nodes not synced to MCP knowledge index - assert op and knowledge_search are disconnected
+
+ cmd/post/main_test.go    | 52 ++++++++++++++++++++++++++++++++++++++++++++++++
+ loop/budget-20260328.txt |  5 +++++
+ loop/build.md            | 43 ++++++++++++++++++++++++++++++---------
+ loop/critique.md         | 27 +++++++++++++++++++++----
+ loop/reflections.md      | 12 +++++++++++
+ loop/test-report.md      | 34 +++++++++++++++++++++++++++++++
+ 6 files changed, 160 insertions(+), 13 deletions(-)
+```

@@ -87,6 +87,33 @@ func TestHandleSearchFindsClaims(t *testing.T) {
 	}
 }
 
+// TestHandleTopicsReturnsLoopChildren verifies that handleTopics("loop") returns
+// the children of the loop category, including claims.md when it exists.
+func TestHandleTopicsReturnsLoopChildren(t *testing.T) {
+	s, loopDir := newTestServer(t)
+
+	// Write claims.md so it's indexed.
+	if err := os.WriteFile(filepath.Join(loopDir, "claims.md"), []byte("# Knowledge Claims\n\n## Foo\n\nBar.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Write state.md so there's more than one child.
+	if err := os.WriteFile(filepath.Join(loopDir, "state.md"), []byte("# State\n\nIteration 10\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s.buildTree()
+
+	result := s.handleTopics(map[string]any{"parent": "loop"})
+	if result == "(no children)" {
+		t.Fatal("expected children for loop, got none")
+	}
+	if !strings.Contains(result, "claims.md") {
+		t.Errorf("claims.md not listed in loop children\ngot: %s", result)
+	}
+	if !strings.Contains(result, "state.md") {
+		t.Errorf("state.md not listed in loop children\ngot: %s", result)
+	}
+}
+
 // TestHandleGetClaims verifies that knowledge.get returns the full content of
 // the claims file when retrieved by the loop/claims topic ID.
 func TestHandleGetClaims(t *testing.T) {

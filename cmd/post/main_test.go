@@ -254,6 +254,9 @@ func TestAssertScoutGapCreatesClaimNode(t *testing.T) {
 	if received["op"] != "assert" {
 		t.Errorf("op = %q, want %q", received["op"], "assert")
 	}
+	if received["kind"] != "claim" {
+		t.Errorf("kind = %q, want %q", received["kind"], "claim")
+	}
 	if received["title"] != "Governance lacks quorum logic." {
 		t.Errorf("title = %q, want %q", received["title"], "Governance lacks quorum logic.")
 	}
@@ -328,6 +331,63 @@ func TestAssertScoutGapAPIError(t *testing.T) {
 	err := assertScoutGap("bad_key", srv.URL)
 	if err == nil {
 		t.Fatal("expected error for HTTP 401, got nil")
+	}
+}
+
+// TestSyncClaimsAPIError verifies that syncClaims returns an error and does not
+// write a file when the API responds with HTTP 4xx.
+func TestSyncClaimsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("forbidden"))
+	}))
+	defer srv.Close()
+
+	outPath := filepath.Join(t.TempDir(), "claims.md")
+	err := syncClaims("bad_key", srv.URL, outPath)
+	if err == nil {
+		t.Fatal("expected error for HTTP 403, got nil")
+	}
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		t.Error("claims.md should not be written on API error")
+	}
+}
+
+// TestSyncClaimsClaimWithNoMetadata verifies that syncClaims writes claim body
+// without the state/author line when both fields are empty.
+func TestSyncClaimsClaimWithNoMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"claims": []map[string]any{
+				{
+					"title":      "Body-only claim",
+					"body":       "This claim has no state or author.",
+					"state":      "",
+					"author":     "",
+					"created_at": "2026-03-01T00:00:00Z",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	outPath := filepath.Join(t.TempDir(), "claims.md")
+	if err := syncClaims("lv_testkey", srv.URL, outPath); err != nil {
+		t.Fatalf("syncClaims() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(outPath)
+	content := string(data)
+
+	if !strings.Contains(content, "Body-only claim") {
+		t.Error("missing claim title")
+	}
+	if !strings.Contains(content, "This claim has no state or author.") {
+		t.Error("missing claim body")
+	}
+	if strings.Contains(content, "**State:**") {
+		t.Error("state/author line should not appear when both are empty")
 	}
 }
 

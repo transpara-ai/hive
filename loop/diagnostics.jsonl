@@ -49,3 +49,6 @@
 {"phase":"reflector","outcome":"revise_blocked","cost_usd":0,"timestamp":"2026-03-27T09:16:20Z"}
 {"phase":"reflector","outcome":"revise_blocked","cost_usd":0,"timestamp":"2026-03-27T09:16:35Z"}
 {"phase":"reflector","outcome":"revise_blocked","cost_usd":0,"timestamp":"2026-03-27T09:16:50Z"}
+{"phase":"builder","outcome":"task.done","duration_secs":206.1041716,"cost_usd":0.49298970000000003,"timestamp":"2026-03-27T13:33:32Z"}
+{"phase":"tester","outcome":"tests.pass","duration_secs":128.1731344,"cost_usd":0.87615105,"timestamp":"2026-03-27T13:35:40Z"}
+{"phase":"critic","outcome":"critique.revise","duration_secs":95.7136247,"cost_usd":1.0656621,"timestamp":"2026-03-27T13:37:16Z"}
