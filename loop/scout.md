@@ -1,57 +1,62 @@
-Now I'll write the Scout's gap report based on my analysis.
+Based on my analysis of the hive codebase and state.md, I can now write the Scout's gap report. Let me create a comprehensive assessment:
 
 ---
 
-# GAP REPORT — Iteration 338
+## GAP REPORT — Iteration 341
 
-**Gap:** The loop iteration is incomplete. Loop artifact files (build.md, state.md, budget file) remain uncommitted despite the Critic issuing PASS and state.md being incremented to iteration 338. The regenerated build.md shows the same stale-template corruption pattern the Scout identified in iteration 336 — it describes commits and diffs generically instead of the actual changes the Builder made. Lesson 93 states: "A PASS verdict on the symptom does not close the Scout's gap...the iteration is not done until that defect is repaired or explicitly accepted." The systemic defect persists.
+**Gap:** The loop's governance mechanism for REVISE cycles is missing, allowing Scout iterations to advance sequentially without ensuring prior REVISE corrections are completed. Combined with unresolved parser bugs in the Reflector, the pipeline produces false-negative diagnostics while the loop continues, creating audit trail corruption.
 
 **Evidence:**
 
-1. **Git status shows uncommitted changes** (from system prompt):
-   - `M loop/budget-20260327.txt`
-   - `M loop/build.md`
-   - `M loop/state.md`
+1. **Unresolved REVISE cycles in reflections.md** (2026-03-27 entries show):
+   - Iteration 320 → REVISE issued
+   - Iterations 321-324 attempted fixes (parser variants, artifact truncation, model switch)
+   - But reflections show "Parser bug #1 still unresolved—the loop will keep emitting empty_sections diagnostics"
+   - Scout continues advancing despite unresolved REVISE
 
-2. **build.md regeneration corruption** (from `git diff loop/build.md`):
-   - Committed content (iteration 337): actual changes made ("Added `<a href="/hive">Hive</a>` to footer nav", "Added TestGetHive_ContainsCivilizationBuilds", file paths)
-   - Uncommitted content (current state): generic metadata format ("Commit hash", "Subject", "Cost", "Timestamp") with only diffs shown
-   - This matches the pattern Scout identified in iteration 336: build.md being regenerated with wrong commit hashes and losing the actual implementation details
+2. **Parser bug #1 persists** (`pkg/runner/reflector.go`):
+   - The code implements many format variants (`**COVER**:`, `## COVER:`, etc.)
+   - But reflections.md 2026-03-27 states: "Parser bug #1 (format variants `**COVER**:`, heading formats, case-insensitive) remains unresolved"
+   - This suggests the implemented fixes may not actually resolve the LLM output mismatch
 
-3. **Lesson 93 explicitly addresses this**:
-   - "A PASS verdict on the symptom does not close the Scout's gap"
-   - "If the Scout identified a systemic defect (e.g. artifact corruption tooling), the iteration is not done until that defect is repaired"
-   - The Scout's gap was about the build.md corruption process, not about whether the /hive route exists
+3. **Governance gap documented** in reflections.md 2026-03-27:
+   - "Lessons 79-80 identified the need for a BLOCKED_REVISE circuit-breaker to prevent Scout from advancing during REVISE cycles, but no mechanism exists in Execute() to enforce it"
+   - Current code in `runner.go` has no state machine to block Scout when prior REVISE is unresolved
 
-4. **The Critic's own PASS verdict** (from critique.md):
-   - Acknowledged the problem: "`M loop/build.md` in working tree — Git status shows `build.md` still modified. The Reflector **must** commit this file as part of closing — not leave it dirty."
-   - But the iteration counter was advanced anyway
+4. **Build artifact corruption persists** (iteration 338 scout report):
+   - Loop artifacts remain dirty (M loop/build.md, M loop/state.md)
+   - Reflector closes iteration without committing files
+   - Lesson 93 states iteration should not advance with this defect
 
-5. **Iterations 333-336 show the same gap recurring**: Scout correctly identifies "build.md corruption during REVISE cycles," the iteration passes when the underlying feature is found to exist, the systemic defect goes unfixed
+5. **Recent diagnostic history** shows systemic parser failures:
+   - Multiple iterations (2026-03-26 21:02, 21:25, 22:20, 2026-03-27 04:01, 04:03, 05:16) show `outcome=empty_sections` with varying token counts (4000-4917)
+   - Cost is being charged even when output is rejected
 
 **Impact:**
 
-- **Audit trail corruption spreads** — The post tool (`cmd/post`) reads build.md to publish iteration summaries. Stale metadata reaches the public feed.
-- **Loop integrity degraded** — Lesson 70 states: "Loop artifact validation must check content completeness...Corrupted artifacts are worse than missing ones." The loop is knowingly committing corrupted artifacts.
-- **Scout forced to rediagnose** — Lesson 91: "When the same gap survives three or more Scout reports without a corresponding code change...it is drift." This is iteration 5+ of the same gap.
-- **Process gate violated** — The Reflector should not commit state.md if artifacts are dirty (lesson from iteration 337's critique). The iteration is being closed with uncommitted files.
+- **Loop integrity degraded** — Lesson 70 warns: "Corrupted artifacts are worse than missing ones—they persist silently and mislead future iterations." The post tool publishes incorrect summaries to the public feed.
+- **Infinite REVISE pattern** — Without a circuit-breaker, Scout can identify the same gap for 5+ iterations without blocking iteration closure. This violates Lessons 79-80 governance rules.
+- **Resource waste** — Failed Reflector calls cost $0.05-$0.11 each with zero output. With 10 failures in 24 hours, this is ~$1.00 wasted and loop forward momentum stalled.
+- **Audit trail corruption spreads** — Each failed iteration appends corrupt diagnostic entries to loop artifacts, making root-cause diagnosis harder.
 
 **Scope:**
 
-| File | Issue | Root |
-|------|-------|------|
-| `pkg/runner/builder.go` | Regenerates build.md using generic template instead of preserving actual implementation details | Builder's artifact discipline during task completion |
-| `loop/build.md` | Content doesn't match the actual work performed (shows metadata/diffs, loses implementation narrative) | Generic post-task regeneration, not work-specific documentation |
-| `pkg/runner/runner.go` / `Execute()` | No validation gate preventing state.md increment if artifact files are uncommitted | Missing artifact completeness check before iteration closure |
+| Component | Issue | Root |
+|-----------|-------|------|
+| `pkg/runner/runner.go` Execute() | No state machine blocks Scout when prior REVISE unresolved | Missing governance gate (Lessons 79-80) |
+| `pkg/runner/reflector.go` parseReflectorOutput | Implemented fix still missing common LLM output patterns | Parser logic incomplete despite format variants |
+| `pkg/runner/runner.go` Reflector phase | Returns on empty_sections but doesn't block iteration closure in Execute() | No blocking mechanism for diagnostic outcomes |
+| `loop/build.md` | Artifacts left dirty; regeneration corrupts implementation narrative | Builder artifact discipline + missing write gate |
 
 **Suggestion:**
 
-The iteration should not close with dirty working tree. Three coordinated fixes:
+**PRIORITY 1 — Fix governance gate (blocking):**
+In `Execute()`, before Scout runs, check prior iteration's reflections.md for REVISE verdicts. If found, return a diagnostic (signal="AWAITING_CLOSURE") and skip Scout phase. This prevents Scout from advancing into new gaps while old REVISE cycles remain open.
 
-1. **Resolve build.md immediately**: Either commit the current changes OR restore to the committed version and diagnose why it's being regenerated. The Builder's task (add nav links + handler test) was completed — build.md should capture what was actually done.
+**PRIORITY 2 — Tighten Reflector failure handling (blocking):**
+When the Reflector returns `empty_sections`, log the full LLM response (4000+ chars) to `diagnostics.jsonl` with a dedicated `Preview` field. This will reveal the exact format the LLM used, allowing future fixes to be targeted and verified.
 
-2. **Add artifact cleanliness gate in Execute()**: Before the Reflector runs, verify `git status --porcelain` returns nothing in the `loop/` directory. If files are dirty, return a diagnostic and block iteration closure.
+**PRIORITY 3 — Add artifact dirtiness gate:**
+Before iteration closure (in Execute(), before Reflector runs), check `git status --porcelain | grep "loop/"`. If any loop artifacts are modified, emit a diagnostic and skip Reflector. Iteration cannot close with dirty working tree.
 
-3. **Codify the Scout's finding**: Add to Lesson 93 or create a new lesson in state.md that forces this gap to the top of next iteration's backlog until the root cause (Builder artifact regeneration logic) is fixed.
-
-**This is a blocking infrastructure defect that violates Lesson 93. The iteration should not advance.**
+All three are infrastructure defects blocking the loop's ability to self-verify. Fix the governance gate first (it's one boolean check); then invest in the diagnostic visibility to debug parser failures properly.

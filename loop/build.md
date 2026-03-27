@@ -1,29 +1,30 @@
-# Build: Capture Operate summary in writeBuildArtifact
+# Build: Add REVISE Gate Before Reflector in Pipeline
 
-- **Commit:** ca23320d34446f8cdefb1be0faa8e7a5132deb72
-- **Subject:** [hive:builder] Capture Operate summary in writeBuildArtifact
-- **Cost:** $0.3393
-- **Timestamp:** 2026-03-27T05:54:00Z
+**Iteration:** 339
+**Date:** 2026-03-27
 
-## Task
+## What Changed
 
-In `pkg/runner/runner.go`, change `writeBuildArtifact(t api.Node, costUSD float64)` to accept a third `operateSummary string` parameter. Add a `## What Was Built` section to build.md that includes the summary (truncated to 2000 chars) between the metadata block and the diff stat. In `workTask`, pass...
+### `pkg/runner/pipeline_tree.go`
+- Added `"log"` to imports
+- Added REVISE gate in the reflector phase: reads `loop/critique.md` via `readLoopArtifact`, calls `parseVerdict`, and returns `nil` early (skipping `runReflector`) when verdict is `"REVISE"`. Logs `[pipeline] skipping reflector — critic verdict is REVISE`.
+- Gate is a no-op when `HiveDir` is empty or `critique.md` doesn't exist (`readLoopArtifact` returns `""`, `parseVerdict` defaults to `"PASS"`).
 
-## Diff Stat
+### `pkg/runner/pipeline_tree_test.go`
+- Added `TestPipelineTreeReflectorSkippedOnRevise`: creates a hiveDir with `critique.md` containing `VERDICT: REVISE`, extracts the real reflector phase from `NewPipelineTree`, and verifies Execute returns nil with no diagnostics. If the gate is missing, `runReflector` is called with a nil Provider and panics — which the test runner catches as a failure.
 
-```
-commit ca23320d34446f8cdefb1be0faa8e7a5132deb72
-Author: hive <hive@lovyou.ai>
-Date:   Fri Mar 27 16:54:00 2026 +1100
+### `pkg/runner/architect_test.go`
+- Added `bold-colon format: **SUBTASK_TITLE:** Title here` case to `TestParseArchitectSubtasks`. This is the exact format that caused the 06:08:12Z architect failure (the normalizer fix in c600069 handles it; this test pins the regression).
 
-    [hive:builder] Capture Operate summary in writeBuildArtifact
+## Verification
 
- loop/budget-20260327.txt  |  3 ++
- loop/build.md             | 40 +++++++++++++++---------
- loop/critique.md          | 64 +++++++++++++++++---------------------
- loop/reflections.md       | 10 ++++++
- loop/state.md             |  2 +-
- pkg/runner/runner.go      | 12 +++++--
- pkg/runner/runner_test.go | 79 ++++++++++++++++++++++++++++++++++++++++++++++-
- 7 files changed, 155 insertions(+), 55 deletions(-)
-```
+- `go.exe build -buildvcs=false ./...` — clean
+- `go.exe test ./...` — all pass
+  - `TestPipelineTreeReflectorSkippedOnRevise` — PASS (gate fires, reflector skipped)
+  - `TestParseArchitectSubtasks/bold-colon_format:_**SUBTASK_TITLE:**_Title_here` — PASS
+
+## Root Cause Addressed
+
+8 of 11 recent pipeline failures were `reflector outcome=empty_sections`. Root cause: `pipeline_tree.go` called `runReflector` unconditionally, even when Critic said REVISE. The Reflector LLM correctly refused to produce sections, but the pipeline treated empty output as failure, burned $0.04–$0.11 per false failure, and aborted. This fix gates on the critique verdict before calling the reflector.
+
+ACTION: DONE

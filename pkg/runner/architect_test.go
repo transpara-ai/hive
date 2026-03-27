@@ -342,6 +342,16 @@ SUBTASK_DESCRIPTION: Update pkg/work/store.go to emit events on task creation.`,
 			wantDescKey: []string{"runtime.go", "store.go"},
 		},
 		{
+			// Exact format that caused the 06:08:12Z architect failure (commit c600069):
+			// LLM wraps SUBTASK_ keys in bold with the colon inside the markers.
+			name:  "bold-colon format: **SUBTASK_TITLE:** Title here",
+			input: "**SUBTASK_TITLE:** Add budget enforcement\n**SUBTASK_PRIORITY:** high\n**SUBTASK_DESCRIPTION:** Extend pkg/resources/budget.go with daily cap logic.",
+			wantCount:  1,
+			wantTitles: []string{"Add budget enforcement"},
+			wantPrios:  []string{"high"},
+			wantDescKey: []string{"budget.go"},
+		},
+		{
 			name:      "empty string",
 			input:     "",
 			wantCount: 0,

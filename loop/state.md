@@ -579,8 +579,6 @@ In `site/handlers/handlers_test.go` (or a new `hive_test.go`), add a test verify
 - `go test ./...` passes
 - Deploys via `./ship.sh "iter 336: /hive — civilization build page"`
 
-## What the Scout Should Focus On Next
-
 ## Fix Reflector Parser — Still Broken After Multiple Failures
 
 **Target repo:** hive
@@ -639,3 +637,52 @@ Add a test for the early-return: use the `tempHiveDir` helper (or equivalent), p
 - Reflector no longer logs `empty_sections` on valid LLM output that uses `**COVER**:` format
 - On genuine empty output, iteration counter is not incremented
 - `go.exe build -buildvcs=false ./...` passes
+
+## What the Scout Should Focus On Next
+
+## What to Build Next: REVISE Gate Before Reflector in Pipeline
+
+**Target repo:** hive
+
+**Why this now:**
+8 of 11 recent pipeline failures are `reflector outcome=empty_sections`. The root cause is structural: `pipeline_tree.go` runs the Reflector unconditionally — it never checks the Critic verdict. When the Critic says REVISE, the Reflector LLM correctly refuses to produce sections (diagnostic preview at 05:16:13Z shows it explicitly saying "The Reflector is not running"), but the pipeline interprets the empty output as a failure, appends a diagnostic, and aborts. This burns $0.04–$0.11 per false failure and prevents real work from completing. The fix is a targeted gate in one function.
+
+**Task 1 — Read critique verdict before calling Reflector** (`pkg/runner/pipeline_tree.go`)
+
+In `NewPipelineTree`, the reflector phase currently calls `r.runReflector(ctx)` unconditionally. Add a gate:
+
+1. Before calling `runReflector`, read `loop/critique.md` from `r.cfg.HiveDir` (use the existing `readLoopArtifact` helper).
+2. Call `parseVerdict` (already in `pkg/runner/critic.go`, same package) on the content.
+3. If the verdict is `"REVISE"`, log `[pipeline] skipping reflector — critic verdict is REVISE` and return `nil` from the phase function without calling `runReflector` or appending any diagnostic.
+4. If HiveDir is empty or critique.md doesn't exist, proceed normally (tolerate absence, don't gate on missing file).
+
+The reflector phase function signature stays `func(ctx context.Context) error`. The change is ~8 lines inside the anonymous function.
+
+**Task 2 — Add test coverage for the REVISE gate** (`pkg/runner/pipeline_tree_test.go`)
+
+Add a test that:
+1. Creates a temp hiveDir with `loop/critique.md` containing `**Verdict:** REVISE\n`
+2. Runs `Execute()` on a `PipelineTree` with stub phases (scout/architect/builder/tester/critic succeed, reflector would fail if called)
+3. Asserts: no error from Execute, no diagnostics written, reflector phase was skipped (verify by checking the stub was not called, or checking that no new diagnostic appears)
+
+Check existing tests in `pipeline_tree_test.go` for the stub/mock pattern used there before writing new tests. Match the style.
+
+**Task 3 — Verify architect normalizer fix test coverage** (`pkg/runner/architect_test.go`)
+
+The 06:08:12Z architect failure used `**SUBTASK_TITLE:**` format (with colon inside bold). The fix in c600069 added normalizer rules for this. Verify the test in `architect_test.go` covers:
+- `**SUBTASK_TITLE:** Title here` (colon inside bold markers) — the exact format that caused the failure
+- If this case is already tested, document it. If not, add it.
+
+Do NOT refactor the existing tests. Add one targeted case for the specific format that failed.
+
+**Task 4 — Ship** (`cd site && ./ship.sh "iter N: add REVISE gate before Reflector in pipeline_tree"`)
+
+Wait — this is a hive fix, not a site change. After tests pass:
+- `go.exe build -buildvcs=false ./...` in hive dir to verify compilation
+- `go test ./pkg/runner/...` to confirm tests pass
+- Commit and push to hive repo directly (no site deploy needed)
+
+**Files to change:**
+- `pkg/runner/pipeline_tree.go` — add REVISE gate (~8 lines)
+- `pkg/runner/pipeline_tree_test.go` — add REVISE gate test
+- `pkg/runner/architect_test.go` — verify/add bold-colon format test case

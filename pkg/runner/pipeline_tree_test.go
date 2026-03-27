@@ -274,3 +274,34 @@ func TestLoopDirtyCheckBlocksReflector(t *testing.T) {
 		t.Error("no diagnostic emitted for loop-clean-check failure")
 	}
 }
+
+// TestPipelineTreeReflectorSkippedOnRevise verifies the REVISE gate: when
+// loop/critique.md contains VERDICT: REVISE, the reflector phase returns nil
+// without calling runReflector. If the gate is absent, runReflector is called
+// with a nil Provider and panics — which the test runner reports as a failure.
+func TestPipelineTreeReflectorSkippedOnRevise(t *testing.T) {
+	hiveDir := makeHiveDir(t, "# State\n", map[string]string{
+		"critique.md": "VERDICT: REVISE\n",
+	})
+
+	r := New(Config{HiveDir: hiveDir})
+	pt := NewPipelineTree(r)
+
+	// Isolate the real reflector phase (which contains the REVISE gate).
+	var reflectorPhase Phase
+	for _, p := range pt.phases {
+		if p.Name == "reflector" {
+			reflectorPhase = p
+			break
+		}
+	}
+	pt.phases = []Phase{reflectorPhase}
+
+	err := pt.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute returned error when reflector should be skipped via REVISE gate: %v", err)
+	}
+	if countDiagnostics(hiveDir) != 0 {
+		t.Errorf("diagnostics written when reflector should have been skipped cleanly")
+	}
+}
