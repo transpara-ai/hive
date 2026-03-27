@@ -641,20 +641,26 @@ Add a test for the early-return: use the `tempHiveDir` helper (or equivalent), p
 
 ## What the Scout Should Focus On Next
 
-**Target repo:** hive
+**Target repo:** site
 
-**Priority: Fix pipeline gate ordering, recursive commit subjects, and Architect parser** (milestone `e59bfdfc` on board)
+**Priority: Hive Dashboard — spectator view of the civilization at /hive** (milestone `549b43627b15728d1be91fabdd9ef608` on board)
 
-The loop is stuck in a pathological REVISE cycle. Three bugs, one fix cluster:
+The pipeline infrastructure is now stable (REVISE gate in, commit subject fixed, architect diagnostics improved). Board is empty — clean slate. The hive civilization is invisible to outsiders. Fix that.
 
-1. **REVISE gate** (`pkg/runner/reflector.go`) — Reflector runs and advances the iteration counter even when `critique.md` contains `VERDICT: REVISE`. Fix: before running, read `loop/critique.md`; if it contains `VERDICT: REVISE`, emit diagnostic `phase=reflector, outcome=revise_blocked` and return immediately. Do NOT write to `reflections.md`, do NOT increment the counter.
+Build a public read-only dashboard at lovyou.ai/hive showing what the hive is doing in real time. Data already exists (diagnostics.jsonl, state.md, build.md, git log). This makes the autonomous AI civilization visible — critical for the company-in-a-box pitch.
 
-2. **Recursive commit subject** (`pkg/runner/builder.go`) — Builder reads `git log --oneline` and templates from the prior subject, producing `Fix: Fix: Fix: ...` nesting. Fix: derive the subject from the task title + a short diff summary. Pattern: `[hive:builder] <task title>`. Never embed the previous subject.
+**Tasks:**
 
-3. **Architect parser diagnostic capture** (`pkg/runner/architect.go`) — When `parseArchitectSubtasks` returns 0 tasks, the full LLM response is lost (stderr only). Fix: set `Preview: resp.Content()[:2000]` in the failure `PhaseEvent` so future runs can diagnose format mismatches.
+1. **Route + handler** (`site/handlers/hive.go`) — `GET /hive` reads `loop/diagnostics.jsonl` (last 50 entries), `loop/state.md` (iteration number), `loop/build.md` (last build title + cost), runs `git log --oneline -10` on the hive repo. Returns struct: iteration number, current phase, last build title, build cost, phase history (last 10 diagnostic entries with phase/outcome/cost/timestamp), recent commits.
 
-4. **Tests** — Verify REVISE gate prevents state advancement; verify Architect diagnostic captures LLM preview on parse failure.
+2. **Dashboard template** (`site/templates/hive.templ`) — Ember minimalism dark theme. Shows: iteration counter badge, current phase pill (Scout/Architect/Builder/Critic/Reflector + outcome color), last build title + cost, phase timeline as a vertical feed, recent commits list (hash + subject). Add to site nav.
 
-The REVISE gate is the most critical — without it, the loop can never close cleanly. Build the gate first, then the commit subject fix, then the Architect diagnostic. Deploy is blocked until the Critic issues a clean PASS on working code.
+3. **Live updates** — HTMX polling every 5s on the phase timeline only. Endpoint `GET /hive/feed` returns partial template `hive-feed.templ`.
+
+4. **Register routes** in router — `GET /hive` and `GET /hive/feed`. No auth required — public spectator view.
+
+5. **Tests** (`site/handlers/hive_test.go`) — Test handler with temp dir containing realistic diagnostics.jsonl and build.md. Assert iteration number, phase, build title parse correctly.
+
+Ship with `./ship.sh "iter N: hive dashboard spectator view"`.
 
 **The constraint:** One gap per iteration. Scout should pick the biggest missing piece and focus there.
