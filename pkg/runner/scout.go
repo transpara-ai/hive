@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
 )
 
 // maxAgentTasks is the cap on open tasks assigned to the agent.
@@ -35,17 +36,69 @@ func (r *Runner) runScout(ctx context.Context) {
 
 	log.Printf("[scout] tick %d: scouting (agent has %d/%d tasks)", r.tick, agentTasks, maxAgentTasks)
 
-	// Gather context.
+	// Use Operate() so the Scout can search the knowledge layer and the codebase.
+	op, canOperate := r.cfg.Provider.(decision.IOperator)
+	if canOperate {
+		r.runScoutOperate(ctx, op)
+	} else {
+		r.runScoutReason(ctx)
+	}
+
+	if r.cfg.OneShot {
+		r.done = true
+	}
+}
+
+// runScoutOperate uses Operate() — the Scout searches knowledge, reads code,
+// and writes the gap report to loop/scout.md AND posts it to the graph.
+func (r *Runner) runScoutOperate(ctx context.Context, op decision.IOperator) {
+	instruction := fmt.Sprintf(`You are the Scout. Identify ONE product gap — the most important thing the hive should build next.
+
+## Your Tools
+- Use knowledge.search to find what's already built (avoid rediscovering existing work)
+- Use knowledge.get to read the backlog, design docs, and prior reflections
+- Use Read/Grep/Glob to examine the target repo codebase
+- Use Bash to check git log, run tests, inspect state
+
+## Steps
+1. Search knowledge for "backlog" and read the priorities
+2. Search knowledge for "Director mandate" — check for binding instructions
+3. Read the target repo's CLAUDE.md for architecture context
+4. Check recent git log: git log --oneline -20
+5. Identify ONE gap — product gaps outrank code gaps
+6. Write the gap report to loop/scout.md with: Gap, Evidence, Impact, Scope, Suggestion
+7. Also post the report as a document to the board:
+   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"express","title":"Scout Report: <GAP>","body":"<REPORT>"}'
+
+## Target repo: %s
+
+Write the report. Be specific — name files, functions, and exact changes.`,
+		os.Getenv("LOVYOU_API_KEY"), r.cfg.SpaceSlug, r.cfg.RepoPath)
+
+	result, err := op.Operate(ctx, decision.OperateTask{
+		WorkDir:     r.cfg.RepoPath,
+		Instruction: instruction,
+	})
+	if err != nil {
+		log.Printf("[scout] Operate error: %v", err)
+		return
+	}
+
+	r.cost.Record(result.Usage)
+	r.dailyBudget.Record(result.Usage.CostUSD)
+	log.Printf("[scout] Operate done (cost=$%.4f)", result.Usage.CostUSD)
+}
+
+// runScoutReason is the legacy fallback.
+func (r *Runner) runScoutReason(ctx context.Context) {
 	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
 	stateContext := r.readScoutSection()
 	repoContext := r.readRepoContext()
 	gitLog := r.recentGitLog()
 	boardSummary := r.boardSummary()
 
-	// Build the scouting prompt.
 	prompt := buildScoutPrompt(r.cfg.RepoPath, sharedCtx, repoContext, stateContext, gitLog, boardSummary)
 
-	// Call Reason() — no tools, just thinking.
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
 	if err != nil {
 		log.Printf("[scout] Reason error: %v", err)
@@ -56,21 +109,12 @@ func (r *Runner) runScout(ctx context.Context) {
 	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[scout] Reason done (cost=$%.4f)", resp.Usage().CostUSD)
 
-	// Write the gap report to loop/scout.md for PM and Architect to read.
-	// The Scout identifies gaps. The Architect creates tasks.
 	report := resp.Content()
 	if r.cfg.HiveDir != "" {
 		reportPath := filepath.Join(r.cfg.HiveDir, "loop", "scout.md")
 		if err := os.WriteFile(reportPath, []byte(report), 0644); err != nil {
 			log.Printf("[scout] write report error: %v", err)
-		} else {
-			log.Printf("[scout] gap report written to loop/scout.md")
 		}
-	}
-
-	// In one-shot mode, signal completion.
-	if r.cfg.OneShot {
-		r.done = true
 	}
 }
 

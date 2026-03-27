@@ -9,11 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
 )
 
-// runPM reads the backlog, recent work, and board state, then updates
-// the Scout's directive in state.md with the next strategic priority.
-// This prevents the Scout from spinning when specs are exhausted.
+// runPM reads the backlog, recent work, and board state, then creates
+// a milestone on the board with the next strategic priority.
 func (r *Runner) runPM(ctx context.Context) {
 	if !r.cfg.OneShot && r.tick%16 != 0 {
 		return
@@ -21,15 +22,82 @@ func (r *Runner) runPM(ctx context.Context) {
 
 	log.Printf("[pm] tick %d: deciding next priority", r.tick)
 
-	// Gather strategic context.
+	// Use Operate() so the PM can search knowledge, read the board, and
+	// create the milestone directly — all as agent actions on the graph.
+	op, canOperate := r.cfg.Provider.(decision.IOperator)
+	if canOperate {
+		r.runPMOperate(ctx, op)
+	} else {
+		r.runPMReason(ctx)
+	}
+
+	if r.cfg.OneShot {
+		r.done = true
+	}
+}
+
+// runPMOperate uses Operate() — the PM searches knowledge, reads the board,
+// and creates milestones directly via the API.
+func (r *Runner) runPMOperate(ctx context.Context, op decision.IOperator) {
+	apiKey := os.Getenv("LOVYOU_API_KEY")
+	repoNames := ""
+	for name := range r.cfg.RepoMap {
+		repoNames += name + ", "
+	}
+
+	instruction := fmt.Sprintf(`You are the PM for the lovyou.ai hive. Decide what to build next.
+
+## Your Tools
+- Use knowledge.search to find existing work, avoid rediscovering what's done
+- Use knowledge.get to read the backlog, design docs, and prior reflections
+- Use Bash to check the board (curl), read recent git log, and create tasks
+
+## Available Repos: %s
+
+## Steps
+1. Search knowledge for "backlog" — read it to understand priorities
+2. Search knowledge for "Director mandate" — check if there are binding instructions
+3. Check the board for open tasks: curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board"
+4. Check recent git commits: git log --oneline -20
+5. Read diagnostics for pipeline failures: cat loop/diagnostics.jsonl | tail -20
+6. Decide the MOST IMPORTANT thing to build next
+7. Create a milestone on the board:
+   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"task","title":"<MILESTONE TITLE>","description":"<FULL DIRECTIVE WITH TARGET REPO AND TASKS>","priority":"high"}'
+8. Update state.md with the directive (for target repo resolution):
+   Write the directive to loop/state.md in the "What the Scout Should Focus On Next" section.
+   MUST include "**Target repo:** <name>" line.
+
+## Rules
+- Search before proposing — the hive's worst failure mode is rediscovering what it already knows
+- Check the Director mandate in the backlog — it may override your preference
+- One direction per milestone, 3-5 specific tasks
+- ALWAYS include Target repo in the directive
+`, repoNames, apiKey, r.cfg.SpaceSlug, apiKey, r.cfg.SpaceSlug)
+
+	result, err := op.Operate(ctx, decision.OperateTask{
+		WorkDir:     r.cfg.HiveDir,
+		Instruction: instruction,
+	})
+	if err != nil {
+		log.Printf("[pm] Operate error: %v", err)
+		return
+	}
+
+	r.cost.Record(result.Usage)
+	r.dailyBudget.Record(result.Usage.CostUSD)
+	log.Printf("[pm] decision made (cost=$%.4f)", result.Usage.CostUSD)
+}
+
+// runPMReason is the legacy fallback — gathers context manually, calls Reason().
+func (r *Runner) runPMReason(ctx context.Context) {
 	backlog := r.readBacklog()
 	recentCommits := r.recentGitLog()
 	boardSummary := r.boardSummary()
 	completedWork := r.completedTasksSummary()
 	sharedCtx := LoadSharedContext(r.cfg.HiveDir)
 	currentDirective := r.readScoutSection()
-
 	recentFailures := readRecentDiagnostics(r.cfg.HiveDir)
+
 	prompt := buildPMPrompt(sharedCtx, backlog, recentCommits, boardSummary, completedWork, currentDirective, recentFailures, r.cfg.RepoMap)
 
 	resp, err := r.cfg.Provider.Reason(ctx, prompt, nil)
@@ -42,38 +110,25 @@ func (r *Runner) runPM(ctx context.Context) {
 	r.dailyBudget.Record(resp.Usage().CostUSD)
 	log.Printf("[pm] decision made (cost=$%.4f)", resp.Usage().CostUSD)
 
-	// Parse the directive from the response.
 	directive := parsePMDirective(resp.Content())
 	if directive == "" {
 		log.Printf("[pm] no directive found in response")
-		if r.cfg.OneShot {
-			r.done = true
-		}
 		return
 	}
 
 	log.Printf("[pm] new directive: %s", truncateLog(directive, 100))
 
-	// Create milestone on the board so the Architect can decompose from it.
 	title := extractDirectiveTitle(directive)
 	if title != "" {
-		_, err := r.cfg.APIClient.CreateTask(r.cfg.SpaceSlug, title, directive, "high")
-		if err != nil {
+		if _, err := r.cfg.APIClient.CreateTask(r.cfg.SpaceSlug, title, directive, "high"); err != nil {
 			log.Printf("[pm] create milestone error: %v", err)
 		} else {
 			log.Printf("[pm] milestone created on board: %s", title)
 		}
 	}
 
-	// Also update state.md (for Scout context and target repo resolution).
 	if err := r.updateScoutDirective(directive); err != nil {
 		log.Printf("[pm] update state.md error: %v", err)
-	} else {
-		log.Printf("[pm] state.md updated with new Scout directive")
-	}
-
-	if r.cfg.OneShot {
-		r.done = true
 	}
 }
 

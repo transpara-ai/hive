@@ -339,8 +339,9 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			Model:        model,
 			MaxBudgetUSD: budget,
 		}
-		// Give Operate-capable roles (builder, observer) access to the knowledge server.
-		if mcpConfigPath != "" && (role == "builder" || role == "observer") {
+		// Give all Operate-capable roles access to the knowledge server.
+		// PM, Scout, Architect, Builder, Observer — any agent that works on the graph.
+		if mcpConfigPath != "" {
 			providerCfg.MCPConfigPath = mcpConfigPath
 		}
 		provider, err := intelligence.New(providerCfg)
