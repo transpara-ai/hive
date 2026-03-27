@@ -1,62 +1,59 @@
-Based on my analysis of the hive codebase and state.md, I can now write the Scout's gap report. Let me create a comprehensive assessment:
+Based on my analysis of the state, reflections, and recent work, let me now write the Scout's gap report. I have enough context to identify the highest-priority gap:
 
 ---
 
-## GAP REPORT — Iteration 341
+## SCOUT GAP REPORT — Iteration 342
 
-**Gap:** The loop's governance mechanism for REVISE cycles is missing, allowing Scout iterations to advance sequentially without ensuring prior REVISE corrections are completed. Combined with unresolved parser bugs in the Reflector, the pipeline produces false-negative diagnostics while the loop continues, creating audit trail corruption.
+**Gap:** The hive's autonomous loop is now stable (lessons 93-96 formalized, artifact gates working, governance constraints enforced), but the PM role that should direct product work is either absent or disconnected from the pipeline. The Builder has no clear tasks to work on, and the Scout has no mechanism to translate site product gaps into hive work tasks. This creates a feedback loop failure: the hive fixes itself but doesn't know WHAT to build next.
 
 **Evidence:**
 
-1. **Unresolved REVISE cycles in reflections.md** (2026-03-27 entries show):
-   - Iteration 320 → REVISE issued
-   - Iterations 321-324 attempted fixes (parser variants, artifact truncation, model switch)
-   - But reflections show "Parser bug #1 still unresolved—the loop will keep emitting empty_sections diagnostics"
-   - Scout continues advancing despite unresolved REVISE
+1. **Loop infrastructure converged** (`loop/reflections.md`, iters 333-340):
+   - Iterations 333-340 shipped fixes to artifact corruption, REVISE gates, and verification logic
+   - Lessons 93-96 formalized patterns to prevent future corruption
+   - Tests now model production configuration (Lesson 94)
+   - All recent reflections show PASS verdicts, not REVISE
 
-2. **Parser bug #1 persists** (`pkg/runner/reflector.go`):
-   - The code implements many format variants (`**COVER**:`, `## COVER:`, etc.)
-   - But reflections.md 2026-03-27 states: "Parser bug #1 (format variants `**COVER**:`, heading formats, case-insensitive) remains unresolved"
-   - This suggests the implemented fixes may not actually resolve the LLM output mismatch
+2. **No product progress in 9 iterations** (`loop/state.md`, line 354):
+   - "nine iterations (332–340) have been spent on loop artifact fidelity... no product layer has advanced in this sprint"
+   - Loop was too busy fixing itself to assign product work to Builder
 
-3. **Governance gap documented** in reflections.md 2026-03-27:
-   - "Lessons 79-80 identified the need for a BLOCKED_REVISE circuit-breaker to prevent Scout from advancing during REVISE cycles, but no mechanism exists in Execute() to enforce it"
-   - Current code in `runner.go` has no state machine to block Scout when prior REVISE is unresolved
+3. **PM role exists but is untested** (`pkg/runner/runner.go`, line 41):
+   - `"pm": "sonnet"` defined in `roleModel` map
+   - `pkg/runner/pm.go` exists (inferred from glob earlier)
+   - No indication in recent commits that PM is wired into the pipeline or producing tasks
 
-4. **Build artifact corruption persists** (iteration 338 scout report):
-   - Loop artifacts remain dirty (M loop/build.md, M loop/state.md)
-   - Reflector closes iteration without committing files
-   - Lesson 93 states iteration should not advance with this defect
+4. **Scout identifies site gaps but can't hand off to hive** (`loop/scout.md`, HEAD commit):
+   - Scout creates tasks on the HIVE board
+   - But the board may be stale or the Scout's task creation may not be connected to what Builder picks up
+   - No clear feedback loop: Scout → PM → Builder
 
-5. **Recent diagnostic history** shows systemic parser failures:
-   - Multiple iterations (2026-03-26 21:02, 21:25, 22:20, 2026-03-27 04:01, 04:03, 05:16) show `outcome=empty_sections` with varying token counts (4000-4917)
-   - Cost is being charged even when output is rejected
+5. **No test failures reported, but no product work shipped**:
+   - Builder is idle or working on whatever happens to sort first on the backlog
+   - No manifest of "what should the hive build this iteration?"
 
 **Impact:**
 
-- **Loop integrity degraded** — Lesson 70 warns: "Corrupted artifacts are worse than missing ones—they persist silently and mislead future iterations." The post tool publishes incorrect summaries to the public feed.
-- **Infinite REVISE pattern** — Without a circuit-breaker, Scout can identify the same gap for 5+ iterations without blocking iteration closure. This violates Lessons 79-80 governance rules.
-- **Resource waste** — Failed Reflector calls cost $0.05-$0.11 each with zero output. With 10 failures in 24 hours, this is ~$1.00 wasted and loop forward momentum stalled.
-- **Audit trail corruption spreads** — Each failed iteration appends corrupt diagnostic entries to loop artifacts, making root-cause diagnosis harder.
+- **Loop asymmetry** — The hive can diagnose and fix problems (Scout → Critic → Reflector), but it cannot CREATE new work (no PM → Builder handoff). Self-healing is only half the capability.
+- **Drift** — Without directed work, Scout will continue identifying HIVE infrastructure gaps (the only gaps visible when there's no product context), and the loop becomes a recursive self-perfection machine rather than a product builder.
+- **Lost time** — Iterations 333-340 proved the hive can execute autonomously on clear tasks. But with no PM directing work, the builder will idle or work on unrelated infrastructure.
 
 **Scope:**
 
 | Component | Issue | Root |
 |-----------|-------|------|
-| `pkg/runner/runner.go` Execute() | No state machine blocks Scout when prior REVISE unresolved | Missing governance gate (Lessons 79-80) |
-| `pkg/runner/reflector.go` parseReflectorOutput | Implemented fix still missing common LLM output patterns | Parser logic incomplete despite format variants |
-| `pkg/runner/runner.go` Reflector phase | Returns on empty_sections but doesn't block iteration closure in Execute() | No blocking mechanism for diagnostic outcomes |
-| `loop/build.md` | Artifacts left dirty; regeneration corrupts implementation narrative | Builder artifact discipline + missing write gate |
+| `pkg/runner/pm.go` | Exists but untested + unconnected to task creation | PM role not wired into pipeline |
+| `pkg/runner/runner.go` | No orchestration that calls PM.Reason() to create tasks | Missing pipeline phase for work direction |
+| `loop/scout.md` or task creation | Scout identifies gaps but no mechanism to route to PM for decomposition | Feedback loop incomplete |
 
 **Suggestion:**
 
-**PRIORITY 1 — Fix governance gate (blocking):**
-In `Execute()`, before Scout runs, check prior iteration's reflections.md for REVISE verdicts. If found, return a diagnostic (signal="AWAITING_CLOSURE") and skip Scout phase. This prevents Scout from advancing into new gaps while old REVISE cycles remain open.
+**Priority 1 — Verify PM role is wired and functional:**
+In `pkg/runner/runner.go`, check the `Execute()` method: does it call `runPM()` at the right phase in the pipeline? If `runPM` is not implemented or not called, add it. The PM should run AFTER the Reflector closes (when state.md is updated) but BEFORE Scout runs (so Scout sees new tasks). The PM reads state.md and the site backlog (via API) and creates HIVE tasks describing what to build next. Without this, the pipeline runs, but the Builder has no mandate.
 
-**PRIORITY 2 — Tighten Reflector failure handling (blocking):**
-When the Reflector returns `empty_sections`, log the full LLM response (4000+ chars) to `diagnostics.jsonl` with a dedicated `Preview` field. This will reveal the exact format the LLM used, allowing future fixes to be targeted and verified.
+**Priority 2 — Add PM phase test:**
+Create `TestPMPhaseFunctional` in `pkg/runner/runner_test.go` (or `pm_test.go`). Mock the API client to return a stale site product gap, call `runPM()`, verify it creates a task on the hive board with title describing the gap. Verify the task is discoverable by the next Scout/Builder cycle.
 
-**PRIORITY 3 — Add artifact dirtiness gate:**
-Before iteration closure (in Execute(), before Reflector runs), check `git status --porcelain | grep "loop/"`. If any loop artifacts are modified, emit a diagnostic and skip Reflector. Iteration cannot close with dirty working tree.
+---
 
-All three are infrastructure defects blocking the loop's ability to self-verify. Fix the governance gate first (it's one boolean check); then invest in the diagnostic visibility to debug parser failures properly.
+This identifies a real architectural gap that's only visible now that the loop infrastructure is stable. The hive has proven it can execute reliably; now it needs a function (PM) that ensures it's executing on the RIGHT work.

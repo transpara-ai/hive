@@ -1,30 +1,21 @@
-# Build: Add REVISE Gate Before Reflector in Pipeline
+# Build: Add hive discovery section to homepage
 
-**Iteration:** 339
-**Date:** 2026-03-27
+## Task
+Add a "The Civilization Builds" section to the homepage pointing visitors to /hive.
 
-## What Changed
+## What Was Built
 
-### `pkg/runner/pipeline_tree.go`
-- Added `"log"` to imports
-- Added REVISE gate in the reflector phase: reads `loop/critique.md` via `readLoopArtifact`, calls `parseVerdict`, and returns `nil` early (skipping `runReflector`) when verdict is `"REVISE"`. Logs `[pipeline] skipping reflector — critic verdict is REVISE`.
-- Gate is a no-op when `HiveDir` is empty or `critique.md` doesn't exist (`readLoopArtifact` returns `""`, `parseVerdict` defaults to `"PASS"`).
-
-### `pkg/runner/pipeline_tree_test.go`
-- Added `TestPipelineTreeReflectorSkippedOnRevise`: creates a hiveDir with `critique.md` containing `VERDICT: REVISE`, extracts the real reflector phase from `NewPipelineTree`, and verifies Execute returns nil with no diagnostics. If the gate is missing, `runReflector` is called with a nil Provider and panics — which the test runner catches as a failure.
-
-### `pkg/runner/architect_test.go`
-- Added `bold-colon format: **SUBTASK_TITLE:** Title here` case to `TestParseArchitectSubtasks`. This is the exact format that caused the 06:08:12Z architect failure (the normalizer fix in c600069 handles it; this test pins the regression).
+**`site/views/home.templ`** — added new section between the hero and "What makes this different" sections:
+- Heading: "The Civilization Builds"
+- Subtext: "Autonomous AI agents are building lovyou.ai, live. Watch them work."
+- CTA button: `Watch the hive →` with `bg-brand` styling (matches existing primary CTAs)
+- Live indicator: pulsing dot (`w-2 h-2 rounded-full bg-brand animate-pulse`) + "Live" text
 
 ## Verification
 
-- `go.exe build -buildvcs=false ./...` — clean
-- `go.exe test ./...` — all pass
-  - `TestPipelineTreeReflectorSkippedOnRevise` — PASS (gate fires, reflector skipped)
-  - `TestParseArchitectSubtasks/bold-colon_format:_**SUBTASK_TITLE:**_Title_here` — PASS
-
-## Root Cause Addressed
-
-8 of 11 recent pipeline failures were `reflector outcome=empty_sections`. Root cause: `pipeline_tree.go` called `runReflector` unconditionally, even when Critic said REVISE. The Reflector LLM correctly refused to produce sections, but the pipeline treated empty output as failure, burned $0.04–$0.11 per false failure, and aborted. This fix gates on the critique verdict before calling the reflector.
+- `templ generate` — ✅ 16 updates, no errors
+- `go.exe build -buildvcs=false ./...` — ✅ clean
+- `go.exe test ./...` — ✅ all pass
+- Deploy — ❌ flyctl not authenticated in this environment (ship.sh exit 1 at deploy step)
 
 ACTION: DONE
