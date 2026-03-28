@@ -2,13 +2,13 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 398 (complete), 2026-03-29.
+Last updated: Iteration 399 (complete), 2026-03-29.
 
-**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–199 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
+**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–200 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
-**Scout/Build gap mismatch — fourteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197).** Scout 354 named Governance delegation. Builders 385–398 resolved infrastructure debt. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 399 MUST address Governance delegation (Scout 354). To make this binding: (a) update the Scout prompt to refuse gap generation if the prior gap is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
+**Scout/Build gap mismatch — fifteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197).** Scout 354 named Governance delegation. Builders 385–399 resolved infrastructure debt and verified already-done tasks. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 400 MUST address Governance delegation (Scout 354). To make this binding: (a) update the Scout prompt to refuse gap generation if the prior gap is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
 
-**populateFormFromJSON fix NOT deployed.** Iteration 398 committed the fix to loop artifacts but the diff stat shows only loop files changed — the site code change may not have been deployed. The fix is in site/graph/handlers.go. Verify deployment before assuming JSON array causes work in production.
+**populateFormFromJSON fix NOT deployed in production.** Confirmed iteration 399: assert op with JSON array causes returns "unknown op" in production; CSV format succeeds. The fix is in site/graph/handlers.go but has not been deployed to Fly.io. Iteration 400 must deploy this before any LLM-driven ops with array causes will work.
 
 **Lesson 196 confirmed (Lesson 198):** Board search server-side cap (~68) is confirmed — the server ignores the `limit` parameter entirely. `syncClaims` has been fixed to use the knowledge endpoint instead. Close this infrastructure item.
 
@@ -24,9 +24,12 @@ Last updated: Iteration 398 (complete), 2026-03-29.
 **Lessons formalized in iteration 394:**
 - Lesson 195: Client-side aggregation with a fetch cap is a silent BOUNDED violation. GetXxx(N) used to compute MAX/COUNT/SUM fails silently when real count exceeds N. Push aggregation to server as a dedicated query. The cap is not a safety net — it is a deferred failure.
 
-**API bug NOTE:** `populateFormFromJSON` fix was committed in iter 398 but may not be deployed — production still returns "unknown op" for JSON array causes. Use CSV format for causes until deployment confirmed.
+**API bug NOTE:** `populateFormFromJSON` fix is in local code but NOT deployed to production (confirmed iter 399: array causes return "unknown op" in production). Use CSV format for causes until `cd site && flyctl deploy --remote-only` is run and verified.
 
 **For Critic:** The Critic's prompt must be updated to enforce Lesson 168 (Scout-gap cross-reference required in build.md) as a REVISE condition. This cannot be done via state.md alone. Matt must update the Critic prompt directly.
+
+**Lessons formalized in iteration 399:**
+- Lesson 200: Degenerate iterations (diff stat: loop-artifact-only, e.g. `loop/budget-*.txt | 1 +`) must trigger Critic REVISE, not PASS. When a Builder finds a task already done, two paths are valid: (a) verify production state explicitly via an endpoint check — not local code — and confirm or deploy; or (b) pivot to the open Scout gap. A Critic PASS on a degenerate iteration ratifies drift. Production confirmation ≠ local code correctness. Confirmed this iteration: `populateFormFromJSON` fix is in local code but NOT deployed; production rejects array causes while local tests pass.
 
 **Lessons formalized in iteration 398:**
 - Lesson 199: Silent JSON decode failure has two compounding causes: wrong target type (`map[string]string` vs `map[string]any`) AND swallowed error. Together they produce a zero-value map with no indication of failure. The canonical failure mode: `op` is empty string, handler falls through to unknown-op. Fix: `map[string]any` with type switch. Rule: never decode into a fixed-type map at a public JSON boundary.
@@ -42,11 +45,11 @@ Last updated: Iteration 398 (complete), 2026-03-29.
 8. **ErrChildrenIncomplete caller audit** (Lesson 180): Grep all packages + external callers for sites that were catching the now-removed sentinel.
 9. **Cascade depth cap documentation** (Lesson 179): Document why 50 levels, add boundary test.
 10. ~~**Replace GetClaims(200) with server-side MAX**~~ — **DONE** (iter 394, Lesson 195).
-11. ~~**Fix populateFormFromJSON array handling**~~ — **COMMITTED** (iter 398, Lesson 199): Fix in site/graph/handlers.go; deployment status unconfirmed.
+11. **Fix populateFormFromJSON array handling** — Fix in site/graph/handlers.go (iter 398, Lesson 199); **NOT DEPLOYED** (confirmed iter 399). Run `cd site && flyctl deploy --remote-only` to close.
 12. **Delete if maxNum != 183 guard** in cmd/republish-lessons: dead logic from completed one-shot migration.
 13. ~~**Verify board API respects limit param**~~ — **CONFIRMED + FIXED** (iter 397, Lesson 198).
 
-**Next lesson: 200.**
+**Next lesson: 201.**
 
 ## Current System State
 

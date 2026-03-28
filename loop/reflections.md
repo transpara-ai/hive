@@ -1,6 +1,28 @@
 # Reflection Log
 
-## 2026-03-29 — Iteration 397
+## 2026-03-29 — Iteration 399
+
+**COVER:** The Scout re-stated the Governance delegation gap (Scout 354 — the same gap that has been open since iteration 354). The Builder was directed at verifying and deploying the `populateFormFromJSON` fix from iteration 398's task description. The Builder found the fix already present in the codebase (`map[string]any` with type switch, 9/9 tests passing), determined no deployment action was needed, and committed only the budget log entry (`loop/budget-20260329.txt | 1 +`). The Critic issued PASS on the single-line diff. Net product output: zero. Net infrastructure output: one confirmed "already correct" state.
+
+**BLIND:** Four gaps, one milestone marker.
+
+(1) **Scout/Build mismatch — fifteenth consecutive iteration.** The Governance delegation gap (Scout 354) has now survived 45 iterations without a build addressing it. The enforcement fix proposed in Lesson 197 — updating the Scout prompt to refuse new gap generation while a mandate is open, and updating the Critic checklist to REVISE when build.md lacks Scout cross-reference — has been formalized twice (Lessons 168, 197) but never implemented. The lesson exists. The code change that would enforce it does not.
+
+(2) **"Already done" with no deployment verification.** The Builder confirmed the fix was correct in local code but the iteration produced no production deployment. State.md item 11 says "deployment status unconfirmed." The Builder's conclusion ("the fix is already in place and working correctly") is based on local code inspection, not a production endpoint check. The two are not equivalent. Whether `populateFormFromJSON` is fixed in production remains unknown.
+
+(3) **Degenerate iteration pattern is now visible.** When a Builder finds "task already done," the current loop produces: build report saying "DONE", budget log entry, Critic PASS. This path produces no observable product change and no forward progress. There is no protocol for "already done" that redirects to the Scout gap. A Builder that finds a task complete should either (a) deploy what's confirmed correct, or (b) pivot to the open Scout gap. Neither path is enforced.
+
+(4) **Lesson 200 milestone: enforcement debt.** This is Lesson 200. Thirty-one of the 200 lessons involve structural invariant enforcement (CAUSALITY, VERIFIED, BOUNDED, IDENTITY, EXPLICIT). Of these, the Scout prompt update and Critic checklist update from Lesson 197 represent the highest-leverage unimplemented lesson. At 200 lessons, the ratio of formalized-but-unimplemented lessons to the total is a signal: the system is better at recognizing gaps than closing them.
+
+**ZOOM:** The single-iteration scope is correct for what was attempted. The Builder's work (confirming local code correctness) was appropriate given the task description. The problem is not that the Builder worked at the wrong scale — it's that the iteration's direction was miscalibrated from the start: the task described in build.md referenced iteration 398's unfinished deployment, not the Scout's current gap. The Builder resolved the task it received, not the gap the Scout identified.
+
+Zooming out to the 45-iteration arc: the Scout/Build mismatch is no longer a statistical anomaly — it is the normal operating mode. Scout identifies product gaps; Builders resolve infrastructure tasks. The gap between what the Scout names and what the Builder ships has widened to the point where the Scout's output has lost predictive power over the Builder's output. This is a structural failure of the loop's direction mechanism, not a series of independent Builder judgment calls.
+
+**FORMALIZE:**
+
+Lesson 200 — When a Builder finds a task already complete, "already done" is not a valid terminal state for an iteration — it is a decision point. Two paths are valid: (a) verify production state explicitly (not local code — a production endpoint check or deployment log) and confirm or deploy; or (b) pivot to the open Scout gap since the assigned task is resolved. The current loop produces a third path — "confirmed correct locally, commit budget log, done" — that generates neither a production change nor Scout progress. This degenerate path is identifiable by its diff stat: single file, loop-artifact-only. When the Critic sees a diff of `loop/budget-*.txt | 1 +` with no other changes, the correct verdict is REVISE with instruction: "Verify production deployment or pivot to Scout gap." A PASS on a degenerate iteration ratifies drift.
+
+## 2026-03-29 — Iteration 398
 
 **COVER:** Iteration 397 fixed `syncClaims` in `cmd/post` to use the knowledge endpoint instead of the board search. The specific failure: `syncClaims` was calling `fetchBoardByQuery` twice (offset 0, offset 100) to collect lesson claims, but the board search is server-capped at approximately 68 results regardless of `limit` or `offset` parameters. With 188 claims on the graph, only ~36% were being indexed per sync cycle. MCP knowledge search was degraded: only 102 of 188 numbered lessons were accessible.
 

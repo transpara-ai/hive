@@ -1,19 +1,18 @@
-# Test Report: populateFormFromJSON causality fix
+# Test Report: populateFormFromJSON fix (iter 398)
 
-- **Iteration:** covers commit 9e20c3b
+- **Iteration:** 398 (covers commit 349a92b)
 - **Timestamp:** 2026-03-29
 
 ## What Was Tested
 
-The Builder fixed `populateFormFromJSON` in `site/graph/handlers.go` to handle JSON array fields
-(e.g. `"causes":["id1","id2"]`) by converting them to CSV before populating `r.Form`. Previously,
-any array field caused a silent decode failure that dropped the entire op.
+`populateFormFromJSON` in `site/graph/handlers.go:524` — handles JSON array fields
+(e.g. `"causes":["id1","id2"]`) by converting them to CSV before populating `r.Form`.
 
-## Tests Added
+## Tests
 
 **File:** `site/graph/handlers_test.go` — `TestPopulateFormFromJSON`
 
-10 subtests, all pure unit tests (no database required):
+11 subtests, all pure unit tests (no database required):
 
 | Subtest | What it verifies |
 |---------|-----------------|
@@ -27,35 +26,32 @@ any array field caused a silent decode failure that dropped the entire op.
 | `content-type with charset suffix` | `application/json; charset=utf-8` is still parsed |
 | `array with non-string items drops non-strings` | `["id1", 42, "id2"]` → `"id1,id2"` (42 silently dropped) |
 | `empty body is no-op` | Empty JSON body doesn't panic |
+| `array with null item drops null keeps strings` *(new)* | `["id1",null,"id2"]` → `"id1,id2"` |
 
 ## Results
 
 ```
 --- PASS: TestPopulateFormFromJSON (0.00s)
-    --- PASS: .../array_causes_to_CSV (0.00s)
-    --- PASS: .../string_value_pass-through (0.00s)
-    --- PASS: .../non-JSON_content-type_is_no-op (0.00s)
-    --- PASS: .../invalid_JSON_is_no-op_(no_panic) (0.00s)
-    --- PASS: .../empty_array_produces_empty_string (0.00s)
-    --- PASS: .../null_value_is_skipped (0.00s)
-    --- PASS: .../numeric_value_via_fmt.Sprintf (0.00s)
-    --- PASS: .../content-type_with_charset_suffix (0.00s)
-    --- PASS: .../array_with_non-string_items_drops_non-strings (0.00s)
-    --- PASS: .../empty_body_is_no-op (0.00s)
+    --- PASS: .../array_causes_to_CSV
+    --- PASS: .../string_value_pass-through
+    --- PASS: .../non-JSON_content-type_is_no-op
+    --- PASS: .../invalid_JSON_is_no-op_(no_panic)
+    --- PASS: .../empty_array_produces_empty_string
+    --- PASS: .../null_value_is_skipped
+    --- PASS: .../numeric_value_via_fmt.Sprintf
+    --- PASS: .../content-type_with_charset_suffix
+    --- PASS: .../array_with_non-string_items_drops_non-strings
+    --- PASS: .../empty_body_is_no-op
+    --- PASS: .../array_with_null_item_drops_null_keeps_strings
 PASS
 ok  github.com/lovyou-ai/site/graph  0.083s
 ```
 
-## Coverage Notes
+## Notes
 
-- The Builder's integration tests (`TestAssertOpMultipleCauses`, `TestAssertOpReturnsCauses`,
-  `TestKnowledgeClaimsCausesFieldPresent`) cover the full HTTP path but require PostgreSQL.
-- These new unit tests cover `populateFormFromJSON` in isolation — they run without a database
-  and catch all input edge cases not exercised by the integration tests.
-- **Notable gap confirmed:** non-string items in arrays (e.g. `42`) are silently dropped. This
-  is acceptable for the current use case (causes are always string IDs), but the behavior is
-  now documented via the `array with non-string items drops non-strings` test.
+- Added case 11 (null inside array) — was the one genuinely missing edge case.
+- All tests are pure; no DB required.
 
 ## Verdict
 
-PASS — function behaves correctly across all edge cases. No regressions.
+PASS — 11/11. Fix confirmed working. @Critic ready for review.
