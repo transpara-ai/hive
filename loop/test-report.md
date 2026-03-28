@@ -1,39 +1,49 @@
-# Test Report: Update Critic prompt — Scout-gap cross-reference and degenerate-iteration REVISE
+# Test Report: intend op — body field + kind=proposal
 
-**Iteration:** a0d435e
+**Iteration:** dc57cba
 **Status:** PASS
 
 ## What Was Tested
 
-The two new helpers added by the Builder: `loadLoopArtifact` and `isDegenerateIteration`, plus the updated `buildReviewPrompt` signature.
+Two bug fixes in `site/graph/handlers.go` `case "intend"`:
+1. Body field: `body` key is now read first, with `description` as fallback.
+2. Kind guard: `kind=proposal` is now accepted (was silently downgraded to `task`).
 
 ## Tests Added
 
-### `TestLoadLoopArtifact` (4 sub-cases)
-- **empty hiveDir** → returns `""` (no panic)
-- **missing file** → returns `""` silently
-- **short file** → full content returned unchanged
-- **long file (4000 chars)** → truncated at 3000 with `... (truncated)` marker; first 3000 chars preserved exactly
+Two tests were added by the Builder (`intend_body_field`, `intend_kind_proposal`). Two additional edge-case tests added by Tester:
 
-### `TestIsDegenerateIterationBudgetFile`
-Budget files (`loop/budget-20260329.txt`) live under `loop/` — iteration with only budget files is correctly flagged as degenerate.
+### `TestHandlerOp/intend_description_fallback`
+When `body` key is absent, `description` must populate the node body. Verifies the fallback path actually works end-to-end (the existing `intend_json` test sent `description` but never asserted the body field).
 
-### `TestIsDegenerateIterationLoopPrefixOnly`
-A file named `loop-extra/foo.go` shares the `loop` prefix but is NOT under `loop/` — correctly returns `false`.
+### `TestHandlerOp/intend_body_beats_description`
+When both `body` and `description` are present, `body` wins. Ensures precedence is correct — a caller using both keys gets `body`, not silently `description`.
 
-## Pre-existing Tests (all pass)
-
-All tests in `pkg/runner` pass: 80+ cases covering `parseVerdict`, `extractIssues`, `buildReviewPrompt`, `TestBuildReviewPromptWithArtifacts`, `TestIsDegenerateIteration` (4 cases), `TestWriteCritiqueArtifact`, `TestReviewCommitFixTaskHasCauses`, `TestWriteCritiqueArtifactRunnerPassesBuildCauses`, and the full pipeline suite.
+## Full Test Run
 
 ```
-ok  github.com/lovyou-ai/hive/pkg/runner  3.5s
+=== RUN   TestHandlerOp/intend_json                   PASS
+=== RUN   TestHandlerOp/intend_body_field             PASS
+=== RUN   TestHandlerOp/intend_description_fallback   PASS
+=== RUN   TestHandlerOp/intend_body_beats_description PASS
+=== RUN   TestHandlerOp/intend_kind_proposal          PASS
+ok  github.com/lovyou-ai/site/graph  0.167s
 ```
+
+## Pre-existing Failures (unrelated)
+
+The full `./...` run shows pre-existing failures unrelated to this iteration:
+- `TestAPIKeyAuth` — schema drift (`column "name" of relation "api_keys" does not exist`)
+- Duplicate-key failures in `TestListHiveActivity`, `TestGetHiveCurrentTask_ScopedToActor`, etc. — stale test-DB state
+- `TestReposts` — nil pointer dereference, pre-existing
+
+None of these touch the `intend` op or the changed code.
 
 ## Coverage Notes
 
-- `loadLoopArtifact` was untested before this iteration — now has 4 cases covering all branches (empty dir, missing file, normal read, truncation).
-- `isDegenerateIteration` had 4 cases from Builder; 2 edge cases added (budget files, loop-prefix false positive).
-- The `buildReviewPrompt` artifact injection (scout/build sections) was already tested by `TestBuildReviewPromptWithArtifacts`.
+- All four branches of the body-resolution logic are now covered: `body`-only, `description`-only, both, neither (empty body case).
+- `kind=proposal` accepted path is covered.
+- The default-to-`kind=task` fallback was already covered by `intend_json`.
 
 ## @Critic
 Tests done. Ready for review.
