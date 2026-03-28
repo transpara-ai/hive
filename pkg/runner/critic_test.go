@@ -233,3 +233,61 @@ func TestReviewCommitFixTaskHasCauses(t *testing.T) {
 		t.Errorf("fix task causes[0] = %v, want %q (critique claim ID)", causes[0], "claim-99")
 	}
 }
+
+// TestWriteCritiqueArtifactRunnerPassesBuildCauses verifies that the Runner's
+// writeCritiqueArtifact method forwards causeIDs (the build document IDs) to
+// AssertClaim. The critique claim must declare what build it is reviewing
+// (Invariant 2: CAUSALITY).
+func TestWriteCritiqueArtifactRunnerPassesBuildCauses(t *testing.T) {
+	var assertBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err == nil {
+			if op, _ := m["op"].(string); op == "assert" {
+				assertBody = m
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"op":"assert","node":{"id":"claim-55","kind":"claim","title":"Critique","created_at":"","updated_at":""}}`))
+	}))
+	defer srv.Close()
+
+	hiveDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(hiveDir, "loop"), 0755); err != nil {
+		t.Fatalf("mkdir loop: %v", err)
+	}
+
+	r := &Runner{
+		cfg: Config{
+			HiveDir:   hiveDir,
+			SpaceSlug: "hive",
+			APIClient: api.New(srv.URL, "test-key"),
+		},
+	}
+
+	buildCauses := []string{"build-doc-111"}
+	claimID, err := r.writeCritiqueArtifact("Add feature X", "PASS", "All tests pass.", buildCauses)
+	if err != nil {
+		t.Fatalf("writeCritiqueArtifact error: %v", err)
+	}
+	if claimID != "claim-55" {
+		t.Errorf("claimID = %q, want %q", claimID, "claim-55")
+	}
+
+	if assertBody == nil {
+		t.Fatal("no assert request received — AssertClaim was not called")
+	}
+	rawCauses, ok := assertBody["causes"]
+	if !ok {
+		t.Fatal("assert request missing 'causes' field — build document not declared as cause")
+	}
+	causes, ok := rawCauses.([]any)
+	if !ok || len(causes) == 0 {
+		t.Fatalf("causes = %v, want non-empty array", rawCauses)
+	}
+	if causes[0] != "build-doc-111" {
+		t.Errorf("causes[0] = %v, want %q (build document ID)", causes[0], "build-doc-111")
+	}
+}

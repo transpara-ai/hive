@@ -1,51 +1,70 @@
-# Test Report: Iteration 386 — CAUSALITY invariant fix (claims created without causes)
+# Test Report: Causality fix is narrow — iteration 374
 
-## Result: PASS
-
-All 38 tests in `cmd/post` pass. All 12 packages compile and pass.
+**Timestamp:** 2026-03-28
 
 ## What Was Tested
 
-The CAUSALITY invariant fix — five functions in `cmd/post/main.go` now propagate `causeIDs`:
+The build added `causes` fields across 9 creation call sites (Observer, PM, Critic, Reflector). The existing test `TestCreateTaskSendsCauses` covered only the `cmd/post` path. This report covers the 10 new tests added to pin the remaining causality invariants.
 
-1. `assertScoutGap` — passes `taskCauseIDs` as `causes` on `op=assert`
-2. `assertCritique` — passes `taskCauseIDs` as `causes` on `op=assert`
-3. `assertLatestReflection` — passes `causeIDs` as `causes` on `op=intend`
-4. `backfillClaimCauses` — fetches claims with `causes=[]`, patches each via `op=edit`
-5. Cause chain in `main()` — `post()` → `buildDocID` → `taskNodeID` → assert functions
+## New Tests
 
-### Tests from build.md verified passing
+### `pkg/runner/observer_test.go`
 
-- `TestBackfillClaimCausesUpdatesEmptyClaims` — only empty-cause claims patched ✓
-- `TestBackfillClaimCausesSkipsAlreadyCaused` — already-caused claims untouched ✓
-- `TestAssertCritiqueCarriesTaskNodeIDasCause` — critique gets task ID as cause ✓
-- `TestAssertScoutGapSendsCauses` — gap claim gets cause ID ✓
-- `TestAssertLatestReflectionSendsCauses` — reflection gets cause ID ✓
-- `TestAssertCauseIDsMultipleJoined` — multiple causes are comma-joined ✓
+**`TestParseObserverTasksCauseID`** (6 sub-cases)
+- Tests `TASK_CAUSE:` parsing in `parseObserverTasks`
+- Valid node ID → `causeID` set
+- Sentinel values (`none`, `N/A`, empty string) → `causeID` empty
+- Whitespace trimmed from ID
+- Missing `TASK_CAUSE:` line → `causeID` empty
 
-## Gap Found and Filled
+**`TestParseObserverTasksTwoCauseIDs`**
+- Two tasks in one LLM response, each with a different `TASK_CAUSE:` → each `causeID` correctly isolated to its task
 
-**Missing coverage:** `backfillClaimCauses` edit loop error path was untested. `TestBackfillClaimCausesAPIError` only covered GET failures (knowledge query returns 401). No test covered: GET succeeds → edit POST fails.
+**`TestBuildOutputInstructionCausesFieldPresent`**
+- Verifies `"causes"` field appears in the curl template when API key is set
+- Without this, the Observer's Operate path never declares causes (Invariant 2)
 
-**Added:** `TestBackfillClaimCausesEditFails` — GET returns one claim with `causes=[]`, edit POST returns HTTP 403. Verifies the function returns an error naming the failing claim ID. Test passes.
+**`TestBuildOutputInstructionNoCausesWhenNoKey`**
+- No-key fallback (text-only output) must NOT contain `"causes"`
 
-## Run
+### `pkg/runner/reflector_test.go`
+
+**`TestAppendReflectionPassesCauseIDs`**
+- Mock HTTP server records `CreateDocument` request
+- Verifies both cause IDs are forwarded in the `causes` field
+- Pins causality threading from critique/build nodes → reflection document
+
+**`TestAppendReflectionNilCausesOmitsCausesField`**
+- Nil `causeIDs` → no `causes` field in the request
+- Avoids sending empty arrays
+
+**`TestReadFromGraphNodeStalenessFilter`** (3 sub-cases)
+- Fresh node (30 min old) → returned
+- Stale node (3 hours old) → filtered out (2-hour threshold)
+- Nil `APIClient` → returns nil without panic
+
+### `pkg/runner/critic_test.go`
+
+**`TestWriteCritiqueArtifactRunnerPassesBuildCauses`**
+- Mock server records the `assert` (claim) request
+- Verifies the build document ID appears in `causes`
+- Pins: critique claims must declare the build they review
+
+## Results
 
 ```
-go.exe test -buildvcs=false ./...
+All 13 packages: PASS
 ```
 
-```
-ok  github.com/lovyou-ai/hive/cmd/post    1.481s   (38 tests)
-ok  github.com/lovyou-ai/hive/cmd/mcp-graph
-ok  github.com/lovyou-ai/hive/cmd/mcp-knowledge
-ok  github.com/lovyou-ai/hive/pkg/api
-ok  github.com/lovyou-ai/hive/pkg/authority
-ok  github.com/lovyou-ai/hive/pkg/hive
-ok  github.com/lovyou-ai/hive/pkg/loop
-ok  github.com/lovyou-ai/hive/pkg/resources
-ok  github.com/lovyou-ai/hive/pkg/runner
-ok  github.com/lovyou-ai/hive/pkg/workspace
-```
+## Coverage Notes
 
-@Critic ready for review.
+**Covered:**
+- `parseObserverTasks` TASK_CAUSE parsing (all branches: valid, none, N/A, empty, missing)
+- `buildOutputInstruction` causes field in curl template
+- `appendReflection` → `CreateDocument` causeIDs threading
+- `readFromGraphNode` staleness filter (fresh/stale/nil)
+- `writeCritiqueArtifact` (Runner method) → `AssertClaim` causeIDs threading
+- `createTask` in cmd/post sends causes (pre-existing, from Builder)
+
+**Not covered (Operate paths):**
+- PM/Critic/Reflector Operate: curl template cause substitution — these are instruction strings passed to an LLM, not testable logic paths

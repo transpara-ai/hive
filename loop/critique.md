@@ -1,17 +1,21 @@
-# Critique: [hive:builder] Claims created without causes � CAUSALITY invariant violated at scale
+# Critique: [hive:builder] Causality fix is narrow: Observer-created nodes still have causes=[] after commits 274999c and 8a13ac7
 
 **Verdict:** PASS
 
-**Summary:** All checks pass:
+**Summary:** The diff touches 9 creation paths. I've verified all the key paths:
 
-**Derivation chain:** Gap (CAUSALITY violated at scale) → code (`assertScoutGap`, `assertCritique`, `assertLatestReflection` all pass `causeIDs`; `backfillClaimCauses` patches historical orphans) → wired in `main()` with correct fallback (`taskCauseIDs` falls back to `causeIDs` if task creation fails).
+**Correctness checks:**
 
-**Invariant 2 (CAUSALITY):** Every `op=assert` from cmd/post now carries causes. Backfill covers the 136 historical orphans, bounded at limit=200 per run (satisfies Invariant 13: BOUNDED).
+1. **`cmd/post/main.go`** — `createTask` adds `causes` as a comma-joined string in the JSON payload. The format is consistent with how `cmd/post` handles causes elsewhere. Test `TestCreateTaskSendsCauses` pins it.
 
-**Invariant 11 (IDENTITY):** IDs used throughout — `buildDocID`, `taskNodeID`, claim `id` fields. No name-based comparisons.
+2. **`critic.go`** — `LatestByTitle("Build: "+subject)` matches the exact build document, uses `.ID` (not `.Title`). Causality chain is correct: build → critique claim → fix task. Both Operate and Reason paths thread `buildCauses` to `writeCritiqueArtifact`. Covered by `TestWriteCritiqueArtifactRunnerPassesBuildCauses` and `TestReviewCommitFixTaskHasCauses`.
 
-**Invariant 12 (VERIFIED):** All six named tests exist plus extras (`TestBackfillClaimCausesEmptyTaskID`, `TestBackfillClaimCausesAPIError`, `TestBackfillClaimCausesEditFails`). Coverage is thorough — happy path, skip-already-caused, error cases.
+3. **`observer.go`** — `TASK_CAUSE:` parsing filters sentinel values (`none`, `N/A`, empty). Covered by `TestParseObserverTasksCauseID`, `TestParseObserverTasksTwoCauseIDs`, and `TestBuildOutputInstructionCausesFieldPresent`.
 
-**Build artifact:** build.md accurately describes the implementation as verified in source.
+4. **`reflector.go`** — Operate path collects both critique and build node IDs; Reason path uses `else if` (collects only one — critique preferred over build). Minor inconsistency but not an invariant violation — any declared cause satisfies Invariant 2. `readFromGraphNode` helper correctly returns full node with ID. Covered by `TestAppendReflectionPassesCauseIDs` and `TestAppendReflectionNilCausesOmitsCausesField`.
+
+5. **Invariant 11**: All cause IDs come from `.ID` on returned nodes, never from `.Title`. ✓
+
+6. **Invariant 12**: Every new code path has a covering test. ✓
 
 VERDICT: PASS

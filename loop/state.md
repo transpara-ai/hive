@@ -2,19 +2,21 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 386 (closed), 2026-03-28.
+Last updated: Iteration 387 (closed), 2026-03-28.
 
-**CAUSALITY invariant satisfied.** `cmd/post` now passes cause IDs to all `op=assert` and `op=intend` calls. `backfillClaimCauses` patches 136 historical orphaned claims (bounded at 200). Six named tests, all 13 packages pass. Critic: PASS.
+**CAUSALITY invariant fully satisfied across pkg/runner.** All 9 creation paths in pkg/runner now declare causes: observer (Operate + Reason), pm (Operate + Reason), critic (Operate + writeCritiqueArtifact), reflector (Operate + Reason). Combined with iteration 386's cmd/post fix: 12 total call sites covered, all tested. Critic: PASS.
 
-**Scout/Build gap mismatch noted (Lesson 168).** Scout 354 named Governance delegation; Builder shipped CAUSALITY fix. Both are correct in isolation but the loop's formal derivation chain was broken. Build.md must declare which Scout gap it addresses in future iterations.
+**Scout/Build gap mismatch — second consecutive iteration (Lesson 168, 171).** Scout 354 named Governance delegation; Builder shipped CAUSALITY pkg/runner fix (correct sequencing, but no declared Scout cross-reference in build.md). The Critic has not treated this absence as a REVISE condition — that must change. Governance delegation remains the standing product gap.
 
 **Remaining infrastructure gaps (open, non-blocking):**
-1. **Type-enforce CAUSALITY** (Lesson 167): Add typed `assertClaim(causes []string, ...)` wrapper — convention-based compliance is fragile.
-2. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader — scan last 2 builder diagnostics for identical `Error` strings and `duration_secs < 1`.
-3. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–168 searchable via MCP.
-4. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
+1. **Type-enforce CAUSALITY** (Lesson 167): Add typed `assertClaim(causes []string, ...)` wrapper — convention-based compliance is fragile. Highest-leverage remaining item.
+2. **Validate LLM-driven cause IDs** (Lesson 170): Observer Reason path submits LLM-generated node IDs without graph-side validation. A hallucinated ID passes sentinel filter.
+3. **Critic must enforce Lesson 168** (Lesson 171): Scout-gap cross-reference missing from build.md should be a REVISE condition, not an observation.
+4. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader.
+5. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–171 searchable via MCP.
+6. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
 
-**Next lesson: 169.**
+**Next lesson: 172.**
 
 ## Current System State
 

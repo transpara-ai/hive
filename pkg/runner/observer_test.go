@@ -434,6 +434,103 @@ func TestBuildPart2InstructionMetaTaskItemSkippedWhenNoKey(t *testing.T) {
 	}
 }
 
+// TestParseObserverTasksCauseID verifies that the TASK_CAUSE field is parsed
+// correctly. Nodes with a valid ID are threaded through; sentinel values ("none",
+// "N/A", empty) are filtered out to avoid creating causality noise.
+func TestParseObserverTasksCauseID(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		wantID string
+	}{
+		{
+			name:   "valid node ID is preserved",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc\nTASK_CAUSE: node-abc-123",
+			wantID: "node-abc-123",
+		},
+		{
+			name:   "TASK_CAUSE: none is filtered",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc\nTASK_CAUSE: none",
+			wantID: "",
+		},
+		{
+			name:   "TASK_CAUSE: N/A is filtered",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc\nTASK_CAUSE: N/A",
+			wantID: "",
+		},
+		{
+			name:   "TASK_CAUSE empty after trim is filtered",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc\nTASK_CAUSE:    ",
+			wantID: "",
+		},
+		{
+			name:   "missing TASK_CAUSE leaves causeID empty",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc",
+			wantID: "",
+		},
+		{
+			name:   "TASK_CAUSE with surrounding whitespace is trimmed",
+			input:  "TASK_TITLE: Fix\nTASK_PRIORITY: high\nTASK_DESCRIPTION: desc\nTASK_CAUSE:   node-456   ",
+			wantID: "node-456",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks := parseObserverTasks(tc.input)
+			if len(tasks) != 1 {
+				t.Fatalf("expected 1 task, got %d", len(tasks))
+			}
+			if tasks[0].causeID != tc.wantID {
+				t.Errorf("causeID = %q, want %q", tasks[0].causeID, tc.wantID)
+			}
+		})
+	}
+}
+
+// TestParseObserverTasksTwoCauseIDs verifies that each task independently captures
+// its own TASK_CAUSE when multiple tasks are parsed from a single LLM response.
+func TestParseObserverTasksTwoCauseIDs(t *testing.T) {
+	input := `TASK_TITLE: Task one
+TASK_PRIORITY: high
+TASK_DESCRIPTION: First description
+TASK_CAUSE: cause-node-1
+TASK_TITLE: Task two
+TASK_PRIORITY: medium
+TASK_DESCRIPTION: Second description
+TASK_CAUSE: cause-node-2`
+
+	tasks := parseObserverTasks(input)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	if tasks[0].causeID != "cause-node-1" {
+		t.Errorf("tasks[0].causeID = %q, want %q", tasks[0].causeID, "cause-node-1")
+	}
+	if tasks[1].causeID != "cause-node-2" {
+		t.Errorf("tasks[1].causeID = %q, want %q", tasks[1].causeID, "cause-node-2")
+	}
+}
+
+// TestBuildOutputInstructionCausesFieldPresent verifies that the curl template
+// includes the "causes" field when an API key is set. Observer-created tasks
+// must declare a cause to satisfy Invariant 2 (CAUSALITY).
+func TestBuildOutputInstructionCausesFieldPresent(t *testing.T) {
+	got := buildOutputInstruction("hive", "lv_testkey")
+	if !strings.Contains(got, `"causes"`) {
+		t.Errorf("expected 'causes' field in curl template (Invariant 2: CAUSALITY), got: %q", got)
+	}
+}
+
+// TestBuildOutputInstructionNoCausesWhenNoKey verifies the text-only fallback
+// (no API key) does not contain the causes field — it's only meaningful when
+// the Observer can make direct API calls.
+func TestBuildOutputInstructionNoCausesWhenNoKey(t *testing.T) {
+	got := buildOutputInstruction("hive", "")
+	if strings.Contains(got, `"causes"`) {
+		t.Errorf("causes field should not appear in no-key output, got: %q", got)
+	}
+}
+
 func TestBuildObserverInstruction(t *testing.T) {
 	cases := []struct {
 		name      string

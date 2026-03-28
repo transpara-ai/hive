@@ -5,14 +5,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/api"
 )
 
 // mockProvider is a test double for intelligence.Provider.
@@ -709,4 +714,146 @@ func TestIncrementIterationLine(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─── Causality tests added in iteration 374 ──────────────────────────────────
+
+// TestAppendReflectionPassesCauseIDs verifies that appendReflection forwards
+// causeIDs to CreateDocument. Reflections must declare the iteration artifacts
+// that produced them (Invariant 2: CAUSALITY).
+func TestAppendReflectionPassesCauseIDs(t *testing.T) {
+	var received map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &received)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"op":"intend","node":{"id":"doc-1","kind":"document","title":"Reflection","created_at":"","updated_at":""}}`))
+	}))
+	defer srv.Close()
+
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+	r := &Runner{
+		cfg: Config{
+			HiveDir:   hiveDir,
+			SpaceSlug: "hive",
+			APIClient: api.New(srv.URL, "test-key"),
+		},
+	}
+
+	causeIDs := []string{"build-node-42", "critique-node-99"}
+	entry := "## 2026-03-28\n\n**COVER:** shipped something\n"
+	if err := r.appendReflection(entry, causeIDs); err != nil {
+		t.Fatalf("appendReflection error: %v", err)
+	}
+
+	rawCauses, ok := received["causes"]
+	if !ok {
+		t.Fatal("CreateDocument request missing 'causes' field — Invariant 2 violated")
+	}
+	causes, ok := rawCauses.([]any)
+	if !ok || len(causes) != 2 {
+		t.Fatalf("causes = %v, want 2-element array", rawCauses)
+	}
+	if causes[0] != "build-node-42" {
+		t.Errorf("causes[0] = %v, want %q", causes[0], "build-node-42")
+	}
+	if causes[1] != "critique-node-99" {
+		t.Errorf("causes[1] = %v, want %q", causes[1], "critique-node-99")
+	}
+}
+
+// TestAppendReflectionNilCausesOmitsCausesField verifies that appendReflection
+// does NOT send a causes field when causeIDs is nil — avoids sending empty arrays.
+func TestAppendReflectionNilCausesOmitsCausesField(t *testing.T) {
+	var received map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &received)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"op":"intend","node":{"id":"doc-2","kind":"document","created_at":"","updated_at":""}}`))
+	}))
+	defer srv.Close()
+
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+	r := &Runner{
+		cfg: Config{
+			HiveDir:   hiveDir,
+			SpaceSlug: "hive",
+			APIClient: api.New(srv.URL, "test-key"),
+		},
+	}
+
+	if err := r.appendReflection("## 2026-03-28\n**COVER:** x\n", nil); err != nil {
+		t.Fatalf("appendReflection error: %v", err)
+	}
+
+	if _, hasCauses := received["causes"]; hasCauses {
+		t.Error("causes field must be absent when causeIDs is nil")
+	}
+}
+
+// TestReadFromGraphNodeStalenessFilter verifies that readFromGraphNode filters
+// out nodes older than 2 hours to avoid surfacing stale data from prior cycles.
+func TestReadFromGraphNodeStalenessFilter(t *testing.T) {
+	freshAt := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	staleAt := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+
+	makeDocServer := func(t *testing.T, createdAt string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case strings.Contains(r.URL.Path, "/documents"):
+				json.NewEncoder(w).Encode(map[string]any{
+					"documents": []map[string]any{
+						{
+							"id": "node-xyz", "title": "Build: the thing",
+							"kind": "document", "body": "some body",
+							"created_at": createdAt, "updated_at": createdAt,
+						},
+					},
+				})
+			default:
+				// board and knowledge endpoints return empty
+				json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}, "claims": []any{}})
+			}
+		}))
+	}
+
+	t.Run("fresh node (30 min old) is returned", func(t *testing.T) {
+		srv := makeDocServer(t, freshAt)
+		defer srv.Close()
+
+		r := &Runner{cfg: Config{SpaceSlug: "hive", APIClient: api.New(srv.URL, "test-key")}}
+		node := r.readFromGraphNode("Build:")
+		if node == nil {
+			t.Fatal("expected fresh node to be returned, got nil")
+		}
+		if node.ID != "node-xyz" {
+			t.Errorf("node.ID = %q, want %q", node.ID, "node-xyz")
+		}
+	})
+
+	t.Run("stale node (3 hours old) is filtered out", func(t *testing.T) {
+		srv := makeDocServer(t, staleAt)
+		defer srv.Close()
+
+		r := &Runner{cfg: Config{SpaceSlug: "hive", APIClient: api.New(srv.URL, "test-key")}}
+		node := r.readFromGraphNode("Build:")
+		if node != nil {
+			t.Errorf("expected nil for stale node, got node.ID=%q", node.ID)
+		}
+	})
+
+	t.Run("nil APIClient returns nil without panic", func(t *testing.T) {
+		r := &Runner{cfg: Config{SpaceSlug: "hive"}}
+		node := r.readFromGraphNode("Build:")
+		if node != nil {
+			t.Errorf("expected nil when APIClient is nil, got %+v", node)
+		}
+	})
 }
