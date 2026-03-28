@@ -251,13 +251,14 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
-	// Look up agent IDs from the DB so each role gets a persistent session.
-	// The agent's DB ID IS its session ID — one identity, one source of truth.
-	agentSessions := map[string]string{} // role → agent DB ID
+	// Look up agent session IDs from the DB — each agent owns a persistent UUID.
+	agentSessions := map[string]string{} // role → session UUID
 	if client != nil {
 		if agents, err := client.ListAgents(space); err == nil {
 			for _, a := range agents {
-				agentSessions[a.Name] = a.ID
+				if a.SessionID != "" {
+					agentSessions[a.Name] = a.SessionID
+				}
 			}
 		}
 	}
@@ -270,10 +271,9 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			Model:        model,
 			MaxBudgetUSD: budget,
 		}
-		// Agent's DB ID = session ID. Persistent because the agent is persistent.
-		// Format as UUID (Claude CLI requires UUID format for --session-id).
-		if sid, ok := agentSessions[role]; ok && len(sid) >= 32 {
-			providerCfg.SessionID = fmt.Sprintf("%s-%s-%s-%s-%s", sid[:8], sid[8:12], sid[12:16], sid[16:20], sid[20:32])
+		// Agent's session UUID from the DB. Persistent because the agent is persistent.
+		if sid, ok := agentSessions[role]; ok {
+			providerCfg.SessionID = sid
 		}
 		if mcpConfigPath != "" {
 			providerCfg.MCPConfigPath = mcpConfigPath

@@ -382,6 +382,7 @@ type Agent struct {
 	Prompt      string `json:"prompt"`
 	Model       string `json:"model"`
 	Active      bool   `json:"active"`
+	SessionID   string `json:"session_id"` // UUID for persistent Claude CLI session
 }
 
 // ListAgents fetches all active agents from the space.
