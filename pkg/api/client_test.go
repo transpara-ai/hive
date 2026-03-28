@@ -175,6 +175,22 @@ func TestNextLessonNumberAPIError(t *testing.T) {
 	}
 }
 
+func TestNextLessonNumberMalformedJSON(t *testing.T) {
+	// Simulates a proxy or CDN returning HTML on a 200 (e.g. rate-limit page).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html>Rate limited</html>`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	got := c.NextLessonNumber("hive")
+	if got != 1 {
+		t.Errorf("NextLessonNumber on malformed JSON = %d, want 1 (safe default)", got)
+	}
+}
+
 func TestPostOpStringFieldsPreserved(t *testing.T) {
 	srv, body := captureBody(t)
 	defer srv.Close()

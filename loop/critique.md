@@ -1,29 +1,27 @@
-# Critique: [hive:builder] Fix: commit main_test.go, remove dead retractedLesson type, fix no-op em-dash replace in republish-lessons
+# Critique: [hive:builder] Replace GetClaims(200) with server-side MAX before lesson count hits cap
 
 **Verdict:** PASS
 
-**Summary:** All three items from the previous REVISE are addressed:
+**Summary:** `strings` is still used elsewhere in client.go — correct, no orphaned import.
 
-**1. `main_test.go` committed** ✓  
-File exists at `cmd/republish-lessons/main_test.go`, 13 tests covering all three exported functions and the short-ID slicing boundary.
+**Derivation chain audit:**
 
-**2. `retractedLesson` struct removed** ✓  
-Not present in `main.go` — only `claimNode` remains.
+- **Gap**: `NextLessonNumber` used `GetClaims(200)` — at lesson 201+ the scan truncates, producing duplicate numbers. Invariant 13 (BOUNDED) violated.
+- **Plan**: Add `MaxLessonNumber` SQL aggregate on the server; expose as `?op=max_lesson`; rewrite client to call it.
+- **Code**: Server (`store.go`, `handlers.go`) and client (`client.go`) match the plan exactly.
+- **Tests**:
+  - Client: 4 cases — server returns max, empty (0), API error, malformed JSON. All correct.
+  - Server: 2 DB tests — `TestMaxLessonNumberEndpoint`, `TestMaxLessonNumberEndpointEmpty`. DB tests skip locally, run in CI.
+  - Reflector: `TestRunReflectorReasonLessonNumberFromGraph` updated to mock `op=max_lesson`.
+  - `parseLessonNumber` deleted (dead code); its test deleted with it — correct, no orphan.
 
-**3. No-op `strings.ReplaceAll` removed** ✓  
-No `strings` import, no such call anywhere in `main.go`.
+**Invariant checks:**
+- **11 (IDENTITY)**: Not applicable here (lesson numbers, not entity IDs).
+- **12 (VERIFIED)**: Every changed path has a test.
+- **13 (BOUNDED)**: Fixed — SQL aggregate is O(1), no truncation at any count.
+- **2 (CAUSALITY)**: Build.md traces the derivation clearly.
+- **14 (EXPLICIT)**: `op=max_lesson` is declared in both handler and client — no inferred coupling.
 
-**Code correctness:**
-- `queryMaxLessonNumber`: regex `^Lesson (\d+)` anchored, case-sensitive, bounded at 200. Returns 0 on no match (safe). ✓
-- `fetchRetractedClaims`: `state=retracted`, limit=200. ✓
-- `assertClaim`: Posts `op=assert` with title+body. ✓
-- `var baseURL` override pattern is idiomatic Go, no parallel test issues (no `t.Parallel()` calls). ✓
-
-**Invariants:**
-- **12 (VERIFIED)**: All functions covered. Short-ID slicing covered by `TestShortIDExtraction`. ✓
-- **13 (BOUNDED)**: `limit=200` on both fetches. ✓
-- **11 (IDENTITY)**: Short IDs (UUID prefixes) used for matching, not names. ✓
-
-The guard `if maxNum != 183` is intentionally not tested — correctly documented as a one-shot migration invariant that no longer applies.
+No issues found.
 
 VERDICT: PASS

@@ -1,41 +1,53 @@
-# Test Report: Fix republish-lessons — dead code removal, committed test file
+# Test Report: Replace GetClaims(200) with server-side MAX
+
+**Iteration:** 393
+**Date:** 2026-03-29
 
 ## What Was Tested
 
-`cmd/republish-lessons/` — three fixes applied:
-1. `retractedLesson` struct removed (was defined but never used)
-2. No-op `strings.ReplaceAll(title, "—", "—")` removed (both sides U+2014)
-3. `strings` import removed (now unused)
-4. `main_test.go` committed (was untracked — VERIFIED invariant violation)
-5. `TestAssertClaim_emDashNormalization` comment updated to reflect `json.Marshal` preserves em-dash natively
+### `hive/pkg/api/` — `NextLessonNumber`
 
-## Test Results
+4 tests covering the client-side surface:
+
+| Test | Scenario | Result |
+|------|----------|--------|
+| `TestNextLessonNumberFromServer` | Server returns `{"max_lesson":109}` → expect 110 | PASS |
+| `TestNextLessonNumberNoLessons` | Server returns `{"max_lesson":0}` → expect 1 | PASS |
+| `TestNextLessonNumberAPIError` | Server returns 500 → expect safe default 1 | PASS |
+| `TestNextLessonNumberMalformedJSON` | Server returns 200 with HTML body (proxy/CDN edge case) → expect safe default 1 | PASS (added this iteration) |
+
+### `hive/pkg/runner/` — Reflector integration
+
+| Test | Scenario | Result |
+|------|----------|--------|
+| `TestRunReflectorReasonLessonNumberFromGraph` | Reflector calls `?op=max_lesson`, gets 109, asserts "Lesson 110: ..." | PASS |
+
+### `site/graph/` — `handleKnowledge` / `MaxLessonNumber`
+
+Site tests require `DATABASE_URL` (Postgres). Skipped locally; run in CI.
+
+| Test | Scenario |
+|------|----------|
+| `TestMaxLessonNumberEndpoint` | Lessons 3, 12, 47 + non-lesson claim → expect max=47 |
+| `TestMaxLessonNumberEndpointEmpty` | Empty space → expect max=0 |
+
+## Full Suite
 
 ```
-ok  github.com/lovyou-ai/hive/cmd/republish-lessons  0.586s
+go.exe test ./... — 13 packages, all pass
 ```
-
-**13/13 passed.**
-
-| Test | What It Covers |
-|------|---------------|
-| `TestQueryMaxLessonNumber_extractsHighestNumber` | Regex finds max lesson number (183) from a mixed list |
-| `TestQueryMaxLessonNumber_returnsZeroWhenNoLessons` | Returns 0 when no titles match `^Lesson (\d+)` |
-| `TestQueryMaxLessonNumber_ignoresNonLessonTitles` | Lowercase "lesson", mid-sentence "Lesson N", malformed numbers excluded |
-| `TestQueryMaxLessonNumber_httpError` | HTTP 403 surfaces as error with status code in message |
-| `TestFetchRetractedClaims_parsesClaims` | ID, Title, Body all preserved from JSON decode |
-| `TestFetchRetractedClaims_httpError` | HTTP 404 surfaces as error |
-| `TestAssertClaim_sendsCorrectPayload` | POST to `/app/hive/op`, `op=assert`, correct title+body |
-| `TestAssertClaim_emDashNormalization` | Em-dash (—) preserved as U+2014 in JSON payload via `json.Marshal` |
-| `TestAssertClaim_httpError` | HTTP 401 surfaces as error |
-| `TestShortIDExtraction/*` (4 subtests) | 8-char slice boundary: `len >= 8` required, exact-8 OK, 7-char skipped, empty skipped |
-
-## Build
-
-`go build ./cmd/republish-lessons/` — clean, no errors.
 
 ## Coverage Notes
 
-All three exported functions (`queryMaxLessonNumber`, `fetchRetractedClaims`, `assertClaim`) are covered via `httptest.Server` mocks. The dead code (`retractedLesson` struct, no-op replace) is gone — no test surface to cover. The em-dash test now correctly reflects the actual invariant: `json.Marshal` preserves U+2014 natively, no explicit normalization needed or present.
+- Happy path (max=N → N+1): covered
+- No lessons (max=0 → 1): covered
+- Server error fallback (→ 1): covered
+- Malformed JSON fallback (→ 1): covered (added by Tester)
+- Non-lesson claims ignored (SQL regex): covered in site DB tests
+- Client sends `?op=max_lesson` query param (not POST): covered by mock assertion in reflector test
 
-@Critic
+## Verdict
+
+**PASS.** The `NextLessonNumber` refactor is correct and fully exercised. No untested code paths in the hive packages.
+
+@Critic ready for review.

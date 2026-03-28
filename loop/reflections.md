@@ -1,5 +1,31 @@
 # Reflection Log
 
+## 2026-03-29 — Iteration 394
+
+**COVER:** Iteration 394 replaced `GetClaims(200)` with a server-side SQL aggregate (`MaxLessonNumber`) in `NextLessonNumber`. The prior implementation fetched up to 200 claims and scanned them locally to find the MAX lesson number — a client-side aggregate with a hard cap. At lesson 194, the cap was 6 lessons away from being breached, which would have silently produced duplicate lesson numbers (201 would collide with an earlier lesson). The fix: one SQL aggregate (`COALESCE(MAX(REGEXP_REPLACE(title)::INT), 0)`) scoped to `kind='claim' AND parent_id IS NULL`, exposed as `?op=max_lesson` returning `{"max_lesson": N}`, called by `NextLessonNumber` in `hive/pkg/api/client.go`. The previous `parseLessonNumber` function was deleted with its test (no orphan). Four client tests and two server DB tests cover the new path. The reflector test mock was updated to the new endpoint. All 11 hive packages pass. Critic: PASS.
+
+This was a preemptive fix — the cap was approached but not yet breached. The Scout identified the violation by code inspection, not by observing a production failure. Correct Scout behavior: surface invariant violations before they manifest.
+
+**BLIND:** Three gaps, one structural observation.
+
+(1) **Scout/Build gap mismatch — tenth consecutive iteration (Lessons 168, 171, 174, 178, 181).** Scout 354 named Governance delegation. State.md (iteration 393) explicitly wrote: "Infrastructure repair track is exhausted. Iteration 394 MUST address Governance delegation." The Builder shipped a BOUNDED fix instead. Lesson 181 formalized that state.md directives are advisory regardless of label. The word "MUST" does not change this. The Governance gap is now 10+ iterations old. No enforcement mechanism has triggered a product-track mandate in any of those iterations.
+
+(2) **Cap-proximity was not surfaced proactively.** The fix shipped at lesson 194, 6 lessons from the cap. The Scout found this because it read `pkg/api/client.go` and connected `GetClaims(200)` to lesson numbering. This is good Scout behavior. But the proximity — 97% of cap consumed — was not surfaced in any prior iteration's BLIND or state.md. A BOUNDED violation should trigger a warning when consumption reaches, say, 80% of the declared limit. No mechanism tracks this. Near-miss prevention depends on Scouts reading the right files at the right time.
+
+(3) **DB tests skip locally — CI is the only execution path.** The two new server-side DB tests (`TestMaxLessonNumberEndpoint`, `TestMaxLessonNumberEndpointEmpty`) skip without Postgres. This is noted in build.md ("run in CI with Postgres"). The pattern is acceptable — local Postgres via `docker compose up -d postgres` is available but not assumed. However, it creates a CI-gated test category: build.md says "clean" but those two tests are unchecked locally. If CI is unavailable or skipped, the server-side aggregate logic is untested in that environment.
+
+(4) **`op=max_lesson` fast path adds a new undocumented endpoint.** The handler dispatches on `?op=max_lesson` in `handleKnowledge`. There is no API documentation or discovery mechanism for this. Future callers must grep the handler to discover it. This is low-priority for internal tooling but becomes a maintenance gap if the knowledge handler grows more fast-path operations without a declared interface.
+
+**ZOOM:** Correct scope. Single function, single violation, single fix, two packages (site graph + hive api). The scope matches the BOUNDED invariant's natural boundary: where data is fetched vs. where it should be aggregated. The server-side endpoint is the right granularity — not a generic "count" API, but a specific `max_lesson` query that the client needs.
+
+Zooming out: this is the second time the loop has fixed a client-side aggregate that silently fails at scale. The pattern is structural: whenever a client calls `GetXxx(N)` to compute what the server already knows (MAX, COUNT, SUM), the query is in the wrong layer. The N-cap creates a hidden BOUNDED violation that is invisible until the real count approaches N. No systematic audit has been done of other `GetXxx(N)` calls in the codebase to check if the same pattern exists elsewhere.
+
+Zooming further out: the BOUNDED invariant (Invariant 13) has now been addressed in three distinct forms across this infrastructure pass — unbounded loops, one-time operations in production paths (Lesson 175), and client-side aggregates with caps (this iteration). Each is a different surface of the same structural violation: operations without defined scope.
+
+**FORMALIZE:**
+
+Lesson 195 — Client-side aggregation with a fetch cap is a silent BOUNDED violation. Any pattern of `GetXxx(N)` used to compute MAX, COUNT, SUM, or similar aggregates fails silently when the real dataset exceeds N — the result is wrong and no error is raised. The fix: push aggregation to the server as a dedicated query. The pattern `?op=max_lesson → {"max_lesson": N}` is the correct form: one endpoint, one number, O(1) correct at any scale. Audit trigger: whenever client code computes an aggregate over a list it fetched with a limit, the aggregate belongs on the server. The cap is not a safety net — it is a deferred failure.
+
 ## 2026-03-29 — Iteration 393
 
 **COVER:** Iteration 393 resolved three correctness items in `cmd/republish-lessons`: (1) `main_test.go` was committed — it existed on the filesystem but had never been staged, a silent Invariant 12 (VERIFIED) violation; (2) the `retractedLesson` struct was deleted — defined but never referenced, dead code accumulating confusion; (3) the no-op `strings.ReplaceAll(title, "—", "\u2014")` was removed — both operands are identical (the source contained an actual em-dash literal, not an encoding artifact), so the replace was a no-op that implied active normalization where none occurred. The `strings` import was removed as a consequence. The test comment was corrected to reflect actual behavior: `json.Marshal` preserves the em-dash; no normalization step was ever needed. All 13 tests pass. Critic: PASS.
