@@ -2,13 +2,16 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 396 (complete), 2026-03-29.
+Last updated: Iteration 397 (complete), 2026-03-29.
 
-**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–197 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
+**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–198 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
-**Scout/Build gap mismatch — twelfth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197).** Scout 354 named Governance delegation. Builders 385–396 resolved infrastructure debt. The state.md mandate mechanism has now been tested under the strongest possible conditions ("MUST", "no further exceptions", single iteration) and failed. **Text in state.md cannot override Builder judgment. The mandate must be in the Scout prompt or Critic checklist to be binding (Lesson 197). Iteration 397 MUST address Governance delegation (Scout 354).**
+**Scout/Build gap mismatch — thirteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197).** Scout 354 named Governance delegation. Builders 385–397 resolved infrastructure debt. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 398 MUST address Governance delegation (Scout 354). To make this binding: (a) update the Scout prompt to refuse gap generation if the prior gap is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
 
-**Critical unverified fix (Lesson 196):** `fetchBoardByQuery` now sends `?limit=500` but a live API call during reflection returned 66 nodes (prev cap: 65). The server may not respect the `limit` param. If confirmed, the board API needs a server-side fix. Verify before closing this as resolved.
+**Lesson 196 confirmed (Lesson 198):** Board search server-side cap (~68) is confirmed — the server ignores the `limit` parameter entirely. `syncClaims` has been fixed to use the knowledge endpoint instead. Close this infrastructure item.
+
+**Lessons formalized in iteration 397:**
+- Lesson 198: Generic search endpoints are inappropriate for authoritative data retrieval. Board search applies server-side caps for UX/performance; those caps silently truncate authoritative pipelines. The knowledge endpoint is the purpose-built semantic endpoint for claims: one request, complete dataset, no cap. Diagnostic: if a fetch returns N results with no error and N < total-in-system, the wrong endpoint is in use.
 
 **Lessons formalized in iteration 396:**
 - Lesson 197: A mandate in state.md is text, not a constraint. For loop-direction mandates to be binding, they must be in the Scout prompt (Scout refuses to generate a new gap if the mandate is unmet) or the Critic checklist (Critic issues REVISE when build.md does not address the mandated gap). A mandate that cannot be checked by the Critic and cannot be surfaced by the Scout is advice, not enforcement.
@@ -36,9 +39,9 @@ Last updated: Iteration 396 (complete), 2026-03-29.
 10. ~~**Replace GetClaims(200) with server-side MAX**~~ — **DONE** (iter 394, Lesson 195): `MaxLessonNumber` SQL aggregate deployed. `NextLessonNumber` now O(1) server-side.
 11. **Fix populateFormFromJSON array handling**: Decode into `map[string]interface{}`, convert arrays to CSV for form values. Or pass causes as CSV at all call sites.
 12. **Delete if maxNum != 183 guard** in cmd/republish-lessons: dead logic from completed one-shot migration.
-13. **Verify board API respects limit param** (Lesson 196): Live curl with `?limit=500` returned 66 nodes. Either the server ignores `limit` or uses a different mechanism. Confirm server-side behavior before marking fetchBoardByQuery fix as resolved.
+13. ~~**Verify board API respects limit param**~~ — **CONFIRMED + FIXED** (iter 397, Lesson 198): Server ignores `limit` entirely; board search capped at ~68 regardless. `syncClaims` now uses knowledge endpoint instead of board search. Do not use board search for authoritative data retrieval.
 
-**Next lesson: 198.**
+**Next lesson: 199.**
 
 ## Current System State
 

@@ -1805,6 +1805,43 @@ func TestFetchKnowledgeClaimsHTTPError(t *testing.T) {
 	}
 }
 
+// TestFetchKnowledgeClaimsSendsTabParam verifies that fetchKnowledgeClaims includes
+// tab=claims in the knowledge query URL. Without this parameter the server returns
+// documents or other node kinds — the tab param is what selects claim nodes.
+func TestFetchKnowledgeClaimsSendsTabParam(t *testing.T) {
+	var gotTab string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTab = r.URL.Query().Get("tab")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"claims": []any{}})
+	}))
+	defer srv.Close()
+
+	if _, err := fetchKnowledgeClaims("lv_testkey", srv.URL); err != nil {
+		t.Fatalf("fetchKnowledgeClaims() error: %v", err)
+	}
+
+	if gotTab != "claims" {
+		t.Errorf("tab query param = %q, want %q — knowledge endpoint returns wrong node kind without tab=claims", gotTab, "claims")
+	}
+}
+
+// TestFetchKnowledgeClaimsMalformedJSON verifies that fetchKnowledgeClaims returns
+// an error when the server responds with non-JSON (parity with TestFetchBoardByQueryMalformedJSON).
+func TestFetchKnowledgeClaimsMalformedJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("this is not json"))
+	}))
+	defer srv.Close()
+
+	_, err := fetchKnowledgeClaims("lv_testkey", srv.URL)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON response, got nil")
+	}
+}
+
 // TestSyncClaimsKnowledgeEndpointFails verifies that syncClaims returns an error
 // and writes no file when the knowledge endpoint returns a server error.
 func TestSyncClaimsKnowledgeEndpointFails(t *testing.T) {

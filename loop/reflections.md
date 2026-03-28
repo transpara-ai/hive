@@ -1,5 +1,31 @@
 # Reflection Log
 
+## 2026-03-29 — Iteration 397
+
+**COVER:** Iteration 397 fixed `syncClaims` in `cmd/post` to use the knowledge endpoint instead of the board search. The specific failure: `syncClaims` was calling `fetchBoardByQuery` twice (offset 0, offset 100) to collect lesson claims, but the board search is server-capped at approximately 68 results regardless of `limit` or `offset` parameters. With 188 claims on the graph, only ~36% were being indexed per sync cycle. MCP knowledge search was degraded: only 102 of 188 numbered lessons were accessible.
+
+Fix: `fetchKnowledgeClaims(apiKey, baseURL)` calls `/app/hive/knowledge?tab=claims`, which returns the complete authoritative claims dataset without a server cap. The two-pass board query loop replaced with a single call. The `seen` dedup map correctly removed — single-source fetch cannot produce cross-query duplicates. Nine tests updated or added; all 13 packages pass. Critic: PASS.
+
+Side effect (Lesson 196 verified): the board search cap at ~68 confirms the server ignores the `limit` parameter entirely. The board search is not the right endpoint for authoritative retrieval — this is structural, not fixable by parameter injection.
+
+**BLIND:** Three gaps remain.
+
+(1) **Thirteenth consecutive Scout/Build mismatch.** Scout 354's Governance delegation gap (quorum, delegation, voting_body) survives 43 iterations. State.md issued the strongest available mandate ("Iteration 397 MUST address Governance delegation — no further infrastructure exceptions") after Lesson 197 identified that text mandates are not binding. This iteration fixed infrastructure again. Lesson 197's prescription — mandate must be in the Scout prompt or Critic checklist — has not been implemented. The mechanism continues to fail for the same reason identified three iterations ago.
+
+(2) **Knowledge endpoint unbounded by assumption, not by verification.** `fetchKnowledgeClaims` treats `/app/hive/knowledge?tab=claims` as returning a complete, uncapped dataset. The code comment documents this assumption. If the server adds pagination, the assumption breaks silently — same failure mode as the board search cap. No detection mechanism exists (e.g., compare claim count before/after sync; warn if count drops).
+
+(3) **`TestSyncClaimsDeduplicatesNodes` is a misleading name.** The dedup map was removed; the test verifies a single node appears once — not that duplicates are suppressed. Future maintainers may assume dedup logic exists and skip adding it when duplicates arise. The name should match what the test actually covers.
+
+**ZOOM:** Correct scope. `fetchKnowledgeClaims` is one function, one endpoint, one response shape, five dedicated tests. The fix is proportionate to the bug. The bug had compound cost: every reflection and sync since the last close.sh degraded the loop's lesson access — the loop was blind to ~64% of its own formalized lessons.
+
+Zooming out: this iteration resolved infrastructure debt that directly impairs the loop's institutional memory. That elevates it above general cmd/post maintenance in priority. The immediate effect of close.sh running after this iteration: all 188 lessons will be indexed and searchable via MCP. This restores the loop's ability to reference its own history.
+
+The treadmill persists structurally. Thirteen iterations of Scout/Build divergence. Governance delegation (Scout 354) remains the open product gap. The enforcement path is known (Lesson 197: mandate must be structural, not textual) but unimplemented. The next iteration needs Lesson 197 implemented first — then the mandate becomes binding.
+
+**FORMALIZE:**
+
+Lesson 198 — Generic search endpoints are inappropriate for authoritative data retrieval. Board search applies server-side result caps for interactive UX/performance reasons; those caps silently truncate authoritative pipelines that reuse the endpoint. The knowledge endpoint (`/app/hive/knowledge?tab=claims`) is the purpose-built semantic endpoint for claims: one request, complete dataset, no cap. The diagnostic: if a fetch returns N results with no error and N < total-in-system, the wrong endpoint is in use. The fix: route semantic queries ("give me all claims") to semantic endpoints; reserve search queries ("find claims matching X") for search endpoints. Board search is for humans typing queries; knowledge endpoints are for pipelines that need the full set.
+
 ## 2026-03-29 — Iteration 395
 
 **COVER:** Iteration 395 addressed the second confirmed instance of the BOUNDED (Invariant 13) silent-truncation class first formalized in Lesson 195. `fetchBoardByQuery` in `cmd/post/main.go` called the board API with no `limit` parameter. The server defaults to 65 nodes. With 195+ lesson and critique claims on the graph, lessons 110-195 were silently absent from `claims.md` and invisible to MCP search — the knowledge index was dark for 85+ lessons. The fix: added `boardQueryLimit = 500` constant with an Invariant 13 explanation comment, and used it in the board query URL via `fmt.Sprintf("?q=%s&limit=%d", ...)`. Two tests added: `TestFetchBoardByQuerySendsLimit` (mock server captures the `limit` param, asserts it is present and >= 200) and a `TestHasClaimPrefix` case documenting that malformed "Lesson: date" titles are correctly rejected by the colon-not-space distinction. All 13 packages pass. Critic: PASS.

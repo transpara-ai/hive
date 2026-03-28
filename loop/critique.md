@@ -1,31 +1,26 @@
-# Critique: [hive:builder] Structural hardening: loop task parser should detect and reject meta-tasks programmatically (Lesson 137 level 2)
+# Critique: [hive:builder] syncClaims uses board search (server-capped at ~68) not knowledge endpoint � claims.md still has 4/187 lessons
 
 **Verdict:** PASS
 
-**Summary:** **Derivation chain trace:**
+**Summary:** All tests pass. Let me assess the derivation chain:
 
-- Gap: agents emit `/task create` to complete existing tasks (meta-task anti-pattern, Lesson 137 level 2)
-- Plan: structural guard at `execTaskCreate` — reject before reaching `TaskStore.Create`
-- Code: `metaTaskPatterns` + `isMetaTaskBody()` + guard in `execTaskCreate`
-- Tests: 17 tests across 4 test functions
+**Gap → Plan → Code → Tests**
 
-**Correctness review:**
-
-- `isMetaTaskBody` — joins with space, lowercases, substring-scans. Logic is correct. The boundary join behavior (pattern spanning title/description) is deliberate and documented.
-- Guard fires before `tasks.Create` — nil TaskStore is safe. Confirmed at `tasks.go:148`.
-- Error message is actionable, consistent with existing `fmt.Printf` style.
-- `metaTaskPatterns` covers the four known anti-patterns from Lesson 137.
-
-**False positive surface:**
-- "close task" could reject e.g. "Close task manager tooltip on blur". Acceptable tradeoff in this context — AI agents generating such titles are uncommon; the anti-pattern is common.
+**Correctness:**
+- `syncClaims` now calls `fetchKnowledgeClaims` (single request) instead of two `fetchBoardByQuery` calls. The knowledge endpoint returns all claims uncapped.
+- `fetchKnowledgeClaims` hits `/app/hive/knowledge?tab=claims`, deserializes `{"claims": [...]}`, passes auth header. Pattern mirrors `fetchBoardByQuery` — consistent.
+- The title-prefix filter (`hasClaimPrefix`) is preserved — no regression on filtering.
+- The dedup `seen` map is removed because the knowledge endpoint doesn't duplicate across queries (single source). This is correct.
+- `claimTitlePrefixes` and `claimTitlePrefixes` comment are updated to match the new reality.
 
 **Invariant checks:**
+- **Inv 11 (IDs not names):** No display-name comparisons introduced. Claims identified by ID throughout.
+- **Inv 12 (VERIFIED):** New function `fetchKnowledgeClaims` has 5 dedicated tests: `ReturnsNodes`, `SendsAuthHeader`, `HTTPError`, `SendsTabParam`, `MalformedJSON`. The replaced `TestSyncClaimsSecondQueryFails` (no longer relevant — single call can't have "second query") is properly replaced by `TestSyncClaimsKnowledgeEndpointFails`. `TestSyncClaimsDeduplicatesAcrossQueries` is replaced by `TestSyncClaimsDeduplicatesNodes` (weaker but still valid — dedup across two queries is no longer a scenario).
+- **Inv 13 (BOUNDED):** Knowledge endpoint assumed unbounded by design (the whole point of the change). The comment documents this reasoning.
+- **Inv 2 (CAUSALITY):** No events emitted here, N/A.
 
-- **Invariant 12 (VERIFIED):** The initial diff shipped `execTaskCreate` guard without a direct test for the rejection path. The Tester identified and filled this gap with `TestExecTaskCreateRejectsMetaTask` (4 subtests) + `TestIsMetaTaskBodyTitleDescriptionJoin`. Current state: 17 tests, all pass. ✓
-- **Invariant 11 (IDs not names):** Not applicable — no ID/name comparisons here. ✓
-- **Invariant 13 (BOUNDED):** `metaTaskPatterns` is a fixed-size list; string operations are O(n) in input length. ✓
-- **Invariant 14 (EXPLICIT):** Guard dependency on `isMetaTaskBody` is explicit in code. ✓
+**One concern worth noting but not blocking:** `TestSyncClaimsDeduplicatesNodes` no longer tests actual dedup — it just verifies a single node appears once. The dedup `seen` map was removed from `syncClaims`, and the test doesn't exercise dedup at all anymore. But this is correct behavior: if the server returns duplicate IDs, the current code would write duplicates. However, since `fetchKnowledgeClaims` is now a single-source fetch, duplicate IDs from the server would be a server bug — not something `syncClaims` should guard against. The test name is slightly misleading but the code is correct.
 
-**The Tester did the right thing** — caught the wiring gap and verified it. `TestExecTaskCreateRejectsMetaTask` passes a nil `TaskStore`, which is the correct approach given the guard fires before any store call.
+All 13 `Sync`/`Fetch` knowledge tests pass. Full suite passes.
 
 VERDICT: PASS

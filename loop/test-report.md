@@ -1,48 +1,46 @@
-# Test Report: Meta-task structural guard (Lesson 137 level 2)
+# Test Report: syncClaims uses knowledge endpoint
 
-- **Build:** 55d4214
+- **Build:** e43e541
 - **Tester:** Tester agent
 - **Date:** 2026-03-29
 
 ## What Was Tested
 
-The Builder shipped `isMetaTaskBody` and the `execTaskCreate` guard, with 15 tests pre-existing (13 loop + 2 new). The Tester added 2 more tests to close coverage gaps.
+The core change: `syncClaims` now calls `fetchKnowledgeClaims`
+(hits `/app/hive/knowledge?tab=claims`) instead of the board search API (which
+is server-capped at ~68 results). The Builder added 3 direct tests for
+`fetchKnowledgeClaims`. The Tester added 2 more to close remaining gaps.
 
-## New Tests Added (`pkg/loop/tasks_test.go`)
+## New Tests Added (`cmd/post/main_test.go`)
 
-### `TestExecTaskCreateRejectsMetaTask` (4 subtests)
-**Gap it fills:** `isMetaTaskBody` was tested in isolation, but the guard wired into `execTaskCreate` had no direct test. This test exercises the full rejection path inside `execTaskCreate` — not just the pure function.
+### `TestFetchKnowledgeClaimsSendsTabParam`
+**Gap caught:** No existing test verified that `fetchKnowledgeClaims` includes
+`?tab=claims` in the request URL. Without `tab=claims`, the knowledge endpoint
+returns a different node kind. This is the exact parameter that makes the fix
+work — its absence would silently return wrong data while all other tests passed.
 
-- All four patterns rejected from title field
-- Case-insensitive rejection (Close Task, not just close task)
-- Rejection when pattern is in description, not title
-- Error message contains `"meta-task rejected"` in all cases
-
-### `TestIsMetaTaskBodyTitleDescriptionJoin`
-**Gap it fills:** Documents and verifies a subtle boundary behaviour — the join is `title + " " + description`, so a pattern can span the boundary (title=`"close the"`, description=`"following tasks"` → joined matches `"close the following"`). Also confirms unrelated fragment pairs don't false-positive.
+### `TestFetchKnowledgeClaimsMalformedJSON`
+**Parity gap:** `fetchBoardByQuery` has `TestFetchBoardByQueryMalformedJSON` but
+`fetchKnowledgeClaims` (the new replacement function) was missing the equivalent.
+If the knowledge endpoint returns HTML (e.g. a login redirect), no test would
+catch the silent empty-result.
 
 ## Results
 
-| Test | Status |
-|------|--------|
-| TestIsMetaTaskBody (18 cases) | PASS |
-| TestParseTaskCommandsMetaTaskNotFiltered | PASS |
-| TestExecTaskCreateRejectsMetaTask/op=complete_in_title | PASS |
-| TestExecTaskCreateRejectsMetaTask/close_task_in_title | PASS |
-| TestExecTaskCreateRejectsMetaTask/mark_done_in_description | PASS |
-| TestExecTaskCreateRejectsMetaTask/close_the_following_in_description | PASS |
-| TestIsMetaTaskBodyTitleDescriptionJoin | PASS |
-| All 13 pre-existing loop tests | PASS |
+**51 tests, 51 pass, 0 fail.**
 
-**Total: 17 tests, 0 failures**
+```
+ok  github.com/lovyou-ai/hive/cmd/post  0.589s
+```
 
 ## Coverage Notes
 
-- `isMetaTaskBody` — all four patterns, both fields, case-insensitivity, boundary join: **covered**
-- `execTaskCreate` rejection path — all four patterns: **covered**
-- `execTaskCreate` happy path (reaching `tasks.Create`) — untestable without a real `TaskStore`; the `TestIsMetaTaskBody` negative cases provide the same guarantee at the unit level
-- `parseTaskCommands` pass-through: **covered**
+- `fetchKnowledgeClaims`: returns nodes, auth header, HTTP error, tab param, malformed JSON — fully covered
+- `syncClaims`: writes file, empty result, filters non-claim nodes, API error, no metadata, multiple causes, deduplication, knowledge endpoint failure — fully covered
+- All pre-existing tests updated to use knowledge endpoint format — passing
 
-## @Critic
+## No Issues Found
 
-Ready for review. The `TestExecTaskCreateRejectsMetaTask` test is the substantive addition — it proves the guard fires at the correct point in `execTaskCreate`, not just that `isMetaTaskBody` returns the right bool.
+Build is clean. The knowledge endpoint change is correct and well-tested.
+
+@Critic ready for review.
