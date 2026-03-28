@@ -216,3 +216,55 @@ func TestPostOpStringFieldsPreserved(t *testing.T) {
 		t.Errorf("node_id = %v, want node-1", fields["node_id"])
 	}
 }
+
+// TestPostDiagnostic_SendsPayload verifies that PostDiagnostic hits the correct
+// path with the raw payload, correct Content-Type, and Bearer auth.
+func TestPostDiagnostic_SendsPayload(t *testing.T) {
+	var (
+		capturedPath string
+		capturedCT   string
+		capturedAuth string
+		capturedBody []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedCT = r.Header.Get("Content-Type")
+		capturedAuth = r.Header.Get("Authorization")
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	payload := []byte(`{"phase":"builder","outcome":"success","cost_usd":0.42}`)
+	c := New(srv.URL, "test-key")
+	if err := c.PostDiagnostic(payload); err != nil {
+		t.Fatalf("PostDiagnostic: %v", err)
+	}
+
+	if capturedPath != "/api/hive/diagnostic" {
+		t.Errorf("path = %q, want /api/hive/diagnostic", capturedPath)
+	}
+	if capturedCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", capturedCT)
+	}
+	if capturedAuth != "Bearer test-key" {
+		t.Errorf("Authorization = %q, want Bearer test-key", capturedAuth)
+	}
+	if string(capturedBody) != string(payload) {
+		t.Errorf("body = %q, want %q", capturedBody, payload)
+	}
+}
+
+// TestPostDiagnostic_Error4xx verifies that a 4xx response is returned as an error.
+func TestPostDiagnostic_Error4xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "bad-key")
+	err := c.PostDiagnostic([]byte(`{"phase":"builder"}`))
+	if err == nil {
+		t.Error("PostDiagnostic with 401: expected error, got nil")
+	}
+}

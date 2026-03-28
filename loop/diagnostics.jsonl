@@ -318,3 +318,6 @@
 {"phase":"critic","outcome":"critique.pass","repo":"hive","board_open":8,"duration_secs":269.4848577,"cost_usd":1.5133071,"timestamp":"2026-03-28T18:52:39Z"}
 {"phase":"reflector","outcome":"reflection.done","repo":"hive","board_open":8,"duration_secs":246.8228692,"cost_usd":1.97669265,"timestamp":"2026-03-28T18:56:46Z"}
 {"phase":"observer","outcome":"audit.done","repo":"hive","board_open":8,"duration_secs":508.8683881,"cost_usd":3.16582665,"timestamp":"2026-03-28T19:05:15Z"}
+{"phase":"builder","outcome":"task.done","repo":"hive","board_open":8,"duration_secs":621.0096909,"cost_usd":2.91965265,"timestamp":"2026-03-28T19:16:47Z"}
+{"phase":"tester","outcome":"tests.pass","repo":"hive","board_open":8,"duration_secs":330.7356643,"cost_usd":4.01746335,"timestamp":"2026-03-28T19:22:18Z"}
+{"phase":"critic","outcome":"critique.revise","repo":"hive","board_open":9,"duration_secs":99.7952609,"cost_usd":4.21444005,"timestamp":"2026-03-28T19:24:00Z"}

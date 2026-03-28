@@ -3,9 +3,14 @@ package runner
 import (
 	"bufio"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/lovyou-ai/hive/pkg/api"
 )
 
 func TestAppendDiagnosticCreatesFile(t *testing.T) {
@@ -181,4 +186,83 @@ func TestCountDiagnostics(t *testing.T) {
 	if got := countDiagnostics(dir); got != 2 {
 		t.Fatalf("expected 2 after two appends, got %d", got)
 	}
+}
+
+// makeLoopDir creates a temp dir with the expected loop/ sub-directory.
+func makeLoopDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "loop"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestRunnerAppendDiagnostic_WritesFileOnly verifies that when only HiveDir is
+// set (no APIClient), the event is written to diagnostics.jsonl and no HTTP call
+// is made.
+func TestRunnerAppendDiagnostic_WritesFileOnly(t *testing.T) {
+	dir := makeLoopDir(t)
+	r := New(Config{HiveDir: dir})
+
+	r.appendDiagnostic(PhaseEvent{Phase: "scout", Outcome: "success"})
+
+	if got := countDiagnostics(dir); got != 1 {
+		t.Errorf("diagnostics count = %d, want 1", got)
+	}
+}
+
+// TestRunnerAppendDiagnostic_PostsOnly verifies that when only APIClient is set
+// (no HiveDir), the event is POSTed but no file is written.
+func TestRunnerAppendDiagnostic_PostsOnly(t *testing.T) {
+	var postCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/hive/diagnostic" {
+			postCount++
+			io.Copy(io.Discard, r.Body)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := New(Config{APIClient: api.New(srv.URL, "key")})
+	r.appendDiagnostic(PhaseEvent{Phase: "builder", Outcome: "success"})
+
+	if postCount != 1 {
+		t.Errorf("POST count = %d, want 1", postCount)
+	}
+}
+
+// TestRunnerAppendDiagnostic_WritesBoth verifies that when both HiveDir and
+// APIClient are set, the event is written to the file AND POSTed.
+func TestRunnerAppendDiagnostic_WritesBoth(t *testing.T) {
+	dir := makeLoopDir(t)
+
+	var postCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/hive/diagnostic" {
+			postCount++
+			io.Copy(io.Discard, r.Body)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := New(Config{HiveDir: dir, APIClient: api.New(srv.URL, "key")})
+	r.appendDiagnostic(PhaseEvent{Phase: "critic", Outcome: "revise"})
+
+	if got := countDiagnostics(dir); got != 1 {
+		t.Errorf("file count = %d, want 1", got)
+	}
+	if postCount != 1 {
+		t.Errorf("POST count = %d, want 1", postCount)
+	}
+}
+
+// TestRunnerAppendDiagnostic_NeitherSet verifies that with neither HiveDir nor
+// APIClient set, appendDiagnostic does not panic.
+func TestRunnerAppendDiagnostic_NeitherSet(t *testing.T) {
+	r := New(Config{Role: "builder"})
+	// Must not panic.
+	r.appendDiagnostic(PhaseEvent{Phase: "builder", Outcome: "success"})
 }
