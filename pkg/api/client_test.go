@@ -268,3 +268,101 @@ func TestPostDiagnostic_Error4xx(t *testing.T) {
 		t.Error("PostDiagnostic with 401: expected error, got nil")
 	}
 }
+
+// TestNodeExists_Returns200_ReturnsTrue verifies that a 200 response means the node exists.
+func TestNodeExists_Returns200_ReturnsTrue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"node-abc","kind":"task"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	if !c.NodeExists("hive", "node-abc") {
+		t.Error("NodeExists with 200: expected true")
+	}
+}
+
+// TestNodeExists_Returns404_ReturnsFalse verifies that a 404 response means the node does not exist.
+func TestNodeExists_Returns404_ReturnsFalse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	if c.NodeExists("hive", "ghost-node") {
+		t.Error("NodeExists with 404: expected false")
+	}
+}
+
+// TestNodeExists_Returns500_ReturnsFalse verifies that server errors are treated as non-existence.
+func TestNodeExists_Returns500_ReturnsFalse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	if c.NodeExists("hive", "some-node") {
+		t.Error("NodeExists with 500: expected false")
+	}
+}
+
+// TestNodeExists_URLFormat verifies the request hits the correct path with format=json.
+func TestNodeExists_URLFormat(t *testing.T) {
+	var capturedPath string
+	var capturedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	c.NodeExists("hive", "node-xyz")
+
+	wantPath := "/app/hive/node/node-xyz"
+	if capturedPath != wantPath {
+		t.Errorf("request path = %q, want %q", capturedPath, wantPath)
+	}
+	if capturedQuery != "format=json" {
+		t.Errorf("query = %q, want format=json", capturedQuery)
+	}
+}
+
+// TestNodeExists_SendsBearerAuth verifies that the Authorization header is sent.
+func TestNodeExists_SendsBearerAuth(t *testing.T) {
+	var capturedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "lv_testkey")
+	c.NodeExists("hive", "node-1")
+
+	if capturedAuth != "Bearer lv_testkey" {
+		t.Errorf("Authorization = %q, want %q", capturedAuth, "Bearer lv_testkey")
+	}
+}
+
+// TestNodeExists_UsesGETMethod verifies the request uses GET (not POST).
+func TestNodeExists_UsesGETMethod(t *testing.T) {
+	var capturedMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	c.NodeExists("hive", "node-1")
+
+	if capturedMethod != http.MethodGet {
+		t.Errorf("method = %q, want GET", capturedMethod)
+	}
+}

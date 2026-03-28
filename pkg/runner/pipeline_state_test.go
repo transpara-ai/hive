@@ -88,7 +88,7 @@ func TestRunBoardClearStartsAtDirecting(t *testing.T) {
 		SpaceSlug: "test",
 		APIClient: api.New(srv.URL, "test-key"),
 	})
-	sm := NewPipelineStateMachine(r)
+	sm := NewPipelineStateMachine(r, nil)
 
 	// Cancel immediately so the main loop exits without invoking agents.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +120,7 @@ func TestRunExistingTasksStartsAtBuilding(t *testing.T) {
 		SpaceSlug: "test",
 		APIClient: api.New(srv.URL, "test-key"),
 	})
-	sm := NewPipelineStateMachine(r)
+	sm := NewPipelineStateMachine(r, nil)
 
 	// Cancel immediately so the main loop exits without invoking agents.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,7 +155,7 @@ func TestInferEventCriticRevise(t *testing.T) {
 	})
 	// nil APIClient → readFromGraph returns "" → falls back to critique.md
 	r := New(Config{HiveDir: hiveDir})
-	sm := NewPipelineStateMachine(r)
+	sm := NewPipelineStateMachine(r, nil)
 
 	got := sm.inferEvent("critic")
 	if got != EventCritiqueRevise {
@@ -170,7 +170,7 @@ func TestInferEventCriticPass(t *testing.T) {
 		"critique.md": "Looks good.\n\nVERDICT: PASS",
 	})
 	r := New(Config{HiveDir: hiveDir})
-	sm := NewPipelineStateMachine(r)
+	sm := NewPipelineStateMachine(r, nil)
 
 	got := sm.inferEvent("critic")
 	if got != EventCritiquePass {

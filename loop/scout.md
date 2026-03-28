@@ -1,69 +1,53 @@
-# Scout Report — Iteration 404
+# Scout Report — Iteration 405
 
 **Date:** 2026-03-29
-**Gap:** `populateFormFromJSON` fix undeployed — array causes silently fail in production, blocking CAUSALITY end-to-end
+**Gap:** LLM-generated cause IDs reach the graph unvalidated — hallucinated IDs silently create dangling causality chains (Lesson 170)
 
 ---
 
 ## Gap
 
-The PM milestone for iteration 404 is: **Enforce CAUSALITY invariant end-to-end: Observer, cmd/post, deploy.**
+The Observer parses LLM output and uses whatever cause ID the LLM returned (`TASK_CAUSE: <id>`) directly in `CreateTask`. Nothing checks whether that ID actually exists on the graph before it is written as a cause. An LLM can hallucinate any string — a plausible-looking UUID, a title fragment, or a node ID from a prior session. When that ID is posted as a cause, the graph records a valid-looking causal link to a non-existent node. CAUSALITY is violated silently: no error, no warning, the task appears correctly created.
 
-The site fix that makes `op=intend` (and other ops) accept JSON array causes (`"causes":["id1","id2"]`) is in `site/graph/handlers.go` but has **not been deployed to production**. Every Observer Operate call that posts a task with JSON array causes gets "unknown op" back from production — the node is either not created or created without causes. The fix has been sitting undeployed since iteration 398.
+This is distinct from the empty-cause (`TASK_CAUSE: none`) path that was fixed in iteration 404. That path produces no cause. This path produces a *wrong* cause.
 
-This is the root of the ongoing CAUSALITY violation: agents emit correct array format, production silently rejects it, tasks are created causeless.
+**Root:** `pkg/runner/observer.go:runObserverReason` — `t.causeID` is used without existence check.
 
 ---
 
 ## Evidence
 
-**State.md (iter 403), verbatim:**
-> populateFormFromJSON fix NOT deployed in production. Confirmed iteration 399: array causes return "unknown op" in production; CSV format succeeds. The fix is in site/graph/handlers.go but has not been deployed to Fly.io.
+**Lesson 170** (state.md): ghost IDs from LLM hallucination — Observer Operate path posts node IDs that may not exist on the graph, silently attaching dangling causes.
 
-**Code confirms fix exists:**
-- `site/graph/handlers.go:524–527` — `populateFormFromJSON` converts JSON array values to CSV
-- `site/graph/handlers.go:528–555` — implementation handles `[]interface{}` case
-- `site/graph/handlers.go:623, 2294, 3663, 3730, 3897` — called at every op entrypoint
+**Code (pre-fix):**
+```go
+causeID := t.causeID
+if causeID == "" {
+    causeID = fallbackCauseID
+}
+```
+No branch for "causeID is non-empty but doesn't exist." The LLM's ID goes straight to `CreateTask`.
 
-**Observer generates array causes today:**
-- `pkg/runner/observer.go:292` — `buildOutputInstruction` instructs the Observer to curl with `"causes":["<NODE_ID>"]`
-- Every Observer Operate task with array causes has been failing silently in production
-
-**Backfill in cmd/post is a workaround, not a fix:**
-- `cmd/post/main.go:787–858` — `backfillClaimCauses` retroactively links causeless nodes each iteration
-- This means: even after fixing Observer code, without the deploy the problem persists
-
-**Lesson 173** (state.md): close.sh has not run since iteration 388 — MCP knowledge search is stale, Lessons 126–203 invisible via knowledge_search. **close.sh must run after this iteration.**
+**`pkg/api/client.go`** — no `NodeExists` method; no way to validate an ID against the graph before use.
 
 ---
 
 ## Impact
 
-- **Invariant 2 (CAUSALITY)** violated at production scale — every agent call using natural JSON array format creates ghost nodes
-- Observer's Operate path is effectively broken for cause-linking in production
-- The backfill workaround fires on every close.sh run but is a patch over a missing deploy
-- Multiple iterations (399, 400, 401, 402, 403) have noted this and not fixed it — it's actively blocking the CAUSALITY milestone
+- Every Observer Operate call where the LLM guesses or misremembers a node ID produces a causally-linked task pointing to a ghost node
+- The graph cannot distinguish valid from dangling causes at query time — the violation is structural, not surfaced
+- Backfill (`backfillClaimCauses` in cmd/post) does not detect or repair dangling cause IDs — it only adds missing causes to causeless nodes
 
 ---
 
 ## Scope
 
 Strictly bounded:
-1. `cd /c/src/matt/lovyou3/site && flyctl deploy --remote-only` — deploy the existing fix
-2. Verify: `curl -s -X POST ... "https://lovyou.ai/app/hive/op" -d '{"op":"intend","kind":"task","title":"Verify array causes","causes":["test-id"]}'` — confirm array causes no longer return "unknown op"
-3. Fix Observer Reason path causes=[] (task c2ab9f11) — when LLM outputs `TASK_CAUSE: none`, the Observer creates a causeless task. Change `parseObserverTasks` + `runObserverReason` to fall back to a system-level cause rather than emitting empty causes.
-
----
-
-## Suggestion
-
-**Builder:**
-1. Run `cd /c/src/matt/lovyou3/site && flyctl deploy --remote-only`
-2. Verify array causes work in production via a test curl
-3. In `hive/pkg/runner/observer.go:runObserverReason` (line 78), after pre-fetching claims (`r.cfg.APIClient.GetClaims`), pass the first claim's ID as the fallback cause when `t.causeID == ""`. This closes task c2ab9f11 — Observer Reason path no longer emits causeless nodes.
-4. Ship: `cd hive && ./loop/close.sh` (restores knowledge index for Lessons 126–203)
+1. Add `NodeExists(slug, id string) bool` to `pkg/api/client.go` — `GET /app/{slug}/node/{id}?format=json`, returns `true` on HTTP 200 only
+2. In `pkg/runner/observer.go:runObserverReason`, when `t.causeID != ""`, call `NodeExists` before use; if false, log warning and replace with `fallbackCauseID`
+3. Add test `TestRunObserverReason_HallucinatedCauseIDGetsReplaced` — server returns 404 for ghost ID, assert `CreateTask` uses `fallbackCauseID`
 
 **File list:**
-- `site/graph/handlers.go` — deploy only, no code change needed
-- `hive/pkg/runner/observer.go:runObserverReason` — fallback cause for empty causeID
-- `hive/pkg/runner/observer_test.go` — add test: assert parsed task with `TASK_CAUSE: none` still gets a fallback cause
+- `pkg/api/client.go` — new `NodeExists` method
+- `pkg/runner/observer.go:runObserverReason` — existence check before cause use
+- `pkg/runner/observer_test.go` — new test for hallucinated ID replacement

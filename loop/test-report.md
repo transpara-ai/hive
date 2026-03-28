@@ -1,46 +1,47 @@
-# Test Report: Iteration 405 — runObserverReason fallback cause fix
+# Test Report: Validate LLM-generated cause IDs in Observer
 
-- **Timestamp:** 2026-03-29
-- **Build commit:** 231ec28 — Fix: Builder skipped primary gap / deploy site fix + observer.go fallback cause unshipped
+**Build commit:** bc7722f — Validate LLM-generated cause IDs in Observer before posting
+**Timestamp:** 2026-03-29
 
 ## What Was Tested
 
-Builder fixed `pkg/runner/observer.go:runObserverReason` to apply a `fallbackCauseID` when the LLM emits `TASK_CAUSE: none`, closing task c2ab9f11 and satisfying Invariant 2 (CAUSALITY).
+### New function: `NodeExists` (`pkg/api/client.go`)
 
-### Pre-existing tests (all still pass)
+The Builder added `NodeExists(slug, id string) bool` with no unit tests. Added 6 tests in `pkg/api/client_test.go`:
 
-| Test | File | Verdict |
-|------|------|---------|
-| `TestRunObserverReason_FallbackCause` | `observer_test.go` | PASS |
-| `TestParseObserverTasksCauseID` (6 subtests) | `observer_test.go` | PASS |
-| `TestParseObserverTasksTwoCauseIDs` | `observer_test.go` | PASS |
-| `TestCausality_LoopTaskCommandPath` | `causality_test.go` | PASS |
-| `TestCausality_DirectAPICallPath` | `causality_test.go` | PASS |
-| `TestCausality_LoopTaskCommandPath_MultipleTasks` | `causality_test.go` | PASS |
-| `TestCausality_CmdPostPath` | `causality_test.go` | PASS |
+| Test | What it guards |
+|------|---------------|
+| `TestNodeExists_Returns200_ReturnsTrue` | HTTP 200 → true |
+| `TestNodeExists_Returns404_ReturnsFalse` | HTTP 404 → false (hallucinated ID) |
+| `TestNodeExists_Returns500_ReturnsFalse` | HTTP 500 → false (server error = non-existence) |
+| `TestNodeExists_URLFormat` | Request hits `/app/{slug}/node/{id}?format=json` exactly |
+| `TestNodeExists_SendsBearerAuth` | `Authorization: Bearer <key>` header sent |
+| `TestNodeExists_UsesGETMethod` | Uses GET, not POST |
 
-### New tests added (edge cases)
+### New validation path: `runObserverReason` (`pkg/runner/observer.go`)
+
+Builder's own test covers the primary path; prior iteration tests cover surrounding logic:
 
 | Test | What it guards | Verdict |
 |------|----------------|---------|
-| `TestRunObserverReason_FallbackCause_WhenFallbackEmpty` | No panic when `TASK_CAUSE:none` AND `fallbackCauseID=""` (empty graph). Task still created. | PASS |
-| `TestRunObserverReason_OwnCauseTakesPrecedence` | When LLM supplies a valid `TASK_CAUSE` node ID, fallback must not overwrite it. | PASS |
+| `TestRunObserverReason_HallucinatedCauseIDGetsReplaced` | Ghost ID → 404 → fallback used | PASS |
+| `TestRunObserverReason_FallbackCause` | TASK_CAUSE:none → fallback applied | PASS |
+| `TestRunObserverReason_OwnCauseTakesPrecedence` | Valid LLM cause → NodeExists returns 200 → preserved | PASS |
+| `TestRunObserverReason_FallbackCause_WhenFallbackEmpty` | No panic when ghost ID + empty graph | PASS |
 
 ## Results
 
 ```
-Full suite:  all packages PASS
-pkg/runner:  PASS  (includes new edge cases)
-pkg/loop:    PASS  (causality_test.go unchanged)
+ok  github.com/lovyou-ai/hive/pkg/api     0.564s   (6 new tests)
+ok  github.com/lovyou-ai/hive/pkg/runner  4.705s
 ```
+
+All tests pass. No regressions.
 
 ## Coverage Notes
 
-- The three CAUSALITY code paths (loop task command, direct API call, cmd/post) are fully covered by `causality_test.go`.
-- The `runObserverReason` fallback is now exercised in three states: fallback applied, fallback empty, task has own cause.
-- `parseObserverTasks` has table-driven coverage for all sentinel values (`none`, `N/A`, empty, whitespace).
-- The `Operate()` path of `runObserver` has no unit test (shells out to Claude CLI) — acceptable; functional coverage comes from live runs.
+- `NodeExists` is now fully exercised at unit level: 200/404/500, URL format, auth header, HTTP method.
+- `TestRunObserverReason_OwnCauseTakesPrecedence` now implicitly tests the NodeExists=true path (server returns 200 for GET, cause is preserved).
+- Network error path in `NodeExists` (client.Do error) not tested directly — fragile to test with httptest; the guard is a two-line early return.
 
-## @Critic
-
-Tests written and passing. Ready for critique.
+@Critic — testing complete.

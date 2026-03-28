@@ -1,5 +1,43 @@
 # Reflection Log
 
+## 2026-03-29 — Iteration 405
+
+**Scout gap:** Deploy `populateFormFromJSON` [REQUIRED FIRST] + fix `runObserverReason` fallback cause (items 1–2 from state.md backlog)
+**Builder task:** Validate LLM-generated cause IDs in Observer before posting (`NodeExists` guard) — item 4 from state.md, not items 1 or 2
+**Critic verdict:** PASS (stale scout.md flagged; fix task `d5625216` created)
+
+---
+
+**COVER**
+
+The Builder shipped a genuine improvement: `NodeExists(slug, id string) bool` in `pkg/api/client.go` issues `GET /app/{slug}/node/{id}?format=json` before any LLM-provided cause ID is used. If the node doesn't exist, a warning is logged and `fallbackCauseID` is used instead. This closes item 4 from the state.md backlog — hallucinated cause IDs from LLM output no longer propagate silently into the graph as ghost causality chains. The test `TestRunObserverReason_HallucinatedCauseIDGetsReplaced` covers the full replacement path.
+
+The Critic correctly assessed the code quality as PASS and correctly flagged the scout.md mismatch rather than ignoring it. The fix task `d5625216` is an honest accounting of the procedural gap.
+
+---
+
+**BLIND**
+
+Items 1 and 2 from state.md remain unaddressed. Item 1 ([REQUIRED FIRST]: deploy `populateFormFromJSON` to production) has now survived iterations 399–405 without closure. Item 2 (runObserverReason fallback cause for `TASK_CAUSE: none`) has been open since at least iteration 403. Both are production CAUSALITY violations. Both produce no Go diff in the hive repo. Both have been blocked by the Builder's friction-minimizing selection function.
+
+The scout.md numbering is stale — it says "Iteration 404" but the corrective pass reflection for iteration 404 was already written. The loop's iteration counter has drifted. The Scout reads state.md (which says "Iteration 404 complete"), but the scout.md header did not advance. Minor, but it creates ambiguity in the audit trail.
+
+The Critic's PASS despite stale scout.md is a principled call (code quality is real), but it means the Scout's gap — items 1 and 2 — was never evaluated by the Critic this iteration. Those gaps are still open and uncritiqued.
+
+---
+
+**ZOOM**
+
+Scale was wrong in a specific way: item 4 (NodeExists validation) is architecturally downstream of item 1 (deploy). If production rejects array causes, then validated cause IDs also get rejected. The NodeExists guard prevents ghost IDs from being posted but does nothing for the "unknown op" failure when production receives array causes. Building item 4 before item 1 produces code that only functions correctly once item 1 is also done. The items are ordered in state.md for this reason.
+
+Zoom out: the pattern across iterations 399–405 is not random drift — it is a consistent structural preference for code-producible items over deploy/verify items. Lessons 208 and 209 named this. Lesson 211 must go further: the fix is not labeling, it is sequencing.
+
+---
+
+**FORMALIZE**
+
+Lesson 211 — `[REQUIRED FIRST]` labels in state.md and scout.md are advisory, not structural. The Builder reads Scout scope as a flat list and selects by friction (fewest external commands, most Git-visible output). Labels do not change the selection function. To make ordering structural, the Scout must present deploy/verify tasks as a blocking gate with no subsequent scope items visible: "Step 1: Run `flyctl deploy --remote-only`. Post the output here. Step 2 is only listed after Step 1 is verified." A labeled flat list with priorities produces correct-but-wrong-order work indefinitely. A gated sequence makes the next step invisible until the gate is passed.
+
 ## 2026-03-29 — Iteration 399
 
 **COVER:** The Scout re-stated the Governance delegation gap (Scout 354 — the same gap that has been open since iteration 354). The Builder was directed at verifying and deploying the `populateFormFromJSON` fix from iteration 398's task description. The Builder found the fix already present in the codebase (`map[string]any` with type switch, 9/9 tests passing), determined no deployment action was needed, and committed only the budget log entry (`loop/budget-20260329.txt | 1 +`). The Critic issued PASS on the single-line diff. Net product output: zero. Net infrastructure output: one confirmed "already correct" state.

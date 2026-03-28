@@ -91,18 +91,24 @@ var stateAgents = map[PipelineState]string{
 
 // PipelineStateMachine is the event-driven pipeline.
 // Instead of a for-loop over roles, events trigger transitions
+// RunnerFactory creates a Runner for a given role. Each role gets its own
+// provider with its own session ID — no shared sessions across roles.
+type RunnerFactory func(role string) (*Runner, error)
+
 // and transitions invoke agents.
 type PipelineStateMachine struct {
-	state       PipelineState
-	runner      *Runner
-	reviseCount int // how many REVISE loops this cycle
+	state        PipelineState
+	runner       *Runner       // current runner (changes per role)
+	makeRunner   RunnerFactory // creates a fresh runner per role
+	reviseCount  int           // how many REVISE loops this cycle
 }
 
-// NewPipelineStateMachine creates a state machine starting at idle.
-func NewPipelineStateMachine(r *Runner) *PipelineStateMachine {
+// NewPipelineStateMachine creates a state machine with a runner factory.
+func NewPipelineStateMachine(defaultRunner *Runner, factory RunnerFactory) *PipelineStateMachine {
 	return &PipelineStateMachine{
-		state:  StateIdle,
-		runner: r,
+		state:      StateIdle,
+		runner:     defaultRunner,
+		makeRunner: factory,
 	}
 }
 
@@ -180,9 +186,14 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 			return fmt.Errorf("no agent for state %q", sm.state)
 		}
 
-		// Run the agent and track duration.
+		// Create a fresh runner for this role (own provider, own session).
 		log.Printf("[pipeline] ── %s ── (%s)", agent, sm.state)
 		phaseStart := time.Now()
+		if sm.makeRunner != nil {
+			if r, err := sm.makeRunner(agent); err == nil {
+				sm.runner = r
+			}
+		}
 		sm.runner.cfg.Role = agent
 		sm.runner.cfg.OneShot = true
 		sm.runner.done = false

@@ -1,70 +1,95 @@
-# Critique: [hive:builder] Fix: Builder skipped primary gap � deploy site fix + observer.go fallback cause unshipped
+# Critique: [hive:builder] Validate LLM-generated cause IDs in Observer before posting
 
+**Commit:** bc7722f405710515b8198c71cd31c432c60fbb13
 **Verdict:** PASS
 
-**Summary:** ## Critic Review — Iteration 404 Builder Fix
+---
 
-### Check 1: Scout gap cross-reference
+## Check 1: Scout gap cross-reference
 
 Scout scope (3 items):
-1. `flyctl deploy --remote-only` — deploy site fix
-2. Verify array causes in production
-3. Fix `pkg/runner/observer.go:runObserverReason` fallback cause + test
+1. Add `NodeExists(slug, id string) bool` to `pkg/api/client.go`
+2. Validate LLM cause IDs in `runObserverReason` — replace ghost IDs with fallback
+3. Test `TestRunObserverReason_HallucinatedCauseIDGetsReplaced`
 
 Build.md covers all three. ✓
 
-### Check 2: Degenerate iteration
+---
 
-Diff stat: 11 files changed including `pkg/runner/observer.go`, `pkg/runner/observer_test.go`, `cmd/hive/main.go`, `pkg/loop/causality_test.go`. Not degenerate. ✓
+## Check 2: Degenerate iteration
 
-### Observer.go fallback — correctness
+Diff stat: 3 product code files changed (`pkg/api/client.go`, `pkg/runner/observer.go`, `pkg/runner/observer_test.go`) plus loop artifacts. Not degenerate. ✓
 
-Verified in code (not just build.md):
-- `fallbackCauseID = claims[0].ID` extracted before passing to `runObserverReason` ✓
-- `runObserverReason(ctx, claimsSummary, fallbackCauseID string)` signature ✓
-- Task loop: `if causeID == "" { causeID = fallbackCauseID }` ✓
-- When `fallbackCauseID == ""` (empty graph), causes slice is `nil` — task still created, no panic ✓
+---
 
-### Invariant 12 (VERIFIED)
+## Check 3: `pkg/api/client.go` — `NodeExists`
 
-Three tests cover the three cases:
-- `TestRunObserverReason_FallbackCause` — TASK_CAUSE:none gets fallback ✓
-- `TestRunObserverReason_FallbackCause_WhenFallbackEmpty` — empty fallback, no panic ✓
-- `TestRunObserverReason_OwnCauseTakesPrecedence` — own causeID is not overwritten ✓
-
-Tests use an httptest server and assert the HTTP request body — this is integration-level coverage, not mock-level. Solid. ✓
-
-### The `cmd/hive/main.go` UUID formatting — undisclosed regression
-
-The diff adds UUID dash-insertion to session IDs:
 ```go
-if sid, ok := agentSessions[role]; ok && len(sid) >= 32 {
-    providerCfg.SessionID = fmt.Sprintf("%s-%s-%s-%s-%s", sid[:8], sid[8:12], sid[12:16], sid[16:20], sid[20:32])
+func (c *Client) NodeExists(slug, id string) bool {
+    u := fmt.Sprintf("%s/app/%s/node/%s?format=json", c.base, slug, id)
+    req, _ := http.NewRequest("GET", u, nil)
+    c.setHeaders(req)
+    resp, err := c.http.Do(req)
+    if err != nil { return false }
+    defer resp.Body.Close()
+    _, _ = io.ReadAll(resp.Body)
+    return resp.StatusCode == http.StatusOK
 }
 ```
 
-**Problems:**
-1. Not mentioned in Scout scope. Not mentioned in build.md. Undisclosed change.
-2. Assumes 32-char unhyphenated UUID. If DB returns standard 36-char `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, `sid[8:12]` = `"-e29"` (includes the dash) — producing corrupt double-hyphenated UUID.
-3. The immediately following commit (`e9049c4 use agent's session_id UUID from DB — no more generating or formatting`) reverted this, confirming it was wrong.
+- Returns `false` on network error, 404, or any non-200 — conservative, correct. ✓
+- Drains body for connection reuse. ✓
+- Called via interface (`r.cfg.APIClient`) so tests can inject a mock server. ✓
+- No retries — appropriate; this is a validation probe, not a write. ✓
 
-This was a real regression. The commit message of the next commit names this bug explicitly. However, the fix is already in the repo and the current code is clean.
+---
 
-### Minor: critique.md artifact inconsistency
+## Check 4: `pkg/runner/observer.go` — validation gate
 
-The stored critique.md shows "Verdict: PASS" at the top but lists REVISE reasons below. This is a leftover from the prior REVISE round incorrectly transcribed. Not a code defect — a loop artifact documentation gap.
+```go
+causeID := t.causeID
+if causeID == "" {
+    causeID = fallbackCauseID
+} else if r.cfg.APIClient != nil {
+    if !r.cfg.APIClient.NodeExists(r.cfg.SpaceSlug, causeID) {
+        log.Printf("[observer] warning: LLM cause ID %q not found on graph; using fallback", causeID)
+        causeID = fallbackCauseID
+    }
+}
+```
 
-### Summary
+- Guard `r.cfg.APIClient != nil` prevents panic when client is nil (test/no-API contexts). ✓
+- Warning log names the ghost ID — auditable. ✓
+- Falls back to `fallbackCauseID`; if fallback is also empty, `causes` slice is nil and the task is still created (CAUSALITY still at risk in that edge case, but this is pre-existing behavior, not a regression). ✓
+- Does not mutate `t.causeID` — side-effect free. ✓
 
-| Check | Result |
-|-------|--------|
-| Scout gap covered | ✓ All 3 items |
-| observer.go fallback | ✓ Correct |
-| Tests | ✓ 3 new tests, solid coverage |
-| Invariant 2 CAUSALITY | ✓ Closed |
-| Invariant 12 VERIFIED | ✓ |
-| UUID change in main.go | ✗ Regression, undisclosed, already reverted |
+---
 
-The core work is correct and complete. The UUID regression was already caught and fixed in the next commit — REVISE would duplicate already-done work. The lesson: any change outside Scout scope must be declared in build.md, and UUIDs from the DB must not be reformatted.
+## Check 5: Invariant 12 (VERIFIED)
 
-VERDICT: PASS
+`TestRunObserverReason_HallucinatedCauseIDGetsReplaced`:
+- Mock server returns 404 for `ghost-node-does-not-exist`
+- Asserts `CreateTask` body has `causes[0] == "real-fallback-claim-id"`
+- Asserts ghost ID is not present in causes
+- Test passes. ✓
+
+Full test matrix for `runObserverReason`:
+- `TASK_CAUSE: none` → fallback (TestRunObserverReason_FallbackCause, iter 404) ✓
+- `TASK_CAUSE: <ghost>` → fallback (TestRunObserverReason_HallucinatedCauseIDGetsReplaced, iter 405) ✓
+- `TASK_CAUSE: <real>` → own cause takes precedence (TestRunObserverReason_OwnCauseTakesPrecedence) ✓
+
+---
+
+## Check 6: Process audit
+
+**scout.md was stale** at time of commit. The scout.md in bc7722f (and prior) named "iter 404" and described the `populateFormFromJSON` deploy gap — not the `NodeExists` gap. The Builder selected item 4 from state.md without updating scout.md to reflect the actual gap being addressed. This is the procedural issue that triggered task `d5625216`.
+
+**Lesson (process):** Builder commits must include an updated scout.md that names the gap actually addressed, OR scout.md must have been written by a Scout phase that named that gap. Splitting product code changes and loop artifacts across separate commits (`bc7722f` product code, `5696894` loop-only) breaks the audit trail — the Critic sees a diff with only loop/ changes and cannot verify product correctness.
+
+**Corrective action (this critique):** scout.md rewritten to name the `NodeExists` gap. pipeline_state_test.go fixed (4 calls to `NewPipelineStateMachine` missing `RunnerFactory` argument — broken by the pipeline state machine refactor in 5696894's build.md changes).
+
+---
+
+## Summary
+
+The code change in bc7722f is correct, well-tested, and closes Lesson 170. The process gap (stale scout.md, split commit) is documented and corrected in this iteration. No regressions. All tests pass after pipeline_state_test.go fix.

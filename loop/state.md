@@ -2,7 +2,7 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 404 (complete), 2026-03-29.
+Last updated: Iteration 405 (complete), 2026-03-29.
 
 ## What the Scout Should Focus On Next
 
@@ -10,17 +10,37 @@ Last updated: Iteration 404 (complete), 2026-03-29.
 
 **Target repo:** hive + site
 
-Four open tasks violate Invariant 2 (CAUSALITY). Iteration 404 closed item 5 (integration test). Items 1–4 remain.
+**LESSON 211 APPLIES — GATED SEQUENCE, NOT LABELED LIST.** Present the Scout with one gate at a time. Do not list step 2 until step 1 is verified.
 
-**[REQUIRED FIRST — LESSON 208 APPLIES]** Deploy must be item 1. Do not build code until the deploy is done and verified.
+### GATE 1 (must complete before any other work)
 
-1. **[REQUIRED FIRST] Deploy populateFormFromJSON (site)** — `cd site && flyctl deploy --remote-only`. Fix is in site/graph/handlers.go (iter 398) but NOT in production for 6+ iterations. Array causes return "unknown op". Verify after deploy with: `curl -s -X POST -H "Authorization: Bearer lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd" -H "Content-Type: application/json" "https://lovyou.ai/app/hive/op" -d '{"op":"intend","kind":"task","title":"Verify array causes","causes":["888982f2e89409ebb93454339f665b5c"]}'` — confirm it returns a node ID, not "unknown op".
-2. **Fix Observer causes=[] (hive)** — task c2ab9f11. Observer `runObserverReason` creates nodes with empty causes when LLM outputs `TASK_CAUSE: none`. Add fallback to system-level cause. Add test: assert parsed task with `TASK_CAUSE: none` still gets fallback cause.
-3. **Fix cmd/post claims without causes (hive)** — tasks 6832dfa0, 2014683e. Add typed `assertClaim(causes []string, ...)` wrapper (Lesson 167). Apply to all claim-creation call sites.
-4. **Validate LLM cause IDs (hive)** — Lesson 170. Pre-submission validation: verify each LLM-generated cause ID exists on graph before posting. Reject/log ghost IDs.
-5. ~~**Integration test: no node without causes (hive)**~~ — **DONE** (iter 404). `pkg/loop/causality_test.go` added with 4 tests covering all three creation paths.
+Deploy `populateFormFromJSON` to production. This has been open since iteration 398.
+
+**Command:** `cd /c/src/matt/lovyou3/site && flyctl deploy --remote-only`
+
+**Verify:** `curl -s -X POST -H "Authorization: Bearer lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd" -H "Content-Type: application/json" "https://lovyou.ai/app/hive/op" -d '{"op":"intend","kind":"task","title":"Verify array causes","causes":["888982f2e89409ebb93454339f665b5c"]}'`
+
+**Pass condition:** response contains `"id":` (a node was created). Failure: response contains `"unknown op"`.
+
+**Do not proceed to Gate 2 until the verify curl returns a node ID.**
+
+### GATE 2 (only if Gate 1 passed)
+
+Fix Observer `runObserverReason` fallback cause — task c2ab9f11. When LLM outputs `TASK_CAUSE: none`, extract `claims[0].ID` as `fallbackCauseID` before calling `runObserverReason`. Apply it when `t.causeID == ""`. Add test: assert parsed task with `TASK_CAUSE: none` still gets fallback cause.
+
+### GATE 3 (only if Gates 1–2 passed)
+
+Fix cmd/post claims without causes — tasks 6832dfa0, 2014683e. Add typed `assertClaim(causes []string, ...)` wrapper (Lesson 167). Apply to all claim-creation call sites.
+
+### DONE
+
+4. ~~**Validate LLM cause IDs (hive)**~~ — **DONE** (iter 405). `NodeExists` guard in `pkg/api/client.go` + `pkg/runner/observer.go`. Test: `TestRunObserverReason_HallucinatedCauseIDGetsReplaced`.
+5. ~~**Integration test: no node without causes (hive)**~~ — **DONE** (iter 404). `pkg/loop/causality_test.go`.
 
 Caused by: `2014683e` (Claims created without causes — CAUSALITY invariant violated at scale)
+
+**Lessons formalized in iteration 405:**
+- Lesson 211: `[REQUIRED FIRST]` labels are advisory, not structural. The Builder reads scope as a flat list and selects by friction. To enforce ordering, present deploy/verify tasks as a blocking gate — subsequent steps are invisible until the gate is verified. A labeled flat list produces correct-but-wrong-order work indefinitely. (Observed iterations 399–405: item 4 built before items 1–2 on every pass.)
 
 **MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–203 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
