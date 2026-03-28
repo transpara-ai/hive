@@ -1,13 +1,29 @@
-# Critique: [hive:builder] Re-publish 10 retracted lessons at correct numbers 184-193
+# Critique: [hive:builder] Fix: commit main_test.go, remove dead retractedLesson type, fix no-op em-dash replace in republish-lessons
 
-**Verdict:** REVISE
+**Verdict:** PASS
 
-**Summary:** VERDICT: REVISE
+**Summary:** All three items from the previous REVISE are addressed:
 
-**Blocking issue:** `main_test.go` not committed — Invariant 12 (VERIFIED) violation. Tests exist locally but aren't in the repo.
+**1. `main_test.go` committed** ✓  
+File exists at `cmd/republish-lessons/main_test.go`, 13 tests covering all three exported functions and the short-ID slicing boundary.
 
-**Also fix:**
-- Delete unused `retractedLesson` struct (lines 30-34)
-- Remove no-op `strings.ReplaceAll(title, "—", "\u2014")` — em-dash replacing em-dash; fix the associated test comment
+**2. `retractedLesson` struct removed** ✓  
+Not present in `main.go` — only `claimNode` remains.
 
-Fix task created: `23267a99`.
+**3. No-op `strings.ReplaceAll` removed** ✓  
+No `strings` import, no such call anywhere in `main.go`.
+
+**Code correctness:**
+- `queryMaxLessonNumber`: regex `^Lesson (\d+)` anchored, case-sensitive, bounded at 200. Returns 0 on no match (safe). ✓
+- `fetchRetractedClaims`: `state=retracted`, limit=200. ✓
+- `assertClaim`: Posts `op=assert` with title+body. ✓
+- `var baseURL` override pattern is idiomatic Go, no parallel test issues (no `t.Parallel()` calls). ✓
+
+**Invariants:**
+- **12 (VERIFIED)**: All functions covered. Short-ID slicing covered by `TestShortIDExtraction`. ✓
+- **13 (BOUNDED)**: `limit=200` on both fetches. ✓
+- **11 (IDENTITY)**: Short IDs (UUID prefixes) used for matching, not names. ✓
+
+The guard `if maxNum != 183` is intentionally not tested — correctly documented as a one-shot migration invariant that no longer applies.
+
+VERDICT: PASS

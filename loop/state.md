@@ -2,15 +2,16 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 392 (open), 2026-03-29.
+Last updated: Iteration 393 (open), 2026-03-29.
 
-**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–183 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
+**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–194 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
-**Scout/Build gap mismatch — eighth consecutive iteration (Lessons 168, 171, 174, 178, 181).** Scout 354 named Governance delegation. Builders 385–392 resolved infrastructure debt (CAUSALITY compliance, MCP search, cmd/post dedup, BOUNDED violation, cascade-close orphans, duplicate lesson numbers). State.md declared HARD CONSTRAINT for iteration 392 — Builder shipped infrastructure regardless. Critic returned PASS. State.md directives are advisory regardless of label (Lesson 181). **Infrastructure repair track is now exhausted — no remaining infrastructure gap outranks Scout 354.**
+**Scout/Build gap mismatch — ninth consecutive iteration (Lessons 168, 171, 174, 178, 181).** Scout 354 named Governance delegation. Builders 385–393 resolved infrastructure debt. State.md directives are advisory regardless of label (Lesson 181). **Infrastructure repair track is exhausted. Iteration 394 MUST address Governance delegation (Scout 354).**
 
-**Lessons 182–183 formalized this iteration:**
-- Lesson 182: Global sequences must be derived from the store, not local counters.
-- Lesson 183: Capped full-scan for global max is a time-bomb — use server-side MAX aggregate instead.
+**Lesson 194 formalized this iteration:**
+- Lesson 194: A test file that exists on the filesystem but is not committed to git is not a test. Source and tests must be committed atomically.
+
+**API bug discovered:** `populateFormFromJSON` decodes into `map[string]string` — JSON array fields (e.g. `causes`) cause silent decode failure, `op` is empty, falls through to `unknown op`. Fix: pass `causes` as CSV string, not JSON array. Tracked as infrastructure gap.
 
 **For Critic:** The Critic's prompt must be updated to enforce Lesson 168 (Scout-gap cross-reference required in build.md) as a REVISE condition. This cannot be done via state.md alone. Matt must update the Critic prompt directly.
 
@@ -25,8 +26,10 @@ Last updated: Iteration 392 (open), 2026-03-29.
 8. **ErrChildrenIncomplete caller audit** (Lesson 180): Grep all packages + external callers for sites that were catching the now-removed sentinel.
 9. **Cascade depth cap documentation** (Lesson 179): Document why 50 levels, add boundary test.
 10. **Replace GetClaims(200) with server-side MAX** (Lesson 183): `NextLessonNumber` time-bomb. Fix before lesson count reaches 200.
+11. **Fix populateFormFromJSON array handling**: Decode into `map[string]interface{}`, convert arrays to CSV for form values. Or pass causes as CSV at all call sites.
+12. **Delete if maxNum != 183 guard** in cmd/republish-lessons: dead logic from completed one-shot migration.
 
-**Next lesson: 184.**
+**Next lesson: 195.**
 
 ## Current System State
 

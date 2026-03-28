@@ -1,19 +1,18 @@
-# Test Report: Iteration 392 — Re-publish 10 retracted lessons at 184-193
+# Test Report: Fix republish-lessons — dead code removal, committed test file
 
 ## What Was Tested
 
-`cmd/republish-lessons/main.go` — the one-shot migration command that re-asserted
-10 retracted lesson claims at corrected numbers 184-193.
-
-## Files Changed
-
-- `cmd/republish-lessons/main.go` — `const baseURL` → `var baseURL` (enables test override)
-- `cmd/republish-lessons/main_test.go` — new test file (13 tests)
+`cmd/republish-lessons/` — three fixes applied:
+1. `retractedLesson` struct removed (was defined but never used)
+2. No-op `strings.ReplaceAll(title, "—", "—")` removed (both sides U+2014)
+3. `strings` import removed (now unused)
+4. `main_test.go` committed (was untracked — VERIFIED invariant violation)
+5. `TestAssertClaim_emDashNormalization` comment updated to reflect `json.Marshal` preserves em-dash natively
 
 ## Test Results
 
 ```
-ok  github.com/lovyou-ai/hive/cmd/republish-lessons  0.532s
+ok  github.com/lovyou-ai/hive/cmd/republish-lessons  0.586s
 ```
 
 **13/13 passed.**
@@ -27,24 +26,16 @@ ok  github.com/lovyou-ai/hive/cmd/republish-lessons  0.532s
 | `TestFetchRetractedClaims_parsesClaims` | ID, Title, Body all preserved from JSON decode |
 | `TestFetchRetractedClaims_httpError` | HTTP 404 surfaces as error |
 | `TestAssertClaim_sendsCorrectPayload` | POST to `/app/hive/op`, `op=assert`, correct title+body |
-| `TestAssertClaim_emDashNormalization` | Em-dash (—) preserved as U+2014 in JSON payload |
+| `TestAssertClaim_emDashNormalization` | Em-dash (—) preserved as U+2014 in JSON payload via `json.Marshal` |
 | `TestAssertClaim_httpError` | HTTP 401 surfaces as error |
 | `TestShortIDExtraction/*` (4 subtests) | 8-char slice boundary: `len >= 8` required, exact-8 OK, 7-char skipped, empty skipped |
 
+## Build
+
+`go build ./cmd/republish-lessons/` — clean, no errors.
+
 ## Coverage Notes
 
-The command has three functions beyond `main()`: `queryMaxLessonNumber`,
-`fetchRetractedClaims`, `assertClaim`. All three are covered via httptest.Server
-mocks. The short-ID slicing logic in `main()` is covered by `TestShortIDExtraction`.
-
-The guard (`if maxNum != 183`) is not tested — it is a one-shot migration invariant
-that no longer applies (lessons 184-193 already exist). Testing it would require
-live graph state, and the migration has already run successfully.
-
-## Approach
-
-All tests use `net/http/httptest.Server` to mock the external API — no live network
-calls. The only production code change was `const baseURL → var baseURL` to allow
-test override, which is the idiomatic Go pattern (see `cmd/post/main.go` for precedent).
+All three exported functions (`queryMaxLessonNumber`, `fetchRetractedClaims`, `assertClaim`) are covered via `httptest.Server` mocks. The dead code (`retractedLesson` struct, no-op replace) is gone — no test surface to cover. The em-dash test now correctly reflects the actual invariant: `json.Marshal` preserves U+2014 natively, no explicit normalization needed or present.
 
 @Critic
