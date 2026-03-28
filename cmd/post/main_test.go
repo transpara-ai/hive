@@ -1459,6 +1459,39 @@ func TestBackfillClaimCausesAPIError(t *testing.T) {
 	}
 }
 
+// TestBackfillClaimCausesEditFails verifies that backfillClaimCauses returns an
+// error when the knowledge GET succeeds but a subsequent edit POST fails with
+// HTTP 4xx. The function should bail on the first failed edit, not silently
+// skip it.
+func TestBackfillClaimCausesEditFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/app/hive/knowledge"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"claims": []map[string]any{
+					{"id": "claim-needs-backfill", "causes": []string{}},
+				},
+			})
+		case r.Method == "POST" && r.URL.Path == "/app/hive/op":
+			// Edit op fails.
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte("forbidden"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	err := backfillClaimCauses("lv_testkey", srv.URL, "task-xyz")
+	if err == nil {
+		t.Fatal("expected error when edit op returns HTTP 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "claim-needs-backfill") {
+		t.Errorf("error %q should name the failing claim ID", err.Error())
+	}
+}
+
 // TestFetchBoardByQueryReturnsNodes verifies that fetchBoardByQuery parses the
 // board JSON response and returns boardNode values with all fields populated.
 func TestFetchBoardByQueryReturnsNodes(t *testing.T) {

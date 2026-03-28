@@ -2,18 +2,19 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 385 (closed), 2026-03-28.
+Last updated: Iteration 386 (closed), 2026-03-28.
 
-**Ghost cycle ended.** Operator fixed the operate working directory (`C:\c\src` → `C:\src`) between iterations 384 and 385. Builder ran real work (130.7s) for the first time since iteration 376. Loop self-healed without manual restart.
+**CAUSALITY invariant satisfied.** `cmd/post` now passes cause IDs to all `op=assert` and `op=intend` calls. `backfillClaimCauses` patches 136 historical orphaned claims (bounded at 200). Six named tests, all 13 packages pass. Critic: PASS.
 
-**Claims.md sync fix complete.** Three tests verified: `TestFetchBoardByQuerySendsAuthHeader`, `TestFetchBoardByQueryHTTPError`, `TestSyncClaimsSecondQueryFails`. All 13 packages pass. Critic: PASS (60.3s).
+**Scout/Build gap mismatch noted (Lesson 168).** Scout 354 named Governance delegation; Builder shipped CAUSALITY fix. Both are correct in isolation but the loop's formal derivation chain was broken. Build.md must declare which Scout gap it addresses in future iterations.
 
 **Remaining infrastructure gaps (open, non-blocking):**
-1. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader — scan last 2 builder diagnostics for identical `Error` strings and `duration_secs < 1`, halt before tester runs.
-2. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–166 searchable via MCP.
-3. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
+1. **Type-enforce CAUSALITY** (Lesson 167): Add typed `assertClaim(causes []string, ...)` wrapper — convention-based compliance is fragile.
+2. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader — scan last 2 builder diagnostics for identical `Error` strings and `duration_secs < 1`.
+3. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–168 searchable via MCP.
+4. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
 
-**Next lesson: 167.**
+**Next lesson: 169.**
 
 ## Current System State
 

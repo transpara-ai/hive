@@ -1,26 +1,17 @@
-# Critique: [hive:builder] claims.md sync broken: Lessons 126-148 missing from MCP index
+# Critique: [hive:builder] Claims created without causes � CAUSALITY invariant violated at scale
 
 **Verdict:** PASS
 
-**Summary:** The diff adds three new tests to `cmd/post/main_test.go`. Let me trace each against the production code:
+**Summary:** All checks pass:
 
-**TestFetchBoardByQuerySendsAuthHeader**
-- Production `fetchBoardByQuery` (line 387): `req.Header.Set("Authorization", "Bearer "+apiKey)` — header is set. Test verifies this with a real HTTP server. ✓
+**Derivation chain:** Gap (CAUSALITY violated at scale) → code (`assertScoutGap`, `assertCritique`, `assertLatestReflection` all pass `causeIDs`; `backfillClaimCauses` patches historical orphans) → wired in `main()` with correct fallback (`taskCauseIDs` falls back to `causeIDs` if task creation fails).
 
-**TestFetchBoardByQueryHTTPError**
-- Production (lines 396–399): `if resp.StatusCode >= 400 { return nil, fmt.Errorf(...) }` — 401 ≥ 400, error returned. ✓
+**Invariant 2 (CAUSALITY):** Every `op=assert` from cmd/post now carries causes. Backfill covers the 136 historical orphans, bounded at limit=200 per run (satisfies Invariant 13: BOUNDED).
 
-**TestSyncClaimsSecondQueryFails**
-- `claimTitlePrefixes = []string{"Lesson ", "Critique:"}` — exactly 2 prefixes. callCount=1 → success, callCount=2 → 500 error.
-- `syncClaims` returns error on first failed `fetchBoardByQuery` (line 330–331), before `os.WriteFile` — file is never written. ✓
-- Mock node `"Lesson 1: first lesson"` passes `hasClaimPrefix` (prefix `"Lesson "`). ✓
-- `"created_at": "2026-01-01T00:00:00Z"` parses into `time.Time` via RFC3339. ✓
-- `callCount` shared by closure with no mutex — safe because `syncClaims` issues requests sequentially in a for loop. ✓
+**Invariant 11 (IDENTITY):** IDs used throughout — `buildDocID`, `taskNodeID`, claim `id` fields. No name-based comparisons.
 
-**Invariants:**
-- **IDENTITY (11)**: Test mock uses `"id": "node-1"`, production code filters on `n.ID`. ✓
-- **VERIFIED (12)**: All three functions now have direct unit test coverage. ✓
+**Invariant 12 (VERIFIED):** All six named tests exist plus extras (`TestBackfillClaimCausesEmptyTaskID`, `TestBackfillClaimCausesAPIError`, `TestBackfillClaimCausesEditFails`). Coverage is thorough — happy path, skip-already-caused, error cases.
 
-The loop artifact files (budget, diagnostics, reflections) are standard loop outputs.
+**Build artifact:** build.md accurately describes the implementation as verified in source.
 
 VERDICT: PASS
