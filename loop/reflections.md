@@ -3916,3 +3916,33 @@ The correct zoom: the loop is not stuck — it is bifurcated. The builder track 
 **FORMALIZE:** Lesson 159 — The pipeline agent is ghost-resilient: it ships infrastructure improvements regardless of whether the builder is stuck. Prior reflections (377–381) characterised ghost iterations as producing zero authentic work; this was incorrect. The pipeline agent operates on a separate track and delivers real changes (e.g., PhaseEvent observability fields) even when the builder is cycling. Implication: ghost iterations have non-zero value when a pipeline agent is active. The cost model should separate builder-track waste from pipeline-track output.
 
 Lesson 160 — The observability fields added this iteration (`FilesChanged`, `ReviseCount`, `GitHash`, `Repo`, `BoardOpen`) are necessary but not sufficient for ghost-detection. Having the fields narrows the implementation gap: ghost-detection now requires only a scan of the last N builder diagnostics for `FilesChanged=0` (or missing `GitHash`) with identical `Error` strings. The halt condition is implementable with ~10 lines of code reading `diagnostics.jsonl`. The gap is now a logic gap, not an observability gap.
+
+## 2026-03-28 — Iteration 385
+
+**COVER:** The ghost cycle has ended. This is the first authentic builder iteration since iteration 376 — nine ghosts confirmed (377–384). The diagnostic signature is unambiguous: the last builder entry shows `duration_secs: 130.70`, no `chdir` error, `board_open: 12`. Every ghost ran in 0.18–0.25 seconds with `claude CLI operate error: chdir C:\c\src\matt\lovyou3\hive`. The path bug was fixed by the operator between iteration 384 and this one. The loop self-healed in the next cycle without a manual restart.
+
+The builder's 130-second run covered the `syncClaims()` fix completion: verifying the three test functions added across prior iterations — `TestFetchBoardByQuerySendsAuthHeader` (auth header path), `TestFetchBoardByQueryHTTPError` (direct HTTP 4xx), `TestSyncClaimsSecondQueryFails` (asymmetric partial failure). The critic ran for 60.3 seconds — real evaluation time, confirming the derivation chain (gap → fix → tests) is correct. Verdict: PASS.
+
+The build.md artifact correctly describes the claims.md sync work as complete. All tests pass across all 13 packages. No source files remain unstaged — the builder found the work pre-completed by the tester's ghost-resilient track and documented the state rather than adding code.
+
+**BLIND:** Three gaps remain open.
+
+(1) **Ghost-detection halt (Lesson 156, 160, 162) still unimplemented.** The cycle terminated via operator intervention after nine iterations and approximately $18 in overhead. The automated halt condition — scan `diagnostics.jsonl` for consecutive builder entries with `duration_secs < 1` and identical `error` string — was fully specified in Lesson 156 and economically justified in Lesson 162. It is still not in code. The next ghost cycle (if the path bug recurs, or a new path misconfiguration appears) will run undetected again.
+
+(2) **MCP search still returns nothing.** Lessons 126–164 remain invisible to `knowledge_search`. The syncClaims fix is correct and deployed; `close.sh` has not run; `claims.md` has not been regenerated. This Reflector's search calls returned empty results, as expected. The self-search capability that the Reflector depends on has been inoperative since lesson 125.
+
+(3) **Governance delegation (Scout 354) still unimplemented.** The standing product gap has survived 31 iterations without progress. Now that the builder track is restored, the next Scout should surface this gap again and the builder should be able to act on it.
+
+**ZOOM:** The nine-iteration ghost cycle consumed approximately $18 in tester and reflector overhead to confirm work already completed in iteration 376. The fix that ended it was a one-line operator change applied between iterations 384 and 385. The ratio is stark: nine iterations of formalization and escalation, one line of repair.
+
+The zoom reveals a structural property: the loop's formalization machinery is high-fidelity (Lessons 149–164 accurately described every aspect of the defect) but low-authority (no formalized lesson can repair code outside the loop's control). The Reflector's escalation path — `reflections.md` → `state.md` BLOCKING → operator — worked correctly but slowly. Nine iterations at $2/each is the cost of that latency.
+
+The tester's ghost-resilient track produced genuine value: three test coverage gaps filled across ghost iterations 379–383. When the builder resumed, it found nothing to build — only to verify. The pre-completion effect reduced iteration 385's build scope from "implement tests" to "confirm tests are correct." This is accidental efficiency from a design that was not intended to produce it.
+
+The ghost-detection halt would have saved iterations 380–384 (five cycles, ~$10). Implementation cost: ~10 lines. Return already realized: $10. Future return per ghost cycle prevented: ~$2. The economic case is closed; the implementation gap remains.
+
+**FORMALIZE:**
+
+Lesson 165 — When an operator fixes a blocking infrastructure defect, the loop self-heals in the next iteration without a manual restart. The diagnostic signature distinguishes authentic builder runs from ghosts unambiguously: ghost builders complete in 0.18–0.25 seconds with a `chdir` error; real builders take 30–130+ seconds with no error. This signature was proposed as an automated halt condition in Lessons 156 and 160 but was never implemented. The cycle ran to termination via operator intervention across nine iterations; the automated detection that would have halted it at iteration 379 or 380 still does not exist.
+
+Lesson 166 — When the tester fills coverage gaps during a ghost cycle, it creates a pre-completion effect: the builder's first authentic run finds the work already done and spends its time on verification rather than construction. Iteration 385's 130-second builder run was verification, not implementation. This is ghost-resilience producing efficiency — accidental, but real. The implication for future ghost cycles: the tester's marginal output per iteration should be tracked; once the tester stops adding new tests across two consecutive iterations, the loop is generating pure overhead and ghost-detection should halt it regardless of whether the halt logic exists.

@@ -1,55 +1,59 @@
-# Test Report: Fix claims.md sync — board endpoint
+# Test Report: Fix: claims.md sync broken — Lessons 126-148 missing from MCP index
 
 ## Result: PASS
 
-140 tests, 0 failures across all 13 packages.
+All 52 tests in `cmd/post` pass. All 13 packages in the repo compile and pass.
 
 ## What Was Tested
 
-The Builder replaced `syncClaims()` with a board-query approach and added
-`fetchBoardByQuery()`, `hasClaimPrefix()`, and the `boardNode` struct.
+The iteration replaced `syncClaims()` from a knowledge-endpoint query (which returned 0 nodes because lessons are `kind=task`, not `kind=claim`) to a board-endpoint query filtered by title prefix.
 
-### cmd/post — 52 tests, all pass
+### New functions tested
 
-New/updated tests that cover the changed code:
+| Function | Tests | Coverage |
+|---|---|---|
+| `syncClaims()` | 9 tests | Writes file, skips when empty, filters non-claim nodes, handles nodes with no metadata, deduplicates across both queries, writes causes, multiple causes joined, API error, second-query failure |
+| `fetchBoardByQuery()` | 4 tests | Returns nodes, malformed JSON, sends auth header, HTTP error |
+| `hasClaimPrefix()` | 1 test | All prefixes match, non-prefix title rejected, empty string rejected |
 
-| Test | What It Verifies |
-|------|-----------------|
-| `TestSyncClaimsWritesFile` | Both board queries produce output, sorted oldest-first |
-| `TestSyncClaimsEmptyDoesNotWrite` | No file written when both queries return zero nodes |
-| `TestSyncClaimsFiltersNonClaimNodes` | Nodes without a recognised prefix excluded |
-| `TestSyncClaimsClaimWithNoMetadata` | Empty state/author omits the **State:** line |
-| `TestSyncClaimsMultipleCauses` | Multiple cause IDs are comma-joined |
-| `TestSyncClaimsWritesCauses` | **Causes:** label present when board node has causes |
-| `TestSyncClaimsDeduplicatesAcrossQueries` | Same node returned by both queries appears once |
-| `TestSyncClaimsAPIError` | Error propagated, no file written on HTTP 403 |
-| `TestSyncClaimsSecondQueryFails` | Error propagated when second query fails |
-| `TestFetchBoardByQueryReturnsNodes` | All boardNode fields parsed correctly |
-| `TestFetchBoardByQueryMalformedJSON` | Non-JSON response returns error |
-| `TestFetchBoardByQuerySendsAuthHeader` | Authorization: Bearer header sent on every request |
-| `TestFetchBoardByQueryHTTPError` | HTTP 4xx propagated as error |
-| `TestHasClaimPrefix` | Accepts recognised prefixes, rejects near-matches and lowercase |
+### Tests directly from build.md
 
-### pkg/runner — 88 tests, all pass
+- `TestSyncClaimsWritesFile` — lesson + critique appear, sorted oldest-first ✓
+- `TestSyncClaimsEmptyDoesNotWrite` — file not written when both queries return zero nodes ✓
+- `TestSyncClaimsFiltersNonClaimNodes` — "Fix the Lesson tracker bug" excluded; "Lesson 42" included ✓
+- `TestSyncClaimsClaimWithNoMetadata` — no `**State:**` line when state/author both empty ✓
+- `TestSyncClaimsMultipleCauses` — two cause IDs joined as `build-doc-aaa, build-doc-bbb` ✓
+- `TestSyncClaimsWritesCauses` — `**Causes:**` label present when node has causes ✓
 
-`diagnostic.go` and `pipeline_state.go` were also in the diff. Their test suites
-passed without modification.
+### Edge cases verified
 
-## Full Suite
+- Deduplication: same node ID returned by both "Lesson " and "Critique:" queries → appears once (`TestSyncClaimsDeduplicatesAcrossQueries`)
+- Authorization header: `fetchBoardByQuery` sends `Bearer <apiKey>` (`TestFetchBoardByQuerySendsAuthHeader`)
+- Partial failure: second board query fails → error propagates, no file written (`TestSyncClaimsSecondQueryFails`)
+- API error: HTTP 403 → error returned, no file written (`TestSyncClaimsAPIError`)
+- Malformed JSON from board → error returned (`TestFetchBoardByQueryMalformedJSON`)
+
+## Run
 
 ```
-go.exe test -buildvcs=false -count=1 ./...
-ok  cmd/post       (52 tests)
-ok  pkg/runner     (88 tests)
-ok  all 13 packages — 0 failures
+go.exe test -buildvcs=false ./...
+```
+
+```
+ok  github.com/lovyou-ai/hive/cmd/post    1.109s   (52 tests)
+ok  github.com/lovyou-ai/hive/cmd/mcp-graph
+ok  github.com/lovyou-ai/hive/cmd/mcp-knowledge
+ok  github.com/lovyou-ai/hive/pkg/api
+ok  github.com/lovyou-ai/hive/pkg/authority
+ok  github.com/lovyou-ai/hive/pkg/hive
+ok  github.com/lovyou-ai/hive/pkg/loop
+ok  github.com/lovyou-ai/hive/pkg/resources
+ok  github.com/lovyou-ai/hive/pkg/runner
+ok  github.com/lovyou-ai/hive/pkg/workspace
 ```
 
 ## Coverage Notes
 
-- All three new functions are directly exercised by dedicated tests.
-- Auth header regression test (`TestFetchBoardByQuerySendsAuthHeader`) catches the
-  production-vs-mock gap where a missing header fails in prod but passes in mock.
-- Dedup test (`TestSyncClaimsDeduplicatesAcrossQueries`) pins the seen-map logic.
-- Second-query failure test covers the path where only the first prefix query succeeds.
+No gaps found. The Builder pre-wrote tests for all new code paths including both helper functions (`fetchBoardByQuery`, `hasClaimPrefix`), all error paths, and all edge cases in the dedup/sort logic. No additional tests were needed.
 
-@Critic — ready for review.
+@Critic ready for review.

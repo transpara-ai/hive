@@ -2,22 +2,25 @@
 
 **Verdict:** PASS
 
-**Summary:** All tests pass. Here is my audit:
+**Summary:** The diff adds three new tests to `cmd/post/main_test.go`. Let me trace each against the production code:
 
-**Derivation chain:** The gap was that `syncClaims` used `/knowledge?tab=claims` which returned 0 results because Lessons/Critiques are stored as `kind=task` on the board, not `kind=claim` on the knowledge lens. The fix switches to `/board?q=<prefix>` with a client-side title-prefix filter and a dedup map (for the two-query fan-out).
+**TestFetchBoardByQuerySendsAuthHeader**
+- Production `fetchBoardByQuery` (line 387): `req.Header.Set("Authorization", "Bearer "+apiKey)` — header is set. Test verifies this with a real HTTP server. ✓
 
-**Correctness:**
-- `url.QueryEscape` is used correctly on the query param — no injection risk.
-- `seen` map by node ID prevents duplication when both queries return the same node.
-- `hasClaimPrefix` filter is applied _after_ the API call, guarding against board search returning false positives (e.g. "Fix the Lesson tracker bug"). This is exactly right.
-- `time.Time` in `boardNode.CreatedAt` — JSON `"2026-03-01T00:00:00Z"` unmarshals into `time.Time` correctly via Go's standard `encoding/json` (RFC3339 is the default format).
-- Sort oldest-first is correct.
-- `TestSyncClaimsEmptyDoesNotWrite` correctly tests _both_ prefixes returning empty (the test server returns `{"nodes":[]}` for any path, covering both `q=Lesson+` and `q=Critique%3A` calls).
+**TestFetchBoardByQueryHTTPError**
+- Production (lines 396–399): `if resp.StatusCode >= 400 { return nil, fmt.Errorf(...) }` — 401 ≥ 400, error returned. ✓
 
-**Invariant 11 (IDs not names):** `seen` map keys on `n.ID` — correct. Dedup is by ID, not title.
+**TestSyncClaimsSecondQueryFails**
+- `claimTitlePrefixes = []string{"Lesson ", "Critique:"}` — exactly 2 prefixes. callCount=1 → success, callCount=2 → 500 error.
+- `syncClaims` returns error on first failed `fetchBoardByQuery` (line 330–331), before `os.WriteFile` — file is never written. ✓
+- Mock node `"Lesson 1: first lesson"` passes `hasClaimPrefix` (prefix `"Lesson "`). ✓
+- `"created_at": "2026-01-01T00:00:00Z"` parses into `time.Time` via RFC3339. ✓
+- `callCount` shared by closure with no mutex — safe because `syncClaims` issues requests sequentially in a for loop. ✓
 
-**Invariant 12 (VERIFIED):** Six `TestSyncClaims*` tests covering: happy path (both prefix types), empty (no write), prefix filter, no metadata, API error, multiple causes, causes-written. New `TestSyncClaimsFiltersNonClaimNodes` is a clean addition that exercises the exact guard path. Coverage is thorough.
+**Invariants:**
+- **IDENTITY (11)**: Test mock uses `"id": "node-1"`, production code filters on `n.ID`. ✓
+- **VERIFIED (12)**: All three functions now have direct unit test coverage. ✓
 
-**No concerns.** The `TestSyncClaimsAPIError` test still sends to `/app/hive/board` path (any path returns 403 in that test), so it correctly exercises the error path through `fetchBoardByQuery`.
+The loop artifact files (budget, diagnostics, reflections) are standard loop outputs.
 
 VERDICT: PASS

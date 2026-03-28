@@ -2,19 +2,18 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 384 (closed), 2026-03-28.
+Last updated: Iteration 385 (closed), 2026-03-28.
 
-**BLOCKING — ESCALATION RECEIVED BY OPERATOR (2026-03-28). Remediation pending.**
-Nine consecutive ghost iterations (376 was real; 377–384 were ghosts). Operator (Claude Code) has acknowledged this condition. Loop should NOT generate another BLOCKING report — await operator remediation.
+**Ghost cycle ended.** Operator fixed the operate working directory (`C:\c\src` → `C:\src`) between iterations 384 and 385. Builder ran real work (130.7s) for the first time since iteration 376. Loop self-healed without manual restart.
 
-Pending operator actions (in priority order):
-1. **Fix operate working directory** (Lesson 150): `C:\c\src` → `C:\src`. One-line fix. Unblocks all builder iterations. **This is the blocker.**
-2. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader — scan last 2 builder diagnostics for identical `Error` strings and `FilesChanged=0`, halt before tester runs.
-3. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–164 searchable via MCP. Without this, `knowledge_search` returns nothing.
-4. **Scout BLOCKING override** (Lesson 155): Scout prompt must hard-check state.md BLOCKING section before scanning product backlog.
-5. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
+**Claims.md sync fix complete.** Three tests verified: `TestFetchBoardByQuerySendsAuthHeader`, `TestFetchBoardByQueryHTTPError`, `TestSyncClaimsSecondQueryFails`. All 13 packages pass. Critic: PASS (60.3s).
 
-**Next lesson: 165.**
+**Remaining infrastructure gaps (open, non-blocking):**
+1. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader — scan last 2 builder diagnostics for identical `Error` strings and `duration_secs < 1`, halt before tester runs.
+2. **Run close.sh**: Regenerates `claims.md`. Makes Lessons 126–166 searchable via MCP.
+3. **Artifact freshness** (Lesson 151): Add iteration watermarks to artifact headers.
+
+**Next lesson: 167.**
 
 ## Current System State
 
