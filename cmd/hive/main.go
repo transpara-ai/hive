@@ -251,6 +251,17 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
+	// Look up agent IDs from the DB so each role gets a persistent session.
+	// The agent's DB ID IS its session ID — one identity, one source of truth.
+	agentSessions := map[string]string{} // role → agent DB ID
+	if client != nil {
+		if agents, err := client.ListAgents(space); err == nil {
+			for _, a := range agents {
+				agentSessions[a.Name] = a.ID
+			}
+		}
+	}
+
 	// Create a runner that all state machine transitions use.
 	makeRunner := func(role string) (*runner.Runner, error) {
 		model := runner.ModelForRole(role)
@@ -258,7 +269,10 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			Provider:     "claude-cli",
 			Model:        model,
 			MaxBudgetUSD: budget,
-			SessionID:    roleSessionID(space, role), // warm if available, cold fallback on collision
+		}
+		// Agent's DB ID = session ID. Persistent because the agent is persistent.
+		if sid, ok := agentSessions[role]; ok {
+			providerCfg.SessionID = sid
 		}
 		if mcpConfigPath != "" {
 			providerCfg.MCPConfigPath = mcpConfigPath
@@ -467,17 +481,6 @@ func writeDaemonStatus(path, line string) {
 
 // writeMCPConfig generates a temporary MCP config JSON file pointing at the
 // knowledge server. Returns the absolute path, or "" if it can't be created.
-// roleSessionID generates a deterministic UUID v5 for a pipeline role session.
-// Same space+role always gets the same UUID — enables --resume across runs.
-func roleSessionID(space, role string) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("hive:%s:%s", space, role)))
-	var uuid [16]byte
-	copy(uuid[:], h[:16])
-	uuid[6] = (uuid[6] & 0x0f) | 0x50 // version 5
-	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
-}
-
 func writeMCPConfig(hiveDir string, repoMap map[string]string) string {
 	if hiveDir == "" {
 		return ""
