@@ -2,11 +2,11 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 399 (complete), 2026-03-29.
+Last updated: Iteration 400 (complete), 2026-03-29.
 
-**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–200 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
+**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–201 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
-**Scout/Build gap mismatch — fifteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197).** Scout 354 named Governance delegation. Builders 385–399 resolved infrastructure debt and verified already-done tasks. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 400 MUST address Governance delegation (Scout 354). To make this binding: (a) update the Scout prompt to refuse gap generation if the prior gap is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
+**Scout/Build gap mismatch — sixteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197, 201).** Scout 354 named Governance delegation. Builders 385–400 resolved infrastructure debt and verified already-done tasks. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 401 MUST address Governance delegation (Scout 354) OR deploy populateFormFromJSON fix to production. To make Governance binding: (a) update the Scout prompt to refuse new gaps if Scout 354 is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
 
 **populateFormFromJSON fix NOT deployed in production.** Confirmed iteration 399: assert op with JSON array causes returns "unknown op" in production; CSV format succeeds. The fix is in site/graph/handlers.go but has not been deployed to Fly.io. Iteration 400 must deploy this before any LLM-driven ops with array causes will work.
 
@@ -27,6 +27,9 @@ Last updated: Iteration 399 (complete), 2026-03-29.
 **API bug NOTE:** `populateFormFromJSON` fix is in local code but NOT deployed to production (confirmed iter 399: array causes return "unknown op" in production). Use CSV format for causes until `cd site && flyctl deploy --remote-only` is run and verified.
 
 **For Critic:** The Critic's prompt must be updated to enforce Lesson 168 (Scout-gap cross-reference required in build.md) as a REVISE condition. This cannot be done via state.md alone. Matt must update the Critic prompt directly.
+
+**Lessons formalized in iteration 400:**
+- Lesson 201: A lesson formalized in iteration N and violated in iteration N+1 proves archive reach, not behavioral reach. Lesson 200 (degenerate iterations must REVISE) was written in iteration 399. Iteration 400 produced an identical degenerate diff; the Critic PASSed again. Five lessons now converge on the same root cause (168, 171, 197, 200, 201): the Critic prompt has not been updated. The fix is a single prompt edit, not a codebase change. The Reflector cannot enforce; the Critic checklist enforces.
 
 **Lessons formalized in iteration 399:**
 - Lesson 200: Degenerate iterations (diff stat: loop-artifact-only, e.g. `loop/budget-*.txt | 1 +`) must trigger Critic REVISE, not PASS. When a Builder finds a task already done, two paths are valid: (a) verify production state explicitly via an endpoint check — not local code — and confirm or deploy; or (b) pivot to the open Scout gap. A Critic PASS on a degenerate iteration ratifies drift. Production confirmation ≠ local code correctness. Confirmed this iteration: `populateFormFromJSON` fix is in local code but NOT deployed; production rejects array causes while local tests pass.
@@ -49,7 +52,7 @@ Last updated: Iteration 399 (complete), 2026-03-29.
 12. **Delete if maxNum != 183 guard** in cmd/republish-lessons: dead logic from completed one-shot migration.
 13. ~~**Verify board API respects limit param**~~ — **CONFIRMED + FIXED** (iter 397, Lesson 198).
 
-**Next lesson: 201.**
+**Next lesson: 202.**
 
 ## Current System State
 

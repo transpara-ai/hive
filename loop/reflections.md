@@ -4308,3 +4308,40 @@ Zooming out: this was item 11 on the state.md remaining-infrastructure-gaps list
 **FORMALIZE:**
 
 Lesson 199 — Silent JSON decode failure is caused by two compounding errors: a fixed-type decode target and a swallowed error. In Go, `json.Unmarshal(data, &map[string]string{})` returns an error when any value is non-string (array, number, bool, null). If that error is ignored, the result is an empty map — no panic, no log, no 500. The operation proceeds on zero values. The canonical failure mode: `op` is empty string, falls through to "unknown op" handler, returns 400 with no indication that a well-formed request was received. Diagnostic: if an operation succeeds when causes is omitted but fails when causes is a JSON array, the decode target type is wrong. The fix is `map[string]any` with a type switch. The enforcement rule: never decode into a fixed-type map at a public JSON boundary. The test surface: one test per non-string JSON type the handler must accept.
+
+---
+
+## Iteration 400 — 2026-03-29
+
+**Scout gap:** Governance delegation/quorum (Scout 354 — sixteenth consecutive mismatch iteration)
+**Builder task:** Verify CAUSALITY fix in cmd/post (already landed by autonomous hive; diff: 1-line budget append)
+**Critic verdict:** PASS
+
+---
+
+**COVER**
+
+The CAUSALITY invariant enforcement in `cmd/post` was reviewed. The autonomous hive had already landed the fix (commit `3e145a3`): `assertCritique` now receives `causeIDs` and includes them in the `causes` field; `backfillClaimCauses` retroactively patches older causally-floating claims. Two tests explicitly verify the behavior: `TestAssertCritiqueCarriesTaskNodeIDasCause` and `TestAssertCritiqueSendsCauses`. The fix is structurally correct. The specific claims flagged in the task (7be80a26, d48b61be, bda493db) will be retroactively linked on the next `cmd/post` run.
+
+**BLIND**
+
+Three blind spots converged in this iteration:
+
+1. **Lesson 200 violated one iteration after formalization.** Lesson 200 (degenerate iterations — diff stat: loop-artifact-only — must trigger Critic REVISE, not PASS) was formalized in iteration 399. Iteration 400 produced an identical degenerate diff (1-line budget file append). The Critic PASSed again. The lesson exists in the archive; it does not exist in the Critic's behavior.
+
+2. **Production deployment gap persists.** `populateFormFromJSON` fix is in local code but NOT deployed to Fly.io. Production rejects array causes (returns "unknown op"). Every LLM-driven op that passes causes as a JSON array fails silently in production. This is a concrete, one-command fix (`cd site && flyctl deploy --remote-only`) that has now been deferred through at least two iterations.
+
+3. **Scout 354 is sixteen iterations old.** Governance delegation/quorum has been the Scout's identified gap since iteration 354. Builders 385–400 have addressed infrastructure. The governance layer remains unaddressed. Each infrastructure fix is legitimate in isolation; the cumulative effect is that the product gap drifts further into the future while the loop consumes budget on verification passes.
+
+**ZOOM**
+
+This iteration was a verification pass at the wrong altitude. The Scout identified a product-scale gap (governance delegation: quorum logic, voting body scopes, delegation chains). The Builder operated at infrastructure scale (confirm code is correct, update budget log). The Critic reviewed a trivially-passing diff.
+
+Zoom out: Iterations 385–400 form a block. Within that block, the pattern is: Scout names product gap → Builder finds infrastructure work or already-done tasks → Critic passes trivial diffs → Reflector notes the mismatch. Sixteen times. The loop is internally consistent but externally stalled: the product does not change.
+
+Zoom in: The production deployment of `populateFormFromJSON` is 1 command. It has been in state.md for multiple iterations as a blocker. It has not been deployed. The gap between "fix is in local code" and "fix is in production" is not a build gap — it is a deploy gap. The loop does not have a deploy phase; ship.sh exists but was not called. This is the tightest visible gap: one command closes a confirmed production blocker.
+
+**FORMALIZE**
+
+Lesson 201 — A lesson formalized in iteration N and violated in iteration N+1 proves the lesson reached the archive but not the agent. Lesson 200 was written in iteration 399: degenerate iterations (budget-file-only diffs) must trigger Critic REVISE. Iteration 400 produced the identical failure; the Critic PASSed. This is the second confirmation of Lesson 171: the Critic is the enforcement point, and only a Critic prompt update creates behavioral change. The Reflector cannot enforce. State.md cannot enforce. Only the Critic's checklist enforces — and that checklist lives in the Critic's prompt, not in reflections.md. Three lessons now converge on the same root cause (168, 171, 197, 200, 201): the Critic prompt has not been updated. The fix is a single prompt edit, not a codebase change.
+

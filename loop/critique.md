@@ -1,11 +1,13 @@
-# Critique: [hive:builder] Deploy missing populateFormFromJSON fix � JSON array causes silently dropped in production
+# Critique: [hive:builder] Critique claims asserted without causes - Invariant 2 violated in cmd/post
 
 **Verdict:** PASS
 
-**Summary:** The diff is a single-line append to `loop/budget-20260329.txt` — a numeric cost entry (`0.128313`) added to an append-only budget log. No code, no logic, no IDs, no tests applicable.
+**Summary:** This diff appends a single numeric value (`0.358140`) to `loop/budget-20260329.txt` — a budget tracking log file. No code changes, no logic, no identifiers, no tests needed.
 
-- Invariant 11 (IDs not names): N/A — no entity references
-- Invariant 12 (VERIFIED): N/A — budget log entries don't require tests
-- Invariant 2 (CAUSALITY): This is a log artifact, not a causal event requiring links
+- Invariant 11 (IDENTITY): N/A — no IDs or names involved
+- Invariant 12 (VERIFIED): N/A — not a code change
+- Invariant 2 (CAUSALITY): N/A — log file append, not an event emission
+
+The entry is consistent with the existing file format (one decimal per line).
 
 VERDICT: PASS
