@@ -1,27 +1,26 @@
-# Critique: [hive:builder] Replace GetClaims(200) with server-side MAX before lesson count hits cap
+# Critique: [hive:builder] cmd/post fetchBoardByQuery bounded at 65 results — claims.md missing 70+ lessons, MCP knowledge index stale
 
 **Verdict:** PASS
 
-**Summary:** `strings` is still used elsewhere in client.go — correct, no orphaned import.
+**Summary:** ## Critic Review
 
-**Derivation chain audit:**
+**Derivation chain**: Gap (65-node default truncates 110+ claims) → Plan (add `limit=500` constant to board query URL) → Code (one constant, one `fmt.Sprintf` change) → Test (two new test cases). Clean and direct.
 
-- **Gap**: `NextLessonNumber` used `GetClaims(200)` — at lesson 201+ the scan truncates, producing duplicate numbers. Invariant 13 (BOUNDED) violated.
-- **Plan**: Add `MaxLessonNumber` SQL aggregate on the server; expose as `?op=max_lesson`; rewrite client to call it.
-- **Code**: Server (`store.go`, `handlers.go`) and client (`client.go`) match the plan exactly.
-- **Tests**:
-  - Client: 4 cases — server returns max, empty (0), API error, malformed JSON. All correct.
-  - Server: 2 DB tests — `TestMaxLessonNumberEndpoint`, `TestMaxLessonNumberEndpointEmpty`. DB tests skip locally, run in CI.
-  - Reflector: `TestRunReflectorReasonLessonNumberFromGraph` updated to mock `op=max_lesson`.
-  - `parseLessonNumber` deleted (dead code); its test deleted with it — correct, no orphan.
+**Correctness**:
+- URL construction is correct: `url.QueryEscape(q)` handles the query string, `limit` is a typed integer constant — no injection risk.
+- `boardQueryLimit = 500` is well above the documented ~200 current count and has a clear rationale comment.
+- The `strconv.Atoi` with `_` for error in the test is intentional: a non-numeric or empty `gotLimit` yields 0, which fails the `< 200` guard with a useful message.
 
-**Invariant checks:**
-- **11 (IDENTITY)**: Not applicable here (lesson numbers, not entity IDs).
-- **12 (VERIFIED)**: Every changed path has a test.
-- **13 (BOUNDED)**: Fixed — SQL aggregate is O(1), no truncation at any count.
-- **2 (CAUSALITY)**: Build.md traces the derivation clearly.
-- **14 (EXPLICIT)**: `op=max_lesson` is declared in both handler and client — no inferred coupling.
+**Tests (Invariant 12 — VERIFIED)**:
+- `TestFetchBoardByQuerySendsLimit`: hits a real test server, captures the `limit` param, asserts presence and minimum floor of 200. This is a proper regression guard against silent truncation.
+- `"Lesson: 2026-03-27"` case in `TestHasClaimPrefix`: documents that the colon-not-space distinction already rejects malformed date titles. Correct — `hasClaimPrefix` checks for `"Lesson "` (space at index 6), and the colon variant is index 6.
 
-No issues found.
+**Invariant 13 (BOUNDED)**: Directly resolved. Scope is now explicit in both code and comment.
+
+**Invariant 11 (IDs not names)**: Not implicated — no name-based matching added.
+
+**Simplicity**: Minimal footprint. No new abstractions, no speculative design.
+
+**No issues found.**
 
 VERDICT: PASS

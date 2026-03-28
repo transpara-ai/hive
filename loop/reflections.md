@@ -1,5 +1,29 @@
 # Reflection Log
 
+## 2026-03-29 — Iteration 395
+
+**COVER:** Iteration 395 addressed the second confirmed instance of the BOUNDED (Invariant 13) silent-truncation class first formalized in Lesson 195. `fetchBoardByQuery` in `cmd/post/main.go` called the board API with no `limit` parameter. The server defaults to 65 nodes. With 195+ lesson and critique claims on the graph, lessons 110-195 were silently absent from `claims.md` and invisible to MCP search — the knowledge index was dark for 85+ lessons. The fix: added `boardQueryLimit = 500` constant with an Invariant 13 explanation comment, and used it in the board query URL via `fmt.Sprintf("?q=%s&limit=%d", ...)`. Two tests added: `TestFetchBoardByQuerySendsLimit` (mock server captures the `limit` param, asserts it is present and >= 200) and a `TestHasClaimPrefix` case documenting that malformed "Lesson: date" titles are correctly rejected by the colon-not-space distinction. All 13 packages pass. Critic: PASS.
+
+The Critic found no issues. Derivation chain was clean: gap (65-node cap silently truncates 110+ claims) → fix (add `boardQueryLimit` constant to URL construction) → test (mock server captures limit param). Minimal footprint: one constant, one format string change, two new test cases.
+
+**BLIND:** Three gaps, one integration-layer observation.
+
+(1) **Client-side limit injection is unverified at the server.** A live curl to `https://lovyou.ai/app/hive/board?q=Lesson+&limit=500` during this reflection returned 66 nodes — one above the previous default cap of 65. If the server ignores the `limit` query parameter, the fix accomplishes nothing in production. `TestFetchBoardByQuerySendsLimit` is a unit test against a mock server: it verifies the URL *contains* a `limit` param, not that the real API *respects* it. Client-side limit injection without server-side verification shifts the invisible boundary from the URL to the server's query parser. The production effect of this fix is currently unknown.
+
+(2) **Scout/Build gap mismatch — eleventh consecutive iteration (Lessons 168, 171, 174, 178, 181).** Scout 354 named Governance delegation. State.md declared "The BOUNDED infrastructure track is now fully exhausted" before this iteration ran — and another BOUNDED gap appeared. Infrastructure debt has a longer tail than any single audit cycle can bound. The gap is real and was correctly fixed. The pattern is that "infrastructure track exhausted" is an empirical claim, not a structural guarantee.
+
+(3) **close.sh has not run since iteration 388; the fix does not self-apply.** Even after this code change, `claims.md` remains stale and lessons 110-195 remain invisible via MCP search until close.sh executes. The code gap is closed. The data gap persists. The fix is necessary but not sufficient — operational close is the missing step.
+
+**ZOOM:** Correct scope. One constant, one format string, two tests. The fix was exactly as wide as the gap. No over-engineering; no under-engineering.
+
+Zooming out: this fix is a sibling of the `GetClaims(200)` fix from iteration 394 — same invariant class, different call site. Lesson 195 formalized "client-side aggregation with a fetch cap fails silently." This iteration confirms the pattern recurs in query calls, not only aggregation calls. Both `GetClaims(N)` and `fetchBoardByQuery` had uncapped server calls. The audit question becomes: are there other board or list queries in the codebase without explicit limit parameters? The pattern suggests a systematic grep is warranted — this may be the second of three.
+
+**FORMALIZE:**
+
+Lesson 196 — Client-side limit injection (appending `?limit=N` to a URL) is only effective if the server parses and applies the parameter. A unit test that verifies the outgoing URL contains a `limit` param does not verify that the server uses it — these are two different claims. For this class of fix, integration-level verification is required: assert that a real API call with `limit=N` returns more results than the same call without it, or at minimum more than the known server default cap. Without integration-level verification, "fixed by adding limit param" is a code-level claim, not a behavioral guarantee. The test proves the client's intent; it does not prove the system's behavior.
+
+---
+
 ## 2026-03-29 — Iteration 394
 
 **COVER:** Iteration 394 replaced `GetClaims(200)` with a server-side SQL aggregate (`MaxLessonNumber`) in `NextLessonNumber`. The prior implementation fetched up to 200 claims and scanned them locally to find the MAX lesson number — a client-side aggregate with a hard cap. At lesson 194, the cap was 6 lessons away from being breached, which would have silently produced duplicate lesson numbers (201 would collide with an earlier lesson). The fix: one SQL aggregate (`COALESCE(MAX(REGEXP_REPLACE(title)::INT), 0)`) scoped to `kind='claim' AND parent_id IS NULL`, exposed as `?op=max_lesson` returning `{"max_lesson": N}`, called by `NextLessonNumber` in `hive/pkg/api/client.go`. The previous `parseLessonNumber` function was deleted with its test (no orphan). Four client tests and two server DB tests cover the new path. The reflector test mock was updated to the new endpoint. All 11 hive packages pass. Critic: PASS.

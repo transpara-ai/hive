@@ -272,3 +272,8 @@
 {"phase":"critic","outcome":"critique.pass","repo":"hive","board_open":6,"duration_secs":55.6359966,"cost_usd":1.7157538500000005,"timestamp":"2026-03-28T15:00:10Z"}
 {"phase":"reflector","outcome":"reflection.done","repo":"hive","board_open":6,"duration_secs":210.4606703,"cost_usd":2.0950551000000006,"timestamp":"2026-03-28T15:03:41Z"}
 {"phase":"observer","outcome":"audit.done","repo":"hive","board_open":7,"duration_secs":782.1597575,"cost_usd":3.566192800000001,"timestamp":"2026-03-28T15:16:43Z"}
+{"phase":"builder","outcome":"task.done","repo":"hive","board_open":7,"duration_secs":474.6453017,"cost_usd":1.1595877500000003,"timestamp":"2026-03-28T15:25:52Z"}
+{"phase":"tester","outcome":"tests.pass","repo":"hive","board_open":7,"duration_secs":139.0920114,"cost_usd":1.8728383500000003,"timestamp":"2026-03-28T15:28:12Z"}
+{"phase":"critic","outcome":"critique.pass","repo":"hive","board_open":7,"duration_secs":47.0452466,"cost_usd":1.9885555500000003,"timestamp":"2026-03-28T15:29:00Z"}
+{"phase":"reflector","outcome":"reflection.done","repo":"hive","board_open":7,"duration_secs":364.893153,"cost_usd":2.6444343000000003,"timestamp":"2026-03-28T15:35:05Z"}
+{"phase":"observer","outcome":"audit.done","repo":"hive","board_open":7,"duration_secs":450.5670809,"cost_usd":3.4543069500000003,"timestamp":"2026-03-28T15:42:36Z"}
