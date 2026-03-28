@@ -4345,3 +4345,54 @@ Zoom in: The production deployment of `populateFormFromJSON` is 1 command. It ha
 
 Lesson 201 — A lesson formalized in iteration N and violated in iteration N+1 proves the lesson reached the archive but not the agent. Lesson 200 was written in iteration 399: degenerate iterations (budget-file-only diffs) must trigger Critic REVISE. Iteration 400 produced the identical failure; the Critic PASSed. This is the second confirmation of Lesson 171: the Critic is the enforcement point, and only a Critic prompt update creates behavioral change. The Reflector cannot enforce. State.md cannot enforce. Only the Critic's checklist enforces — and that checklist lives in the Critic's prompt, not in reflections.md. Three lessons now converge on the same root cause (168, 171, 197, 200, 201): the Critic prompt has not been updated. The fix is a single prompt edit, not a codebase change.
 
+
+## 2026-03-29 — Iteration 401
+
+**Scout gap:** Governance delegation/quorum (Scout 354)
+**Builder task:** Implement delegation + quorum infrastructure for Governance layer
+**Critic verdict:** PASS
+
+---
+
+**COVER**
+
+This iteration broke a 16-consecutive-iteration Scout/Build mismatch streak. Scout 354 (Governance delegation) had been identified as the highest-priority product gap since iteration 354. Builders 385–400 resolved infrastructure debt and verified already-completed work instead. Iteration 401 addressed the Scout's stated gap directly.
+
+What was shipped:
+- `delegations` table — space-scoped delegation (`delegator_id → delegate_id`, one per user per space)
+- `quorum_pct INT DEFAULT 0` + `voting_body TEXT DEFAULT 'all'` columns on `nodes` (proposals)
+- Constants: `OpDelegate`, `OpUndelegate`, `VotingBodyAll/Council/Team`
+- Store methods: `Delegate`, `Undelegate`, `HasDelegated`, `SetProposalConfig`, `GetSpaceMemberCount`, `GetEffectiveVoteCount`, `CheckAndAutoCloseProposal`
+- Handler ops: `delegate`, `undelegate`, extended `propose` (accepts quorum config), extended `vote` (blocks delegated users, calls auto-close)
+- 16 tests across `TestGovernanceDelegation` and `TestHandlerGovernanceDelegation`
+
+The build.md title itself is diagnostic: "Fix: re-ground iteration — Scout gap (Governance delegation) vs Build (intend op) mismatch". The mismatch was named, the correction was applied, the gap closed.
+
+---
+
+**BLIND**
+
+Three gaps survive.
+
+(1) **The correction mechanism is unclear.** The build.md title uses the phrase "re-ground iteration", indicating an explicit correction occurred. But what triggered it? If an external operator (human or system prompt change) forced re-grounding, the loop remains dependent on external intervention to self-correct Scout/Build drift. The correction happened, but the mechanism that produced it is not visible in the artifacts. Lessons 197 and 201 predicted this: only a Critic prompt update or Scout prompt update creates structural enforcement. Whether either prompt was updated this iteration is unobservable from the build artifacts alone.
+
+(2) **Transitive cycle detection is incomplete.** `Delegate` checks 1-deep cycles only: it prevents A→B when B→A already exists, but does not prevent A→B→C→A. The function comment says "Prevent circular delegation" — an overstatement. The Critic correctly flagged this as outside iteration scope. As delegation chains grow, this is a latent correctness gap: one misrouted delegation can create an effective-vote loop where the same voter is counted multiple times via transitive resolution. No test covers this case. The fix (DFS/BFS cycle check before insert) is well-understood but not scheduled.
+
+(3) **`populateFormFromJSON` remains undeployed in production.** State.md has flagged this since iteration 398 as a confirmed production blocker: assert ops with JSON array causes return "unknown op" in production. The delegation handler may route through the same form parsing path. If `delegate` and `undelegate` ops pass causes as JSON arrays (the natural format for LLM-driven ops), they may silently fail in production until the fix is deployed. One command closes this: `cd site && flyctl deploy --remote-only`.
+
+---
+
+**ZOOM**
+
+Correct internal scope. The three substeps (delegation ops, quorum enforcement, authority mapping) form a coherent unit — each depends on the prior. The 16-test suite is proportionate to the 5 new store methods and 2 handler ops. The false negative on transitive cycles was correctly deferred: it requires a separate iteration to design the traversal and test exhaustively.
+
+Zooming out: this ends the longest Scout/Build mismatch recorded in the reflection log (16 iterations, iterations 385–400). The closure is significant in two ways. First, product-layer progress resumes: Governance now has quorum and delegation, unblocking multi-agent coordination at scale. Second, it provides a data point on mismatch correction: the correction came from re-grounding the Builder explicitly, not from state.md mandates. Lessons 168, 171, 197, and 201 all pointed at the Critic prompt as the binding enforcement surface. If the re-grounding in this iteration came from a Critic prompt change (Scout gap cross-reference added as a REVISE condition), that is the mechanism. If it came from a one-time human instruction, the pattern may resume.
+
+---
+
+**FORMALIZE**
+
+Lesson 202 — A 16-iteration Scout/Build mismatch was corrected in a single iteration by explicit re-grounding of the Builder. The mechanism — the word "re-ground" in the build.md title — implies a targeted instruction named the specific gap and overrode the Builder's default judgment. This confirms and extends Lesson 197: text in state.md is advice, not enforcement. But prompt-level re-direction (naming the gap, specifying the deviation, requiring correction) works in a single pass. The lesson for loop maintenance: when drift accumulates past 3 iterations, the intervention is a targeted prompt re-direction that names the gap explicitly — not stronger language in state.md, not additional reflection entries, not mandate escalation. Name it, direct it, enforce it once.
+
+Lesson 203 — Shallow cycle detection (1-deep) in delegation chains is insufficient for production authority graphs. The pattern: `Delegate(A, B)` checks whether `B has already delegated to A` before inserting `A → B`. This prevents direct inversions (depth 1) but not transitive cycles (A→B→C→A at depth 3+). In a small system (3–5 agents), this gap is low-risk because cycles are visible. At governance scale (30+ agents with council/team voting bodies), transitive cycles produce silent vote double-counting: effective-vote resolution follows the delegation chain, and a cycle means the same voter is counted at each traversal step with no termination. The correct algorithm: before inserting any delegation edge, perform a reachability check from the proposed delegate back to the delegator (DFS/BFS). If a path exists, reject the delegation with 409. This is O(n) in the depth of the delegation chain — bounded, deterministic, and worth the cost. The known-gap acceptance was correct for iteration scope; it should be the first task on the Governance backlog.
+

@@ -2,11 +2,11 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 400 (complete), 2026-03-29.
+Last updated: Iteration 401 (complete), 2026-03-29.
 
-**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–201 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
+**MCP knowledge search inoperative this session.** close.sh has not run since iteration 388's confirmed close. Lessons 126–203 invisible via search. close.sh must run before the next iteration to restore index freshness (Lesson 173).
 
-**Scout/Build gap mismatch — sixteenth consecutive iteration (Lessons 168, 171, 174, 178, 181, 197, 201).** Scout 354 named Governance delegation. Builders 385–400 resolved infrastructure debt and verified already-done tasks. The state.md mandate mechanism has failed under every condition tested. **Text in state.md cannot override Builder judgment (Lesson 197). Iteration 401 MUST address Governance delegation (Scout 354) OR deploy populateFormFromJSON fix to production. To make Governance binding: (a) update the Scout prompt to refuse new gaps if Scout 354 is still open; (b) update the Critic checklist to require Scout-gap cross-reference in build.md.**
+**Scout 354 CLOSED — Governance delegation shipped.** Iteration 401 broke the 16-consecutive Scout/Build mismatch streak. Delegation + quorum infrastructure is now live: delegations table, Delegate/Undelegate ops, quorum_pct/voting_body on proposals, auto-close, 16 tests. Critic: PASS. Known remaining gap: transitive cycle detection (1-deep only — first task on Governance backlog per Lesson 203).
 
 **populateFormFromJSON fix NOT deployed in production.** Confirmed iteration 399: assert op with JSON array causes returns "unknown op" in production; CSV format succeeds. The fix is in site/graph/handlers.go but has not been deployed to Fly.io. Iteration 400 must deploy this before any LLM-driven ops with array causes will work.
 
@@ -24,7 +24,11 @@ Last updated: Iteration 400 (complete), 2026-03-29.
 **Lessons formalized in iteration 394:**
 - Lesson 195: Client-side aggregation with a fetch cap is a silent BOUNDED violation. GetXxx(N) used to compute MAX/COUNT/SUM fails silently when real count exceeds N. Push aggregation to server as a dedicated query. The cap is not a safety net — it is a deferred failure.
 
-**API bug NOTE:** `populateFormFromJSON` fix is in local code but NOT deployed to production (confirmed iter 399: array causes return "unknown op" in production). Use CSV format for causes until `cd site && flyctl deploy --remote-only` is run and verified.
+**API bug NOTE:** `populateFormFromJSON` fix is in local code but NOT deployed to production (confirmed iter 399: array causes return "unknown op" in production). Use CSV format for causes until `cd site && flyctl deploy --remote-only` is run and verified. Delegation ops posted via LLM with JSON array causes will fail silently in production until deployed.
+
+**Lessons formalized in iteration 401:**
+- Lesson 202: Re-grounding the Builder with a targeted prompt re-direction works in a single pass; state.md mandates do not. When drift accumulates past 3 iterations, the intervention is a prompt re-direction that names the gap explicitly.
+- Lesson 203: 1-deep cycle detection in delegation chains is insufficient for production authority graphs. Before inserting A->B, a DFS/BFS reachability check from B back to A is required to prevent transitive cycles (A->B->C->A). Schedule as first Governance backlog item.
 
 **For Critic:** The Critic's prompt must be updated to enforce Lesson 168 (Scout-gap cross-reference required in build.md) as a REVISE condition. This cannot be done via state.md alone. Matt must update the Critic prompt directly.
 
