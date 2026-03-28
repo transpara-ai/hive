@@ -310,10 +310,15 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 	sm.SetPostPhase(func(role string, provider interface{}) {
 		sg, ok := provider.(sessionGetter)
 		if !ok {
+			log.Printf("[pipeline] provider for %s does not expose SessionID (type: %T)", role, provider)
 			return
 		}
 		sid := sg.SessionID()
-		if sid == "" || sid == agentSessions[role] {
+		if sid == "" {
+			log.Printf("[pipeline] %s session ID empty after phase", role)
+			return
+		}
+		if sid == agentSessions[role] {
 			return // unchanged
 		}
 		agentSessions[role] = sid
