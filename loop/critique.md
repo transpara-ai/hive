@@ -1,36 +1,23 @@
-# Critique: [hive:builder] All 103 claims have causes=[] � close.sh assertion pipeline never sets causes
+# Critique: [hive:builder] claims.md sync broken: Lessons 126-148 missing from MCP index
 
 **Verdict:** PASS
 
-**Summary:** Tracing the derivation chain:
+**Summary:** All tests pass. Here is my audit:
 
-**Gap → Plan → Code → Test**
+**Derivation chain:** The gap was that `syncClaims` used `/knowledge?tab=claims` which returned 0 results because Lessons/Critiques are stored as `kind=task` on the board, not `kind=claim` on the knowledge lens. The fix switches to `/board?q=<prefix>` with a client-side title-prefix filter and a dedup map (for the two-query fan-out).
 
-**Fix correctness:**
-- `taskCauseIDs` computation moved before both `assertScoutGap` and `assertCritique` calls — the root bug (assertScoutGap using `causeIDs` instead of `taskCauseIDs`) is fixed ✓
-- `handleOp` calls `populateFormFromJSON` at line 2257, so JSON bodies are properly parsed — the `op=edit` JSON payload from `backfillClaimCauses` reaches `r.FormValue("causes")` correctly ✓
-- `op=edit` handler splits `causesStr` by comma, calls `UpdateNodeCauses` — no type mismatch ✓
+**Correctness:**
+- `url.QueryEscape` is used correctly on the query param — no injection risk.
+- `seen` map by node ID prevents duplication when both queries return the same node.
+- `hasClaimPrefix` filter is applied _after_ the API call, guarding against board search returning false positives (e.g. "Fix the Lesson tracker bug"). This is exactly right.
+- `time.Time` in `boardNode.CreatedAt` — JSON `"2026-03-01T00:00:00Z"` unmarshals into `time.Time` correctly via Go's standard `encoding/json` (RFC3339 is the default format).
+- Sort oldest-first is correct.
+- `TestSyncClaimsEmptyDoesNotWrite` correctly tests _both_ prefixes returning empty (the test server returns `{"nodes":[]}` for any path, covering both `q=Lesson+` and `q=Critique%3A` calls).
 
-**`backfillClaimCauses` logic:**
-- Guards against empty `taskNodeID` ✓
-- Skips claims where `len(c.Causes) > 0` ✓
-- `editResp.Body.Close()` called for both success and error paths ✓
-- Non-fatal from `main()` ✓
-- `limit=200` satisfies Invariant 13 (BOUNDED); 140 total claims is well within it ✓
-- Becomes a no-op after first backfill run — no permanent performance tax ✓
+**Invariant 11 (IDs not names):** `seen` map keys on `n.ID` — correct. Dedup is by ID, not title.
 
-**Invariant 12 (VERIFIED):**
-- `TestBackfillClaimCausesUpdatesEmptyClaims` — only empty-cause claims updated ✓
-- `TestBackfillClaimCausesSkipsAlreadyCaused` — already-caused claims untouched ✓
-- `TestBackfillClaimCausesEmptyTaskID` — guard on empty taskNodeID ✓
-- `TestBackfillClaimCausesAPIError` — HTTP 4xx propagated ✓
-- `TestUpdateNodeCauses` (store_test.go) — SQL path covered ✓
-- `TestHandlerOpEditCauses` (handlers_test.go) — handler path covered ✓
+**Invariant 12 (VERIFIED):** Six `TestSyncClaims*` tests covering: happy path (both prefix types), empty (no write), prefix filter, no metadata, API error, multiple causes, causes-written. New `TestSyncClaimsFiltersNonClaimNodes` is a clean addition that exercises the exact guard path. Coverage is thorough.
 
-**Invariant 11 (IDs not names):** backfill uses node IDs throughout ✓
-
-**Invariant 2 (CAUSALITY):** both new claims (via taskCauseIDs fix) and the 140 existing empty-cause claims (via backfill) now have declared causes ✓
-
-No gaps, no untested code paths, no invariant violations.
+**No concerns.** The `TestSyncClaimsAPIError` test still sends to `/app/hive/board` path (any path returns 403 in that test), so it correctly exercises the error path through `fetchBoardByQuery`.
 
 VERDICT: PASS

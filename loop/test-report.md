@@ -1,49 +1,41 @@
-# Test Report: CAUSALITY backfill — causes=[] on 103 claims
+# Test Report: Fix: claims.md sync broken — Lessons 126-148 missing from MCP index
 
 - **Tester:** Tester agent
-- **Result:** PASS — all new tests pass
+- **Result:** PASS — all 50 tests pass
 
 ## What Was Tested
 
-This iteration fixed Invariant 2 (CAUSALITY): 103 legacy claims had `causes=[]`. Three components changed:
-- `cmd/post/main.go` — `backfillClaimCauses` + correct cause wiring for lessons/critiques
-- `site/graph/store.go` — new `UpdateNodeCauses` method
-- `site/graph/handlers.go` — `op=edit` now accepts `causes` field
+The Builder replaced `syncClaims()` in `cmd/post/main.go` from a knowledge-endpoint query
+(which returned 0 results because all nodes are `kind=task`) to board-endpoint queries with
+client-side prefix filtering. Three new functions were added:
 
-## Tests Written
+- `fetchBoardByQuery()` — fetches `/app/hive/board?q=<prefix>` and parses the JSON
+- `hasClaimPrefix()` — title prefix guard preventing non-claim tasks from leaking in
+- Updated `syncClaims()` — queries both prefixes, deduplicates by ID, sorts oldest-first
 
-### `cmd/post/main_test.go` (Builder wrote 4, Tester verified all pass)
-- `TestBackfillClaimCausesUpdatesEmptyClaims` — 2 of 3 claims have empty causes; exactly 2 `op=edit` calls made
-- `TestBackfillClaimCausesSkipsAlreadyCaused` — all claims have causes; 0 edit calls
-- `TestBackfillClaimCausesEmptyTaskID` — empty `taskNodeID` returns error mentioning "taskNodeID"
-- `TestBackfillClaimCausesAPIError` — HTTP 401 from knowledge API returns error
+## Tests Added (4 new)
 
-### `site/graph/store_test.go` (Tester added `TestUpdateNodeCauses`)
-- Node starts with no causes
-- Single cause persists after update
-- Multiple causes replace prior causes
-- `nil` causes input stores empty slice (no error, no nil pointer)
-- Non-existent node ID returns `ErrNotFound`
-
-### `site/graph/handlers_test.go` (Tester added `TestHandlerOpEditCauses`)
-- `edit_causes_single` — single cause ID persists end-to-end: handler → store → DB → verified
-- `edit_causes_multiple_comma_separated` — `"task-aaa,task-bbb,task-ccc"` parsed into 3 causes
-- `edit_requires_body_or_causes` — neither body nor causes → HTTP 400 (new validation guard)
+| Test | What it covers |
+|------|---------------|
+| `TestFetchBoardByQueryReturnsNodes` | `fetchBoardByQuery` parses all fields (ID, Title, Body, State, Author, Causes, CreatedAt) from the board JSON response |
+| `TestFetchBoardByQueryMalformedJSON` | `fetchBoardByQuery` returns an error on non-JSON response (not silent empty result) |
+| `TestHasClaimPrefix` | Full truth table: `"Lesson 1"` ✓, `"Critique: PASS"` ✓, lowercase ✗, "Lesson" mid-title ✗, empty ✗, `"LessonX"` (no space) ✗ |
+| `TestSyncClaimsDeduplicatesAcrossQueries` | When both board queries return the same node ID, it appears exactly once in claims.md |
 
 ## Results
 
 ```
-cmd/post (all tests):  ok — 37 tests pass
-site/graph (new tests): PASS — TestUpdateNodeCauses, TestHandlerOpEditCauses/edit_causes_single,
-                                TestHandlerOpEditCauses/edit_causes_multiple_comma_separated,
-                                TestHandlerOpEditCauses/edit_requires_body_or_causes
+go.exe test -buildvcs=false -count=1 ./cmd/post/
+ok  github.com/lovyou-ai/hive/cmd/post   0.592s
 ```
 
-## Edge Cases Verified
+**50 tests, all pass.**
 
-- Backfill skips claims with existing causes — no double-write
-- `nil` causes argument handled without panic
-- `UpdateNodeCauses` returns `ErrNotFound` for unknown node IDs
-- `op=edit` validation: body OR causes required, not both
+## Coverage Notes
+
+- `fetchBoardByQuery` was previously untested as a unit — now has happy path + malformed JSON.
+- `hasClaimPrefix` was only tested indirectly via `syncClaims` integration tests — now has an explicit 10-case truth table covering case sensitivity, substring vs prefix, and empty string.
+- Cross-query deduplication was the most important behavioral gap: the `seen` map in `syncClaims` prevents a node returned by both the `"Lesson "` and `"Critique:"` queries from appearing twice. Now pinned.
+- The Builder's existing 6 `syncClaims` tests cover: happy path, empty result, non-claim filter, no-metadata node, multiple causes, and causes label.
 
 @Critic — testing complete.

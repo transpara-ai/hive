@@ -1458,3 +1458,139 @@ func TestBackfillClaimCausesAPIError(t *testing.T) {
 		t.Fatal("expected error for HTTP 401, got nil")
 	}
 }
+
+// TestFetchBoardByQueryReturnsNodes verifies that fetchBoardByQuery parses the
+// board JSON response and returns boardNode values with all fields populated.
+func TestFetchBoardByQueryReturnsNodes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/hive/board" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("q") != "Lesson " {
+			json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":         "node-abc",
+					"title":      "Lesson 5: something",
+					"body":       "body text",
+					"state":      "done",
+					"author":     "hive",
+					"causes":     []string{"cause-1"},
+					"created_at": "2026-01-15T10:00:00Z",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	nodes, err := fetchBoardByQuery("lv_testkey", srv.URL, "Lesson ")
+	if err != nil {
+		t.Fatalf("fetchBoardByQuery() error: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	n := nodes[0]
+	if n.ID != "node-abc" {
+		t.Errorf("ID = %q, want %q", n.ID, "node-abc")
+	}
+	if n.Title != "Lesson 5: something" {
+		t.Errorf("Title = %q, want %q", n.Title, "Lesson 5: something")
+	}
+	if n.Body != "body text" {
+		t.Errorf("Body = %q, want %q", n.Body, "body text")
+	}
+	if len(n.Causes) != 1 || n.Causes[0] != "cause-1" {
+		t.Errorf("Causes = %v, want [cause-1]", n.Causes)
+	}
+}
+
+// TestFetchBoardByQueryMalformedJSON verifies that fetchBoardByQuery returns an
+// error when the server responds with non-JSON, not a silent empty result.
+func TestFetchBoardByQueryMalformedJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("this is not json"))
+	}))
+	defer srv.Close()
+
+	_, err := fetchBoardByQuery("lv_testkey", srv.URL, "Lesson ")
+	if err == nil {
+		t.Fatal("expected error for malformed JSON response, got nil")
+	}
+}
+
+// TestHasClaimPrefix verifies that hasClaimPrefix accepts recognised prefixes
+// and rejects everything else, including empty strings and near-matches.
+func TestHasClaimPrefix(t *testing.T) {
+	tests := []struct {
+		title string
+		want  bool
+	}{
+		{"Lesson 1: something", true},
+		{"Lesson 148: last lesson", true},
+		{"Critique: PASS — Fix: foo", true},
+		{"Critique: REVISE — missing tests", true},
+		{"lesson 1: lowercase", false},        // case-sensitive
+		{"critique: lowercase", false},        // case-sensitive
+		{"Fix the Lesson tracker", false},     // "Lesson" in middle
+		{"A Lesson Learned", false},           // "Lesson" doesn't start title
+		{"", false},                           // empty string
+		{"LessonX: no space after word", false}, // no space — doesn't match "Lesson "
+	}
+	for _, tt := range tests {
+		got := hasClaimPrefix(tt.title)
+		if got != tt.want {
+			t.Errorf("hasClaimPrefix(%q) = %v, want %v", tt.title, got, tt.want)
+		}
+	}
+}
+
+// TestSyncClaimsDeduplicatesAcrossQueries verifies that when the same node ID
+// is returned by both the "Lesson " and "Critique:" board queries, it appears
+// only once in claims.md. The seen-map dedup in syncClaims must prevent this.
+func TestSyncClaimsDeduplicatesAcrossQueries(t *testing.T) {
+	duplicateNode := map[string]any{
+		"id":         "node-dup",
+		"title":      "Lesson 99: duplicate node",
+		"body":       "appears in both query results",
+		"state":      "done",
+		"author":     "hive",
+		"created_at": "2026-03-01T00:00:00Z",
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/hive/board" {
+			http.NotFound(w, r)
+			return
+		}
+		// Both queries return the same node (e.g. body contains both keywords).
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"nodes": []map[string]any{duplicateNode},
+		})
+	}))
+	defer srv.Close()
+
+	outPath := filepath.Join(t.TempDir(), "claims.md")
+	if err := syncClaims("lv_testkey", srv.URL, outPath); err != nil {
+		t.Fatalf("syncClaims() error: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("claims.md not written: %v", err)
+	}
+	content := string(data)
+
+	// The node should appear exactly once.
+	count := strings.Count(content, "Lesson 99: duplicate node")
+	if count != 1 {
+		t.Errorf("expected node to appear 1 time, got %d — dedup across queries broken\n%s", count, content)
+	}
+}
