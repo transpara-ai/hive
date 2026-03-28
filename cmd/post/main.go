@@ -108,9 +108,20 @@ func main() {
 		// Non-fatal — post succeeded.
 	}
 
+	// taskCauseIDs links claim nodes back to the build task that generated them.
+	// Both scout gap and critique claims should cite the task, not just the doc,
+	// so the claim is causally linked to the work that produced it (Invariant 2).
+	var taskCauseIDs []string
+	if taskNodeID != "" {
+		taskCauseIDs = []string{taskNodeID}
+	} else {
+		taskCauseIDs = causeIDs // fall back to build doc ID if task creation failed
+	}
+
 	// Assert the Scout's gap as a KindClaim node so gaps are searchable
 	// via knowledge_search and survive scout.md being overwritten next iteration.
-	if err := assertScoutGap(apiKey, baseURL, causeIDs); err != nil {
+	// Causally linked to the build task (Invariant 2: CAUSALITY).
+	if err := assertScoutGap(apiKey, baseURL, taskCauseIDs); err != nil {
 		fmt.Fprintf(os.Stderr, "assert scout gap: %v\n", err)
 		// Non-fatal — post succeeded.
 	}
@@ -118,12 +129,6 @@ func main() {
 	// Assert the critique verdict as a KindClaim node, causally linked to the
 	// task node it reviews. This satisfies Invariant 2: a critique of a build
 	// must cite the build task as its cause, not just the build document.
-	var taskCauseIDs []string
-	if taskNodeID != "" {
-		taskCauseIDs = []string{taskNodeID}
-	} else {
-		taskCauseIDs = causeIDs // fall back to build doc ID if task creation failed
-	}
 	if err := assertCritique(apiKey, baseURL, taskCauseIDs); err != nil {
 		fmt.Fprintf(os.Stderr, "assert critique: %v\n", err)
 		// Non-fatal — post succeeded.
@@ -133,6 +138,16 @@ func main() {
 	if err := assertLatestReflection(apiKey, baseURL, causeIDs); err != nil {
 		fmt.Fprintf(os.Stderr, "assert reflection: %v\n", err)
 		// Non-fatal — post succeeded.
+	}
+
+	// Retroactive backfill: any existing claims that still have causes=[] are
+	// linked to the current task node. This satisfies Invariant 2 for the 103
+	// lesson claims and 37 critique claims created before causes were propagated.
+	if taskNodeID != "" {
+		if err := backfillClaimCauses(apiKey, baseURL, taskNodeID); err != nil {
+			fmt.Fprintf(os.Stderr, "backfill claim causes: %v\n", err)
+			// Non-fatal — post succeeded.
+		}
 	}
 
 	fmt.Printf("posted iteration %s to %s/app/hive/feed\n", iteration, baseURL)
@@ -309,6 +324,7 @@ func syncClaims(apiKey, baseURL, outPath string) error {
 
 	var result struct {
 		Claims []struct {
+			ID        string   `json:"id"`
 			Title     string   `json:"title"`
 			Body      string   `json:"body"`
 			State     string   `json:"state"`
@@ -565,6 +581,83 @@ func extractGapTitle(data []byte) string {
 		}
 	}
 	return ""
+}
+
+// backfillClaimCauses fetches all KindClaim nodes in the hive space and
+// updates any that have causes=[] to declare taskNodeID as their cause.
+// This satisfies Invariant 2 (CAUSALITY) retroactively for claims created
+// before close.sh was fixed to propagate task node IDs as causes.
+func backfillClaimCauses(apiKey, baseURL, taskNodeID string) error {
+	if taskNodeID == "" {
+		return fmt.Errorf("taskNodeID required for backfill")
+	}
+
+	// Fetch all claims from the knowledge API.
+	u := baseURL + "/app/hive/knowledge?tab=claims&limit=200"
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, b)
+	}
+
+	var result struct {
+		Claims []struct {
+			ID     string   `json:"id"`
+			Causes []string `json:"causes"`
+		} `json:"claims"`
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode claims: %w", err)
+	}
+
+	backfilled := 0
+	for _, c := range result.Claims {
+		if c.ID == "" || len(c.Causes) > 0 {
+			continue // skip claims that already have causes or have no ID
+		}
+		payload, _ := json.Marshal(map[string]string{
+			"op":      "edit",
+			"node_id": c.ID,
+			"causes":  taskNodeID,
+		})
+		editReq, _ := http.NewRequest("POST", baseURL+"/app/hive/op", bytes.NewReader(payload))
+		editReq.Header.Set("Authorization", "Bearer "+apiKey)
+		editReq.Header.Set("Accept", "application/json")
+		editReq.Header.Set("Content-Type", "application/json")
+
+		editResp, err := http.DefaultClient.Do(editReq)
+		if err != nil {
+			return fmt.Errorf("backfill claim %s: %w", c.ID, err)
+		}
+		if editResp.StatusCode >= 400 {
+			b, _ := io.ReadAll(editResp.Body)
+			editResp.Body.Close()
+			return fmt.Errorf("backfill claim %s: HTTP %d: %s", c.ID, editResp.StatusCode, b)
+		}
+		editResp.Body.Close()
+		backfilled++
+	}
+
+	if backfilled > 0 {
+		fmt.Printf("backfilled causes on %d existing claims (task=%s)\n", backfilled, taskNodeID)
+	}
+	return nil
 }
 
 // post creates a KindDocument node for the build report via the intend op.

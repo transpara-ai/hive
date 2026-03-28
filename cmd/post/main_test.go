@@ -1262,3 +1262,116 @@ func TestSyncClaimsWritesCauses(t *testing.T) {
 		t.Error("claims.md missing **Causes:** label")
 	}
 }
+
+// TestBackfillClaimCausesUpdatesEmptyClaims verifies that backfillClaimCauses
+// POSTs op=edit with causes for each claim that has causes=[].
+func TestBackfillClaimCausesUpdatesEmptyClaims(t *testing.T) {
+	var editRequests []map[string]string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/app/hive/knowledge"):
+			// Return two claims: one with causes=[], one with causes already set.
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"claims": []map[string]any{
+					{"id": "claim-111", "causes": []string{}},
+					{"id": "claim-222", "causes": []string{"existing-cause"}},
+					{"id": "claim-333", "causes": []string{}},
+				},
+			})
+		case r.Method == "POST" && r.URL.Path == "/app/hive/op":
+			body, _ := io.ReadAll(r.Body)
+			var payload map[string]string
+			json.Unmarshal(body, &payload)
+			editRequests = append(editRequests, payload)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"op":"edit"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := backfillClaimCauses("lv_testkey", srv.URL, "task-xyz"); err != nil {
+		t.Fatalf("backfillClaimCauses() error: %v", err)
+	}
+
+	// Only the two claims with empty causes should have been updated.
+	if len(editRequests) != 2 {
+		t.Fatalf("expected 2 edit requests, got %d", len(editRequests))
+	}
+	for _, req := range editRequests {
+		if req["op"] != "edit" {
+			t.Errorf("op = %q, want %q", req["op"], "edit")
+		}
+		if req["causes"] != "task-xyz" {
+			t.Errorf("causes = %q, want %q", req["causes"], "task-xyz")
+		}
+		if req["node_id"] == "claim-222" {
+			t.Error("claim-222 already has causes — should not have been updated")
+		}
+	}
+}
+
+// TestBackfillClaimCausesSkipsAlreadyCaused verifies that backfillClaimCauses
+// does not call op=edit for claims that already have causes.
+func TestBackfillClaimCausesSkipsAlreadyCaused(t *testing.T) {
+	editCallCount := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/app/hive/knowledge"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"claims": []map[string]any{
+					{"id": "claim-aaa", "causes": []string{"doc-111"}},
+					{"id": "claim-bbb", "causes": []string{"task-222", "doc-333"}},
+				},
+			})
+		case r.Method == "POST" && r.URL.Path == "/app/hive/op":
+			editCallCount++
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"op":"edit"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := backfillClaimCauses("lv_testkey", srv.URL, "task-new"); err != nil {
+		t.Fatalf("backfillClaimCauses() error: %v", err)
+	}
+
+	if editCallCount != 0 {
+		t.Errorf("expected 0 edit calls when all claims already have causes, got %d", editCallCount)
+	}
+}
+
+// TestBackfillClaimCausesEmptyTaskID verifies that backfillClaimCauses returns
+// an error when taskNodeID is empty, preventing accidental empty-cause backfill.
+func TestBackfillClaimCausesEmptyTaskID(t *testing.T) {
+	err := backfillClaimCauses("lv_testkey", "http://localhost:9999", "")
+	if err == nil {
+		t.Fatal("expected error for empty taskNodeID, got nil")
+	}
+	if !strings.Contains(err.Error(), "taskNodeID") {
+		t.Errorf("error %q should mention taskNodeID", err.Error())
+	}
+}
+
+// TestBackfillClaimCausesAPIError verifies that backfillClaimCauses returns an
+// error when the knowledge API responds with HTTP 4xx.
+func TestBackfillClaimCausesAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer srv.Close()
+
+	err := backfillClaimCauses("bad_key", srv.URL, "task-xyz")
+	if err == nil {
+		t.Fatal("expected error for HTTP 401, got nil")
+	}
+}
