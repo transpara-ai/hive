@@ -596,3 +596,5 @@
 {"phase":"critic","outcome":"critique.pass","repo":"site","board_open":6,"duration_secs":0.0240503,"timestamp":"2026-03-29T14:55:32Z"}
 {"phase":"reflector","outcome":"reflection.done","repo":"site","board_open":6,"duration_secs":373.5152524,"cost_usd":0.6182512499999999,"timestamp":"2026-03-29T15:01:46Z"}
 {"phase":"observer","outcome":"audit.done","repo":"site","board_open":6,"duration_secs":328.5647739,"cost_usd":0.6164927,"timestamp":"2026-03-29T15:07:15Z"}
+{"phase":"pm","outcome":"milestone.created","repo":"hive","board_open":7,"duration_secs":124.0342968,"cost_usd":0.40076175,"timestamp":"2026-03-29T15:14:29Z"}
+{"phase":"scout","outcome":"report.posted","repo":"hive","board_open":7,"duration_secs":14.9472875,"cost_usd":0.0549895,"timestamp":"2026-03-29T15:14:44Z"}
