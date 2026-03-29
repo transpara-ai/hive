@@ -592,7 +592,7 @@ func (r *Runner) verifyBuild() error {
 	parts := strings.Fields(buildCmd)
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = r.cfg.RepoPath
-	cmd.Env = append(os.Environ(), "GOPATH=/d/gopath", "GOCACHE=/d/gocache")
+	cmd.Env = append(os.Environ(), "GOPATH=D:\\gopath", "GOCACHE=D:\\gocache")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s\n%s", err, string(out))

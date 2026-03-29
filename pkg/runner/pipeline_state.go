@@ -251,8 +251,16 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 		sm.runner.cfg.Role = agent
 		sm.runner.cfg.OneShot = true
 		sm.runner.done = false
-		sm.runner.runTick(ctx)
+
+		// Per-phase timeout: no single phase should run longer than 20 minutes.
+		// This catches hung CLI subprocesses that survive the Operate timeout.
+		phaseCtx, phaseCancel := context.WithTimeout(ctx, 20*time.Minute)
+		sm.runner.runTick(phaseCtx)
+		phaseCancel()
 		phaseDuration := time.Since(phaseStart)
+		if phaseCtx.Err() == context.DeadlineExceeded {
+			log.Printf("[pipeline] ⚠ phase %s timed out after %s", agent, phaseDuration.Round(time.Second))
+		}
 
 		// Capture worktree from Builder for merge after Critic PASS.
 		if agent == "builder" && sm.runner.Worktree() != nil {
