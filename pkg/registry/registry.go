@@ -6,7 +6,9 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -162,4 +164,65 @@ func (r *Registry) Summary() string {
 		}
 	}
 	return b.String()
+}
+
+// EnsureCloned clones any repos that have a URL but no local directory.
+// Uses --depth 1 for speed. After cloning, updates AbsPath and reloads CLAUDE.md.
+func (r *Registry) EnsureCloned() int {
+	cloned := 0
+	for i := range r.Repos {
+		repo := &r.Repos[i]
+		if repo.URL == "" {
+			continue
+		}
+		if repo.AbsPath != "" {
+			if _, err := os.Stat(repo.AbsPath); err == nil {
+				continue // already exists
+			}
+		}
+		// Clone into the directory the registry expects.
+		target := repo.AbsPath
+		if target == "" {
+			// Default: clone next to repos.json dir.
+			target = filepath.Join(r.dir, repo.Name)
+		}
+		log.Printf("[registry] cloning %s → %s", repo.URL, target)
+		cmd := exec.Command("git", "clone", "--depth", "1", repo.URL, target)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[registry] clone %s failed: %v\n%s", repo.Name, err, out)
+			continue
+		}
+		repo.AbsPath = target
+		// Load CLAUDE.md from the freshly cloned repo.
+		claudePath := filepath.Join(target, "CLAUDE.md")
+		if data, err := os.ReadFile(claudePath); err == nil {
+			s := string(data)
+			if len(s) > 4000 {
+				s = s[:4000] + "\n... (truncated)"
+			}
+			repo.ClaudeMD = s
+		}
+		cloned++
+		log.Printf("[registry] cloned %s", repo.Name)
+	}
+	return cloned
+}
+
+// PullAll runs git pull --ff-only on all repos that have a local directory.
+// Errors are logged but don't stop processing — a stale repo is better than
+// no repo.
+func (r *Registry) PullAll() {
+	for _, repo := range r.Repos {
+		if repo.AbsPath == "" {
+			continue
+		}
+		if _, err := os.Stat(repo.AbsPath); err != nil {
+			continue
+		}
+		cmd := exec.Command("git", "pull", "--ff-only")
+		cmd.Dir = repo.AbsPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[registry] pull %s: %v\n%s", repo.Name, err, out)
+		}
+	}
 }

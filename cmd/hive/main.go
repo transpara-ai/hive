@@ -67,6 +67,7 @@ func run() error {
 	oneShot := flag.Bool("one-shot", false, "Work one task then exit (for testing)")
 	prMode := flag.Bool("pr", false, "Create a feature branch and open a PR instead of pushing directly to main")
 	useWorktrees := flag.Bool("worktrees", false, "Each Builder task gets its own git worktree for isolation")
+	autoClone := flag.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
 
 	// Shared flags.
 	repo := flag.String("repo", "", "Path to repo for Operate (default: current dir)")
@@ -84,11 +85,11 @@ func run() error {
 	}
 	if *daemon {
 		repoMap := parseRepos(*repos, *repo)
-		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *useWorktrees)
+		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *useWorktrees, *autoClone)
 	}
 	if *pipeline || *role == "pipeline" {
 		repoMap := parseRepos(*repos, *repo)
-		return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *useWorktrees)
+		return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *useWorktrees, *autoClone)
 	}
 	if *role != "" {
 		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
@@ -209,7 +210,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 // ─── Pipeline mode ───────────────────────────────────────────────────
 
 // runPipeline runs Scout → Builder → Critic in sequence. One full cycle.
-func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode, useWorktrees bool) error {
+func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode, useWorktrees, autoClone bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -243,6 +244,14 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			}
 		}
 		log.Printf("[pipeline] loaded %d repos from registry", len(r.Available()))
+
+		// Auto-clone missing repos and pull latest.
+		if autoClone {
+			if n := r.EnsureCloned(); n > 0 {
+				log.Printf("[pipeline] cloned %d missing repos", n)
+			}
+		}
+		r.PullAll()
 	} else if len(repoMap) == 0 {
 		log.Printf("[pipeline] no repos.json and no --repos flag")
 	}
@@ -422,7 +431,7 @@ const (
 // runDaemon loops runPipeline at the given interval until SIGINT/SIGTERM.
 // On pipeline failure it retries after a short backoff. After 3 consecutive
 // failures it halts. Writes loop/daemon.status after each cycle.
-func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode, useWorktrees bool) error {
+func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode, useWorktrees, autoClone bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -442,7 +451,7 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 			daemonResetToMain(repoPath)
 		}
 
-		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode, useWorktrees)
+		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode, useWorktrees, autoClone)
 
 		elapsed := time.Since(start)
 
