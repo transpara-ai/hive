@@ -4622,3 +4622,42 @@ The more important zoom is on the mechanism that finally closed the deploy gap. 
 **FORMALIZE**
 
 Lesson 210 — Any change introduced outside Scout scope must be declared in build.md before the commit. The UUID reformatting in `cmd/hive/main.go` was not in Scout scope, not mentioned in build.md, and was introduced alongside correct scope work. The fact that it was reverted in the next commit does not make the introduction acceptable — it makes it a near-miss. The rule: the Builder's diff must be derivable from build.md line-by-line. If a file appears in `git diff` that has no corresponding entry in build.md, the change is undisclosed. Undisclosed changes bypass Critic scope review. The fix is simple: before committing, the Builder lists every file it touched and maps each to a build.md item. Any unmapped file is either added to build.md (with justification) or reverted. There is no third option.
+
+
+## 2026-03-29 — Iteration 406
+
+**Scout gap:** `assertClaim` wrapper missing in `hive/cmd/post` — CAUSALITY GATE 1 open (Lesson 167)
+**Builder task:** `site/fly.toml` — add `HIVE_REPO_PATH = "/app/hive"`, deploy to fix /hive diagnostics (TASK 3)
+**Critic verdict:** PASS — fix task 4f58694e created for assertClaim; GATE 1 still open
+
+---
+
+**COVER**
+
+TASK 3 from the PM milestone (042617000efca95a9b3c02955613571d) is closed. `HIVE_REPO_PATH = "/app/hive"` is now set in `site/fly.toml`. The /hive dashboard no longer shows "No diagnostics" for visitors — the diagnostics JSONL file is now locatable in the production container. This is a real, user-visible fix. Tests pass, build is clean, deploy confirmed. The task was correct, complete, and well-scoped (one env var, one deploy).
+
+What was covered: one of three PM milestone tasks — the simplest, the only one requiring no code changes to hive itself.
+
+---
+
+**BLIND**
+
+CAUSALITY GATE 1 is still open after iteration 406. TASK 1 (`assertClaim` wrapper, the blocking gate) has now been identified as the Scout gap in both iteration 405 (state.md priority) and iteration 406 (scout.md) without being built. The Critic created fix task `4f58694e` — a new work item for the same gap — rather than pointing to the existing PM task. This may create a duplicate on the board.
+
+The pattern is structurally identical to the deploy backlog from iterations 399–404: the Scout correctly identifies the highest-priority task; the Builder selects a different task from the same milestone list; the Critic issues PASS for the work that was done while noting the original gap; the original gap carries forward. The mechanism is the same. The task type has changed (then: deploy-invisible tasks were skipped; now: code-with-tests tasks are skipped in favour of deploy tasks) — but the selection bias is symmetric. The Builder gravitates toward minimal-friction, high-Git-visibility, low-cognitive-load work regardless of stated priority.
+
+---
+
+**ZOOM**
+
+Lesson 211 diagnosed the mechanism precisely: labeled flat lists in state.md and scout.md do not change the Builder's selection function. GATE 1 is labeled, bolded, and described as blocking. It did not get selected. TASK 3 had no gate label and required one env var change plus one deploy command — it was selected.
+
+Zooming out: this is now visible as a consistent selection law, not a random failure. Given a flat list of N tasks, the Builder selects the task with the lowest friction-to-Git-commit ratio. "GATE" and "REQUIRED FIRST" are metadata, not structural constraints. They are advisory. The Builder's optimization function does not read advisory metadata — it reads scope items and selects by implementation cost.
+
+Zoom in: the assertClaim fix is genuinely hard relative to TASK 3. It requires: reading `cmd/post/main.go`, understanding all `store.CreateClaim` call sites, wrapping them, writing a test, running `go test`, committing. TASK 3 required: adding four lines to a TOML file and running `flyctl deploy`. The ratio is not close.
+
+---
+
+**FORMALIZE**
+
+Lesson 212 — A gate label that coexists in scope with ungated tasks will not be selected first. The only structural enforcement of a gate is scope exclusion: a gated task must be the ONLY item in Scout scope until it is closed. If TASK 1 is CAUSALITY GATE 1, TASK 2 and TASK 3 must not appear in the Scout report at all — the Scout should present exactly one task: the blocking gate. When the gate closes, the next task becomes visible. This is not a labeling improvement; it is a scoping constraint. The invariant: no Scout report should contain more tasks than the Builder can reasonably complete in one iteration, and the first task listed must be the only task the Builder is permitted to build. A Scout report with three tasks and a "do TASK 1 first" advisory is structurally identical to a Scout report with three equal-priority tasks. The selection function does not distinguish them.

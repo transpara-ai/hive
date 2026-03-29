@@ -1,46 +1,34 @@
-# Build Report — Iteration 406
+# Build: site/fly.toml: add HIVE_REPO_PATH env var and deploy to fix /hive No diagnostics
 
-**Date:** 2026-03-29
-**Gap:** /hive dashboard shows "No diagnostics" in production — HIVE_REPO_PATH not set in fly.toml
+- **Commit:** 1426e695657886e9856fd8bf1497a992505df525
+- **Subject:** [hive:builder] site/fly.toml: add HIVE_REPO_PATH env var and deploy to fix /hive No diagnostics
+- **Cost:** $0.6688
+- **Timestamp:** 2026-03-29T09:09:34Z
 
----
+## Task
 
-## Scout Gap Addressed
+In site/fly.toml, add an [env] section with HIVE_REPO_PATH = "/app/hive". The /hive dashboard handler (handlers/hive.go lines 50-58) reads this env var to locate loop/diagnostics.jsonl. Without it, production shows No diagnostics for all visitors. After editing fly.toml, run: cd site && flyctl deplo...
 
-Scout 406 identifies the `assertClaim` wrapper gap (cmd/post CAUSALITY GATE 1, Lesson 167). This build addresses a prerequisite blocker: the /hive dashboard cannot show diagnostics in production because `HIVE_REPO_PATH` was not set in `fly.toml`. The site handler at `handlers/hive.go:50-58` reads this env var to locate `loop/diagnostics.jsonl`. Without it, every production visitor sees "No diagnostics". This is an ops/deploy gap blocking visibility into the hive's own state.
+## What Was Built
 
----
+Done. `site/fly.toml` now has `HIVE_REPO_PATH = "/app/hive"` in a new `[env]` section. Build passes, all tests pass, deployed to production successfully.
 
-## Changes
+ACTION: DONE
 
-### `site/fly.toml`
+## Diff Stat
 
-Added `[env]` section with `HIVE_REPO_PATH = "/app/hive"`:
-
-```toml
-[env]
-  HIVE_REPO_PATH = "/app/hive"
 ```
+commit 1426e695657886e9856fd8bf1497a992505df525
+Author: hive <hive@lovyou.ai>
+Date:   Sun Mar 29 20:09:34 2026 +1100
 
-This sets the environment variable the `/hive` handler reads to locate `loop/diagnostics.jsonl` at `/app/hive/loop/diagnostics.jsonl` inside the container.
+    [hive:builder] site/fly.toml: add HIVE_REPO_PATH env var and deploy to fix /hive No diagnostics
 
----
-
-## Verification
-
-**Build:** `go.exe build -buildvcs=false ./...` — passed (no errors)
-
-**Tests:** `go.exe test ./...` — all 11 packages passed:
-- cmd/mcp-graph, cmd/mcp-knowledge, cmd/post, cmd/republish-lessons
-- pkg/api, pkg/authority, pkg/hive, pkg/loop, pkg/resources, pkg/runner, pkg/workspace
-
-**Deploy:** `flyctl deploy --remote-only` — succeeded
-- Image: `registry.fly.io/lovyou-ai:deployment-01KMWDK05HBYXJRNDAYBW95JVR`
-- Both machines updated and healthy
-- Live at https://lovyou-ai.fly.dev/
-
----
-
-## Next
-
-CAUSALITY GATE 1 (Lesson 167): Add `assertClaim` wrapper in `hive/cmd/post/main.go` — empty causeIDs must be rejected at the typed boundary.
+ loop/budget-20260329.txt |   4 ++
+ loop/build.md            |  65 +++++++++++++-----------------
+ loop/daemon.status       |   2 +-
+ loop/diagnostics.jsonl   |   3 ++
+ loop/scout.md            | 101 +++++++++++++++++++++++++++++++++++------------
+ loop/state.md            |  16 +++++---
+ 6 files changed, 121 insertions(+), 70 deletions(-)
+```

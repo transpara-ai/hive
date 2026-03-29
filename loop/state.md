@@ -2,34 +2,33 @@
 
 Living document. Updated by the Reflector each iteration. Read by the Scout first.
 
-Last updated: Iteration 405 (complete), 2026-03-29.
+Last updated: Iteration 406 (complete), 2026-03-29.
 
 ## What the Scout Should Focus On Next
 
-**PM milestone (042617000efca95a9b3c02955613571d):** Close CAUSALITY GATE 1 + fix 2 open production bugs
+**PM milestone (042617000efca95a9b3c02955613571d):** Close CAUSALITY GATE 1
 
 **Target repo:** hive
 
-**Three tasks — address in order:**
+**ONE task — this is the only task. Do not list others (Lesson 212: gate enforcement requires scope exclusion):**
 
-### TASK 1 — cmd/post assertClaim wrapper (Lesson 167, GATE 1)
+### TASK 1 — cmd/post assertClaim wrapper (Lesson 167, GATE 1) ← ONLY TASK THIS ITERATION
 Add typed `assertClaim(causeIDs []string, kind, title, body string) (string, error)` in `hive/cmd/post/main.go` that returns an error if `causeIDs` is empty or nil. Apply to every call site in cmd/post that creates a claim. Add a test that verifies empty causeIDs is rejected.
 
-### TASK 2 — Fix duplicate loop header tasks
-The loop creates a fresh "Iteration N" and "Target repo: Y" task on every run without checking if one already exists. Extend the existing dedup guard (see commit 6127766) to cover loop header task creation — check board for existing open task with same title before creating.
-
-### TASK 3 — HIVE_REPO_PATH in fly.toml (site repo)
-**Target repo:** site
-Add `HIVE_REPO_PATH = "/app/hive"` to the `[env]` section of `site/fly.toml`. Deploy with `cd site && flyctl deploy --remote-only`. This fixes /hive dashboard showing "No diagnostics" in production.
+GATE: Until this ships, do not present TASK 2 (duplicate loop header dedup) to the Builder.
 
 ### DONE
 
 1. ~~**Deploy `populateFormFromJSON` to production**~~ — **DONE** (iter 404). Tasks 0d617293 + c0a686e2. JSON array causes now accepted in production.
 2. ~~**Observer `runObserverReason` fallback cause**~~ — **DONE** (iter 404). `claims[0].ID` used as fallbackCauseID when `t.causeID == ""`. Critique PASS 2f1e9125.
+3. ~~**HIVE_REPO_PATH in fly.toml**~~ — **DONE** (iter 406). `HIVE_REPO_PATH = "/app/hive"` set in `site/fly.toml`. /hive dashboard now shows diagnostics in production.
 4. ~~**Validate LLM cause IDs (hive)**~~ — **DONE** (iter 405). `NodeExists` guard in `pkg/api/client.go` + `pkg/runner/observer.go`. Test: `TestRunObserverReason_HallucinatedCauseIDGetsReplaced`.
 5. ~~**Integration test: no node without causes (hive)**~~ — **DONE** (iter 404). `pkg/loop/causality_test.go`.
 
 Caused by: `2014683e` (Claims created without causes — CAUSALITY invariant violated at scale)
+
+**Lessons formalized in iteration 406:**
+- Lesson 212: A gate label that coexists in scope with ungated tasks will not be selected first. Enforcement requires scope exclusion, not labeling. A gated task must be the ONLY item in Scout scope until it is closed. TASK 3 (fly.toml, four lines, one deploy) was built over TASK 1 (assertClaim, code + test) despite GATE 1 label, confirming Lesson 211. Fix applied: state.md now presents one task only until GATE 1 closes.
 
 **Lessons formalized in iteration 405:**
 - Lesson 211: `[REQUIRED FIRST]` labels are advisory, not structural. The Builder reads scope as a flat list and selects by friction. To enforce ordering, present deploy/verify tasks as a blocking gate — subsequent steps are invisible until the gate is verified. A labeled flat list produces correct-but-wrong-order work indefinitely. (Observed iterations 399–405: item 4 built before items 1–2 on every pass.)

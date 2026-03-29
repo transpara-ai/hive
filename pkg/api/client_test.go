@@ -366,3 +366,13 @@ func TestNodeExists_UsesGETMethod(t *testing.T) {
 		t.Errorf("method = %q, want GET", capturedMethod)
 	}
 }
+
+// TestNodeExists_NetworkError verifies that network errors are treated as non-existence.
+// This guards against the client incorrectly raising an error when a node can't be validated.
+func TestNodeExists_NetworkError(t *testing.T) {
+	// Use a listener that immediately closes to simulate a network failure.
+	c := New("http://invalid-host-that-does-not-exist-12345.local", "test-key")
+	if c.NodeExists("hive", "node-1") {
+		t.Error("NodeExists with network error: expected false")
+	}
+}
