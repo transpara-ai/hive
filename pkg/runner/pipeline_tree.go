@@ -38,7 +38,17 @@ type clientFixTasker struct {
 }
 
 func (f *clientFixTasker) CreateTask(_ context.Context, title string) error {
-	_, err := f.client.CreateTask(f.slug, title, "", "high", nil)
+	// Dedup: don't create a Fix task if one with the same title already exists.
+	tasks, err := f.client.GetTasks(f.slug, "")
+	if err == nil {
+		for _, t := range tasks {
+			if t.Kind == "task" && t.State != "done" && t.State != "closed" && t.Title == title {
+				log.Printf("[fix-tasker] skipping duplicate: %s", title)
+				return nil
+			}
+		}
+	}
+	_, err = f.client.CreateTask(f.slug, title, "", "high", nil)
 	return err
 }
 
