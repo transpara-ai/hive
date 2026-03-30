@@ -24,6 +24,7 @@ import (
 
 	hiveagent "github.com/lovyou-ai/agent"
 	"github.com/lovyou-ai/hive/pkg/loop"
+	"github.com/lovyou-ai/hive/pkg/membrane"
 	"github.com/lovyou-ai/hive/pkg/resources"
 	"github.com/lovyou-ai/work"
 )
@@ -35,7 +36,8 @@ type Runtime struct {
 	actors  actor.IActorStore
 	graph   *graph.Graph
 	humanID types.ActorID
-	defs    []AgentDef
+	defs         []AgentDef
+	membraneDefs []membrane.MembraneConfig
 
 	// Event infrastructure.
 	signer  event.Signer
@@ -110,6 +112,16 @@ func (r *Runtime) Register(def AgentDef) error {
 		return err
 	}
 	r.defs = append(r.defs, def)
+	return nil
+}
+
+// RegisterMembrane registers a membrane agent definition.
+// Membrane agents wrap external services and run their own poll-based loop.
+func (r *Runtime) RegisterMembrane(cfg membrane.MembraneConfig) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	r.membraneDefs = append(r.membraneDefs, cfg)
 	return nil
 }
 
