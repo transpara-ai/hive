@@ -170,6 +170,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 		var response string
 		var usage decision.TokenUsage
 
+		// Auto-assign: if this agent can operate and there are open unassigned
+		// tasks, grab the first one so the Operate path activates immediately
+		// instead of requiring a Reason round-trip to emit /task assign.
+		if l.config.CanOperate && l.config.RepoPath != "" && !l.hasAssignedTask() {
+			l.autoAssignOpenTask()
+		}
+
 		if l.config.CanOperate && l.config.RepoPath != "" && l.hasAssignedTask() {
 			// Operate path: agent has filesystem access and assigned work.
 			task := l.nextAssignedTask()
@@ -552,6 +559,38 @@ func (l *Loop) processTaskCommands(response string) {
 	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID)
 	if executed > 0 {
 		fmt.Printf("[%s] executed %d/%d task commands\n", l.agent.Name(), executed, len(commands))
+	}
+}
+
+// autoAssignOpenTask finds the first open, unassigned task and assigns it to
+// this agent. This lets the Operate path activate without waiting for the LLM
+// to emit a /task assign command via Reason.
+func (l *Loop) autoAssignOpenTask() {
+	if l.config.TaskStore == nil {
+		return
+	}
+	open, err := l.config.TaskStore.ListOpen()
+	if err != nil || len(open) == 0 {
+		return
+	}
+	// Find first task not assigned to anyone.
+	for _, t := range open {
+		summary, sErr := l.config.TaskStore.ListSummaries(100)
+		if sErr != nil {
+			continue
+		}
+		for _, s := range summary {
+			if s.ID == t.ID && s.Assignee == (types.ActorID{}) {
+				var causes []types.EventID
+				if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+					causes = []types.EventID{lastEv}
+				}
+				if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
+					fmt.Printf("  → auto-assigned: %s — %s\n", t.ID.Value(), t.Title)
+				}
+				return
+			}
+		}
 	}
 }
 
