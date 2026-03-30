@@ -14,12 +14,14 @@ var (
 	EventServiceError     = types.MustEventType("membrane.service.error")
 	EventNotificationSent = types.MustEventType("membrane.notification.sent")
 	EventModeChanged      = types.MustEventType("membrane.mode.changed")
+	EventBridgeAdoption   = types.MustEventType("membrane.bridge.adoption")
 )
 
 func allMembraneEventTypes() []types.EventType {
 	return []types.EventType{
 		EventActionCreated, EventActionApproved, EventActionRejected, EventActionTimeout,
 		EventServicePolled, EventServiceError, EventNotificationSent, EventModeChanged,
+		EventBridgeAdoption,
 	}
 }
 
@@ -98,6 +100,17 @@ type ModeChangedContent struct {
 
 func (c ModeChangedContent) EventTypeName() string { return "membrane.mode.changed" }
 
+// BridgeAdoptionContent records an agent-bridge self-tracking metric.
+type BridgeAdoptionContent struct {
+	membraneContent
+	AgentName  string  `json:"AgentName"`
+	MetricType string  `json:"MetricType"` // "decision_response_time", "dashboard_visit", "action_created"
+	Value      float64 `json:"Value"`
+	Timestamp  string  `json:"Timestamp"` // RFC3339
+}
+
+func (c BridgeAdoptionContent) EventTypeName() string { return "membrane.bridge.adoption" }
+
 // RegisterMembraneEventTypes registers content unmarshalers for Postgres deserialization.
 func RegisterMembraneEventTypes() {
 	event.RegisterContentUnmarshaler("membrane.action.created", event.Unmarshal[ActionCreatedContent])
@@ -108,6 +121,7 @@ func RegisterMembraneEventTypes() {
 	event.RegisterContentUnmarshaler("membrane.service.error", event.Unmarshal[ServiceErrorContent])
 	event.RegisterContentUnmarshaler("membrane.notification.sent", event.Unmarshal[NotificationSentContent])
 	event.RegisterContentUnmarshaler("membrane.mode.changed", event.Unmarshal[ModeChangedContent])
+	event.RegisterContentUnmarshaler("membrane.bridge.adoption", event.Unmarshal[BridgeAdoptionContent])
 }
 
 // RegisterWithRegistry registers all membrane event types with the given registry
