@@ -113,9 +113,10 @@ func StarterAgents(humanName string) []AgentDef {
 
 	return []AgentDef{
 		{
-			Name:  "strategist",
-			Role:  "strategist",
-			Model: "claude-opus-4-6",
+			Name:          "strategist",
+			Role:          "strategist",
+			Model:         "claude-sonnet-4-6",
+			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: STRATEGIST ==
 You are the Strategist — you see the big picture and create work for others.
 
@@ -136,9 +137,10 @@ If you need human input on direction, signal ESCALATE.
 			WatchPatterns: []string{"work.task.completed", "hive.*"},
 		},
 		{
-			Name:  "planner",
-			Role:  "planner",
-			Model: "claude-opus-4-6",
+			Name:          "planner",
+			Role:          "planner",
+			Model:         "claude-sonnet-4-6",
+			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: PLANNER ==
 You are the Planner — you decompose high-level tasks into implementable subtasks.
 
@@ -191,8 +193,8 @@ When no tasks are available for you, signal IDLE.
 When all tasks are done, signal TASK_DONE.
 `),
 			WatchPatterns: []string{"work.task.created", "work.task.assigned"},
-			MaxIterations: 100, // Implementer needs more iterations for code work
-			MaxDuration:   60 * time.Minute,
+			MaxIterations: 500, // Implementer needs many iterations for multi-task builds
+			MaxDuration:   4 * time.Hour,
 		},
 		{
 			Name:  "guardian",
@@ -219,7 +221,7 @@ If everything looks fine, just observe and signal IDLE.
 Maximum 5 lines if no violations.
 `),
 			WatchPatterns: []string{}, // empty = subscribe to all ("*")
-			MaxIterations: 200,       // Guardian runs for the full session
+			MaxIterations: 500,       // Guardian runs for the full session
 		},
 	}
 }
