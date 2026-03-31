@@ -3,6 +3,7 @@ package hive
 import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/membrane"
 )
 
 // Hive event types — runtime lifecycle and agent coordination.
@@ -95,4 +96,5 @@ func RegisterWithRegistry(registry *event.EventTypeRegistry) {
 		registry.Register(et, nil)
 	}
 	RegisterEventTypes()
+	membrane.RegisterWithRegistry(registry)
 }
