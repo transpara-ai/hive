@@ -78,6 +78,7 @@ func run() error {
 	idea := flag.String("idea", "", "Seed idea for agents (legacy runtime mode)")
 	storeDSN := flag.String("store", "", "Store DSN (legacy runtime mode)")
 	autoApprove := flag.Bool("yes", false, "Auto-approve authority (legacy runtime mode)")
+	keepalive := flag.Bool("keepalive", false, "Keep agents alive when idle — block on bus instead of quiescing (legacy runtime mode)")
 	flag.Parse()
 
 	if *council {
@@ -95,7 +96,7 @@ func run() error {
 		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
 	}
 	if *human != "" {
-		return runLegacy(*human, *idea, *storeDSN, *autoApprove, *repo)
+		return runLegacy(*human, *idea, *storeDSN, *autoApprove, *repo, *keepalive)
 	}
 
 	fmt.Fprintln(os.Stderr, "usage:")
@@ -709,7 +710,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string) error {
+func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string, keepalive bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -727,6 +728,11 @@ func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string) e
 		}
 		defer pool.Close()
 	}
+
+	// Register hive event types before opening the store. Postgres stores
+	// deserialize event content on Head() — without these unmarshalers,
+	// existing events with types like hive.run.completed fail to load.
+	hive.RegisterEventTypes()
 
 	s, err := openStore(ctx, pool)
 	if err != nil {
@@ -761,6 +767,7 @@ func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string) e
 		HumanID:     humanID,
 		AutoApprove: autoApprove,
 		RepoPath:    repoPath,
+		Keepalive:   keepalive,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: %w", err)

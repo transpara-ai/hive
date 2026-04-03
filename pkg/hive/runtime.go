@@ -48,6 +48,7 @@ type Runtime struct {
 	// Options.
 	autoApprove bool
 	repoPath    string
+	keepalive   bool
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -57,6 +58,7 @@ type Config struct {
 	HumanID     types.ActorID
 	AutoApprove bool   // --yes flag
 	RepoPath    string // --repo flag (for Implementer's Operate)
+	Keepalive   bool   // --keepalive flag: agents block on bus instead of quiescing
 }
 
 // New creates a new hive Runtime.
@@ -100,6 +102,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		tasks:       tasks,
 		autoApprove: cfg.AutoApprove,
 		repoPath:    cfg.RepoPath,
+		keepalive:   cfg.Keepalive,
 	}, nil
 }
 
@@ -168,6 +171,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			ConvID:     r.convID,
 			CanOperate: def.CanOperate,
 			RepoPath:   r.repoPath,
+			Keepalive:  r.keepalive,
 
 			OnIteration: func(iteration int, response string) {
 				fmt.Fprintf(os.Stderr, "[%s] iteration %d (%d chars)\n",

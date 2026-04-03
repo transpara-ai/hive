@@ -97,6 +97,12 @@ type Config struct {
 	// RepoPath is the working directory for Operate() calls.
 	// Required when CanOperate is true.
 	RepoPath string
+
+	// Keepalive prevents agents from exiting on quiescence. When true,
+	// waitForEvents blocks indefinitely on the bus wake channel instead
+	// of timing out. Agents consume zero CPU/LLM while waiting. They
+	// resume when a new event arrives on the bus.
+	Keepalive bool
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
@@ -489,7 +495,18 @@ func (l *Loop) onEvent(ev event.Event) {
 
 // waitForEvents blocks until new events arrive or quiescence timeout.
 // Returns true if events arrived, false if timed out.
+// In keepalive mode, there is no timeout — the agent blocks on the wake
+// channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
+	if l.config.Keepalive {
+		select {
+		case <-l.wake:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
 	timer := time.NewTimer(l.config.QuiescenceDelay)
 	defer timer.Stop()
 
