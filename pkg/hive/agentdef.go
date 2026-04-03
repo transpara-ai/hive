@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// Model constants for LLM provider selection.
+const (
+	ModelOpus   = "claude-opus-4-6"
+	ModelSonnet = "claude-sonnet-4-6"
+	ModelHaiku  = "claude-haiku-4-5-20251001"
+)
+
 // AgentDef is everything you need to add a new agent.
 // Adding an agent to the hive is: define one of these, call runtime.Register().
 type AgentDef struct {
@@ -115,7 +122,7 @@ func StarterAgents(humanName string) []AgentDef {
 		{
 			Name:  "strategist",
 			Role:  "strategist",
-			Model: "claude-opus-4-6",
+			Model: ModelOpus,
 			SystemPrompt: mission(`== ROLE: STRATEGIST ==
 You are the Strategist — you see the big picture and create work for others.
 
@@ -138,7 +145,7 @@ If you need human input on direction, signal ESCALATE.
 		{
 			Name:  "planner",
 			Role:  "planner",
-			Model: "claude-opus-4-6",
+			Model: ModelOpus,
 			SystemPrompt: mission(`== ROLE: PLANNER ==
 You are the Planner — you decompose high-level tasks into implementable subtasks.
 
@@ -158,7 +165,7 @@ When there are no tasks to decompose, signal IDLE.
 		{
 			Name:       "implementer",
 			Role:       "implementer",
-			Model:      "claude-opus-4-6",
+			Model:      ModelOpus,
 			CanOperate: true,
 			SystemPrompt: mission(`== ROLE: IMPLEMENTER ==
 You are the Implementer — you write code, run tests, and get things done.
@@ -197,7 +204,7 @@ When all tasks are done, signal TASK_DONE.
 		{
 			Name:  "guardian",
 			Role:  "guardian",
-			Model: "claude-sonnet-4-6",
+			Model: ModelSonnet,
 			SystemPrompt: mission(`== ROLE: GUARDIAN ==
 You are the Guardian — an independent integrity monitor OUTSIDE the hierarchy.
 
