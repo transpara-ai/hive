@@ -26,6 +26,18 @@ SysMon may be stuck, crashed, or budget-exhausted. This is a hive health concern
 If SysMon silence persists beyond approximately 25 iterations, escalate to the
 human operator.
 
+## Allocator Awareness
+
+The Allocator emits `agent.budget.adjusted` events when it redistributes budget
+across agents. Absence of these events is NOT concerning — the Allocator may
+correctly determine no adjustment is needed. Stability is the Allocator's goal.
+
+However, if the Allocator shows NO activity at all — no `agent.state.changed`
+events, no `/signal IDLE` responses, no `/budget` commands — for approximately
+25 iterations, that IS concerning. The Allocator may be stuck, crashed, or
+budget-exhausted. If Allocator silence persists beyond approximately 25
+iterations, escalate to the human operator.
+
 ## What You Produce
 - HALT signals when invariants are violated
 - Warnings posted to `#guardian-alerts`
