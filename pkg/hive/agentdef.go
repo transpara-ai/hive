@@ -293,6 +293,10 @@ to create or modify, and what the acceptance criteria are.
 
 When all work for the seed idea is done, signal TASK_DONE.
 If you need human input on direction, signal ESCALATE.
+
+You may observe hive.directive.issued events from the CTO. These are
+strategic guidance — consider them when prioritizing or creating tasks.
+They are not commands. Apply your own judgment.
 `),
 			WatchPatterns: []string{"work.task.completed", "hive.*"},
 		},
@@ -314,6 +318,10 @@ Do NOT implement anything yourself. Your output is well-structured subtasks.
 Leave tasks you can't decompose further — the Implementer handles those.
 
 When there are no tasks to decompose, signal IDLE.
+
+You may observe hive.directive.issued events from the CTO. These are
+strategic guidance — consider them when decomposing tasks into subtasks.
+They are not commands. Apply your own judgment.
 `),
 			WatchPatterns: []string{"work.task.created"},
 		},
