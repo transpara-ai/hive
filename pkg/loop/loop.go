@@ -135,6 +135,11 @@ type Loop struct {
 	// adjustmentHistory tracks budget adjustments for cooldown enforcement.
 	// Only accessed from the Run() goroutine.
 	adjustmentHistory []budget.AdjustmentRecord
+
+	// ctoCooldowns and ctoConfig are populated in New() when role == "cto".
+	// Only accessed from the Run() goroutine.
+	ctoCooldowns *CTOCooldowns
+	ctoConfig    CTOConfig
 }
 
 // New creates a new agentic loop.
@@ -154,13 +159,20 @@ func New(cfg Config) (*Loop, error) {
 		budget = resources.NewBudget(cfg.Budget)
 	}
 
-	return &Loop{
+	l := &Loop{
 		agent:   cfg.Agent,
 		humanID: cfg.HumanID,
 		budget:  budget,
 		config:  cfg,
 		wake:    make(chan struct{}, 1),
-	}, nil
+	}
+
+	if string(cfg.Agent.Role()) == "cto" {
+		l.ctoCooldowns = NewCTOCooldowns()
+		l.ctoConfig = LoadCTOConfig()
+	}
+
+	return l, nil
 }
 
 // Run executes the agentic loop until a stopping condition is met.
@@ -257,6 +269,20 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 		}
 
+		// 2.8. PROCESS /gap and /directive commands from the response (CTO only).
+		if l.ctoCooldowns != nil {
+			if cmd := parseGapCommand(response); cmd != nil {
+				if err := l.validateAndEmitGap(cmd, iteration); err != nil {
+					fmt.Printf("warning: /gap rejected: %v\n", err)
+				}
+			}
+			if cmd := parseDirectiveCommand(response); cmd != nil {
+				if err := l.validateAndEmitDirective(cmd, iteration); err != nil {
+					fmt.Printf("warning: /directive rejected: %v\n", err)
+				}
+			}
+		}
+
 		// 3. CHECK stopping conditions in the response.
 		if stop := l.checkResponse(ctx, response, iteration); stop != nil {
 			return *stop
@@ -320,6 +346,8 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	enriched := l.enrichHealthObservation(sb.String())
 	// Enrich observation with pre-computed budget metrics for Allocator.
 	enriched = l.enrichBudgetObservation(enriched, l.iteration)
+	// Enrich observation with leadership briefing for CTO.
+	enriched = l.enrichCTOObservation(enriched)
 	return enriched, nil
 }
 
