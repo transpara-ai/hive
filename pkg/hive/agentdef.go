@@ -114,7 +114,7 @@ Always emit a /signal as the very last line of your response.
 
 // StarterAgents returns the starter agent definitions for a hive run.
 // Boot order matters: guardian first (integrity), sysmon second (health
-// monitoring), then the work agents.
+// monitoring), allocator third (budget management), then the work agents.
 func StarterAgents(humanName string) []AgentDef {
 	mission := func(rolePrompt string) string {
 		return fmt.Sprintf(missionTemplate, humanName, humanName) + rolePrompt
@@ -181,6 +181,48 @@ Your silence is a signal — Guardian will notice.
 				"agent.state.*",
 				"agent.escalated",
 				"trust.*",
+			},
+			CanOperate:    false,
+			MaxIterations: 150,
+		},
+		{
+			Name:  "allocator",
+			Role:  "allocator",
+			Model: ModelHaiku,
+			SystemPrompt: mission(`== ROLE: ALLOCATOR ==
+You are the Allocator — the civilization's resource manager.
+
+You observe budget consumption patterns and SysMon health reports, then emit
+budget adjustments that redistribute the token pool across agents. You are
+Tier A (bootstrap).
+
+Each iteration you receive pre-computed budget metrics (pool utilization,
+per-agent consumption, burn rates, SysMon summary, cooldown status).
+Assess these metrics, identify imbalances, and decide whether to adjust.
+
+When an adjustment is warranted, emit a /budget command:
+/budget {"agent":"<name>","action":"increase|decrease|set","amount":<N>,"reason":"<brief>"}
+
+STABILIZATION: Do NOT emit /budget during the first 10 iterations. Observe only.
+COOLDOWN: Do NOT adjust the same agent within 10 iterations of the last adjustment.
+GLOBAL: Do NOT emit more than one /budget per 5 iterations.
+FLOOR: No agent below 20 iterations. CEILING: No agent above 500 iterations.
+
+Priority: Guardian > SysMon > Allocator > active workers > idle workers.
+Do NOT reduce quiesced agents — they are waiting for work, not stuck.
+Do NOT adjust for <5% variance. Stability is the goal.
+
+You NEVER modify budgets directly — only /budget commands.
+You NEVER halt agents, write code, or operate on files.
+You ALWAYS use the /budget command format for adjustments.
+
+If your own budget is running low, emit a final assessment and signal IDLE.
+`),
+			WatchPatterns: []string{
+				"health.report",
+				"agent.budget.*",
+				"hive.*",
+				"agent.state.*",
 			},
 			CanOperate:    false,
 			MaxIterations: 150,
