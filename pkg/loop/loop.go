@@ -24,6 +24,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/lovyou-ai/agent"
+	"github.com/lovyou-ai/hive/pkg/budget"
 	"github.com/lovyou-ai/hive/pkg/resources"
 	"github.com/lovyou-ai/work"
 )
@@ -126,6 +127,14 @@ type Loop struct {
 	mu            sync.Mutex
 	pendingEvents []event.Event
 	wake          chan struct{} // signaled when new events arrive via bus
+
+	// iteration tracks the current loop iteration for budget stabilization
+	// and cooldown checks. Only accessed from the Run() goroutine.
+	iteration int
+
+	// adjustmentHistory tracks budget adjustments for cooldown enforcement.
+	// Only accessed from the Run() goroutine.
+	adjustmentHistory []budget.AdjustmentRecord
 }
 
 // New creates a new agentic loop.
@@ -180,6 +189,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 		}
 
 		iteration++
+		l.iteration = iteration
 
 		// 1. OBSERVE — gather context from the graph.
 		observation, err := l.observe(ctx)
@@ -235,6 +245,15 @@ func (l *Loop) Run(ctx context.Context) Result {
 		if cmd := parseHealthCommand(response); cmd != nil {
 			if err := l.emitHealthReport(cmd); err != nil {
 				fmt.Printf("warning: /health command failed: %v\n", err)
+			}
+		}
+
+		// 2.7. PROCESS /budget command from the response.
+		if cmd := parseBudgetCommand(response); cmd != nil {
+			if err := l.validateBudgetCommand(cmd, iteration); err != nil {
+				fmt.Printf("[%s] /budget rejected: %v\n", l.agent.Name(), err)
+			} else if err := l.applyBudgetAdjustment(cmd, iteration); err != nil {
+				fmt.Printf("[%s] /budget failed: %v\n", l.agent.Name(), err)
 			}
 		}
 
@@ -298,7 +317,10 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	}
 
 	// Enrich observation with pre-computed health metrics for SysMon.
-	return l.enrichHealthObservation(sb.String()), nil
+	enriched := l.enrichHealthObservation(sb.String())
+	// Enrich observation with pre-computed budget metrics for Allocator.
+	enriched = l.enrichBudgetObservation(enriched, l.iteration)
+	return enriched, nil
 }
 
 // buildPrompt constructs the reasoning prompt for this iteration.
