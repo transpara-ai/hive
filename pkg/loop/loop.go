@@ -103,6 +103,16 @@ type Config struct {
 	// of timing out. Agents consume zero CPU/LLM while waiting. They
 	// resume when a new event arrives on the bus.
 	Keepalive bool
+
+	// BudgetInstance is an externally-created Budget tracker. When set,
+	// the Loop uses this instead of creating a new one from Budget config.
+	// This allows the Runtime to register the Budget in a shared registry
+	// before the Loop starts.
+	BudgetInstance *resources.Budget
+
+	// BudgetRegistry provides cross-agent budget visibility. Optional.
+	// When set, observation enrichment can query all agents' budget states.
+	BudgetRegistry *resources.BudgetRegistry
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
@@ -130,10 +140,15 @@ func New(cfg Config) (*Loop, error) {
 		cfg.QuiescenceDelay = 5 * time.Second
 	}
 
+	budget := cfg.BudgetInstance
+	if budget == nil {
+		budget = resources.NewBudget(cfg.Budget)
+	}
+
 	return &Loop{
 		agent:   cfg.Agent,
 		humanID: cfg.HumanID,
-		budget:  resources.NewBudget(cfg.Budget),
+		budget:  budget,
 		config:  cfg,
 		wake:    make(chan struct{}, 1),
 	}, nil

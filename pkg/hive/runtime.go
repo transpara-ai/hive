@@ -45,6 +45,9 @@ type Runtime struct {
 	// Task store for agent coordination.
 	tasks *work.TaskStore
 
+	// Budget registry for cross-agent budget visibility and mutation.
+	budgetRegistry *resources.BudgetRegistry
+
 	// Options.
 	autoApprove bool
 	repoPath    string
@@ -148,6 +151,9 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		fmt.Fprintf(os.Stderr, "Seed task: %s\n", task.ID.Value())
 	}
 
+	// Create the budget registry for cross-agent visibility.
+	r.budgetRegistry = resources.NewBudgetRegistry()
+
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
@@ -156,15 +162,22 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			return fmt.Errorf("spawn %s: %w", def.Name, err)
 		}
 
+		// Create the budget tracker and register it for cross-agent visibility.
+		budgetCfg := resources.BudgetConfig{
+			MaxIterations: def.EffectiveMaxIterations(),
+			MaxDuration:   def.EffectiveMaxDuration(),
+		}
+		agentBudget := resources.NewBudget(budgetCfg)
+		r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations())
+
 		cfg := loop.Config{
-			Agent:   agent,
-			HumanID: r.humanID,
-			Budget: resources.BudgetConfig{
-				MaxIterations: def.EffectiveMaxIterations(),
-				MaxDuration:   def.EffectiveMaxDuration(),
-			},
-			Bus:  r.graph.Bus(),
-			Task: seedIdea,
+			Agent:          agent,
+			HumanID:        r.humanID,
+			Budget:         budgetCfg,
+			BudgetInstance: agentBudget,
+			BudgetRegistry: r.budgetRegistry,
+			Bus:            r.graph.Bus(),
+			Task:           seedIdea,
 
 			// Task coordination.
 			TaskStore:  r.tasks,

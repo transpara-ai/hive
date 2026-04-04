@@ -87,6 +87,21 @@ func (b *Budget) RecordUsage(usage decision.TokenUsage) {
 	b.iterations++
 }
 
+// MaxIterations returns the current iteration limit. Safe for concurrent use.
+func (b *Budget) MaxIterations() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.maxIterations
+}
+
+// SetMaxIterations updates the iteration limit at runtime.
+// Used by the Allocator to redistribute budget across agents.
+func (b *Budget) SetMaxIterations(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maxIterations = n
+}
+
 // Check returns nil if within budget, or an error describing what was exceeded.
 func (b *Budget) Check() error {
 	b.mu.Lock()
