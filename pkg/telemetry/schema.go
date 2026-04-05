@@ -79,14 +79,60 @@ INSERT INTO telemetry_phases (phase, label, status, started_at, completed_at, no
 ON CONFLICT (phase) DO NOTHING;
 `
 
-// EnsureTables creates the telemetry tables and seeds phase data.
-// Safe to call on every startup — uses IF NOT EXISTS and ON CONFLICT DO NOTHING.
+// phaseUpdates advances phases whose real-world status has changed since
+// initial seeding. Each entry is idempotent: it only fires when the current
+// DB status matches the expected "before" value, so restarts are safe.
+var phaseUpdates = []struct {
+	phase  int
+	from   string
+	status string
+	startedAt string
+	completedAt string
+	notes  string
+}{
+	{
+		phase:       2,
+		from:        "blocked",
+		status:      "complete",
+		startedAt:   "2026-04-04",
+		completedAt: "2026-04-05",
+		notes:       "CTO graduated: running on Opus with /gap + /directive commands, leadership briefing, 15-iteration stabilization window, Guardian awareness. Reviewer deferred to Phase 4.",
+	},
+	{
+		phase:     3,
+		from:      "blocked",
+		status:    "in_progress",
+		startedAt: "2026-04-05",
+		notes:     "Spawner unblocked by CTO graduation. CTO gap detection feeds role proposals.",
+	},
+}
+
+// EnsureTables creates the telemetry tables, seeds phase data, and applies
+// any phase status updates that reflect real-world progress.
+// Safe to call on every startup — all operations are idempotent.
 func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		return fmt.Errorf("telemetry schema: %w", err)
 	}
 	if _, err := pool.Exec(ctx, seedPhases); err != nil {
 		return fmt.Errorf("telemetry seed phases: %w", err)
+	}
+	for _, u := range phaseUpdates {
+		var q string
+		if u.completedAt != "" {
+			q = fmt.Sprintf(
+				`UPDATE telemetry_phases SET status = '%s', started_at = '%s', completed_at = '%s', notes = '%s' WHERE phase = %d AND status = '%s'`,
+				u.status, u.startedAt, u.completedAt, u.notes, u.phase, u.from,
+			)
+		} else {
+			q = fmt.Sprintf(
+				`UPDATE telemetry_phases SET status = '%s', started_at = '%s', notes = '%s' WHERE phase = %d AND status = '%s'`,
+				u.status, u.startedAt, u.notes, u.phase, u.from,
+			)
+		}
+		if _, err := pool.Exec(ctx, q); err != nil {
+			return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
+		}
 	}
 	return nil
 }
