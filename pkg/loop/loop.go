@@ -303,6 +303,20 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 		}
 
+		// 2.10. PROCESS /approve and /reject commands from the response (Guardian only).
+		if string(l.agent.Role()) == "guardian" {
+			if cmd := parseApproveCommand(response); cmd != nil {
+				if err := l.emitRoleApproved(cmd); err != nil {
+					fmt.Printf("[%s] /approve emit failed: %v\n", l.agent.Name(), err)
+				}
+			}
+			if cmd := parseRejectCommand(response); cmd != nil {
+				if err := l.emitRoleRejected(cmd); err != nil {
+					fmt.Printf("[%s] /reject emit failed: %v\n", l.agent.Name(), err)
+				}
+			}
+		}
+
 		// 3. CHECK stopping conditions in the response.
 		if stop := l.checkResponse(ctx, response, iteration); stop != nil {
 			return *stop
