@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS telemetry_agent_snapshots (
     cost_usd        NUMERIC(10,6) NOT NULL DEFAULT 0,
     trust_score     NUMERIC(4,3),
     last_event_type TEXT,
+    last_event_at   TIMESTAMPTZ,
     last_message    TEXT,
     errors          INT NOT NULL DEFAULT 0
 );
@@ -113,6 +114,15 @@ var phaseUpdates = []struct {
 func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		return fmt.Errorf("telemetry schema: %w", err)
+	}
+
+	// Migrations: add columns that postdate the initial schema.
+	// All use ADD COLUMN IF NOT EXISTS — safe to run on every startup.
+	const migrations = `
+ALTER TABLE telemetry_agent_snapshots ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
+`
+	if _, err := pool.Exec(ctx, migrations); err != nil {
+		return fmt.Errorf("telemetry migrations: %w", err)
 	}
 	if _, err := pool.Exec(ctx, seedPhases); err != nil {
 		return fmt.Errorf("telemetry seed phases: %w", err)
