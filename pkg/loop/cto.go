@@ -183,7 +183,7 @@ func validateDirectiveCommand(cmd *DirectiveCommand, iteration int, cooldowns *C
 
 // emitGap constructs a GapDetectedContent and calls agent.EmitGapDetected.
 func (l *Loop) emitGap(cmd *GapCommand) error {
-	content := event.NewGapDetectedContent(cmd.Category, cmd.MissingRole, cmd.Evidence, cmd.Severity)
+	content := event.NewGapDetectedContent(event.GapCategory(cmd.Category), cmd.MissingRole, cmd.Evidence, event.SeverityLevel(cmd.Severity))
 	if err := l.agent.EmitGapDetected(content); err != nil {
 		return fmt.Errorf("emit hive.gap.detected: %w", err)
 	}
@@ -194,7 +194,7 @@ func (l *Loop) emitGap(cmd *GapCommand) error {
 
 // emitDirective constructs a DirectiveIssuedContent and calls agent.EmitDirective.
 func (l *Loop) emitDirective(cmd *DirectiveCommand) error {
-	content := event.NewDirectiveIssuedContent(cmd.Target, cmd.Action, cmd.Reason, cmd.Priority)
+	content := event.NewDirectiveIssuedContent(cmd.Target, cmd.Action, cmd.Reason, event.DirectivePriority(cmd.Priority))
 	if err := l.agent.EmitDirective(content); err != nil {
 		return fmt.Errorf("emit hive.directive.issued: %w", err)
 	}

@@ -140,6 +140,10 @@ type Loop struct {
 	// Only accessed from the Run() goroutine.
 	ctoCooldowns *CTOCooldowns
 	ctoConfig    CTOConfig
+
+	// spawnerState is populated in New() when role == "spawner".
+	// Only accessed from the Run() goroutine.
+	spawnerState *spawnerState
 }
 
 // New creates a new agentic loop.
@@ -170,6 +174,10 @@ func New(cfg Config) (*Loop, error) {
 	if string(cfg.Agent.Role()) == "cto" {
 		l.ctoCooldowns = NewCTOCooldowns()
 		l.ctoConfig = LoadCTOConfig()
+	}
+
+	if string(cfg.Agent.Role()) == "spawner" {
+		l.spawnerState = newSpawnerState()
 	}
 
 	return l, nil
