@@ -35,6 +35,7 @@ import (
 	"syscall"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 const soul = `== SOUL ==
@@ -102,7 +103,21 @@ func run() error {
 		system += "\n== CURRENT STATE ==\n" + stateCtx
 	}
 
-	client := anthropic.NewClient() // reads ANTHROPIC_API_KEY from env
+	// HIVE_ANTHROPIC_API_KEY takes precedence so the hive can use API billing
+	// without interfering with Claude Code's Max subscription.
+	apiKey := os.Getenv("HIVE_ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	var clientOpts []option.RequestOption
+	if apiKey != "" {
+		if strings.HasPrefix(apiKey, "sk-ant-oat") {
+			clientOpts = append(clientOpts, option.WithAuthToken(apiKey), option.WithAPIKey(""))
+		} else {
+			clientOpts = append(clientOpts, option.WithAPIKey(apiKey))
+		}
+	}
+	client := anthropic.NewClient(clientOpts...)
 
 	// Start MCP client if config provided.
 	var mcpClient *mcpClient

@@ -138,6 +138,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 		Provider:     "claude-cli",
 		Model:        model,
 		MaxBudgetUSD: budget,
+		APIKey:       resolveAnthropicKey(),
 	})
 	if err != nil {
 		return fmt.Errorf("provider: %w", err)
@@ -193,6 +194,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 		Provider:     "claude-cli",
 		Model:        councilModel,
 		MaxBudgetUSD: budget,
+		APIKey:       resolveAnthropicKey(),
 	})
 	if err != nil {
 		return fmt.Errorf("provider: %w", err)
@@ -302,6 +304,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			Provider:     "claude-sdk",
 			Model:        model,
 			MaxBudgetUSD: budget,
+			APIKey:       resolveAnthropicKey(),
 			SessionID:    agentSessions[role], // warm session from DB (empty = cold start)
 		}
 		if mcpConfigPath != "" {
@@ -692,6 +695,17 @@ func extractRepoName(text string, repoMap map[string]string) string {
 		}
 	}
 	return ""
+}
+
+// resolveAnthropicKey returns the Anthropic API key for the hive.
+// HIVE_ANTHROPIC_API_KEY takes precedence so the hive can use API billing
+// without interfering with Claude Code's Max subscription (which reads
+// ANTHROPIC_API_KEY). Falls back to ANTHROPIC_API_KEY for backward compat.
+func resolveAnthropicKey() string {
+	if key := os.Getenv("HIVE_ANTHROPIC_API_KEY"); key != "" {
+		return key
+	}
+	return os.Getenv("ANTHROPIC_API_KEY")
 }
 
 // findHiveDir returns the hive repo directory by walking up from cwd.
