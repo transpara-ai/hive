@@ -54,6 +54,9 @@ type Runtime struct {
 	// Telemetry writer (optional, nil when no postgres available).
 	telemetryWriter *telemetry.Writer
 
+	// Dynamic agent lifecycle tracker (agents spawned after boot).
+	dynamic *dynamicAgentTracker
+
 	// Options.
 	autoApprove bool
 	repoPath    string
@@ -174,6 +177,9 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	// Create the budget registry for cross-agent visibility.
 	r.budgetRegistry = resources.NewBudgetRegistry()
 
+	// Create the dynamic agent tracker (manages post-boot spawned agents).
+	r.dynamic = newDynamicAgentTracker()
+
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
 		r.telemetryWriter.SetBudgetRegistry(r.budgetRegistry)
@@ -242,8 +248,14 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		fmt.Fprintf(os.Stderr, "Telemetry: writer started (%d agents registered)\n", r.telemetryWriter.Agents())
 	}
 
-	// Run all agents concurrently.
+	// Watch for approved role proposals and spawn new agents mid-session.
+	go r.watchForApprovedRoles(ctx)
+
+	// Run all bootstrap agents concurrently.
 	results := loop.RunConcurrent(ctx, configs)
+
+	// Wait for any dynamically spawned agents to finish.
+	r.dynamic.Wait()
 
 	// Report results and emit stop events.
 	fmt.Fprintf(os.Stderr, "\n── Results ──\n")
