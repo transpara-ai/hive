@@ -2,6 +2,9 @@ package telemetry
 
 import (
 	"testing"
+
+	"github.com/lovyou-ai/eventgraph/go/pkg/event"
+	"github.com/lovyou-ai/work"
 )
 
 func TestRegisterAgent(t *testing.T) {
@@ -103,4 +106,128 @@ func TestWriterNilBudgetRegistry(t *testing.T) {
 	// We can't test the full DB path without postgres, but we verify
 	// the data collection path doesn't panic.
 	// The method returns early when pool is nil (no tx), which is fine.
+}
+
+func TestEventSummary(t *testing.T) {
+	tests := []struct {
+		name      string
+		role      string
+		eventType string
+		content   interface{}
+		want      string
+	}{
+		{
+			name:      "nil content falls back",
+			role:      "guardian",
+			eventType: "health.report",
+			content:   nil,
+			want:      "guardian: health.report",
+		},
+		{
+			name:      "task created",
+			role:      "strategist",
+			eventType: "work.task.created",
+			content:   work.TaskCreatedContent{Title: "Build auth system"},
+			want:      "Task: Build auth system",
+		},
+		{
+			name:      "task completed with summary",
+			role:      "implementer",
+			eventType: "work.task.completed",
+			content:   work.TaskCompletedContent{Summary: "Implemented JWT auth"},
+			want:      "Completed: Implemented JWT auth",
+		},
+		{
+			name:      "task completed without summary",
+			role:      "implementer",
+			eventType: "work.task.completed",
+			content:   work.TaskCompletedContent{},
+			want:      "Task completed",
+		},
+		{
+			name:      "gap detected",
+			role:      "cto",
+			eventType: "hive.gap.detected",
+			content:   event.GapDetectedContent{MissingRole: "reviewer", Evidence: "no code review agent"},
+			want:      "Gap: reviewer — no code review agent",
+		},
+		{
+			name:      "role proposed",
+			role:      "cto",
+			eventType: "hive.role.proposed",
+			content:   event.RoleProposedContent{Name: "reviewer"},
+			want:      "Proposed: reviewer",
+		},
+		{
+			name:      "agent state changed",
+			role:      "guardian",
+			eventType: "agent.state.changed",
+			content:   event.AgentStateChangedContent{Previous: "Idle", Current: "Active"},
+			want:      "Idle → Active",
+		},
+		{
+			name:      "agent escalated",
+			role:      "implementer",
+			eventType: "agent.escalated",
+			content:   event.AgentEscalatedContent{Reason: "budget exceeded"},
+			want:      "ESCALATED: budget exceeded",
+		},
+		{
+			name:      "agent budget adjusted",
+			role:      "allocator",
+			eventType: "agent.budget.adjusted",
+			content:   event.AgentBudgetAdjustedContent{AgentName: "implementer", PreviousBudget: 50, NewBudget: 75},
+			want:      "implementer: 50 → 75 iterations",
+		},
+		{
+			name:      "hive run started via JSON",
+			role:      "system",
+			eventType: "hive.run.started",
+			content:   struct{ Idea string }{"Build a task manager"},
+			want:      "Hive run started: Build a task manager",
+		},
+		{
+			name:      "hive agent spawned via JSON",
+			role:      "system",
+			eventType: "hive.agent.spawned",
+			content:   struct{ Name, Role, Model string }{"guardian", "guardian", "claude-sonnet-4-6"},
+			want:      "Spawned: guardian (guardian, claude-sonnet-4-6)",
+		},
+		{
+			name:      "unknown type falls back",
+			role:      "mystery",
+			eventType: "custom.event",
+			content:   struct{ Foo string }{"bar"},
+			want:      "mystery: custom.event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eventSummary(tt.role, tt.eventType, tt.content)
+			if got != tt.want {
+				t.Errorf("eventSummary() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		input  string
+		maxLen int
+		want   string
+	}{
+		{"short", 10, "short"},
+		{"exactly10!", 10, "exactly10!"},
+		{"this is too long", 7, "this is…"},
+		{"", 5, ""},
+	}
+
+	for _, tt := range tests {
+		got := truncate(tt.input, tt.maxLen)
+		if got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+		}
+	}
 }

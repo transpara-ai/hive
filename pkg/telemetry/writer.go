@@ -17,6 +17,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/lovyou-ai/work"
 )
 
 // AgentRegistration captures everything the telemetry writer needs to snapshot
@@ -384,7 +385,7 @@ func (w *Writer) writeEvent(ev event.Event) {
 	w.mu.RUnlock()
 
 	eventType := ev.Type().Value()
-	summary := fmt.Sprintf("%s: %s", actorRole, eventType)
+	summary := eventSummary(actorRole, eventType, ev.Content())
 
 	var rawContent json.RawMessage
 	if ev.Content() != nil {
@@ -404,4 +405,146 @@ func (w *Writer) writeEvent(ev event.Event) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetry: event stream: %v\n", err)
 	}
+}
+
+// eventSummary extracts a human-readable one-liner from an event's content.
+// Falls back to "actorRole: eventType" when the content type is unrecognised
+// or the type assertion fails.
+func eventSummary(actorRole, eventType string, content interface{}) string {
+	fallback := fmt.Sprintf("%s: %s", actorRole, eventType)
+
+	if content == nil {
+		return fallback
+	}
+
+	switch c := content.(type) {
+	// --- Health ---
+	case event.HealthReportContent:
+		chain := "intact"
+		if !c.ChainIntegrity {
+			chain = "broken"
+		}
+		return fmt.Sprintf("severity: %s, %d agents active, chain %s",
+			c.Overall.String(), c.ActiveActors, chain)
+
+	// --- Work tasks ---
+	case work.TaskCreatedContent:
+		return fmt.Sprintf("Task: %s", c.Title)
+	case work.TaskCompletedContent:
+		if c.Summary != "" {
+			return fmt.Sprintf("Completed: %s", truncate(c.Summary, 120))
+		}
+		return "Task completed"
+	case work.TaskAssignedContent:
+		return fmt.Sprintf("Assigned: %s → %s", c.TaskID.Value(), c.AssignedTo.Value())
+	case work.CommentContent:
+		return fmt.Sprintf("Comment: %s", truncate(c.Body, 120))
+	case work.TaskUnblockedContent:
+		return fmt.Sprintf("Unblocked: %s", c.TaskID.Value())
+
+	// --- Hive governance ---
+	case event.GapDetectedContent:
+		return fmt.Sprintf("Gap: %s — %s", c.MissingRole, c.Evidence)
+	case event.RoleProposedContent:
+		return fmt.Sprintf("Proposed: %s", c.Name)
+	case event.RoleApprovedContent:
+		return fmt.Sprintf("Approved: %s", c.Name)
+	case event.RoleRejectedContent:
+		return fmt.Sprintf("Rejected: %s — %s", c.Name, c.Reason)
+	case event.DirectiveIssuedContent:
+		return fmt.Sprintf("Directive → %s: %s", c.Target, c.Action)
+
+	// --- Agent lifecycle ---
+	case event.AgentStateChangedContent:
+		return fmt.Sprintf("%s → %s", c.Previous, c.Current)
+	case event.AgentEscalatedContent:
+		return fmt.Sprintf("ESCALATED: %s", c.Reason)
+	case event.AgentBudgetAdjustedContent:
+		return fmt.Sprintf("%s: %d → %d iterations", c.AgentName, c.PreviousBudget, c.NewBudget)
+
+	default:
+		// Hive runtime content types live in pkg/hive which imports pkg/telemetry,
+		// so we can't type-switch on them directly. Extract fields from JSON instead.
+		if s := hiveRuntimeSummary(eventType, content); s != "" {
+			return s
+		}
+		return fallback
+	}
+}
+
+// hiveRuntimeSummary extracts summaries from hive runtime event content via JSON
+// to avoid a circular import with pkg/hive.
+func hiveRuntimeSummary(eventType string, content interface{}) string {
+	data, err := json.Marshal(content)
+	if err != nil {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return ""
+	}
+
+	str := func(key string) string {
+		raw, ok := fields[key]
+		if !ok {
+			return ""
+		}
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+		return ""
+	}
+
+	intVal := func(key string) int {
+		raw, ok := fields[key]
+		if !ok {
+			return 0
+		}
+		var n int
+		if json.Unmarshal(raw, &n) == nil {
+			return n
+		}
+		return 0
+	}
+
+	floatVal := func(key string) float64 {
+		raw, ok := fields[key]
+		if !ok {
+			return 0
+		}
+		var f float64
+		if json.Unmarshal(raw, &f) == nil {
+			return f
+		}
+		return 0
+	}
+
+	switch eventType {
+	case "hive.run.started":
+		if idea := str("Idea"); idea != "" {
+			return fmt.Sprintf("Hive run started: %s", truncate(idea, 100))
+		}
+		return "Hive run started"
+	case "hive.run.completed":
+		return fmt.Sprintf("Hive run completed: %d agents, $%.4f", intVal("AgentCount"), floatVal("TotalCost"))
+	case "hive.agent.spawned":
+		return fmt.Sprintf("Spawned: %s (%s, %s)", str("Name"), str("Role"), str("Model"))
+	case "hive.agent.stopped":
+		return fmt.Sprintf("Stopped: %s — %s (%d iterations)", str("Name"), str("StopReason"), intVal("Iterations"))
+	case "hive.progress":
+		if msg := str("Message"); msg != "" {
+			return truncate(msg, 140)
+		}
+	}
+	return ""
+}
+
+// truncate shortens s to maxLen runes, appending "…" if truncated.
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "…"
 }
