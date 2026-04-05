@@ -9,6 +9,8 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/graph"
 	"github.com/lovyou-ai/eventgraph/go/pkg/store"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+
+	"github.com/lovyou-ai/hive/pkg/resources"
 )
 
 // ════════════════════════════════════════════════════════════════════════
@@ -425,5 +427,135 @@ func TestUpdateSpawnerState_ApprovalClearsProposal(t *testing.T) {
 
 	if state.pendingProposal != "" {
 		t.Errorf("pendingProposal = %q, want empty after approval", state.pendingProposal)
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// enrichSpawnObservation
+// ════════════════════════════════════════════════════════════════════════
+
+// newSpawnerLoop creates a minimal Loop with role="spawner" so spawnerState
+// is initialised. Uses a mock provider that always signals IDLE.
+func newSpawnerLoop(t *testing.T) *Loop {
+	t.Helper()
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent := testHiveAgent(t, provider, "spawner", "spawner")
+	l, err := New(Config{
+		Agent:  agent,
+		Budget: resources.BudgetConfig{MaxIterations: 100},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func TestEnrichSpawnObservation_Format(t *testing.T) {
+	l := newSpawnerLoop(t)
+
+	// Populate spawnerState with known data.
+	l.spawnerState.pendingProposal = "code-reviewer"
+	l.spawnerState.recentRejections["security-auditor"] = 10
+	l.spawnerState.processedGaps["gap-id-001"] = true
+
+	// Set up a BudgetRegistry with one entry.
+	reg := resources.NewBudgetRegistry()
+	budget := resources.NewBudget(resources.BudgetConfig{MaxIterations: 50})
+	reg.Register("guardian", budget, 50)
+	l.config.BudgetRegistry = reg
+
+	enriched := l.enrichSpawnObservation("base observation\n")
+
+	sections := []string{
+		"=== SPAWN CONTEXT ===",
+		"ROSTER:",
+		"PENDING PROPOSALS:",
+		"code-reviewer",
+		"RECENT GAPS",
+		"RECENT OUTCOMES:",
+		"security-auditor",
+		"BUDGET POOL:",
+		"===",
+	}
+	for _, want := range sections {
+		if !strings.Contains(enriched, want) {
+			t.Errorf("enriched output missing %q\ngot:\n%s", want, enriched)
+		}
+	}
+
+	// Base observation must be preserved.
+	if !strings.HasPrefix(enriched, "base observation\n") {
+		t.Errorf("base observation not preserved; got prefix: %q", enriched[:30])
+	}
+}
+
+func TestEnrichSpawnObservation_SkipsNonSpawner(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent := testHiveAgent(t, provider, "cto", "cto")
+	l, err := New(Config{
+		Agent:  agent,
+		Budget: resources.BudgetConfig{MaxIterations: 50},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obs := "unchanged observation"
+	got := l.enrichSpawnObservation(obs)
+	if got != obs {
+		t.Errorf("non-spawner observation should be unchanged; got %q", got)
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// buildSpawnContext
+// ════════════════════════════════════════════════════════════════════════
+
+func TestBuildSpawnContext(t *testing.T) {
+	l := newSpawnerLoop(t)
+
+	// Advance spawnerState to iteration 25 with a pending proposal.
+	for i := 0; i < 25; i++ {
+		l.spawnerState.update(nil)
+	}
+	l.spawnerState.pendingProposal = "code-reviewer"
+	l.spawnerState.recentRejections["security-auditor"] = 20
+
+	// Register two agents in BudgetRegistry.
+	reg := resources.NewBudgetRegistry()
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200)
+	reg.Register("sysmon", resources.NewBudget(resources.BudgetConfig{MaxIterations: 150}), 150)
+	l.config.BudgetRegistry = reg
+
+	ctx := l.buildSpawnContext()
+
+	if ctx.Iteration != 25 {
+		t.Errorf("Iteration = %d, want 25", ctx.Iteration)
+	}
+	if !ctx.HasPendingProposal {
+		t.Error("HasPendingProposal = false, want true")
+	}
+	if len(ctx.AgentRoster) != 2 {
+		t.Errorf("AgentRoster len = %d, want 2", len(ctx.AgentRoster))
+	}
+	rejectedAt, ok := ctx.RecentRejections["security-auditor"]
+	if !ok {
+		t.Fatal("expected security-auditor in RecentRejections")
+	}
+	if rejectedAt != 20 {
+		t.Errorf("RecentRejections[security-auditor] = %d, want 20", rejectedAt)
+	}
+
+	// Verify RosterContains works.
+	if !ctx.RosterContains("guardian") {
+		t.Error("RosterContains(guardian) = false, want true")
+	}
+	if ctx.RosterContains("nonexistent") {
+		t.Error("RosterContains(nonexistent) = true, want false")
+	}
+
+	// ctx.Iteration=25, rejectedAt=20, window=50 → 25-20=5 < 50 → recently rejected.
+	if !ctx.RecentlyRejected("security-auditor", 50) {
+		t.Error("RecentlyRejected(security-auditor, 50) = false, want true")
 	}
 }

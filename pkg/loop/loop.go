@@ -291,6 +291,18 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 		}
 
+		// 2.9. PROCESS /spawn command from the response (Spawner only).
+		if l.spawnerState != nil {
+			if cmd := parseSpawnCommand(response); cmd != nil {
+				spawnCtx := l.buildSpawnContext()
+				if err := validateSpawnCommand(cmd, spawnCtx); err != nil {
+					fmt.Printf("[%s] /spawn rejected: %v\n", l.agent.Name(), err)
+				} else if err := l.emitRoleProposed(cmd); err != nil {
+					fmt.Printf("[%s] /spawn emit failed: %v\n", l.agent.Name(), err)
+				}
+			}
+		}
+
 		// 3. CHECK stopping conditions in the response.
 		if stop := l.checkResponse(ctx, response, iteration); stop != nil {
 			return *stop
@@ -335,6 +347,11 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	l.pendingEvents = nil
 	l.mu.Unlock()
 
+	// Update spawner cross-iteration state from this iteration's events.
+	if l.spawnerState != nil {
+		l.spawnerState.update(pending)
+	}
+
 	var sb strings.Builder
 	sb.WriteString("## Recent Events\n")
 	for _, ev := range events {
@@ -356,6 +373,8 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	enriched = l.enrichBudgetObservation(enriched, l.iteration)
 	// Enrich observation with leadership briefing for CTO.
 	enriched = l.enrichCTOObservation(enriched)
+	// Enrich observation with spawn context for Spawner.
+	enriched = l.enrichSpawnObservation(enriched)
 	return enriched, nil
 }
 

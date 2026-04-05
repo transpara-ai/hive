@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
@@ -288,4 +289,112 @@ func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
 	fmt.Printf("[%s] emitted hive.role.proposed (name=%s model=%s)\n",
 		l.agent.Name(), cmd.Name, cmd.Model)
 	return nil
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Observation Enrichment
+// ────────────────────────────────────────────────────────────────────
+
+// enrichSpawnObservation appends the pre-computed SPAWN CONTEXT block to the
+// observation string for the Spawner. Only activates when l.spawnerState != nil
+// (i.e., when role == "spawner").
+//
+// Reads cross-iteration state from l.spawnerState (already updated from the
+// current iteration's pending events before this is called) and live data from
+// the BudgetRegistry.
+func (l *Loop) enrichSpawnObservation(obs string) string {
+	if l.spawnerState == nil {
+		return obs
+	}
+
+	reg := l.config.BudgetRegistry
+
+	var sb strings.Builder
+	sb.WriteString("\n=== SPAWN CONTEXT ===\n")
+
+	// Roster from BudgetRegistry.
+	sb.WriteString("ROSTER:\n")
+	if reg != nil {
+		entries := reg.Snapshot()
+		// Sort by name for deterministic output.
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Name < entries[j].Name
+		})
+		for _, e := range entries {
+			snap := e.Budget.Snapshot()
+			marker := ""
+			if e.Name == l.agent.Name() {
+				marker = "  (you)"
+			}
+			sb.WriteString(fmt.Sprintf("  %-14s %-8s iter=%d/%d%s\n",
+				e.Name+":", e.AgentState, snap.Iterations, e.MaxIterations, marker))
+		}
+	} else {
+		sb.WriteString("  [no budget registry available]\n")
+	}
+
+	// Pending proposals from spawnerState.
+	sb.WriteString("\nPENDING PROPOSALS: ")
+	if l.spawnerState.pendingProposal == "" {
+		sb.WriteString("none\n")
+	} else {
+		sb.WriteString(l.spawnerState.pendingProposal + "\n")
+	}
+
+	// Recent gaps from spawnerState.processedGaps.
+	sb.WriteString("\nRECENT GAPS (last 50 iterations):\n")
+	if len(l.spawnerState.processedGaps) == 0 {
+		sb.WriteString("  [none yet]\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("  %d gap(s) detected this session\n", len(l.spawnerState.processedGaps)))
+	}
+
+	// Recent outcomes from spawnerState.recentRejections.
+	sb.WriteString("\nRECENT OUTCOMES:\n")
+	if len(l.spawnerState.recentRejections) == 0 {
+		sb.WriteString("  (none yet)\n")
+	} else {
+		// Sort for deterministic output.
+		names := make([]string, 0, len(l.spawnerState.recentRejections))
+		for name := range l.spawnerState.recentRejections {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			iter := l.spawnerState.recentRejections[name]
+			sb.WriteString(fmt.Sprintf("  [iter %d] %s REJECTED\n", iter, name))
+		}
+	}
+
+	// Budget pool from BudgetRegistry.
+	sb.WriteString("\nBUDGET POOL:\n")
+	if reg != nil {
+		totalPool := reg.TotalPool()
+		totalUsed := reg.TotalUsed()
+		available := totalPool - totalUsed
+		sb.WriteString(fmt.Sprintf("  total=%d used=%d available=%d\n", totalPool, totalUsed, available))
+	} else {
+		sb.WriteString("  [no budget registry available]\n")
+	}
+
+	sb.WriteString("===\n")
+	return obs + sb.String()
+}
+
+// buildSpawnContext constructs a SpawnContext from spawnerState and BudgetRegistry.
+// Called once per iteration when a /spawn command is found in the response.
+func (l *Loop) buildSpawnContext() *SpawnContext {
+	ctx := &SpawnContext{
+		Iteration:          l.spawnerState.iteration,
+		HasPendingProposal: l.spawnerState.pendingProposal != "",
+		RecentRejections:   l.spawnerState.recentRejections,
+	}
+
+	if reg := l.config.BudgetRegistry; reg != nil {
+		for _, e := range reg.Snapshot() {
+			ctx.AgentRoster = append(ctx.AgentRoster, e.Name)
+		}
+	}
+
+	return ctx
 }
