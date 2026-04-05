@@ -236,6 +236,43 @@ func (w *Writer) collectAndWrite(ctx context.Context) {
 	}
 	eventRate := float64(recentEventCount) / 5.0
 
+	// Fetch trust scores for all agents in one query.
+	// DISTINCT ON (to_actor) picks the most recent trust edge per agent —
+	// the latest assessment supersedes earlier ones.
+	// Uses event.EdgeTypeTrust ("Trust") — the canonical constant, not a bare string.
+	// Result is nil for agents with no trust edges (honest null, not zero).
+	actorIDs := make([]string, len(agents))
+	for i, reg := range agents {
+		actorIDs[i] = reg.Agent.ID().Value()
+	}
+	trustScores := make(map[string]*float64, len(agents))
+	trustRows, err := w.pool.Query(ctx,
+		`SELECT DISTINCT ON (to_actor) to_actor, weight
+		 FROM edges
+		 WHERE to_actor = ANY($1) AND edge_type = $2
+		 ORDER BY to_actor, created_at_nanos DESC`,
+		actorIDs,
+		string(event.EdgeTypeTrust),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: trust scores query: %v\n", err)
+	} else {
+		for trustRows.Next() {
+			var actorID string
+			var weight float64
+			if scanErr := trustRows.Scan(&actorID, &weight); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "telemetry: trust score scan: %v\n", scanErr)
+				continue
+			}
+			w := weight
+			trustScores[actorID] = &w
+		}
+		trustRows.Close()
+		if rowsErr := trustRows.Err(); rowsErr != nil {
+			fmt.Fprintf(os.Stderr, "telemetry: trust scores rows: %v\n", rowsErr)
+		}
+	}
+
 	// Write everything in a single transaction.
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -263,19 +300,9 @@ func (w *Writer) collectAndWrite(ctx context.Context) {
 
 		lastMessage := responses[reg.Name]
 
-		// Trust score: most recent weight of any trust edge pointing TO this agent.
-		// We use created_at_nanos DESC to pick the latest edge, not an average,
-		// because the most recent trust assessment supersedes earlier ones.
+		// Trust score from the pre-fetched batch query above.
 		// Nil when no trust edges exist — honest null, not zero.
-		var trustScore *float64
-		if err := w.pool.QueryRow(ctx,
-			`SELECT weight FROM edges WHERE to_actor = $1 AND edge_type = 'trust'
-			 ORDER BY created_at_nanos DESC LIMIT 1`,
-			actorID,
-		).Scan(&trustScore); err != nil {
-			// No rows is expected for agents without trust data — leave nil.
-			trustScore = nil
-		}
+		trustScore := trustScores[actorID]
 
 		// Per-agent last event: use the event type and timestamp tracked from
 		// the bus subscription. Falls back to empty string / nil when no event

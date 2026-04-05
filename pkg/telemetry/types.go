@@ -19,6 +19,7 @@ type AgentSnapshot struct {
 	CostUSD       float64    `json:"cost_usd"`
 	TrustScore    *float64   `json:"trust_score"`
 	LastEventType string     `json:"last_event_type"`
+	LastEventAt   *time.Time `json:"last_event_at"`
 	LastMessage   string     `json:"last_message"`
 	Errors        int        `json:"errors"`
 }

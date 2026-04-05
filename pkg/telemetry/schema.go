@@ -116,8 +116,11 @@ func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("telemetry schema: %w", err)
 	}
 
-	// Migrations: add columns that postdate the initial schema.
-	// All use ADD COLUMN IF NOT EXISTS — safe to run on every startup.
+	// Migrations: add columns that postdate the initial schema definition above.
+	// Convention: new columns appear in BOTH the CREATE TABLE (for fresh installs)
+	// AND here as ADD COLUMN IF NOT EXISTS (for existing deployments). The ALTER
+	// is a no-op on fresh installs; the CREATE TABLE column is never reached on
+	// existing deployments. Both paths produce the same schema.
 	const migrations = `
 ALTER TABLE telemetry_agent_snapshots ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
 `
