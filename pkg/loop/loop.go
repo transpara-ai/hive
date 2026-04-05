@@ -443,14 +443,27 @@ Every response MUST end with exactly one /signal line.
 
 // reason calls the agent's LLM and returns the response text and token usage.
 // Uses the unified Agent.Reason() which drives state machine transitions.
+//
+// Retries up to 3 times on chain integrity violations. These occur when a
+// concurrent goroutine (e.g., autoAssignOpenTask via TaskStore.Assign) appends
+// directly to the event store between the graph.Record mutex's head-read and
+// store-append, causing the spawner's prevHash to stale. On retry, graph.Record
+// re-reads the fresh head and the append succeeds.
 func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.TokenUsage, error) {
-	content, err := l.agent.Reason(ctx, prompt)
-	if err != nil {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		content, err := l.agent.Reason(ctx, prompt)
+		if err == nil {
+			return content, decision.TokenUsage{}, nil
+		}
+		if strings.Contains(err.Error(), "chain integrity violation") && attempt < maxRetries-1 {
+			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+			continue
+		}
 		return "", decision.TokenUsage{}, err
 	}
-	// Token usage is tracked by the provider wrapper (TrackingProvider).
-	// Return zero usage here — the budget uses iteration counts.
-	return content, decision.TokenUsage{}, nil
+	// Unreachable, but satisfies the compiler.
+	return "", decision.TokenUsage{}, fmt.Errorf("reason: exhausted retries")
 }
 
 // Signal is the structured JSON signal emitted by agents at the end of each response.
