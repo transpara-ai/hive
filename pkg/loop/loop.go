@@ -114,6 +114,10 @@ type Config struct {
 	// BudgetRegistry provides cross-agent budget visibility. Optional.
 	// When set, observation enrichment can query all agents' budget states.
 	BudgetRegistry *resources.BudgetRegistry
+
+	// ActorResolver maps actor IDs to display names for task context.
+	// Optional. When nil, task context omits creator information.
+	ActorResolver func(types.ActorID) string
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
@@ -663,8 +667,18 @@ func (l *Loop) buildTaskContext() string {
 				assignee = fmt.Sprintf(" [assigned to %s]", t.Assignee.Value())
 			}
 		}
-		sb.WriteString(fmt.Sprintf("- [%s] %s: %s%s\n",
-			status, t.ID.Value(), t.Title, assignee))
+		createdBy := ""
+		if l.config.ActorResolver != nil && t.CreatedBy != (types.ActorID{}) {
+			if name := l.config.ActorResolver(t.CreatedBy); name != "" {
+				if t.CreatedBy == l.agent.ID() {
+					createdBy = " (created by you)"
+				} else {
+					createdBy = fmt.Sprintf(" (created by %s)", name)
+				}
+			}
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] %s: %s%s%s\n",
+			status, t.ID.Value(), t.Title, assignee, createdBy))
 	}
 
 	return sb.String()

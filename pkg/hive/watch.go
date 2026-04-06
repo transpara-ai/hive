@@ -176,6 +176,13 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		CanOperate: false,
 		RepoPath:   r.repoPath,
 		Keepalive:  r.keepalive,
+		ActorResolver: func(id types.ActorID) string {
+			a, err := r.actors.Get(id)
+			if err != nil {
+				return ""
+			}
+			return a.DisplayName()
+		},
 
 		OnIteration: func(iteration int, response string) {
 			fmt.Fprintf(os.Stderr, "[%s] iteration %d (%d chars)\n",
