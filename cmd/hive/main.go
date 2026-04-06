@@ -44,6 +44,7 @@ import (
 	"github.com/lovyou-ai/hive/pkg/registry"
 	"github.com/lovyou-ai/hive/pkg/runner"
 	"github.com/lovyou-ai/hive/pkg/telemetry"
+	"github.com/lovyou-ai/work"
 )
 
 func main() {
@@ -748,6 +749,7 @@ func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string, k
 	// deserialize event content on Head() — without these unmarshalers,
 	// existing events with types like hive.run.completed fail to load.
 	hive.RegisterEventTypes()
+	work.RegisterEventTypes()
 
 	s, err := openStore(ctx, pool)
 	if err != nil {
