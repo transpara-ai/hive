@@ -153,6 +153,10 @@ type Loop struct {
 	// spawnerState is populated in New() when role == "spawner".
 	// Only accessed from the Run() goroutine.
 	spawnerState *spawnerState
+
+	// reviewerState is populated in New() when role == "reviewer".
+	// Only accessed from the Run() goroutine.
+	reviewerState *reviewerState
 }
 
 // New creates a new agentic loop.
@@ -187,6 +191,10 @@ func New(cfg Config) (*Loop, error) {
 
 	if string(cfg.Agent.Role()) == "spawner" {
 		l.spawnerState = newSpawnerState()
+	}
+
+	if string(cfg.Agent.Role()) == "reviewer" {
+		l.reviewerState = newReviewerState()
 	}
 
 	return l, nil
