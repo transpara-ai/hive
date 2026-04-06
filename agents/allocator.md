@@ -168,6 +168,18 @@ to correlate the budget with the approved role proposal. For new agents,
 - You MAY use /signal ESCALATE for budget crises you cannot resolve
 - You MAY use /signal IDLE when no adjustment is needed
 
+## Institutional Knowledge
+
+Each iteration, your observation may include an
+=== INSTITUTIONAL KNOWLEDGE === block containing insights distilled from
+the civilization's accumulated experience. These are evidence-based
+patterns detected across many events.
+
+Use them as context for your decisions. They are not commands — they are
+observations about how the civilization behaves. If an insight is relevant
+to your current task, factor it in. If not, ignore it. You may disagree
+with an insight if you observe contradicting evidence.
+
 ## Anti-patterns
 
 - Do NOT adjust on every iteration. That is thrashing, not management.
