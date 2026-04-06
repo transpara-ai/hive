@@ -23,6 +23,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/lovyou-ai/agent"
+	"github.com/lovyou-ai/hive/pkg/knowledge"
 	"github.com/lovyou-ai/hive/pkg/loop"
 	"github.com/lovyou-ai/hive/pkg/membrane"
 	"github.com/lovyou-ai/hive/pkg/resources"
@@ -53,6 +54,12 @@ type Runtime struct {
 
 	// Telemetry writer (optional, nil when no postgres available).
 	telemetryWriter *telemetry.Writer
+
+	// System actor for infrastructure events (knowledge, telemetry, etc.).
+	systemID types.ActorID
+
+	// Knowledge store for distilled insights (survives reboot via chain replay).
+	knowledgeStore knowledge.KnowledgeStore
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -97,6 +104,12 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	RegisterWithRegistry(registry)
 	work.RegisterWithRegistry(registry)
 
+	// Register the system actor for infrastructure events.
+	systemID, err := registerSystemActor(cfg.Actors)
+	if err != nil {
+		return nil, fmt.Errorf("register system actor: %w", err)
+	}
+
 	// Create event factory for the task store.
 	factory := event.NewEventFactory(registry)
 	convID, err := newConversationID()
@@ -111,6 +124,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		actors:          cfg.Actors,
 		graph:           g,
 		humanID:         cfg.HumanID,
+		systemID:        systemID,
 		signer:          signer,
 		factory:         factory,
 		convID:          convID,
@@ -185,6 +199,32 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		r.telemetryWriter.SetBudgetRegistry(r.budgetRegistry)
 	}
 
+	// Create knowledge store and replay state from the event chain.
+	r.knowledgeStore = knowledge.NewStore()
+	if err := knowledge.ReplayFromStore(r.store, r.knowledgeStore); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: knowledge replay: %v (starting with empty store)\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Knowledge: replayed %d active insights from chain\n", r.knowledgeStore.ActiveCount())
+	}
+	go knowledge.RunPruner(ctx, r.knowledgeStore, 15*time.Minute)
+
+	// Subscribe to live knowledge events on the bus.
+	knowledgePattern := types.MustSubscriptionPattern("knowledge.*")
+	r.graph.Bus().Subscribe(knowledgePattern, func(ev event.Event) {
+		switch c := ev.Content().(type) {
+		case event.KnowledgeInsightContent:
+			insight := knowledge.ConvertFromEventContent(c, ev.Timestamp().Value())
+			_ = r.knowledgeStore.Record(insight)
+			if c.SupersedesID != "" {
+				_ = r.knowledgeStore.Supersede(c.SupersedesID, c.InsightID)
+			}
+		case event.KnowledgeSupersessionContent:
+			_ = r.knowledgeStore.Supersede(c.OldInsightID, c.NewInsightID)
+		case event.KnowledgeExpirationContent:
+			_ = r.knowledgeStore.Expire(c.InsightID)
+		}
+	})
+
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
@@ -222,11 +262,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			Task:           seedIdea,
 
 			// Task coordination.
-			TaskStore:  r.tasks,
-			ConvID:     r.convID,
-			CanOperate: def.CanOperate,
-			RepoPath:   r.repoPath,
-			Keepalive:  r.keepalive,
+			TaskStore:      r.tasks,
+			ConvID:         r.convID,
+			CanOperate:     def.CanOperate,
+			RepoPath:       r.repoPath,
+			Keepalive:      r.keepalive,
+			KnowledgeStore: r.knowledgeStore,
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)
 				if err != nil {
@@ -362,6 +403,35 @@ func deriveSignerFromID(id types.ActorID) *ed25519Signer {
 	h := sha256.Sum256([]byte("signer:" + id.Value()))
 	priv := ed25519.NewKeyFromSeed(h[:])
 	return &ed25519Signer{key: priv}
+}
+
+// registerSystemActor registers a deterministic system actor for infrastructure
+// events. Idempotent — returns the existing actor on reboot.
+func registerSystemActor(actors actor.IActorStore) (types.ActorID, error) {
+	h := sha256.Sum256([]byte("system:hive"))
+	priv := ed25519.NewKeyFromSeed(h[:])
+	pub := priv.Public().(ed25519.PublicKey)
+
+	pk, err := types.NewPublicKey([]byte(pub))
+	if err != nil {
+		return types.ActorID{}, fmt.Errorf("public key: %w", err)
+	}
+
+	a, err := actors.Register(pk, "system", event.ActorTypeSystem)
+	if err != nil {
+		return types.ActorID{}, err
+	}
+	return a.ID(), nil
+}
+
+// SystemID returns the system actor's ID.
+func (r *Runtime) SystemID() types.ActorID {
+	return r.systemID
+}
+
+// KnowledgeStore returns the runtime's knowledge store.
+func (r *Runtime) KnowledgeStore() knowledge.KnowledgeStore {
+	return r.knowledgeStore
 }
 
 // newConversationID generates a unique conversation ID for this run.

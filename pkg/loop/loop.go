@@ -25,6 +25,7 @@ import (
 
 	hiveagent "github.com/lovyou-ai/agent"
 	"github.com/lovyou-ai/hive/pkg/budget"
+	"github.com/lovyou-ai/hive/pkg/knowledge"
 	"github.com/lovyou-ai/hive/pkg/resources"
 	"github.com/lovyou-ai/work"
 )
@@ -118,6 +119,10 @@ type Config struct {
 	// ActorResolver maps actor IDs to display names for task context.
 	// Optional. When nil, task context omits creator information.
 	ActorResolver func(types.ActorID) string
+
+	// KnowledgeStore provides access to distilled insights for context
+	// enrichment. Optional. When nil, agents run without knowledge injection.
+	KnowledgeStore knowledge.KnowledgeStore
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.

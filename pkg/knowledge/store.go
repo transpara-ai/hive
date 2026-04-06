@@ -17,19 +17,19 @@ type KnowledgeStore interface {
 	PruneExpired() int
 }
 
-type store struct {
+type memoryStore struct {
 	mu       sync.RWMutex
 	insights map[string]*KnowledgeInsight
 }
 
 // NewStore creates an empty in-memory KnowledgeStore.
 func NewStore() KnowledgeStore {
-	return &store{
+	return &memoryStore{
 		insights: make(map[string]*KnowledgeInsight),
 	}
 }
 
-func (s *store) Record(insight KnowledgeInsight) error {
+func (s *memoryStore) Record(insight KnowledgeInsight) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -40,7 +40,7 @@ func (s *store) Record(insight KnowledgeInsight) error {
 	return nil
 }
 
-func (s *store) Supersede(oldID, newID string) error {
+func (s *memoryStore) Supersede(oldID, newID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -51,7 +51,7 @@ func (s *store) Supersede(oldID, newID string) error {
 	return nil
 }
 
-func (s *store) Expire(insightID string) error {
+func (s *memoryStore) Expire(insightID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -61,7 +61,7 @@ func (s *store) Expire(insightID string) error {
 	return nil
 }
 
-func (s *store) Query(filter KnowledgeFilter, maxResults int) []KnowledgeInsight {
+func (s *memoryStore) Query(filter KnowledgeFilter, maxResults int) []KnowledgeInsight {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -124,7 +124,7 @@ func (s *store) Query(filter KnowledgeFilter, maxResults int) []KnowledgeInsight
 	return out
 }
 
-func (s *store) ActiveCount() int {
+func (s *memoryStore) ActiveCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -137,7 +137,7 @@ func (s *store) ActiveCount() int {
 	return count
 }
 
-func (s *store) PruneExpired() int {
+func (s *memoryStore) PruneExpired() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -170,7 +170,7 @@ func RunPruner(ctx context.Context, s KnowledgeStore, interval time.Duration) {
 
 // enforceLimit deactivates the lowest-confidence active insights when the
 // active count exceeds MaxActiveInsights. Must be called with mu held.
-func (s *store) enforceLimit() {
+func (s *memoryStore) enforceLimit() {
 	active := make([]*KnowledgeInsight, 0)
 	for _, ins := range s.insights {
 		if ins.Active {
