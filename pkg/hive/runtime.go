@@ -225,6 +225,19 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		}
 	})
 
+	// Start knowledge distiller with system actor.
+	systemSigner := deriveSignerFromID(r.systemID)
+	emitter := &systemEmitter{
+		store:   r.store,
+		factory: r.factory,
+		signer:  systemSigner,
+		actorID: r.systemID,
+		convID:  r.convID,
+	}
+	distiller := knowledge.NewDistiller(r.store, r.knowledgeStore, emitter, 5*time.Minute)
+	go distiller.Run(ctx)
+	fmt.Fprintf(os.Stderr, "Knowledge: distiller started (5m interval)\n")
+
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
@@ -432,6 +445,30 @@ func (r *Runtime) SystemID() types.ActorID {
 // KnowledgeStore returns the runtime's knowledge store.
 func (r *Runtime) KnowledgeStore() knowledge.KnowledgeStore {
 	return r.knowledgeStore
+}
+
+// systemEmitter implements knowledge.EventEmitter using the system actor.
+type systemEmitter struct {
+	store   store.Store
+	factory *event.EventFactory
+	signer  event.Signer
+	actorID types.ActorID
+	convID  types.ConversationID
+}
+
+func (e *systemEmitter) Emit(eventType types.EventType, content event.EventContent) error {
+	head, err := e.store.Head()
+	if err != nil || !head.IsSome() {
+		return fmt.Errorf("no chain head")
+	}
+	causeID := head.Unwrap().ID()
+
+	ev, err := e.factory.Create(eventType, e.actorID, content, []types.EventID{causeID}, e.convID, e.store, e.signer)
+	if err != nil {
+		return fmt.Errorf("create event: %w", err)
+	}
+	_, err = e.store.Append(ev)
+	return err
 }
 
 // newConversationID generates a unique conversation ID for this run.
