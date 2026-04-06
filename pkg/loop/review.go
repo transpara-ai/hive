@@ -66,10 +66,10 @@ func (s *reviewerState) update(events []event.Event) {
 			taskID := c.TaskID.Value()
 			s.completedTasks[taskID] = c
 		}
-		// Track our own reviews to exclude already-reviewed tasks.
-		if c, ok := ev.Content().(event.CodeReviewContent); ok {
-			s.recordReview(c.TaskID, c.Verdict, c.Issues, s.iteration)
-		}
+		// Note: CodeReviewContent is NOT tracked here. Own events are
+		// filtered by onEvent() (source == self → skip), so the bus
+		// never delivers our own reviews. Recording happens directly
+		// in the Run loop after successful emitCodeReview.
 	}
 }
 
