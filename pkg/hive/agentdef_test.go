@@ -64,8 +64,8 @@ func TestAgentDefDefaults(t *testing.T) {
 func TestStarterAgents(t *testing.T) {
 	agents := StarterAgents("TestHuman")
 
-	if len(agents) != 8 {
-		t.Fatalf("got %d agents, want 8", len(agents))
+	if len(agents) != 9 {
+		t.Fatalf("got %d agents, want 9", len(agents))
 	}
 
 	names := map[string]bool{}
@@ -87,15 +87,15 @@ func TestStarterAgents(t *testing.T) {
 	}
 
 	// Verify expected roles exist.
-	expectedRoles := []string{"guardian", "sysmon", "allocator", "cto", "spawner", "strategist", "planner", "implementer"}
+	expectedRoles := []string{"guardian", "sysmon", "allocator", "cto", "spawner", "reviewer", "strategist", "planner", "implementer"}
 	for _, role := range expectedRoles {
 		if !roles[role] {
 			t.Errorf("missing expected role: %s", role)
 		}
 	}
 
-	// Verify boot order: guardian → sysmon → allocator → cto → spawner → strategist → planner → implementer.
-	bootOrder := []string{"guardian", "sysmon", "allocator", "cto", "spawner", "strategist", "planner", "implementer"}
+	// Verify boot order: guardian → sysmon → allocator → cto → spawner → reviewer → strategist → planner → implementer.
+	bootOrder := []string{"guardian", "sysmon", "allocator", "cto", "spawner", "reviewer", "strategist", "planner", "implementer"}
 	for i, want := range bootOrder {
 		if agents[i].Role != want {
 			t.Errorf("boot order[%d]: got role %q, want %q", i, agents[i].Role, want)

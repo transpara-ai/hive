@@ -320,7 +320,24 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 		}
 
-		// 2.10. PROCESS /approve and /reject commands from the response (Guardian only).
+		// 2.10. PROCESS /review command from the response (Reviewer only).
+		if l.reviewerState != nil {
+			if cmd := parseReviewCommand(response); cmd != nil {
+				if err := validateReviewCommand(cmd, l.iteration); err != nil {
+					fmt.Printf("[%s] /review rejected: %v\n", l.agent.Name(), err)
+				} else if l.reviewerState.shouldEscalate(cmd.TaskID) {
+					fmt.Printf("[%s] review cycle limit reached for %s, escalating\n",
+						l.agent.Name(), cmd.TaskID)
+				} else {
+					if err := l.emitCodeReview(cmd); err != nil {
+						fmt.Printf("[%s] /review emit failed: %v\n", l.agent.Name(), err)
+					}
+					l.reviewerState.recordReview(cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
+				}
+			}
+		}
+
+		// 2.11. PROCESS /approve and /reject commands from the response (Guardian only).
 		if string(l.agent.Role()) == "guardian" {
 			if cmd := parseApproveCommand(response); cmd != nil {
 				if err := l.emitRoleApproved(cmd); err != nil {
