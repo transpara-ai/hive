@@ -34,10 +34,9 @@ var validVerdicts = map[string]bool{
 // Created in New() when role == "reviewer". Only accessed from the
 // Run() goroutine — no mutex needed.
 type reviewerState struct {
-	iteration           int
-	reviewHistory       map[string]*taskReviewRecord
-	pendingCompletedIDs []string                        // task IDs from work.task.completed events
-	completedTasks      map[string]work.TaskCompletedContent // keyed by TaskID string
+	iteration      int
+	reviewHistory  map[string]*taskReviewRecord
+	completedTasks map[string]work.TaskCompletedContent // keyed by TaskID string
 }
 
 // taskReviewRecord tracks review history for a single task.
@@ -61,13 +60,11 @@ func newReviewerState() *reviewerState {
 // Called once per loop iteration with the pending events from the bus.
 func (s *reviewerState) update(events []event.Event) {
 	s.iteration++
-	s.pendingCompletedIDs = nil // reset each iteration
 
 	for _, ev := range events {
 		if c, ok := ev.Content().(work.TaskCompletedContent); ok {
 			taskID := c.TaskID.Value()
 			s.completedTasks[taskID] = c
-			s.pendingCompletedIDs = append(s.pendingCompletedIDs, taskID)
 		}
 		// Track our own reviews to exclude already-reviewed tasks.
 		if c, ok := ev.Content().(event.CodeReviewContent); ok {

@@ -332,7 +332,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 					if err := l.emitCodeReview(cmd); err != nil {
 						fmt.Printf("[%s] /review emit failed: %v\n", l.agent.Name(), err)
 					}
-					l.reviewerState.recordReview(cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
+					// recordReview is NOT called here — the emitted event comes
+					// back via the bus and reviewerState.update() handles it.
+					// Calling it here too would double-count and trigger premature
+					// escalation (3-review threshold hit after only 2 reviews).
 				}
 			}
 		}
