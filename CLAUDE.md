@@ -222,6 +222,21 @@ See `docs/CODING-STANDARDS.md` for full details. The cardinal rules:
 - **Typed errors** — domain error types, not string messages you have to parse
 - **Explicit optionality** — `Option[T]`, no nil/zero-value-means-absent
 
+## Local Loop Guardrails
+
+The loop is configured via `loop/config.env`. All environment-specific values (remote names, repo paths, org names, feature flags) live there — not hardcoded in prompts or scripts.
+
+Default constraints for the transpara-ai deployment:
+
+- **Git remote:** `GIT_REMOTE` in config.env (default: `transpara-ai`). Never push to `origin` (upstream).
+- **Protected branches:** `PROTECTED_BRANCHES` in config.env (default: `main master`). Never commit directly.
+- **Posting:** `POST_ENABLED` in config.env (default: `false`). No external API calls unless enabled.
+- **Deployment:** `DEPLOY_ENABLED` in config.env (default: `false`). No fly deploy or ship.sh unless enabled.
+- **PRs:** Use `gh pr create --repo ${GIT_ORG}/${REPO_NAME}` with values from config.env.
+- **Repo paths:** `${REPOS_BASE}/${REPO_*}` with values from config.env.
+
+These rules apply to all agents, all prompts, and all scripts in the loop. To change the deployment target, edit config.env — not the prompts.
+
 ## Intelligence
 
 All inference runs through **Claude CLI** (Max plan, flat rate). NOT the Anthropic API — CLI is cheaper and better for our use case. The runtime creates `claude-cli` providers automatically.

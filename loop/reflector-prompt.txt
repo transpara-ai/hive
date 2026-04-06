@@ -24,4 +24,4 @@ Update loop/state.md:
 - Known issues
 - What the Scout should focus on next
 
-Close the iteration: `LOVYOU_API_KEY=lv_... ./loop/close.sh` — this posts to lovyou.ai (feed + board), commits loop/ artifacts, and pushes. Validates all artifact files exist.
+Close the iteration: `./loop/close.sh` — this commits loop/ artifacts to the current feature branch. It reads loop/config.env for git remote and org settings. It does NOT push or post unless configured to do so. Review the commit before proceeding.

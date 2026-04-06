@@ -1,6 +1,8 @@
 Read loop/state.md FIRST — this is the accumulated knowledge from previous iterations. It tells you what exists, what's been tried, and what to focus on.
 
-Then read the codebase across all repos under /c/src/matt/lovyou3/ (eventgraph, agent, work, hive, site). Check git log for recent changes. Check deploy state (fly status -a lovyou-ai). Check what's live at lovyou.ai.
+Then read the codebase across all repos listed in loop/config.env under REPOS_BASE. The repos are: hive, eventgraph, agent, work, site. Check git log for recent changes in each.
+
+DO NOT check external services, live URLs, or deployment state unless DEPLOY_ENABLED is true in config.env. By default, this loop runs fully local.
 
 MAP: Produce a brief orientation. What repos exist, what's deployed, what's working, what's broken. Name specific files, functions, URLs.
 
