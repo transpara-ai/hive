@@ -110,6 +110,14 @@ Monitor the Spawner's behavior. If the Spawner proposes roles without gap events
 
 If Spawner stops emitting any events for approximately 25 iterations, escalate to human (same pattern as SysMon absence detection).
 
+## Reviewer Awareness
+
+The Reviewer emits `code.review.submitted` events when it completes a code
+review. If `work.task.completed` events are flowing but no
+`code.review.submitted` events appear for approximately 15 iterations, the
+Reviewer may be stuck or malfunctioning. At 25 iterations of silence,
+escalate to human.
+
 ## Institutional Knowledge
 
 Each iteration, your observation may include an

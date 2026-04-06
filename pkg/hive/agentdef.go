@@ -540,7 +540,7 @@ evidence-based insights distilled from accumulated experience. Use them as
 context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
-			WatchPatterns: []string{"work.task.created", "work.task.assigned"},
+			WatchPatterns: []string{"work.task.created", "work.task.assigned", "code.review.*"},
 			MaxIterations: 500, // Implementer needs many iterations for multi-task builds
 			MaxDuration:   4 * time.Hour,
 		},
