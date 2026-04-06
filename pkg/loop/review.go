@@ -3,9 +3,11 @@ package loop
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
+	"github.com/lovyou-ai/work"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -32,8 +34,10 @@ var validVerdicts = map[string]bool{
 // Created in New() when role == "reviewer". Only accessed from the
 // Run() goroutine — no mutex needed.
 type reviewerState struct {
-	iteration     int
-	reviewHistory map[string]*taskReviewRecord
+	iteration           int
+	reviewHistory       map[string]*taskReviewRecord
+	pendingCompletedIDs []string                        // task IDs from work.task.completed events
+	completedTasks      map[string]work.TaskCompletedContent // keyed by TaskID string
 }
 
 // taskReviewRecord tracks review history for a single task.
@@ -48,8 +52,46 @@ type taskReviewRecord struct {
 // newReviewerState initialises a zeroed reviewerState.
 func newReviewerState() *reviewerState {
 	return &reviewerState{
-		reviewHistory: make(map[string]*taskReviewRecord),
+		reviewHistory:  make(map[string]*taskReviewRecord),
+		completedTasks: make(map[string]work.TaskCompletedContent),
 	}
+}
+
+// update processes the current batch of pending events and tracks completed tasks.
+// Called once per loop iteration with the pending events from the bus.
+func (s *reviewerState) update(events []event.Event) {
+	s.iteration++
+	s.pendingCompletedIDs = nil // reset each iteration
+
+	for _, ev := range events {
+		if c, ok := ev.Content().(work.TaskCompletedContent); ok {
+			taskID := c.TaskID.Value()
+			s.completedTasks[taskID] = c
+			s.pendingCompletedIDs = append(s.pendingCompletedIDs, taskID)
+		}
+		// Track our own reviews to exclude already-reviewed tasks.
+		if c, ok := ev.Content().(event.CodeReviewContent); ok {
+			s.recordReview(c.TaskID, c.Verdict, c.Issues, s.iteration)
+		}
+	}
+}
+
+// findPendingReviews returns task IDs that have been completed but not yet
+// reviewed (or were reviewed with request_changes and re-completed).
+func (s *reviewerState) findPendingReviews() []string {
+	var pending []string
+	for taskID := range s.completedTasks {
+		rec, reviewed := s.reviewHistory[taskID]
+		if !reviewed {
+			pending = append(pending, taskID)
+			continue
+		}
+		// Re-review if last verdict was request_changes (implementer may have fixed).
+		if rec.lastVerdict == "request_changes" {
+			pending = append(pending, taskID)
+		}
+	}
+	return pending
 }
 
 // recordReview records a review verdict for a task.
@@ -168,4 +210,135 @@ func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
 	fmt.Printf("[%s] emitted code.review.submitted (task=%s verdict=%s confidence=%.2f)\n",
 		l.agent.Name(), cmd.TaskID, cmd.Verdict, cmd.Confidence)
 	return nil
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Observation Enrichment
+// ────────────────────────────────────────────────────────────────────
+
+// enrichReviewObservation appends pre-computed code review context to the
+// observation string for the Reviewer. Only activates when l.reviewerState
+// is non-nil (i.e., when role == "reviewer").
+func (l *Loop) enrichReviewObservation(obs string) string {
+	if l.reviewerState == nil {
+		return obs
+	}
+
+	pending := l.reviewerState.findPendingReviews()
+	if len(pending) == 0 {
+		return obs + "\n\n=== CODE REVIEW CONTEXT ===\nNo tasks pending review.\n==="
+	}
+
+	// One task per iteration — focus produces better reviews.
+	taskID := pending[0]
+	task, ok := l.reviewerState.completedTasks[taskID]
+
+	var sb strings.Builder
+	sb.WriteString("\n\n=== CODE REVIEW CONTEXT ===\n")
+	sb.WriteString(fmt.Sprintf("PENDING REVIEWS: %d\n\n", len(pending)))
+
+	// Task metadata.
+	sb.WriteString("TASK UNDER REVIEW:\n")
+	sb.WriteString(fmt.Sprintf("  id: %s\n", taskID))
+	if ok {
+		sb.WriteString(fmt.Sprintf("  completed_by: %s\n", task.CompletedBy.Value()))
+		if task.Summary != "" {
+			sb.WriteString(fmt.Sprintf("  summary: %s\n", task.Summary))
+		}
+	}
+	sb.WriteString("\n")
+
+	// Git context — only if RepoPath is configured.
+	if l.config.RepoPath != "" {
+		commit := gitCommand(l.config.RepoPath, "log", "--oneline", "-1")
+		fileStat := gitCommand(l.config.RepoPath, "diff", "HEAD~1", "--stat")
+		diff := gitCommand(l.config.RepoPath, "diff", "HEAD~1")
+
+		sb.WriteString("RECENT COMMIT:\n")
+		if commit != "" {
+			sb.WriteString(fmt.Sprintf("  %s\n", commit))
+		} else {
+			sb.WriteString("  (unavailable)\n")
+		}
+		sb.WriteString("\n")
+
+		sb.WriteString("CHANGED FILES:\n")
+		if fileStat != "" {
+			for _, line := range strings.Split(fileStat, "\n") {
+				if line != "" {
+					sb.WriteString(fmt.Sprintf("  %s\n", line))
+				}
+			}
+		} else {
+			sb.WriteString("  (unavailable)\n")
+		}
+		sb.WriteString("\n")
+
+		truncated := truncateDiff(diff, 300)
+		sb.WriteString("DIFF:\n")
+		if truncated != "" {
+			sb.WriteString(truncated)
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString("  (unavailable)\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	// Previous review history for this task.
+	rec := l.reviewerState.reviewHistory[taskID]
+	if rec != nil && rec.reviewCount > 0 {
+		sb.WriteString(fmt.Sprintf("PREVIOUS REVIEWS FOR THIS TASK: %d (last verdict: %s)\n", rec.reviewCount, rec.lastVerdict))
+		if len(rec.lastIssues) > 0 {
+			sb.WriteString("PREVIOUS ISSUES:\n")
+			for _, issue := range rec.lastIssues {
+				sb.WriteString(fmt.Sprintf("  - %s\n", issue))
+			}
+		}
+	} else {
+		sb.WriteString("PREVIOUS REVIEWS FOR THIS TASK: none\n")
+	}
+
+	sb.WriteString("===\n")
+	return obs + sb.String()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Git Helpers
+// ────────────────────────────────────────────────────────────────────
+
+// gitCommand runs a git command in the given directory and returns stdout.
+// Returns empty string on any error (best-effort).
+func gitCommand(dir string, args ...string) string {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// truncateDiff applies the three-tier truncation strategy from the design spec.
+//   - ≤ maxLines: include full diff
+//   - maxLines+1 to 1000: first 200 lines + last 50 lines + omission note
+//   - > 1000: "Diff too large for inline review."
+func truncateDiff(diff string, maxLines int) string {
+	if diff == "" {
+		return ""
+	}
+	lines := strings.Split(diff, "\n")
+	total := len(lines)
+
+	if total <= maxLines {
+		return diff
+	}
+
+	if total <= 1000 {
+		head := strings.Join(lines[:200], "\n")
+		tail := strings.Join(lines[total-50:], "\n")
+		return head + fmt.Sprintf("\n\n... %d lines omitted ...\n\n", total-250) + tail
+	}
+
+	return fmt.Sprintf("Diff too large for inline review (%d lines). See CHANGED FILES above.", total)
 }

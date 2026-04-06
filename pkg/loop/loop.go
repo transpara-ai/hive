@@ -382,6 +382,10 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	if l.spawnerState != nil {
 		l.spawnerState.update(pending)
 	}
+	// Update reviewer cross-iteration state from this iteration's events.
+	if l.reviewerState != nil {
+		l.reviewerState.update(pending)
+	}
 
 	var sb strings.Builder
 	sb.WriteString("## Recent Events\n")
@@ -406,6 +410,8 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	enriched = l.enrichCTOObservation(enriched)
 	// Enrich observation with spawn context for Spawner.
 	enriched = l.enrichSpawnObservation(enriched)
+	// Enrich observation with code review context for Reviewer.
+	enriched = l.enrichReviewObservation(enriched)
 	// Enrich observation with institutional knowledge for ALL agents.
 	enriched = l.enrichKnowledgeObservation(enriched)
 	return enriched, nil
