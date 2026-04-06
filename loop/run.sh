@@ -9,12 +9,13 @@
 #   ./loop/run.sh reflector    # Run just the Reflector
 #
 # Requires: claude CLI (Claude Code) on PATH.
-# Run from the hive repo root: cd /c/src/matt/lovyou3/hive && ./loop/run.sh
+# Run from the hive repo root. Paths configured in loop/config.env.
 
 set -euo pipefail
 
 LOOP_DIR="$(cd "$(dirname "$0")" && pwd)"
-HIVE_DIR="$(dirname "$LOOP_DIR")"
+source "${LOOP_DIR}/config.env"
+HIVE_DIR="$(dirname "${LOOP_DIR}")"
 MAX_REVISE=3
 
 cd "$HIVE_DIR"
@@ -77,12 +78,12 @@ case "$phase" in
 
         run_phase reflector
 
-        # Post iteration summary to lovyou.ai.
-        if command -v go &>/dev/null && [ -n "${LOVYOU_API_KEY:-}" ]; then
+        # Post iteration summary (only if enabled in config.env).
+        if [ "${POST_ENABLED:-false}" = "true" ] && [ -n "${POST_API_KEY:-}" ]; then
             echo "=== POST ==="
-            LOVYOU_API_KEY="$LOVYOU_API_KEY" go run ./cmd/post/
+            POST_API_KEY="${POST_API_KEY}" POST_API_BASE="${POST_API_BASE}" go run ./cmd/post/
         else
-            echo "SKIP: post (set LOVYOU_API_KEY to enable)"
+            echo "SKIP: post (POST_ENABLED=${POST_ENABLED:-false})"
         fi
         ;;
     *)
