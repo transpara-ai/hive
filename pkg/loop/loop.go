@@ -460,6 +460,9 @@ Every response MUST end with exactly one /signal line.
 // directly to the event store between the graph.Record mutex's head-read and
 // store-append, causing the spawner's prevHash to stale. On retry, graph.Record
 // re-reads the fresh head and the append succeeds.
+//
+// State transition errors (e.g., Processing → Processing) are NOT retryable —
+// they indicate the agent is stuck in a state that retrying won't fix.
 func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.TokenUsage, error) {
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -467,7 +470,15 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.Toke
 		if err == nil {
 			return content, decision.TokenUsage{}, nil
 		}
+		// State transition errors are not retryable.
+		if strings.Contains(err.Error(), "invalid transition") {
+			return "", decision.TokenUsage{}, err
+		}
 		if strings.Contains(err.Error(), "chain integrity violation") && attempt < maxRetries-1 {
+			// Reset agent state before retry — the failed iteration may have
+			// left the agent in Processing, which would cause the next
+			// Reason() call to fail with Processing → Processing.
+			l.agent.ResetToIdle()
 			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
 			continue
 		}
