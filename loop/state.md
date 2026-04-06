@@ -6,23 +6,13 @@ Last updated: Iteration 413, 2026-03-30.
 
 ## What the Scout Should Focus On Next
 
-**PM milestone (71c72845401ac1ea01b76ae710b66082):** site: ship real email delivery for magic link auth
+**Target repo:** hive
 
-**Target repo:** site
+**Goal:** Build missing agents from the `agents/*.md` role specifications into registered `AgentDef` structs in the runtime.
 
-**ONE gap. Do not list future tasks (Lessons 212, 213).**
+**Context:** The hive has 56 role specs in `agents/*.md` but only 8 agents wired into `StarterAgents()` in `pkg/hive/agentdef.go`: guardian, sysmon, allocator, cto, spawner, strategist, planner, implementer. The Reviewer agent has a full design spec at `docs/reviewer-design-v1.0.0_1.md` and should be built first (Option C: hybrid — full spec exists, compare against Spawner output if growth loop fires, fall back to manual bootstrap).
 
-### GATE 1 — Email delivery for magic link auth
-
-Magic link auth is deployed but emails go to stdout — no user has ever received one. The feature is non-functional in production.
-
-Add email sending to `POST /auth/magic-link/request`:
-1. Add SendGrid HTTP API sender (one POST to api.sendgrid.com/v3/mail/send, Bearer SENDGRID_API_KEY — no SDK). Fallback: Go stdlib net/smtp if SendGrid not preferred.
-2. Replace the fmt.Println/log stub in the request handler with a real email send. Body must include the full redemption URL: `https://lovyou.ai/auth/magic-link/verify?token=TOKEN`.
-3. Add SENDGRID_API_KEY to site/fly.toml [env] and deploy: `cd site && flyctl deploy --remote-only`.
-4. Graceful failure: log error, return 200 (prevents user enumeration). Test: handler returns 200 even when email sender errors.
-
-**Note on hive repo:** Board tasks `521b904a` (workspace tests) and `b9ac6697` (git config scope test) are already open — pipeline should pick those up for the hive repo when targeting hive.
+**ONE gap. Do not list future tasks.**
 
 ### DONE
 
