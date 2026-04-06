@@ -168,8 +168,9 @@ func RunPruner(ctx context.Context, s KnowledgeStore, interval time.Duration) {
 	}
 }
 
-// enforceLimit deactivates the lowest-confidence active insights when the
-// active count exceeds MaxActiveInsights. Must be called with mu held.
+// enforceLimit deactivates the lowest-confidence active insights when
+// cardinality limits are exceeded. Enforces per-domain, per-source, and
+// global limits. Must be called with mu held.
 func (s *memoryStore) enforceLimit() {
 	active := make([]*KnowledgeInsight, 0)
 	for _, ins := range s.insights {
@@ -178,18 +179,59 @@ func (s *memoryStore) enforceLimit() {
 		}
 	}
 
-	if len(active) <= MaxActiveInsights {
-		return
+	// Enforce per-domain limits.
+	byDomain := make(map[string][]*KnowledgeInsight)
+	for _, ins := range active {
+		byDomain[ins.Domain] = append(byDomain[ins.Domain], ins)
+	}
+	for _, domainInsights := range byDomain {
+		if len(domainInsights) <= MaxPerDomain {
+			continue
+		}
+		sort.Slice(domainInsights, func(i, j int) bool {
+			return domainInsights[i].Confidence < domainInsights[j].Confidence
+		})
+		for i := 0; i < len(domainInsights)-MaxPerDomain; i++ {
+			domainInsights[i].Active = false
+		}
 	}
 
-	// Sort ascending by confidence so we deactivate lowest first.
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].Confidence < active[j].Confidence
-	})
+	// Enforce per-source limits.
+	bySource := make(map[string][]*KnowledgeInsight)
+	for _, ins := range active {
+		if !ins.Active {
+			continue // already evicted by domain limit
+		}
+		bySource[ins.Source] = append(bySource[ins.Source], ins)
+	}
+	for _, sourceInsights := range bySource {
+		if len(sourceInsights) <= MaxPerSource {
+			continue
+		}
+		sort.Slice(sourceInsights, func(i, j int) bool {
+			return sourceInsights[i].Confidence < sourceInsights[j].Confidence
+		})
+		for i := 0; i < len(sourceInsights)-MaxPerSource; i++ {
+			sourceInsights[i].Active = false
+		}
+	}
 
-	excess := len(active) - MaxActiveInsights
+	// Enforce global limit.
+	activeAfter := make([]*KnowledgeInsight, 0)
+	for _, ins := range s.insights {
+		if ins.Active {
+			activeAfter = append(activeAfter, ins)
+		}
+	}
+	if len(activeAfter) <= MaxActiveInsights {
+		return
+	}
+	sort.Slice(activeAfter, func(i, j int) bool {
+		return activeAfter[i].Confidence < activeAfter[j].Confidence
+	})
+	excess := len(activeAfter) - MaxActiveInsights
 	for i := 0; i < excess; i++ {
-		active[i].Active = false
+		activeAfter[i].Active = false
 	}
 }
 

@@ -359,15 +359,27 @@ func TestRecord_WithSupersession(t *testing.T) {
 func TestCardinality_MaxActive(t *testing.T) {
 	s := NewStore()
 
+	// Spread across enough domains to avoid per-domain limits triggering first.
+	domains := []string{
+		DomainHealth, DomainBudget, DomainQuality,
+		DomainArchitecture, DomainProcess, DomainPerformance, DomainPatterns,
+	}
+
+	// Use multiple sources to avoid per-source limit.
+	sources := []string{"src-a", "src-b", "src-c"}
+
 	// Record MaxActiveInsights + 5 insights with ascending confidence.
 	total := MaxActiveInsights + 5
 	for i := 0; i < total; i++ {
 		conf := float64(i) / float64(total)
-		require.NoError(t, s.Record(makeInsight(
+		ins := makeInsight(
 			fmt.Sprintf("ins-%d", i),
 			withRoles(),
 			withConfidence(conf),
-		)))
+			withDomain(domains[i%len(domains)]),
+		)
+		ins.Source = sources[i%len(sources)]
+		require.NoError(t, s.Record(ins))
 	}
 
 	assert.Equal(t, MaxActiveInsights, s.ActiveCount())
@@ -382,6 +394,55 @@ func TestCardinality_MaxActive(t *testing.T) {
 		assert.False(t, ids[fmt.Sprintf("ins-%d", i)],
 			"ins-%d should have been evicted (low confidence)", i)
 	}
+}
+
+func TestCardinality_MaxPerDomain(t *testing.T) {
+	s := NewStore()
+
+	// Record MaxPerDomain + 5 insights in the same domain.
+	total := MaxPerDomain + 5
+	for i := 0; i < total; i++ {
+		conf := float64(i) / float64(total)
+		require.NoError(t, s.Record(makeInsight(
+			fmt.Sprintf("dom-%d", i),
+			withRoles(),
+			withConfidence(conf),
+			withDomain(DomainHealth),
+		)))
+	}
+
+	// Count active insights in DomainHealth.
+	results := s.Query(KnowledgeFilter{Domains: []string{DomainHealth}}, 0)
+	assert.Equal(t, MaxPerDomain, len(results),
+		"per-domain limit should cap at %d", MaxPerDomain)
+}
+
+func TestCardinality_MaxPerSource(t *testing.T) {
+	s := NewStore()
+
+	// Spread across domains to avoid per-domain limit.
+	domains := []string{
+		DomainHealth, DomainBudget, DomainQuality,
+		DomainArchitecture, DomainProcess, DomainPerformance, DomainPatterns,
+	}
+
+	// Record MaxPerSource + 5 insights from the same source.
+	total := MaxPerSource + 5
+	source := SourceDistillerPrefix + "test"
+	for i := 0; i < total; i++ {
+		conf := float64(i) / float64(total)
+		ins := makeInsight(
+			fmt.Sprintf("src-%d", i),
+			withRoles(),
+			withConfidence(conf),
+			withDomain(domains[i%len(domains)]),
+		)
+		ins.Source = source
+		require.NoError(t, s.Record(ins))
+	}
+
+	assert.Equal(t, MaxPerSource, s.ActiveCount(),
+		"per-source limit should cap at %d", MaxPerSource)
 }
 
 // ---------------------------------------------------------------------------

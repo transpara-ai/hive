@@ -130,12 +130,13 @@ func (d *Distiller) detectHealthCorrelations() []KnowledgeInsight {
 		}
 		totalScanned++
 
-		// Look at recent events around this health report.
-		recentPage, err := d.store.Recent(20, types.None[types.Cursor]())
+		// Look at events near this health report using Since to anchor
+		// to the report's position in the chain, not the current head.
+		nearbyPage, err := d.store.Since(ev.ID(), 20)
 		if err != nil {
 			continue
 		}
-		for _, nearby := range recentPage.Items() {
+		for _, nearby := range nearbyPage.Items() {
 			src := nearby.Source().Value()
 			if src != "" {
 				agentCorrelation[src]++
@@ -193,14 +194,14 @@ func (d *Distiller) detectBudgetEffectiveness() []KnowledgeInsight {
 		return nil
 	}
 
-	// Group adjustments by target agent.
+	// Group adjustments by target agent ID (not name — IDENTITY invariant).
 	type adjustment struct {
 		agentID   types.ActorID
-		agentName string
+		agentName string // display only
 		delta     int
 		timestamp time.Time
 	}
-	byAgent := make(map[string][]adjustment)
+	byAgent := make(map[string][]adjustment) // keyed by ActorID.Value()
 
 	for _, ev := range items {
 		bc, ok := ev.Content().(event.AgentBudgetAdjustedContent)
@@ -216,16 +217,19 @@ func (d *Distiller) detectBudgetEffectiveness() []KnowledgeInsight {
 			delta:     bc.Delta,
 			timestamp: ev.Timestamp().Value(),
 		}
-		byAgent[bc.AgentName] = append(byAgent[bc.AgentName], adj)
+		byAgent[bc.AgentID.Value()] = append(byAgent[bc.AgentID.Value()], adj)
 	}
 
 	var insights []KnowledgeInsight
 	dateStr := time.Now().Format("2006-01-02")
 
-	for agentName, adjustments := range byAgent {
+	for agentIDStr, adjustments := range byAgent {
 		if len(adjustments) < 3 {
 			continue
 		}
+
+		// Use display name from the first adjustment for human-readable summary.
+		displayName := adjustments[0].agentName
 
 		// Check output around each adjustment.
 		lowEffectCount := 0
@@ -255,10 +259,10 @@ func (d *Distiller) detectBudgetEffectiveness() []KnowledgeInsight {
 		}
 		recordedAt := time.Now()
 		insights = append(insights, KnowledgeInsight{
-			InsightID:     fmt.Sprintf("budget-eff-%s-%s", agentName, dateStr),
+			InsightID:     fmt.Sprintf("budget-eff-%s-%s", agentIDStr, dateStr),
 			Domain:        DomainBudget,
-			Summary:       fmt.Sprintf("Budget increases for %s show diminishing returns (%d/%d adjustments with <20%% output increase)", agentName, lowEffectCount, len(adjustments)),
-			RelevantRoles: []string{"allocator", agentName, "cto"},
+			Summary:       fmt.Sprintf("Budget increases for %s show diminishing returns (%d/%d adjustments with <20%% output increase)", displayName, lowEffectCount, len(adjustments)),
+			RelevantRoles: []string{"allocator", "cto"},
 			Confidence:    confidence,
 			EvidenceCount: len(adjustments),
 			Source:        SourceDistillerPrefix + "budget-effectiveness",
