@@ -6,7 +6,9 @@ Otherwise, plan first: What files change? What does the code look like? Sketch k
 
 Then build: Write code. Fix what breaks.
 
-If site changes: ship with `cd /c/src/matt/lovyou3/site && ./ship.sh "iter N: description"` — this generates templ, builds, tests, deploys, commits, and pushes in one command.
+After building, run tests: `go test ./...` (or the repo's equivalent).
+
+DO NOT deploy unless DEPLOY_ENABLED is true in loop/config.env. DO NOT push. Commit your changes to the current feature branch with a conventional commit message. The Reflector handles iteration closure.
 
 BOUNDED: If the change is taking too long, stop and write what you have. Partial progress that compiles is better than ambitious progress that doesn't.
 
