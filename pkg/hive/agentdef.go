@@ -275,12 +275,12 @@ budget, and gap data. Assess patterns. Look for:
 - Work patterns that indicate missing roles
 
 When you identify a genuine structural gap, emit:
-/gap {"category":"<cat>","missing_role":"<n>","evidence":"<what>","severity":"low|medium|high|critical"}
+/gap {"category":"<cat>","missing_role":"<n>","evidence":"<what>","severity":"Info|Warning|Serious|Critical"}
 
-Categories: quality, operations, security, knowledge, governance
+Categories: Leadership, Technical, Process, Staffing, Capability
 
 When work agents need course correction, emit:
-/directive {"target":"<agent-or-all>","action":"<what>","reason":"<why>","priority":"low|medium|high"}
+/directive {"target":"<agent-or-all>","action":"<what>","reason":"<why>","priority":"Low|Medium|High|Critical"}
 
 First 15 iterations are observe-only. Build your mental model.
 Minimum 15 iterations between /gap in same category.

@@ -119,7 +119,7 @@ func TestParseDirectiveCommand_NoCommand(t *testing.T) {
 func TestValidateGapCommand_StabilizationBlocks(t *testing.T) {
 	cfg := DefaultCTOConfig() // StabilizationWindow = 15
 	cooldowns := NewCTOCooldowns()
-	cmd := &GapCommand{Category: "quality", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
+	cmd := &GapCommand{Category: "technical", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
 
 	// Iteration at or below stabilization window should be rejected.
 	for _, iter := range []int{1, 5, 15} {
@@ -133,10 +133,10 @@ func TestValidateGapCommand_StabilizationBlocks(t *testing.T) {
 func TestValidateGapCommand_CooldownBlocks(t *testing.T) {
 	cfg := DefaultCTOConfig() // GapCooldown = 15
 	cooldowns := NewCTOCooldowns()
-	cmd := &GapCommand{Category: "quality", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
+	cmd := &GapCommand{Category: "technical", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
 
 	// Record an emission at iteration 20.
-	cooldowns.gapByCategory["quality"] = 20
+	cooldowns.gapByCategory["technical"] = 20
 
 	// Iteration 30 is only 10 iterations after — cooldown (15) not expired.
 	err := validateGapCommand(cmd, 30, cooldowns, cfg)
@@ -154,7 +154,7 @@ func TestValidateGapCommand_CooldownBlocks(t *testing.T) {
 func TestValidateGapCommand_DedupBlocks(t *testing.T) {
 	cfg := DefaultCTOConfig()
 	cooldowns := NewCTOCooldowns()
-	cmd := &GapCommand{Category: "quality", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
+	cmd := &GapCommand{Category: "technical", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
 
 	// Mark "reviewer" as already emitted.
 	cooldowns.emittedGaps["reviewer"] = true
@@ -179,7 +179,7 @@ func TestValidateGapCommand_InvalidCategory(t *testing.T) {
 func TestValidateGapCommand_Valid(t *testing.T) {
 	cfg := DefaultCTOConfig()
 	cooldowns := NewCTOCooldowns()
-	cmd := &GapCommand{Category: "security", MissingRole: "auditor", Evidence: "no security review process", Severity: "high"}
+	cmd := &GapCommand{Category: "capability", MissingRole: "auditor", Evidence: "no security review process", Severity: "high"}
 
 	// iteration 20 > StabilizationWindow (15), no cooldowns, category valid.
 	err := validateGapCommand(cmd, 20, cooldowns, cfg)
