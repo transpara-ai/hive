@@ -43,9 +43,10 @@ func ReplayFromStore(s store.Store, ks KnowledgeStore) error {
 				return fmt.Errorf("record insight %s: %w", c.InsightID, err)
 			}
 			// Handle inline supersession.
-			if c.SupersedesID != "" {
-				if err := ks.Supersede(c.SupersedesID, c.InsightID); err != nil {
-					return fmt.Errorf("supersede %s: %w", c.SupersedesID, err)
+			if c.SupersedesID.IsSome() {
+				oldID := c.SupersedesID.Unwrap()
+				if err := ks.Supersede(oldID, c.InsightID); err != nil {
+					return fmt.Errorf("supersede %s: %w", oldID, err)
 				}
 			}
 
@@ -77,7 +78,7 @@ func ConvertFromEventContent(c event.KnowledgeInsightContent, recordedAt time.Ti
 		Domain:        c.Domain,
 		Summary:       c.Summary,
 		RelevantRoles: c.RelevantRoles,
-		Confidence:    c.Confidence,
+		Confidence:    c.Confidence.Value(),
 		EvidenceCount: c.EvidenceCount,
 		Source:        c.Source,
 		RecordedAt:    recordedAt,

@@ -215,8 +215,8 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		case event.KnowledgeInsightContent:
 			insight := knowledge.ConvertFromEventContent(c, ev.Timestamp().Value())
 			_ = r.knowledgeStore.Record(insight)
-			if c.SupersedesID != "" {
-				_ = r.knowledgeStore.Supersede(c.SupersedesID, c.InsightID)
+			if c.SupersedesID.IsSome() {
+				_ = r.knowledgeStore.Supersede(c.SupersedesID.Unwrap(), c.InsightID)
 			}
 		case event.KnowledgeSupersessionContent:
 			_ = r.knowledgeStore.Supersede(c.OldInsightID, c.NewInsightID)

@@ -65,17 +65,19 @@ func (d *Distiller) runAllDetectors() {
 		if d.known[ins.InsightID] {
 			continue
 		}
-		// Emit to chain.
-		content := event.KnowledgeInsightContent{
-			InsightID:     ins.InsightID,
-			Domain:        ins.Domain,
-			Summary:       ins.Summary,
-			RelevantRoles: ins.RelevantRoles,
-			Confidence:    ins.Confidence,
-			EvidenceCount: ins.EvidenceCount,
-			Source:        ins.Source,
-			TTL:           ttlFromExpiry(ins.RecordedAt, ins.ExpiresAt),
-		}
+		// Emit to chain using the constructor for sorted roles.
+		confidenceScore := types.MustScore(ins.Confidence)
+		content := event.NewKnowledgeInsightContent(
+			ins.InsightID,
+			ins.Domain,
+			ins.Summary,
+			ins.RelevantRoles,
+			confidenceScore,
+			ins.EvidenceCount,
+			ins.Source,
+			ttlFromExpiry(ins.RecordedAt, ins.ExpiresAt),
+			types.None[string](),
+		)
 		if err := d.emitter.Emit(event.EventTypeKnowledgeInsightRecorded, content); err != nil {
 			continue
 		}

@@ -114,16 +114,15 @@ func (te *testEventStore) appendEvent(eventType types.EventType, content event.E
 }
 
 func (te *testEventStore) recordInsight(id, domain, summary string, confidence float64, ttl int) {
-	te.appendEvent(event.EventTypeKnowledgeInsightRecorded, event.KnowledgeInsightContent{
-		InsightID:     id,
-		Domain:        domain,
-		Summary:       summary,
-		RelevantRoles: []string{"implementer"},
-		Confidence:    confidence,
-		EvidenceCount: 5,
-		Source:        SourceMemoryKeeper,
-		TTL:           ttl,
-	})
+	te.appendEvent(event.EventTypeKnowledgeInsightRecorded, event.NewKnowledgeInsightContent(
+		id, domain, summary,
+		[]string{"implementer"},
+		types.MustScore(confidence),
+		5,
+		SourceMemoryKeeper,
+		ttl,
+		types.None[string](),
+	))
 }
 
 func (te *testEventStore) supersede(oldID, newID, reason string) {
@@ -203,23 +202,20 @@ func TestConvertFromEventContent(t *testing.T) {
 	now := time.Now().UTC()
 
 	t.Run("without TTL", func(t *testing.T) {
-		content := event.KnowledgeInsightContent{
-			InsightID:     "ins-42",
-			Domain:        DomainArchitecture,
-			Summary:       "codebase uses hexagonal architecture",
-			RelevantRoles: []string{"planner", "implementer"},
-			Confidence:    0.95,
-			EvidenceCount: 12,
-			Source:        SourceDistillerPrefix + "arch-analyzer",
-			TTL:           0,
-		}
+		content := event.NewKnowledgeInsightContent(
+			"ins-42", DomainArchitecture, "codebase uses hexagonal architecture",
+			[]string{"planner", "implementer"},
+			types.MustScore(0.95), 12,
+			SourceDistillerPrefix+"arch-analyzer",
+			0, types.None[string](),
+		)
 
 		insight := ConvertFromEventContent(content, now)
 
 		assert.Equal(t, "ins-42", insight.InsightID)
 		assert.Equal(t, DomainArchitecture, insight.Domain)
 		assert.Equal(t, "codebase uses hexagonal architecture", insight.Summary)
-		assert.Equal(t, []string{"planner", "implementer"}, insight.RelevantRoles)
+		assert.Equal(t, []string{"implementer", "planner"}, insight.RelevantRoles) // sorted by constructor
 		assert.Equal(t, 0.95, insight.Confidence)
 		assert.Equal(t, 12, insight.EvidenceCount)
 		assert.Equal(t, SourceDistillerPrefix+"arch-analyzer", insight.Source)
@@ -229,16 +225,13 @@ func TestConvertFromEventContent(t *testing.T) {
 	})
 
 	t.Run("with TTL", func(t *testing.T) {
-		content := event.KnowledgeInsightContent{
-			InsightID:     "ins-43",
-			Domain:        DomainPerformance,
-			Summary:       "latency spike in API",
-			RelevantRoles: []string{"guardian"},
-			Confidence:    0.7,
-			EvidenceCount: 3,
-			Source:        SourceOperator,
-			TTL:           24,
-		}
+		content := event.NewKnowledgeInsightContent(
+			"ins-43", DomainPerformance, "latency spike in API",
+			[]string{"guardian"},
+			types.MustScore(0.7), 3,
+			SourceOperator,
+			24, types.None[string](),
+		)
 
 		insight := ConvertFromEventContent(content, now)
 
