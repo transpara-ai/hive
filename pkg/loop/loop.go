@@ -398,6 +398,8 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	enriched = l.enrichCTOObservation(enriched)
 	// Enrich observation with spawn context for Spawner.
 	enriched = l.enrichSpawnObservation(enriched)
+	// Enrich observation with institutional knowledge for ALL agents.
+	enriched = l.enrichKnowledgeObservation(enriched)
 	return enriched, nil
 }
 
