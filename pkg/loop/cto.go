@@ -13,10 +13,10 @@ import (
 
 // GapCommand represents the parsed /gap command from CTO LLM output.
 type GapCommand struct {
-	Category    string `json:"category"`     // "quality", "operations", "security", "knowledge", "governance"
+	Category    string `json:"category"`     // "leadership", "technical", "process", "staffing", "capability"
 	MissingRole string `json:"missing_role"` // suggested kebab-case role name
 	Evidence    string `json:"evidence"`     // what the CTO observed
-	Severity    string `json:"severity"`     // "low", "medium", "high", "critical"
+	Severity    string `json:"severity"`     // "info", "warning", "serious", "critical"
 }
 
 // DirectiveCommand represents the parsed /directive command from CTO LLM output.
@@ -80,7 +80,7 @@ func DefaultCTOConfig() CTOConfig {
 		StabilizationWindow: 15,
 		GapCooldown:         15,
 		DirectiveCooldown:   5,
-		ValidCategories:     []string{"quality", "operations", "security", "knowledge", "governance"},
+		ValidCategories:     []string{"leadership", "technical", "process", "staffing", "capability"},
 	}
 }
 
@@ -134,10 +134,10 @@ func validateGapCommand(cmd *GapCommand, iteration int, cooldowns *CTOCooldowns,
 		return fmt.Errorf("stabilization window active (iteration %d ≤ %d)", iteration, cfg.StabilizationWindow)
 	}
 
-	// 2. Valid category.
+	// 2. Valid category (case-insensitive — LLM may output any case).
 	validCategory := false
 	for _, c := range cfg.ValidCategories {
-		if cmd.Category == c {
+		if strings.EqualFold(cmd.Category, c) {
 			validCategory = true
 			break
 		}
@@ -182,25 +182,49 @@ func validateDirectiveCommand(cmd *DirectiveCommand, iteration int, cooldowns *C
 }
 
 // emitGap constructs a GapDetectedContent and calls agent.EmitGapDetected.
-func (l *Loop) emitGap(cmd *GapCommand) error {
-	content := event.NewGapDetectedContent(event.GapCategory(cmd.Category), cmd.MissingRole, cmd.Evidence, event.SeverityLevel(cmd.Severity))
+// Normalizes case from LLM output (e.g., "quality" → "Quality") and recovers
+// from constructor panics so bad LLM output never crashes the hive.
+func (l *Loop) emitGap(cmd *GapCommand) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("emit hive.gap.detected: %v", r)
+		}
+	}()
+	category := event.GapCategory(titleCase(cmd.Category))
+	severity := event.SeverityLevel(titleCase(cmd.Severity))
+	content := event.NewGapDetectedContent(category, cmd.MissingRole, cmd.Evidence, severity)
 	if err := l.agent.EmitGapDetected(content); err != nil {
 		return fmt.Errorf("emit hive.gap.detected: %w", err)
 	}
 	fmt.Printf("[%s] emitted hive.gap.detected (category=%s missing_role=%s severity=%s)\n",
-		l.agent.Name(), cmd.Category, cmd.MissingRole, cmd.Severity)
+		l.agent.Name(), category, cmd.MissingRole, severity)
 	return nil
 }
 
 // emitDirective constructs a DirectiveIssuedContent and calls agent.EmitDirective.
-func (l *Loop) emitDirective(cmd *DirectiveCommand) error {
-	content := event.NewDirectiveIssuedContent(cmd.Target, cmd.Action, cmd.Reason, event.DirectivePriority(cmd.Priority))
+// Normalizes case from LLM output and recovers from constructor panics.
+func (l *Loop) emitDirective(cmd *DirectiveCommand) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("emit hive.directive.issued: %v", r)
+		}
+	}()
+	priority := event.DirectivePriority(titleCase(cmd.Priority))
+	content := event.NewDirectiveIssuedContent(cmd.Target, cmd.Action, cmd.Reason, priority)
 	if err := l.agent.EmitDirective(content); err != nil {
 		return fmt.Errorf("emit hive.directive.issued: %w", err)
 	}
 	fmt.Printf("[%s] emitted hive.directive.issued (target=%s priority=%s)\n",
-		l.agent.Name(), cmd.Target, cmd.Priority)
+		l.agent.Name(), cmd.Target, priority)
 	return nil
+}
+
+// titleCase normalizes a string to title case (e.g., "high" → "High").
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
 // validateAndEmitGap validates and, if valid, emits a gap event and records the cooldown.

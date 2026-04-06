@@ -28,10 +28,10 @@ func TestGapCommandToEvent(t *testing.T) {
 	}
 
 	cmd := &GapCommand{
-		Category:    "quality",
+		Category:    "technical",
 		MissingRole: "reviewer",
 		Evidence:    "3 tasks completed without review in last 20 events",
-		Severity:    "medium",
+		Severity:    "warning",
 	}
 
 	if err := l.emitGap(cmd); err != nil {
@@ -60,8 +60,9 @@ func TestGapCommandToEvent(t *testing.T) {
 		t.Fatalf("event content is %T, want GapDetectedContent", ev.Content())
 	}
 
-	if content.Category != "quality" {
-		t.Errorf("Category = %q, want %q", content.Category, "quality")
+	// emitGap normalizes to title case.
+	if content.Category != "Technical" {
+		t.Errorf("Category = %q, want %q", content.Category, "Technical")
 	}
 	if content.MissingRole != "reviewer" {
 		t.Errorf("MissingRole = %q, want %q", content.MissingRole, "reviewer")
@@ -69,8 +70,8 @@ func TestGapCommandToEvent(t *testing.T) {
 	if content.Evidence != "3 tasks completed without review in last 20 events" {
 		t.Errorf("Evidence = %q, want %q", content.Evidence, "3 tasks completed without review in last 20 events")
 	}
-	if content.Severity != "medium" {
-		t.Errorf("Severity = %q, want %q", content.Severity, "medium")
+	if content.Severity != "Warning" {
+		t.Errorf("Severity = %q, want %q", content.Severity, "Warning")
 	}
 
 	// Verify the event source is the CTO agent.
@@ -134,8 +135,9 @@ func TestDirectiveCommandToEvent(t *testing.T) {
 	if content.Reason != "3 bugs found in last sprint" {
 		t.Errorf("Reason = %q, want %q", content.Reason, "3 bugs found in last sprint")
 	}
-	if content.Priority != "high" {
-		t.Errorf("Priority = %q, want %q", content.Priority, "high")
+	// emitDirective normalizes to title case.
+	if content.Priority != "High" {
+		t.Errorf("Priority = %q, want %q", content.Priority, "High")
 	}
 
 	if ev.Source() != agent.ID() {
@@ -231,7 +233,7 @@ func TestGapCommandInLoop(t *testing.T) {
 	t.Setenv("CTO_STABILIZATION_WINDOW", "0")
 
 	provider := newMockProvider(
-		`/gap {"category":"quality","missing_role":"reviewer","evidence":"tasks completed without review","severity":"medium"}` +
+		`/gap {"category":"technical","missing_role":"reviewer","evidence":"tasks completed without review","severity":"warning"}` +
 			"\n" + `/signal {"signal": "TASK_DONE"}`,
 	)
 	agent := testHiveAgent(t, provider, "cto", "test-cto")
@@ -269,8 +271,8 @@ func TestGapCommandInLoop(t *testing.T) {
 	if !ok {
 		t.Fatal("event content is not GapDetectedContent")
 	}
-	if content.Category != "quality" {
-		t.Errorf("Category = %q, want %q", content.Category, "quality")
+	if content.Category != "Technical" {
+		t.Errorf("Category = %q, want %q", content.Category, "Technical")
 	}
 	if content.MissingRole != "reviewer" {
 		t.Errorf("MissingRole = %q, want %q", content.MissingRole, "reviewer")
