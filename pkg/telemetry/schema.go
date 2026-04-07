@@ -99,12 +99,29 @@ var phaseUpdates = []struct {
 		completedAt: "2026-04-05",
 		notes:       "CTO graduated: running on Opus with /gap + /directive commands, leadership briefing, 15-iteration stabilization window, Guardian awareness. Reviewer deferred to Phase 4.",
 	},
+	// Phase 2 notes update: Reviewer graduated 2026-04-06, knowledge infra operational.
+	{
+		phase:       2,
+		from:        "complete",
+		status:      "complete",
+		startedAt:   "2026-04-04",
+		completedAt: "2026-04-06",
+		notes:       "CTO graduated 2026-04-05. Reviewer graduated 2026-04-06. Knowledge Enrichment Infrastructure operational. 9 agents running.",
+	},
 	{
 		phase:     3,
 		from:      "blocked",
 		status:    "in_progress",
 		startedAt: "2026-04-05",
 		notes:     "Spawner unblocked by CTO graduation. CTO gap detection feeds role proposals.",
+	},
+	// Phase 3 notes update: Spawner graduated, growth loop mechanically complete.
+	{
+		phase:     3,
+		from:      "in_progress",
+		status:    "in_progress",
+		startedAt: "2026-04-05",
+		notes:     "Spawner graduated and running. Growth loop mechanically complete — awaiting first live validation (real gap producing a real spawned agent).",
 	},
 }
 
