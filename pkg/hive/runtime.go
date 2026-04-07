@@ -264,6 +264,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 				MaxIterations: def.EffectiveMaxIterations(),
 				WatchPatterns: def.WatchPatterns,
 				CanOperate:    def.CanOperate,
+				Tier:          def.EffectiveTier(),
 			})
 		}
 

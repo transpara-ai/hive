@@ -12,6 +12,14 @@ const (
 	ModelHaiku  = "claude-haiku-4-5-20251001"
 )
 
+// Tier constants for role classification.
+const (
+	TierA = "A" // Bootstrap / foundation agents
+	TierB = "B" // Organic emergence (Phase 4)
+	TierC = "C" // Business operations (Phase 6)
+	TierD = "D" // Self-governance (Phase 7)
+)
+
 // AgentDef is everything you need to add a new agent.
 // Adding an agent to the hive is: define one of these, call runtime.Register().
 type AgentDef struct {
@@ -40,6 +48,10 @@ type AgentDef struct {
 
 	// MaxDuration is the loop time budget. 0 = default 30m.
 	MaxDuration time.Duration
+
+	// Tier classifies the agent in the role taxonomy (A/B/C/D).
+	// Empty defaults to TierA for bootstrap agents.
+	Tier string
 }
 
 // Validate checks that the AgentDef has all required fields.
@@ -65,6 +77,14 @@ func (d AgentDef) EffectiveMaxIterations() int {
 		return d.MaxIterations
 	}
 	return 50
+}
+
+// EffectiveTier returns Tier or the default (TierA).
+func (d AgentDef) EffectiveTier() string {
+	if d.Tier != "" {
+		return d.Tier
+	}
+	return TierA
 }
 
 // EffectiveMaxDuration returns MaxDuration or the default (30m).

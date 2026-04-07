@@ -40,12 +40,13 @@ type HiveSnapshot struct {
 
 // Phase tracks expansion phase status.
 type Phase struct {
-	Phase       int        `json:"phase"`
-	Label       string     `json:"label"`
-	Status      string     `json:"status"`
-	StartedAt   *time.Time `json:"started_at"`
-	CompletedAt *time.Time `json:"completed_at"`
-	Notes       string     `json:"notes"`
+	Phase        int        `json:"phase"`
+	Label        string     `json:"label"`
+	Status       string     `json:"status"`
+	StartedAt    *time.Time `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
+	Notes        string     `json:"notes"`
+	ExitCriteria *string    `json:"exit_criteria"`
 }
 
 // EventStreamEntry is a single event in the live event stream.
