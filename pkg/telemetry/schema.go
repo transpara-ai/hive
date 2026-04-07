@@ -172,13 +172,36 @@ INSERT INTO telemetry_phase_agents (phase, agent_role) VALUES
 ON CONFLICT (phase, agent_role) DO NOTHING;
 `
 
-// seedRoleDefinitions populates non-running roles (designed/defined/missing).
-// Running agents are upserted by the writer during RegisterAgent, which takes
-// precedence because it has real runtime data (model, watchPatterns, canOperate).
+// seedRoleDefinitions populates ALL known roles — both running and non-running.
+// Structural fields (tier, purpose, category, depends_on, phase) come from seed data.
+// Runtime fields (model, max_iterations, watch_patterns, can_operate) come from the
+// writer's persistRoleDefinition during RegisterAgent. The ON CONFLICT clause preserves
+// 'running' status set by the writer while updating structural fields from seed.
 const seedRoleDefinitions = `
 INSERT INTO telemetry_role_definitions
     (role, name, tier, purpose, status, has_prompt, has_persona, category, depends_on, phase)
 VALUES
+    -- Running agents (Tier A bootstrap) — structural data seeded here,
+    -- runtime data (model, watchPatterns, canOperate) set by writer.
+    ('guardian',      'Guardian',      'A', 'Independent integrity monitor, HALT authority',
+     'running', true,  true,  'governance', '{}', 0),
+    ('sysmon',        'SysMon',        'A', 'Health monitoring, resource tracking',
+     'running', true,  true,  'resource',   '{guardian}', 1),
+    ('allocator',     'Allocator',     'A', 'Token budget management across agents',
+     'running', true,  true,  'resource',   '{guardian,sysmon}', 1),
+    ('cto',           'CTO',           'A', 'Technical leadership, architecture decisions, gap detection',
+     'running', true,  true,  'governance', '{guardian,sysmon,allocator}', 2),
+    ('reviewer',      'Reviewer',      'A', 'Code review, quality gate',
+     'running', true,  false, 'product',    '{cto,guardian}', 2),
+    ('spawner',       'Spawner',       'A', 'Create new agents when gaps detected',
+     'running', true,  true,  'governance', '{cto,allocator,guardian}', 3),
+    ('strategist',    'Strategist',    'A', 'High-level task creation from ideas',
+     'running', true,  false, 'governance', '{}', 0),
+    ('planner',       'Planner',       'A', 'Task decomposition into implementable steps',
+     'running', true,  false, 'governance', '{}', 0),
+    ('implementer',   'Implementer',   'A', 'Code execution — the only agent that can operate',
+     'running', true,  false, 'product',    '{}', 0),
+    -- Non-running roles (designed/defined/missing)
     ('researcher',        'Researcher',        'A', 'Explore unknown territory, read docs',
      'defined',  true,  true,  'knowledge',   '{}', NULL),
     ('architect',         'Architect',         'A', 'Decompose problems into implementable plans',
@@ -230,10 +253,18 @@ VALUES
     ('politician',        'Politician',        'D', 'Represent constituencies, negotiate policy',
      'missing',  false, false, NULL,           '{}', 7)
 ON CONFLICT (role) DO UPDATE SET
-    tier = EXCLUDED.tier, purpose = EXCLUDED.purpose,
-    category = COALESCE(telemetry_role_definitions.category, EXCLUDED.category),
-    depends_on = EXCLUDED.depends_on, phase = EXCLUDED.phase,
-    has_prompt = EXCLUDED.has_prompt, has_persona = EXCLUDED.has_persona;
+    name = EXCLUDED.name,
+    tier = EXCLUDED.tier,
+    purpose = EXCLUDED.purpose,
+    category = COALESCE(EXCLUDED.category, telemetry_role_definitions.category),
+    depends_on = EXCLUDED.depends_on,
+    phase = EXCLUDED.phase,
+    has_prompt = EXCLUDED.has_prompt,
+    has_persona = EXCLUDED.has_persona,
+    status = CASE
+        WHEN telemetry_role_definitions.status = 'running' THEN 'running'
+        ELSE EXCLUDED.status
+    END;
 `
 
 // phaseUpdates advances phases whose real-world status has changed since
