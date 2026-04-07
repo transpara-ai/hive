@@ -819,6 +819,25 @@ func ModelForRole(role string) string {
 	return "haiku"
 }
 
+// ProviderConfig returns an intelligence.Config for the given role.
+// HIVE_PROVIDER selects the provider (default: "claude-cli").
+// HIVE_MODEL selects the model globally, overriding per-role defaults.
+func ProviderConfig(role string, budget float64) intelligence.Config {
+	provider := os.Getenv("HIVE_PROVIDER")
+	if provider == "" {
+		provider = "claude-cli"
+	}
+	model := os.Getenv("HIVE_MODEL")
+	if model == "" {
+		model = ModelForRole(role)
+	}
+	return intelligence.Config{
+		Provider:     provider,
+		Model:        model,
+		MaxBudgetUSD: budget,
+	}
+}
+
 // maybeCreatePR creates a GitHub PR for a Critic-PASS commit when PRMode is enabled.
 // Logs and skips gracefully if gh is not found.
 func (r *Runner) maybeCreatePR(c commit) {

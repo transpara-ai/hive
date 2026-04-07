@@ -134,13 +134,9 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 
 	// Create intelligence provider.
 	// Role prompt is passed in the instruction (with task context), not as system prompt.
-	model := runner.ModelForRole(role)
-	provider, err := intelligence.New(intelligence.Config{
-		Provider:     "claude-cli",
-		Model:        model,
-		MaxBudgetUSD: budget,
-		APIKey:       resolveAnthropicKey(),
-	})
+	providerCfg := runner.ProviderConfig(role, budget)
+	providerCfg.APIKey = resolveAnthropicKey()
+	provider, err := intelligence.New(providerCfg)
 	if err != nil {
 		return fmt.Errorf("provider: %w", err)
 	}
@@ -167,7 +163,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 	})
 
 	log.Printf("hive agent starting: role=%s model=%s space=%s repo=%s agent-id=%s one-shot=%v",
-		role, model, space, absRepo, agentID, oneShot)
+		role, providerCfg.Model, space, absRepo, agentID, oneShot)
 	return r.Run(ctx)
 }
 
@@ -300,14 +296,9 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 
 	// Create a runner that all state machine transitions use.
 	makeRunner := func(role string) (*runner.Runner, error) {
-		model := runner.ModelForRole(role)
-		providerCfg := intelligence.Config{
-			Provider:     "claude-sdk",
-			Model:        model,
-			MaxBudgetUSD: budget,
-			APIKey:       resolveAnthropicKey(),
-			SessionID:    agentSessions[role], // warm session from DB (empty = cold start)
-		}
+		providerCfg := runner.ProviderConfig(role, budget)
+		providerCfg.APIKey = resolveAnthropicKey()
+		providerCfg.SessionID = agentSessions[role] // warm session from DB (empty = cold start)
 		if mcpConfigPath != "" {
 			providerCfg.MCPConfigPath = mcpConfigPath
 		}

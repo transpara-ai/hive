@@ -348,9 +348,17 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, error) {
 	// Create the intelligence provider.
+	providerName := os.Getenv("HIVE_PROVIDER")
+	if providerName == "" {
+		providerName = "claude-cli"
+	}
+	model := os.Getenv("HIVE_MODEL")
+	if model == "" {
+		model = def.Model
+	}
 	provider, err := intelligence.New(intelligence.Config{
-		Provider:     "claude-cli",
-		Model:        def.Model,
+		Provider:     providerName,
+		Model:        model,
 		SystemPrompt: def.SystemPrompt,
 	})
 	if err != nil {
