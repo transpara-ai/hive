@@ -262,6 +262,9 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 				Model:         def.Model,
 				Agent:         agent,
 				MaxIterations: def.EffectiveMaxIterations(),
+				WatchPatterns: def.WatchPatterns,
+				CanOperate:    def.CanOperate,
+				Tier:          def.EffectiveTier(),
 			})
 		}
 

@@ -29,6 +29,9 @@ type AgentRegistration struct {
 	Model         string
 	Agent         *hiveagent.Agent
 	MaxIterations int
+	WatchPatterns []string
+	CanOperate    bool
+	Tier          string
 }
 
 // agentEventRecord stores the most recent event observed from a specific agent
@@ -92,12 +95,55 @@ func (w *Writer) SetBudgetRegistry(reg *resources.BudgetRegistry) {
 	w.budgetRegistry = reg
 }
 
-// RegisterAgent adds an agent to the telemetry snapshot set.
+// RegisterAgent adds an agent to the telemetry snapshot set and persists the
+// role definition to telemetry_role_definitions. The DB upsert sets status to
+// 'running', which takes precedence over seed data for actively running agents.
 // Called by the hive runtime during agent spawn.
 func (w *Writer) RegisterAgent(reg AgentRegistration) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.agents = append(w.agents, reg)
+	w.mu.Unlock()
+
+	// Persist role definition to postgres (best-effort, non-blocking).
+	if w.pool != nil {
+		go w.persistRoleDefinition(reg)
+	}
+}
+
+// persistRoleDefinition upserts a running agent's role definition.
+func (w *Writer) persistRoleDefinition(reg AgentRegistration) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tier := reg.Tier
+	if tier == "" {
+		tier = "A"
+	}
+
+	_, err := w.pool.Exec(ctx,
+		`INSERT INTO telemetry_role_definitions (
+			role, name, tier, model, can_operate, max_iterations,
+			watch_patterns, status, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', now())
+		ON CONFLICT (role) DO UPDATE SET
+			tier = EXCLUDED.tier,
+			model = EXCLUDED.model,
+			can_operate = EXCLUDED.can_operate,
+			max_iterations = EXCLUDED.max_iterations,
+			watch_patterns = EXCLUDED.watch_patterns,
+			status = 'running',
+			updated_at = now()`,
+		reg.Role,
+		reg.Name,
+		tier,
+		reg.Model,
+		reg.CanOperate,
+		reg.MaxIterations,
+		reg.WatchPatterns,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: persist role definition %s: %v\n", reg.Role, err)
+	}
 }
 
 // RecordResponse captures an agent's latest LLM response.

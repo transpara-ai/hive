@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
@@ -32,6 +33,53 @@ func TestRegisterAgent(t *testing.T) {
 		if w.agents[i].Name != name {
 			t.Errorf("agents[%d].Name = %q, want %q", i, w.agents[i].Name, name)
 		}
+	}
+}
+
+func TestRegisterAgentWithNewFields(t *testing.T) {
+	w := &Writer{
+		lastResponses:   make(map[string]string),
+		lastAgentEvents: make(map[string]agentEventRecord),
+	}
+
+	w.RegisterAgent(AgentRegistration{
+		Name:          "implementer",
+		Role:          "implementer",
+		Model:         "claude-opus-4-6",
+		MaxIterations: 500,
+		WatchPatterns: []string{"work.task.created", "work.task.assigned"},
+		CanOperate:    true,
+	})
+	w.RegisterAgent(AgentRegistration{
+		Name:          "guardian",
+		Role:          "guardian",
+		Model:         "claude-sonnet-4-6",
+		MaxIterations: 500,
+		WatchPatterns: []string{},
+		CanOperate:    false,
+	})
+
+	if got := w.Agents(); got != 2 {
+		t.Fatalf("Agents() = %d, want 2", got)
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	impl := w.agents[0]
+	if !impl.CanOperate {
+		t.Error("implementer.CanOperate = false, want true")
+	}
+	if len(impl.WatchPatterns) != 2 {
+		t.Errorf("implementer.WatchPatterns len = %d, want 2", len(impl.WatchPatterns))
+	}
+
+	guard := w.agents[1]
+	if guard.CanOperate {
+		t.Error("guardian.CanOperate = true, want false")
+	}
+	if len(guard.WatchPatterns) != 0 {
+		t.Errorf("guardian.WatchPatterns len = %d, want 0", len(guard.WatchPatterns))
 	}
 }
 
@@ -209,6 +257,44 @@ func TestEventSummary(t *testing.T) {
 				t.Errorf("eventSummary() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSchemaContainsNewTables(t *testing.T) {
+	// Verify the schema const includes the new structural data tables.
+	tables := []string{
+		"telemetry_role_definitions",
+		"telemetry_layers",
+		"telemetry_phase_agents",
+	}
+	for _, table := range tables {
+		if !strings.Contains(schema, table) {
+			t.Errorf("schema missing table %q", table)
+		}
+	}
+
+	// Verify exit_criteria column exists in telemetry_phases CREATE TABLE.
+	if !strings.Contains(schema, "exit_criteria") {
+		t.Error("schema missing exit_criteria column on telemetry_phases")
+	}
+}
+
+func TestSeedDataNonEmpty(t *testing.T) {
+	seeds := map[string]string{
+		"seedLayers":          seedLayers,
+		"seedPhaseAgents":     seedPhaseAgents,
+		"seedRoleDefinitions": seedRoleDefinitions,
+	}
+	for name, sql := range seeds {
+		if len(strings.TrimSpace(sql)) == 0 {
+			t.Errorf("%s is empty", name)
+		}
+		if !strings.Contains(sql, "INSERT INTO") {
+			t.Errorf("%s missing INSERT INTO", name)
+		}
+		if !strings.Contains(sql, "ON CONFLICT") {
+			t.Errorf("%s missing ON CONFLICT (not idempotent)", name)
+		}
 	}
 }
 

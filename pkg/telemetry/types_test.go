@@ -129,6 +129,7 @@ func TestHiveSnapshot_JSONRoundTrip(t *testing.T) {
 func TestPhase_JSONRoundTrip(t *testing.T) {
 	started := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	completed := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	exitCriteria := "All foundation agents coordinating via events and tasks."
 
 	tests := []struct {
 		name  string
@@ -137,23 +138,25 @@ func TestPhase_JSONRoundTrip(t *testing.T) {
 		{
 			name: "complete phase with timestamps",
 			phase: Phase{
-				Phase:       0,
-				Label:       "Foundation",
-				Status:      "complete",
-				StartedAt:   &started,
-				CompletedAt: &completed,
-				Notes:       "Strategist, Planner, Implementer, Guardian running.",
+				Phase:        0,
+				Label:        "Foundation",
+				Status:       "complete",
+				StartedAt:    &started,
+				CompletedAt:  &completed,
+				Notes:        "Strategist, Planner, Implementer, Guardian running.",
+				ExitCriteria: &exitCriteria,
 			},
 		},
 		{
 			name: "blocked phase with nil timestamps",
 			phase: Phase{
-				Phase:       2,
-				Label:       "Technical leadership",
-				Status:      "blocked",
-				StartedAt:   nil,
-				CompletedAt: nil,
-				Notes:       "CTO + Reviewer — no AgentDefs.",
+				Phase:        2,
+				Label:        "Technical leadership",
+				Status:       "blocked",
+				StartedAt:    nil,
+				CompletedAt:  nil,
+				Notes:        "CTO + Reviewer — no AgentDefs.",
+				ExitCriteria: nil,
 			},
 		},
 	}
@@ -197,6 +200,14 @@ func TestPhase_JSONRoundTrip(t *testing.T) {
 				}
 			} else if got.CompletedAt == nil || !got.CompletedAt.Equal(*tt.phase.CompletedAt) {
 				t.Errorf("CompletedAt: got %v, want %v", got.CompletedAt, tt.phase.CompletedAt)
+			}
+
+			if tt.phase.ExitCriteria == nil {
+				if got.ExitCriteria != nil {
+					t.Errorf("ExitCriteria: got %v, want nil", got.ExitCriteria)
+				}
+			} else if got.ExitCriteria == nil || *got.ExitCriteria != *tt.phase.ExitCriteria {
+				t.Errorf("ExitCriteria: got %v, want %v", got.ExitCriteria, tt.phase.ExitCriteria)
 			}
 		})
 	}
