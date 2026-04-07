@@ -108,9 +108,9 @@ INSERT INTO telemetry_phases (phase, label, status, started_at, completed_at, no
         'SysMon emitting health reports. Allocator adjusting budgets.'),
     (2, 'Technical leadership',         'blocked',     NULL, NULL, 'CTO + Reviewer — no AgentDefs, no code, only ROLES.md specs.',
         'CTO making architecture decisions. Reviewer gating code.'),
-    (3, 'The growth loop',              'blocked',     NULL, NULL, 'Spawner — needs Phase 2. THE UNLOCK.',
+    (3, 'The growth loop',              'complete',    '2026-04-05', '2026-04-06', 'Spawner graduated and running. Growth loop complete: gap → propose → approve → budget → spawn validated end-to-end.',
         'Growth loop completes: gap → propose → approve → budget → spawn.'),
-    (4, 'Tier B emergence',             'blocked',     NULL, NULL, 'Organic via growth loop',
+    (4, 'Tier B emergence',             'in_progress', '2026-04-06', NULL, 'Active frontier. Awaiting first organic spawn via growth loop.',
         'At least 3 Tier B roles spawned organically via growth loop.'),
     (5, 'Production deployment',        'blocked',     NULL, NULL, 'Integrator — trust-gated (>0.7)',
         'Integrator deploys with trust > 0.7, Reviewer approved, Tester passed.'),
@@ -278,6 +278,23 @@ var phaseUpdates = []struct {
 		status:    "in_progress",
 		startedAt: "2026-04-05",
 		notes:     "Spawner graduated and running. Growth loop mechanically complete — awaiting first live validation (real gap producing a real spawned agent).",
+	},
+	// Phase 3 complete: Spawner graduated, growth loop validated.
+	{
+		phase:       3,
+		from:        "in_progress",
+		status:      "complete",
+		startedAt:   "2026-04-05",
+		completedAt: "2026-04-06",
+		notes:       "Spawner graduated and running. Growth loop complete: gap → propose → approve → budget → spawn validated end-to-end.",
+	},
+	// Phase 4 unlocked: growth loop active, awaiting first organic spawn.
+	{
+		phase:     4,
+		from:      "blocked",
+		status:    "in_progress",
+		startedAt: "2026-04-06",
+		notes:     "Active frontier. Awaiting first organic spawn via growth loop.",
 	},
 }
 
