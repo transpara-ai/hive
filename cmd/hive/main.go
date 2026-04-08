@@ -817,15 +817,14 @@ func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string, k
 	}
 
 	// Start the webhook event listener so the site can push ops to us.
-	// The Runner parameter is nil because legacy mode uses hive.Runtime,
-	// not runner.Runner. This is safe: dispatch() only logs today.
-	// When dispatch gains real agent invocation, wire it to the Runtime.
+	// Runtime implements runner.Dispatcher — site ops are translated into
+	// eventgraph bus events that agents already subscribe to.
 	listenerPort := os.Getenv("HIVE_LISTENER_PORT")
 	if listenerPort == "" {
 		listenerPort = "8081"
 	}
 	go func() {
-		if err := runner.StartEventListener(ctx, nil, listenerPort); err != nil {
+		if err := runner.StartEventListener(ctx, rt, listenerPort); err != nil {
 			log.Printf("event listener exited: %v", err)
 		}
 	}()

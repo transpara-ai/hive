@@ -20,6 +20,9 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeRunStarted, EventTypeRunCompleted,
 		EventTypeAgentSpawned, EventTypeAgentStopped,
 		EventTypeProgress,
+		// Site webhook bridge events (dispatch.go).
+		EventTypeSiteRespond, EventTypeSiteExpress,
+		EventTypeSiteAssert, EventTypeSiteProgress,
 	}
 }
 
