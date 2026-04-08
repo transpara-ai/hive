@@ -12,10 +12,11 @@ import (
 	"github.com/lovyou-ai/hive/pkg/runner"
 )
 
-// dispatchMu serializes dispatch calls to prevent chain integrity violations.
-// The eventgraph requires each append to reference the actual head; concurrent
-// appends race and the loser fails. This mutex ensures only one dispatch
-// touches the chain at a time.
+// dispatchMu serializes webhook dispatch calls against each other.
+// This prevents two concurrent webhooks from reading the same chain head
+// and racing on Append. It does NOT protect against concurrent appends
+// from the agent loop (Runtime.emit) — those follow the same best-effort
+// pattern as the rest of the runtime.
 var dispatchMu sync.Mutex
 
 // Site op event types — bridged from the site's webhook into the eventgraph bus.
@@ -27,8 +28,10 @@ var (
 )
 
 // SiteOpContent wraps a site op payload for non-task events.
+// EventType is exported so it survives JSON round-trip through Postgres.
 type SiteOpContent struct {
 	hiveContent
+	EventType string          `json:"EventType"`
 	SiteOp    string          `json:"SiteOp"`
 	SpaceID   string          `json:"SpaceID"`
 	NodeID    string          `json:"NodeID"`
@@ -36,10 +39,9 @@ type SiteOpContent struct {
 	Actor     string          `json:"Actor"`
 	ActorID   string          `json:"ActorID"`
 	Payload   json.RawMessage `json:"Payload,omitempty"`
-	eventType string
 }
 
-func (c SiteOpContent) EventTypeName() string { return c.eventType }
+func (c SiteOpContent) EventTypeName() string { return c.EventType }
 
 func init() {
 	event.RegisterContentUnmarshaler("hive.site.respond", event.Unmarshal[SiteOpContent])
@@ -49,9 +51,12 @@ func init() {
 }
 
 // EmitSiteOp translates a site webhook op into eventgraph bus events.
-// Task ops (intend, assign, complete) go through the TaskStore which emits
-// work.task.* events that agents already subscribe to. Non-task ops are
-// emitted as hive.site.* events.
+// Task ops use the TaskStore where implemented:
+//   - intend → TaskStore.Create() → work.task.created
+//   - assign → NOT YET IMPLEMENTED (needs site→eventgraph task ID mapping)
+//   - complete → NOT YET IMPLEMENTED (needs site→eventgraph task ID mapping)
+//
+// Non-task ops are emitted as hive.site.* events.
 func (r *Runtime) EmitSiteOp(ctx context.Context, op runner.OpEvent) error {
 	dispatchMu.Lock()
 	defer dispatchMu.Unlock()
@@ -110,19 +115,20 @@ func (r *Runtime) dispatchIntend(op runner.OpEvent) error {
 	return nil
 }
 
-// dispatchAssign records an assignment on the eventgraph.
-// The site payload must include the target task — but we don't have a mapping
-// from site node IDs to eventgraph task IDs yet. Log and skip for now.
+// dispatchAssign is a stub — site→eventgraph task ID mapping is not yet
+// implemented. Logs the event and returns an error so the caller knows
+// the op was not processed.
 func (r *Runtime) dispatchAssign(op runner.OpEvent) error {
 	log.Printf("[dispatch] assign received for node %s — site→eventgraph task ID mapping not yet implemented", op.NodeID)
-	return nil
+	return fmt.Errorf("assign: site→eventgraph task ID mapping not yet implemented")
 }
 
-// dispatchComplete records a completion on the eventgraph.
-// Same limitation as assign — needs site→eventgraph task ID mapping.
+// dispatchComplete is a stub — site→eventgraph task ID mapping is not yet
+// implemented. Logs the event and returns an error so the caller knows
+// the op was not processed.
 func (r *Runtime) dispatchComplete(op runner.OpEvent) error {
 	log.Printf("[dispatch] complete received for node %s — site→eventgraph task ID mapping not yet implemented", op.NodeID)
-	return nil
+	return fmt.Errorf("complete: site→eventgraph task ID mapping not yet implemented")
 }
 
 // emitSiteEvent creates and appends a hive.site.* event to the eventgraph.
@@ -132,6 +138,7 @@ func (r *Runtime) emitSiteEvent(eventType types.EventType, op runner.OpEvent) er
 		return err
 	}
 	content := SiteOpContent{
+		EventType: eventType.String(),
 		SiteOp:    op.Op,
 		SpaceID:   op.SpaceID,
 		NodeID:    op.NodeID,
@@ -139,7 +146,6 @@ func (r *Runtime) emitSiteEvent(eventType types.EventType, op runner.OpEvent) er
 		Actor:     op.Actor,
 		ActorID:   op.ActorID,
 		Payload:   op.Payload,
-		eventType: eventType.String(),
 	}
 	ev, err := r.factory.Create(eventType, r.humanID, content, causes, r.convID, r.store, r.signer)
 	if err != nil {
