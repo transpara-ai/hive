@@ -5,11 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/hive/pkg/runner"
 )
+
+// dispatchMu serializes dispatch calls to prevent chain integrity violations.
+// The eventgraph requires each append to reference the actual head; concurrent
+// appends race and the loser fails. This mutex ensures only one dispatch
+// touches the chain at a time.
+var dispatchMu sync.Mutex
 
 // Site op event types — bridged from the site's webhook into the eventgraph bus.
 var (
@@ -46,6 +53,9 @@ func init() {
 // work.task.* events that agents already subscribe to. Non-task ops are
 // emitted as hive.site.* events.
 func (r *Runtime) EmitSiteOp(ctx context.Context, op runner.OpEvent) error {
+	dispatchMu.Lock()
+	defer dispatchMu.Unlock()
+
 	switch op.Op {
 	case "intend":
 		return r.dispatchIntend(op)
