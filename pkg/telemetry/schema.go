@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS telemetry_role_definitions (
     category        TEXT,
     depends_on      TEXT[],
     origin          TEXT NOT NULL DEFAULT 'bootstrap' CHECK (origin IN ('bootstrap', 'spawned')),
+    reboot_survival TEXT NOT NULL DEFAULT 'none',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -356,6 +357,7 @@ func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 ALTER TABLE telemetry_agent_snapshots ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
 ALTER TABLE telemetry_phases ADD COLUMN IF NOT EXISTS exit_criteria TEXT;
 ALTER TABLE telemetry_role_definitions ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'bootstrap';
+ALTER TABLE telemetry_role_definitions ADD COLUMN IF NOT EXISTS reboot_survival TEXT NOT NULL DEFAULT 'none';
 DO $$ BEGIN
   ALTER TABLE telemetry_role_definitions ADD CONSTRAINT telemetry_role_definitions_origin_check
     CHECK (origin IN ('bootstrap', 'spawned'));

@@ -289,6 +289,18 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		fmt.Fprintf(os.Stderr, "Checkpoint: %d/%d agents warm-started\n", warmCount, len(recoveryStates))
 	}
 
+	if r.telemetryWriter != nil {
+		for role, rs := range recoveryStates {
+			var survival string
+			if rs != nil && rs.Mode == checkpoint.ModeWarm {
+				survival = "full"
+			} else {
+				survival = "role-only"
+			}
+			r.telemetryWriter.UpdateRebootSurvival(role, survival)
+		}
+	}
+
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {

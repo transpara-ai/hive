@@ -153,6 +153,19 @@ func (w *Writer) persistRoleDefinition(reg AgentRegistration) {
 	}
 }
 
+// UpdateRebootSurvival sets the reboot_survival column for an agent role.
+func (w *Writer) UpdateRebootSurvival(role, survival string) {
+	if w.pool == nil {
+		return
+	}
+	_, err := w.pool.Exec(context.Background(),
+		`UPDATE telemetry_role_definitions SET reboot_survival = $1, updated_at = now() WHERE role = $2`,
+		survival, role)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[telemetry] update reboot_survival failed for %s: %v\n", role, err)
+	}
+}
+
 // RecordResponse captures an agent's latest LLM response.
 // Designed to be called from the OnIteration callback.
 func (w *Writer) RecordResponse(agentName string, response string) {
