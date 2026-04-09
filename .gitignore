@@ -8,4 +8,5 @@ hive.exe~
 # Go built binaries
 /hive
 /approve-role
+/adjust-budget
 /user-api
