@@ -707,10 +707,18 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 // checkResponseText is the text-based fallback for signal detection.
 func (l *Loop) checkResponseText(ctx context.Context, response string, iteration int) *Result {
 	if ContainsSignal(response, "HALT") {
+		if l.sink != nil {
+			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
+			l.lastCheckpointIter = l.iteration
+		}
 		r := l.result(StopHalt, iteration, response)
 		return &r
 	}
 	if ContainsSignal(response, "ESCALATE") {
+		if l.sink != nil {
+			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
+			l.lastCheckpointIter = l.iteration
+		}
 		if err := l.agent.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, response)); err != nil {
 			fmt.Printf("warning: escalation event failed: %v\n", err)
