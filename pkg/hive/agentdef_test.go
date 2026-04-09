@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -100,5 +101,35 @@ func TestStarterAgents(t *testing.T) {
 		if agents[i].Role != want {
 			t.Errorf("boot order[%d]: got role %q, want %q", i, agents[i].Role, want)
 		}
+	}
+}
+
+func TestNonOperateOutputConvention(t *testing.T) {
+	// The constant is appended to every dynamically spawned agent's system
+	// prompt (CanOperate=false). It must tell the agent:
+	//   1. It cannot write files
+	//   2. It should use /task comment for output delivery
+	//   3. It should reference output in /task complete
+	required := []string{
+		"OUTPUT CONVENTION",
+		"file write access",
+		"/task comment",
+		"/task complete",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(nonOperateOutputConvention, phrase) {
+			t.Errorf("nonOperateOutputConvention missing required phrase %q", phrase)
+		}
+	}
+
+	// Simulate the concatenation done in spawnDynamicAgent (watch.go).
+	proposalPrompt := "You are the analyst. Investigate metrics."
+	result := proposalPrompt + nonOperateOutputConvention
+
+	if !strings.HasPrefix(result, proposalPrompt) {
+		t.Error("original proposal prompt must be preserved as prefix")
+	}
+	if !strings.Contains(result, "OUTPUT CONVENTION") {
+		t.Error("combined prompt must contain OUTPUT CONVENTION header")
 	}
 }
