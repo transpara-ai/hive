@@ -3,6 +3,7 @@ package loop
 import (
 	"testing"
 
+	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/work"
 )
@@ -118,19 +119,115 @@ func TestResolveCommitForTask_Fallback_NoHash(t *testing.T) {
 	}
 }
 
-func TestResolveCommitForTask_TaskNotFound(t *testing.T) {
-	// When taskFound=false, should go straight to fallback.
-	// Can't call resolveCommitForTask without l.agent, so verify extractCommitHash
-	// is not called by checking that an empty task with taskFound=false skips Strategy 1.
-	l := &Loop{config: Config{RepoPath: "."}}
-
-	// taskFound=false → skip Strategy 1, go to fallback.
-	// Note: this will print a warning and call l.agent.Name() which panics without a real agent.
-	// So we test the precondition: with taskFound=false, Strategy 1 is skipped.
-	task := work.TaskCompletedContent{}
-	// Strategy 1 requires taskFound && task.Summary != ""
-	if false && task.Summary != "" {
-		t.Fatal("should not reach here")
+func TestResolveCommitForTask_Strategy0_ArtifactRef(t *testing.T) {
+	head := gitCommand(".", "rev-parse", "HEAD")
+	if head == "" {
+		t.Skip("not in a git repo")
 	}
-	_ = l // used to verify the type compiles with the new signature
+
+	// Create a real TaskStore with an artifact containing a commit hash.
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_strategy0_test")
+
+	// Create task + artifact with commit hash in body.
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Test task", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	artifactBody := "commit: " + head + "\n\nfoo.go | 5 ++"
+	if err := ts.AddArtifact(agent.ID(), task.ID, "Operate result", "text/plain", artifactBody, causes, convID); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+
+	// Complete — ArtifactRef should be set.
+	if err := ts.Complete(agent.ID(), task.ID, "done", causes, convID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Find the completed event to get ArtifactRef.
+	completedPage, err := g.Store().ByType(work.EventTypeTaskCompleted, 100, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType: %v", err)
+	}
+	var completedContent work.TaskCompletedContent
+	for _, ev := range completedPage.Items() {
+		c, ok := ev.Content().(work.TaskCompletedContent)
+		if ok && c.TaskID == task.ID {
+			completedContent = c
+			break
+		}
+	}
+	if completedContent.ArtifactRef.IsZero() {
+		t.Fatal("ArtifactRef is zero on completed event")
+	}
+
+	// Now test resolveCommitForTask with Strategy 0.
+	l := &Loop{config: Config{RepoPath: ".", TaskStore: ts}}
+	commitHash, diffRef := l.resolveCommitForTask(completedContent, true)
+
+	if commitHash != head {
+		t.Errorf("Strategy 0: commitHash = %q, want %q", commitHash, head)
+	}
+	wantRef := head + "^.." + head
+	if diffRef != wantRef {
+		t.Errorf("Strategy 0: diffRef = %q, want %q", diffRef, wantRef)
+	}
+}
+
+func TestFetchArtifactBody_WaiverReturnsFalse(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_waiver_test")
+
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Waived task", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := ts.WaiveArtifact(agent.ID(), task.ID, "no commits", causes, convID); err != nil {
+		t.Fatalf("WaiveArtifact: %v", err)
+	}
+
+	if err := ts.Complete(agent.ID(), task.ID, "done", causes, convID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Get ArtifactRef (points to waiver).
+	completedPage, err := g.Store().ByType(work.EventTypeTaskCompleted, 100, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType: %v", err)
+	}
+	var artifactRef types.EventID
+	for _, ev := range completedPage.Items() {
+		c, ok := ev.Content().(work.TaskCompletedContent)
+		if ok && c.TaskID == task.ID {
+			artifactRef = c.ArtifactRef
+			break
+		}
+	}
+	if artifactRef.IsZero() {
+		t.Fatal("ArtifactRef is zero")
+	}
+
+	l := &Loop{config: Config{TaskStore: ts}}
+	_, isArtifact := l.fetchArtifactBody(artifactRef)
+	if isArtifact {
+		t.Fatal("fetchArtifactBody returned true for waiver ref; expected false")
+	}
 }

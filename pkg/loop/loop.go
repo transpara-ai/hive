@@ -249,6 +249,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// Operate path: agent has filesystem access and assigned work.
 			task := l.nextAssignedTask()
 			instruction := fmt.Sprintf("Task: %s\n\n%s", task.Title, task.Description)
+
+			// Record HEAD before Operate so we can detect new commits.
+			preOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
+
 			result, opErr := l.agent.Operate(ctx, l.config.RepoPath, instruction)
 			if opErr != nil {
 				return l.result(StopError, iteration, fmt.Sprintf("operate: %v", opErr))
@@ -256,8 +260,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 			response = result.Summary
 			usage = result.Usage
 
-			// Attach artifact before completing (satisfies the artifact gate).
-			l.attachOperateArtifact(task)
+			// Attach artifact or waive — compare HEAD before/after Operate.
+			postOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
+			if postOperateHead != "" && postOperateHead != preOperateHead {
+				l.attachOperateArtifact(task)
+			} else {
+				l.waiveOperateArtifact(task, "Operate produced no new commits")
+			}
 
 			// Auto-complete the task after successful Operate.
 			l.completeTask(task, result.Summary)
@@ -843,6 +852,8 @@ func (l *Loop) nextAssignedTask() work.Task {
 // attachOperateArtifact captures the current git state as a task artifact.
 // Called after a successful Operate() and before completeTask() to satisfy
 // the artifact gate in TaskStore.Complete(). Best-effort.
+// Note: causes may be empty on the agent's very first event (bootstrap case).
+// The factory handles this by using the graph head as a fallback cause.
 func (l *Loop) attachOperateArtifact(task work.Task) {
 	if l.config.TaskStore == nil {
 		return
@@ -862,6 +873,27 @@ func (l *Loop) attachOperateArtifact(task work.Task) {
 	)
 	if err != nil {
 		fmt.Printf("[%s] warning: attach artifact failed: %v\n", l.agent.Name(), err)
+	}
+}
+
+// waiveOperateArtifact exempts a task from the artifact requirement when
+// Operate produced no new commits. Best-effort.
+func (l *Loop) waiveOperateArtifact(task work.Task, reason string) {
+	if l.config.TaskStore == nil {
+		return
+	}
+	// Causes: use agent's last event for causality chain.
+	var causes []types.EventID
+	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+		causes = []types.EventID{lastEv}
+	}
+	err := l.config.TaskStore.WaiveArtifact(
+		l.agent.ID(), task.ID,
+		reason,
+		causes, l.config.ConvID,
+	)
+	if err != nil {
+		fmt.Printf("[%s] warning: waive artifact failed: %v\n", l.agent.Name(), err)
 	}
 }
 

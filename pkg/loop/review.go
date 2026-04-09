@@ -320,10 +320,14 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 
 	// Strategy 0: use ArtifactRef → fetch artifact body → extract commit hash.
 	if taskFound && !task.ArtifactRef.IsZero() {
-		if body := l.fetchArtifactBody(task.ArtifactRef); body != "" {
+		body, isArtifact := l.fetchArtifactBody(task.ArtifactRef)
+		if isArtifact && body != "" {
 			if hash := extractCommitHash(body, repo); hash != "" {
 				return hash, hash + "^.." + hash
 			}
+		} else if !isArtifact {
+			// ArtifactRef points to a waiver — no commit body available.
+			fmt.Printf("[%s] note: ArtifactRef is a waiver, falling through to summary heuristic\n", l.agent.Name())
 		}
 	}
 
@@ -340,10 +344,10 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 }
 
 // fetchArtifactBody reads a work.task.artifact event by ID and returns its Body.
-// Returns empty string if not found or TaskStore is nil.
-func (l *Loop) fetchArtifactBody(artifactID types.EventID) string {
+// Returns (body, true) for artifacts, ("", false) for waivers or missing events.
+func (l *Loop) fetchArtifactBody(artifactID types.EventID) (string, bool) {
 	if l.config.TaskStore == nil {
-		return ""
+		return "", false
 	}
 	return l.config.TaskStore.GetArtifactBody(artifactID)
 }
