@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
+	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/work"
 )
 
@@ -307,14 +308,24 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 // ────────────────────────────────────────────────────────────────────
 
 // resolveCommitForTask determines the correct commit hash and diff reference
-// for a completed task. Uses two strategies:
-//  1. Extract commit hash from the task summary (e.g., "Implemented X in commit abc1234")
-//  2. Fall back to HEAD~1 (legacy behavior, race-prone with concurrent completions)
+// for a completed task. Uses three strategies in priority order:
+//  0. Use ArtifactRef to fetch the artifact body and extract the commit hash (most reliable)
+//  1. Extract commit hash from the task summary text (heuristic)
+//  2. Fall back to HEAD~1 (legacy, race-prone with concurrent completions)
 //
 // Returns (commitHash, diffRef) where commitHash is for `git log -1 <hash>`
 // and diffRef is for `git diff <ref>` (e.g., "abc1234^..abc1234").
 func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bool) (string, string) {
 	repo := l.config.RepoPath
+
+	// Strategy 0: use ArtifactRef → fetch artifact body → extract commit hash.
+	if taskFound && !task.ArtifactRef.IsZero() {
+		if body := l.fetchArtifactBody(task.ArtifactRef); body != "" {
+			if hash := extractCommitHash(body, repo); hash != "" {
+				return hash, hash + "^.." + hash
+			}
+		}
+	}
 
 	// Strategy 1: extract hash from summary text.
 	if taskFound && task.Summary != "" {
@@ -326,6 +337,15 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 	// Strategy 2: fall back to HEAD~1 (race-prone with concurrent completions).
 	fmt.Printf("[%s] warning: no commit hash found for task, falling back to HEAD~1\n", l.agent.Name())
 	return "HEAD", "HEAD~1"
+}
+
+// fetchArtifactBody reads a work.task.artifact event by ID and returns its Body.
+// Returns empty string if not found or TaskStore is nil.
+func (l *Loop) fetchArtifactBody(artifactID types.EventID) string {
+	if l.config.TaskStore == nil {
+		return ""
+	}
+	return l.config.TaskStore.GetArtifactBody(artifactID)
 }
 
 // extractCommitHash scans text for a 7-40 character hex string that looks like
