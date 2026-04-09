@@ -153,18 +153,23 @@ go run ./cmd/hive --human Matt --idea "Build a task management app with kanban b
 # With Postgres persistence
 go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive" --idea "Build a CLI tool"
 
-# Auto-approve all authority requests (dev/testing)
-go run ./cmd/hive --human Matt --yes --idea "Build a REST API"
+# Auto-approve authority requests and role proposals (dev/testing)
+go run ./cmd/hive --human Matt --approve-requests --approve-roles --idea "Build a REST API"
+
+# Full autonomy: approve everything, stay alive for webhook work
+go run ./cmd/hive --human Matt --approve-requests --approve-roles --loop --store "postgres://hive:hive@localhost:5432/hive"
 
 # Point at an existing repo for the Implementer to modify
-go run ./cmd/hive --human Matt --yes --repo /path/to/repo --idea "add error handling to the API"
+go run ./cmd/hive --human Matt --approve-requests --repo /path/to/repo --idea "add error handling to the API"
 ```
 
-Five flags:
+Flags (run `hive` with no args for full help):
 - `--human` — Human operator name (required)
 - `--idea` — Seed idea for agents to work on
 - `--store` — Store DSN (`postgres://...` or empty for in-memory)
-- `--yes` — Auto-approve all authority requests
+- `--approve-requests` — Auto-approve authority requests (file writes, git ops)
+- `--approve-roles` — Auto-approve role proposals (skip Guardian approval)
+- `--loop` — Keep agents alive when idle (block on bus for webhook work)
 - `--repo` — Path to repo for Implementer's Operate (default: current dir)
 
 Can also set `DATABASE_URL` env var instead of `--store`.

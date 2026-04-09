@@ -76,11 +76,12 @@ func run() error {
 	repos := flag.String("repos", "", "Named repos for pipeline: name=path,name=path (e.g. site=../site,hive=.)")
 
 	// Legacy runtime mode flags.
-	human := flag.String("human", "", "Human operator name (legacy runtime mode)")
-	idea := flag.String("idea", "", "Seed idea for agents (legacy runtime mode)")
-	storeDSN := flag.String("store", "", "Store DSN (legacy runtime mode)")
-	autoApprove := flag.Bool("yes", false, "Auto-approve authority (legacy runtime mode)")
-	keepalive := flag.Bool("keepalive", false, "Keep agents alive when idle — block on bus instead of quiescing (legacy runtime mode)")
+	human := flag.String("human", "", "Human operator name")
+	idea := flag.String("idea", "", "Seed idea for agents to work on")
+	storeDSN := flag.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
+	approveRequests := flag.Bool("approve-requests", false, "Auto-approve authority requests (file writes, git ops)")
+	approveRoles := flag.Bool("approve-roles", false, "Auto-approve role proposals (skip Guardian approval)")
+	loop := flag.Bool("loop", false, "Keep agents alive when idle — block on bus instead of quiescing")
 	flag.Parse()
 
 	if *council {
@@ -98,14 +99,53 @@ func run() error {
 		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
 	}
 	if *human != "" {
-		return runLegacy(*human, *idea, *storeDSN, *autoApprove, *repo, *keepalive)
+		return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *loop)
 	}
 
-	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  Pipeline:     hive --pipeline --repo ../site [--space hive] [--budget 10]")
-	fmt.Fprintln(os.Stderr, "  Single role:  hive --role builder --repo ../site [--space hive] [--budget 10]")
-	fmt.Fprintln(os.Stderr, "  Legacy mode:  hive --human Matt --idea 'description' [--store postgres://...]")
+	printUsage()
 	return fmt.Errorf("specify --pipeline, --role, or --human")
+}
+
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "usage: hive [mode] [flags]")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Modes:")
+	fmt.Fprintln(os.Stderr, "  --human NAME           Start hive with human operator (default mode)")
+	fmt.Fprintln(os.Stderr, "  --pipeline             Run Scout → Builder → Critic in sequence")
+	fmt.Fprintln(os.Stderr, "  --daemon               Run pipeline in a loop at --interval")
+	fmt.Fprintln(os.Stderr, "  --role ROLE             Run a single agent role (builder, scout, critic, monitor)")
+	fmt.Fprintln(os.Stderr, "  --council              Convene all agents for deliberation")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Hive flags (use with --human):")
+	fmt.Fprintln(os.Stderr, "  --idea TEXT             Seed idea for agents to work on")
+	fmt.Fprintln(os.Stderr, "  --store DSN             Store DSN (postgres://... or empty for in-memory)")
+	fmt.Fprintln(os.Stderr, "  --repo PATH             Path to repo for Operate (default: current dir)")
+	fmt.Fprintln(os.Stderr, "  --approve-requests      Auto-approve authority requests (file writes, git ops)")
+	fmt.Fprintln(os.Stderr, "  --approve-roles         Auto-approve role proposals (skip Guardian approval)")
+	fmt.Fprintln(os.Stderr, "  --loop                  Keep agents alive when idle (block on bus)")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Pipeline flags:")
+	fmt.Fprintln(os.Stderr, "  --space SLUG            lovyou.ai space slug (default: hive)")
+	fmt.Fprintln(os.Stderr, "  --api URL               lovyou.ai API base URL")
+	fmt.Fprintln(os.Stderr, "  --budget USD            Daily budget in USD (default: 10)")
+	fmt.Fprintln(os.Stderr, "  --agent-id ID           Agent's lovyou.ai user ID")
+	fmt.Fprintln(os.Stderr, "  --repos NAME=PATH,...   Named repos for pipeline")
+	fmt.Fprintln(os.Stderr, "  --pr                    Create feature branch + PR instead of pushing to main")
+	fmt.Fprintln(os.Stderr, "  --worktrees             Each task gets its own git worktree")
+	fmt.Fprintln(os.Stderr, "  --auto-clone            Clone missing repos from registry URLs")
+	fmt.Fprintln(os.Stderr, "  --interval DURATION     Daemon cycle interval (default: 30m)")
+	fmt.Fprintln(os.Stderr, "  --one-shot              Work one task then exit")
+	fmt.Fprintln(os.Stderr, "  --topic TEXT            Focus council on a specific question")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Environment:")
+	fmt.Fprintln(os.Stderr, "  DATABASE_URL            Fallback for --store")
+	fmt.Fprintln(os.Stderr, "  HIVE_LISTENER_PORT      Webhook listener port (default: 8081)")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Examples:")
+	fmt.Fprintln(os.Stderr, "  hive --human Michael --idea 'Build a REST API' --store postgres://hive:hive@localhost:5432/hive")
+	fmt.Fprintln(os.Stderr, "  hive --human Michael --approve-requests --approve-roles --loop --store postgres://...")
+	fmt.Fprintln(os.Stderr, "  hive --pipeline --repo ../site --space hive --budget 10")
+	fmt.Fprintln(os.Stderr, "  hive --role builder --repo ../site --one-shot")
 }
 
 // ─── Runner mode ─────────────────────────────────────────────────────
@@ -726,7 +766,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string, keepalive bool) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath string, loop bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -810,9 +850,10 @@ func runLegacy(humanName, idea, dsn string, autoApprove bool, repoPath string, k
 		Store:           s,
 		Actors:          actors,
 		HumanID:         humanID,
-		AutoApprove:     autoApprove,
+		ApproveRequests: approveRequests,
+		ApproveRoles:    approveRoles,
 		RepoPath:        repoPath,
-		Keepalive:       keepalive,
+		Loop:            loop,
 		TelemetryWriter: tw,
 	})
 	if err != nil {

@@ -4,3 +4,8 @@ products/
 *.exe
 *.stackdump
 hive.exe~
+
+# Go built binaries
+/hive
+/approve-role
+/user-api

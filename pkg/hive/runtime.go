@@ -65,9 +65,10 @@ type Runtime struct {
 	dynamic *dynamicAgentTracker
 
 	// Options.
-	autoApprove bool
-	repoPath    string
-	keepalive   bool
+	approveRequests bool
+	approveRoles    bool
+	repoPath        string
+	loop            bool
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -75,9 +76,10 @@ type Config struct {
 	Store       store.Store
 	Actors      actor.IActorStore
 	HumanID     types.ActorID
-	AutoApprove bool   // --yes flag
-	RepoPath    string // --repo flag (for Implementer's Operate)
-	Keepalive   bool   // --keepalive flag: agents block on bus instead of quiescing
+	ApproveRequests bool   // --approve-requests: auto-approve authority requests
+	ApproveRoles    bool   // --approve-roles: auto-approve role proposals
+	RepoPath        string // --repo: path to repo for Operate
+	Loop            bool   // --loop: agents block on bus instead of quiescing
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -129,9 +131,10 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		factory:         factory,
 		convID:          convID,
 		tasks:           tasks,
-		autoApprove:     cfg.AutoApprove,
+		approveRequests: cfg.ApproveRequests,
+		approveRoles:    cfg.ApproveRoles,
 		repoPath:        cfg.RepoPath,
-		keepalive:       cfg.Keepalive,
+		loop:            cfg.Loop,
 		telemetryWriter: cfg.TelemetryWriter,
 	}, nil
 }
@@ -282,7 +285,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			ConvID:         r.convID,
 			CanOperate:     def.CanOperate,
 			RepoPath:       r.repoPath,
-			Keepalive:      r.keepalive,
+			Keepalive:      r.loop,
 			KnowledgeStore: r.knowledgeStore,
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)

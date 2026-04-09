@@ -33,6 +33,9 @@ func (r *Runtime) watchForApprovedRoles(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if r.approveRoles {
+				r.autoApproveProposedRoles(ctx)
+			}
 			r.processApprovedRoles(ctx)
 		}
 	}
@@ -118,6 +121,105 @@ func (r *Runtime) findBudgetForRole(name string) (event.AgentBudgetAdjustedConte
 	return event.AgentBudgetAdjustedContent{}, false
 }
 
+// autoApproveProposedRoles scans for hive.role.proposed events that have no
+// matching hive.role.approved event, and emits both approval and budget events
+// automatically. Called when --approve-roles is set.
+func (r *Runtime) autoApproveProposedRoles(_ context.Context) {
+	proposedPage, err := r.store.ByType(roleProposedType, 100, types.None[types.Cursor]())
+	if err != nil {
+		return
+	}
+
+	for _, ev := range proposedPage.Items() {
+		proposal, ok := ev.Content().(event.RoleProposedContent)
+		if !ok {
+			continue
+		}
+
+		name := proposal.Name
+
+		// Already tracked (spawned or spawning) — skip.
+		if r.dynamic.IsTracked(name) {
+			continue
+		}
+
+		// Already approved — skip (processApprovedRoles will handle it).
+		if _, found := r.findApproval(name); found {
+			continue
+		}
+
+		// Emit approval.
+		approvalContent := event.RoleApprovedContent{
+			Name:       name,
+			ApprovedBy: "auto",
+			Reason:     "auto-approved via --approve-roles",
+		}
+		head, err := r.store.Head()
+		if err != nil {
+			continue
+		}
+		var causes []types.EventID
+		if head.IsSome() {
+			causes = []types.EventID{head.Unwrap().ID()}
+		}
+
+		approvalEv, err := r.graph.Record(
+			roleApprovedType,
+			r.humanID,
+			approvalContent,
+			causes,
+			r.convID,
+			r.signer,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[watcher] auto-approve failed for %q: %v\n", name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[watcher] auto-approved role %q\n", name)
+
+		// Emit budget.
+		maxIter := proposal.MaxIterations
+		if maxIter == 0 {
+			maxIter = 200
+		}
+		budgetContent := event.AgentBudgetAdjustedContent{
+			AgentID:   r.humanID,
+			AgentName: name,
+			Action:    "set",
+			NewBudget: maxIter,
+			Reason:    "auto-budgeted via --approve-roles",
+		}
+
+		if _, err := r.graph.Record(
+			budgetAdjustedType,
+			r.humanID,
+			budgetContent,
+			[]types.EventID{approvalEv.ID()},
+			r.convID,
+			r.signer,
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "[watcher] auto-budget failed for %q: %v\n", name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[watcher] auto-budgeted role %q (maxIter=%d)\n", name, maxIter)
+	}
+}
+
+// findApproval searches for a hive.role.approved event with the given name.
+func (r *Runtime) findApproval(name string) (event.RoleApprovedContent, bool) {
+	page, err := r.store.ByType(roleApprovedType, 100, types.None[types.Cursor]())
+	if err != nil {
+		return event.RoleApprovedContent{}, false
+	}
+	for _, ev := range page.Items() {
+		c, ok := ev.Content().(event.RoleApprovedContent)
+		if ok && c.Name == name {
+			return c, true
+		}
+	}
+	return event.RoleApprovedContent{}, false
+}
+
 // spawnDynamicAgent creates, registers, and starts a Loop goroutine for a new
 // agent derived from an approved role proposal + Allocator budget event.
 func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProposedContent, budgetEv event.AgentBudgetAdjustedContent) error {
@@ -178,7 +280,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		ConvID:         r.convID,
 		CanOperate:     false,
 		RepoPath:       r.repoPath,
-		Keepalive:      r.keepalive,
+		Keepalive:      r.loop,
 		KnowledgeStore: r.knowledgeStore,
 		ActorResolver: func(id types.ActorID) string {
 			a, err := r.actors.Get(id)
