@@ -75,8 +75,10 @@ docker compose up -d postgres
 docker compose ps  # should show "healthy"
 
 # 3. Work-server (background, logs to file)
+# DATABASE_URL connects it to the same postgres as the hive (required for telemetry).
+# WORK_API_KEY=dev is a stable key so the dashboard can connect with a known token.
 cd $WORK_REPO
-WORK_HUMAN=Michael WORK_API_KEY=$(uuidgen) nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
+WORK_HUMAN=Michael WORK_API_KEY=dev DATABASE_URL=postgres://hive:hive@localhost:5432/hive nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
 echo $! > /tmp/work-server.pid
 echo "Work-server started (PID: $(cat /tmp/work-server.pid))"
 
@@ -232,7 +234,7 @@ ss -tlnp 2>/dev/null | grep -E "8080|8081" && echo "WARNING: ports held" || echo
 
 # 3. Start fresh (same commands as Hive Up steps 3-4)
 cd $WORK_REPO
-WORK_HUMAN=Michael WORK_API_KEY=$(uuidgen) nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
+WORK_HUMAN=Michael WORK_API_KEY=dev DATABASE_URL=postgres://hive:hive@localhost:5432/hive nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
 echo $! > /tmp/work-server.pid
 
 cd $HIVE_REPO
