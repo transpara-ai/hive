@@ -9,6 +9,7 @@ import (
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -48,6 +49,20 @@ func newSpawnerState() *spawnerState {
 		recentRejections: make(map[string]int),
 		processedGaps:    make(map[string]bool),
 	}
+}
+
+// InitSpawnerFromRecovery seeds spawner state from chain replay.
+func (s *spawnerState) InitSpawnerFromRecovery(state *checkpoint.SpawnerRecoveredState) {
+	if state == nil {
+		return
+	}
+	for k := range state.RecentRejections {
+		s.recentRejections[k] = 0
+	}
+	for k, v := range state.ProcessedGaps {
+		s.processedGaps[k] = v
+	}
+	s.pendingProposal = state.PendingProposal
 }
 
 // update processes the current batch of pending events and increments the

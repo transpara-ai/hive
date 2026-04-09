@@ -229,6 +229,19 @@ func New(cfg Config) (*Loop, error) {
 		l.reviewerState = newReviewerState()
 	}
 
+	// Seed recovered state into role-specific structs.
+	if cfg.RecoveryState != nil {
+		if l.ctoCooldowns != nil && cfg.RecoveryState.CTOState != nil {
+			l.ctoCooldowns.InitCTOFromRecovery(cfg.RecoveryState.CTOState)
+		}
+		if l.spawnerState != nil && cfg.RecoveryState.SpawnerState != nil {
+			l.spawnerState.InitSpawnerFromRecovery(cfg.RecoveryState.SpawnerState)
+		}
+		if l.reviewerState != nil && cfg.RecoveryState.ReviewerState != nil {
+			l.reviewerState.InitReviewerFromRecovery(cfg.RecoveryState.ReviewerState)
+		}
+	}
+
 	return l, nil
 }
 
@@ -357,6 +370,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 				fmt.Printf("[%s] /budget rejected: %v\n", l.agent.Name(), err)
 			} else if err := l.applyBudgetAdjustment(cmd, iteration); err != nil {
 				fmt.Printf("[%s] /budget failed: %v\n", l.agent.Name(), err)
+			} else {
+				if l.sink != nil {
+					l.sink.OnBoundary(checkpoint.BudgetAdjusted, l.currentSnapshot())
+					l.lastCheckpointIter = l.iteration
+				}
 			}
 		}
 
@@ -365,11 +383,21 @@ func (l *Loop) Run(ctx context.Context) Result {
 			if cmd := parseGapCommand(response); cmd != nil {
 				if err := l.validateAndEmitGap(cmd, iteration); err != nil {
 					fmt.Printf("warning: /gap rejected: %v\n", err)
+				} else {
+					if l.sink != nil {
+						l.sink.OnBoundary(checkpoint.GapEmitted, l.currentSnapshot())
+						l.lastCheckpointIter = l.iteration
+					}
 				}
 			}
 			if cmd := parseDirectiveCommand(response); cmd != nil {
 				if err := l.validateAndEmitDirective(cmd, iteration); err != nil {
 					fmt.Printf("warning: /directive rejected: %v\n", err)
+				} else {
+					if l.sink != nil {
+						l.sink.OnBoundary(checkpoint.DirectiveEmitted, l.currentSnapshot())
+						l.lastCheckpointIter = l.iteration
+					}
 				}
 			}
 		}
@@ -382,6 +410,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("[%s] /spawn rejected: %v\n", l.agent.Name(), err)
 				} else if err := l.emitRoleProposed(cmd); err != nil {
 					fmt.Printf("[%s] /spawn emit failed: %v\n", l.agent.Name(), err)
+				} else {
+					if l.sink != nil {
+						l.sink.OnBoundary(checkpoint.RoleProposed, l.currentSnapshot())
+						l.lastCheckpointIter = l.iteration
+					}
 				}
 			}
 		}
@@ -403,6 +436,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 						// update() path never sees our own reviews.
 						l.reviewerState.recordReview(
 							cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
+						if l.sink != nil {
+							l.sink.OnBoundary(checkpoint.ReviewCompleted, l.currentSnapshot())
+							l.lastCheckpointIter = l.iteration
+						}
 					}
 				}
 			}
@@ -413,6 +450,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 			if cmd := parseApproveCommand(response); cmd != nil {
 				if err := l.emitRoleApproved(cmd); err != nil {
 					fmt.Printf("[%s] /approve emit failed: %v\n", l.agent.Name(), err)
+				} else {
+					if l.sink != nil {
+						l.sink.OnBoundary(checkpoint.RoleDecided, l.currentSnapshot())
+						l.lastCheckpointIter = l.iteration
+					}
 				}
 			}
 			if cmd := parseRejectCommand(response); cmd != nil {
