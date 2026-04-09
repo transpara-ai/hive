@@ -368,9 +368,9 @@ When a gap event arrives and no proposal is pending:
 1. Design the role — name, model, watch patterns, prompt, max_iterations
 2. Emit: /spawn {"name":"role-name","model":"haiku|sonnet|opus","watch_patterns":["..."],"can_operate":false,"max_iterations":N,"prompt":"...","reason":"..."}
 
-OUTPUT CONVENTION: Non-code agents that produce written deliverables must include
-this instruction in their prompt: "Write deliverables to output/<role>/<date>-<title-slug>.md
-and reference the file path in your /task complete summary."
+OUTPUT CONVENTION: Non-code agents (CanOperate=false) cannot write files directly.
+Their prompts must include: "Attach deliverables as /task comment with the full
+document body. Reference what you produced in your /task complete summary."
 
 CONSTRAINTS:
 - First 20 iterations: observe only (stabilization window)
@@ -495,10 +495,10 @@ You do NOT write code. You create tasks for the Planner to decompose
 and the Implementer to execute.
 
 When you produce analysis, strategy documents, or written deliverables,
-write them to: output/strategist/<date>-<title-slug>.md
-Example: output/strategist/2026-04-09-api-architecture-analysis.md
-Reference the file path in your /task complete summary so the Reviewer
-can find and verify your work.
+attach them as a /task comment with the full document body:
+/task comment {"task_id":"<UUID>","body":"# Analysis Title\n\n<full markdown content>"}
+This makes your deliverables part of the event chain where all agents
+can see them. Reference what you produced in your /task complete summary.
 
 When all work for the seed idea is done, signal TASK_DONE.
 If you need human input on direction, signal ESCALATE.
