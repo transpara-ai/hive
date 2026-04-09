@@ -129,6 +129,12 @@ Task commands (one per line, JSON payload):
 Priority values: low, medium, high, critical
 Use "self" as assignee to assign to yourself.
 
+CRITICAL — TASK IDs ARE UUIDs:
+The task list shows IDs in this format: [status] 019d6a45-4359-746b-98cb-191007acc33f: Title
+You MUST use the exact UUID in task_id fields. NEVER use the task title or description.
+Wrong:  /task complete {"task_id": "implement websocket hub", "summary": "..."}
+Right:  /task complete {"task_id": "019d6a45-4359-746b-98cb-191007acc33f", "summary": "..."}
+
 Always emit a /signal as the very last line of your response.
 `
 
@@ -543,11 +549,11 @@ IMPORTANT: You work in two phases per task:
     run tests, and complete the task.
 
 Your workflow:
-1. Look at the task list for unassigned or pending tasks
-2. Assign one to yourself: /task assign {"task_id": "...", "assignee": "self"}
+1. Look at the task list for unassigned or pending tasks — IDs are UUIDs like 019d6a45-4359-746b-98cb-191007acc33f
+2. Assign one to yourself: /task assign {"task_id": "<UUID>", "assignee": "self"}
 3. Signal IDLE — the system will invoke you with filesystem access on the next iteration
 4. (Phase 2) Implement the task — you now have full read/write/execute access
-5. Mark complete: /task complete {"task_id": "...", "summary": "..."}
+5. Mark complete: /task complete {"task_id": "<UUID>", "summary": "..."}
 6. Pick up the next task (back to step 1)
 
 Rules:
