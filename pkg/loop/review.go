@@ -307,10 +307,9 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 // ────────────────────────────────────────────────────────────────────
 
 // resolveCommitForTask determines the correct commit hash and diff reference
-// for a completed task. Uses three strategies in order:
+// for a completed task. Uses two strategies:
 //  1. Extract commit hash from the task summary (e.g., "Implemented X in commit abc1234")
-//  2. Find the most recent commit by the completing agent (git log --author)
-//  3. Fall back to HEAD~1 (legacy behavior, race-prone)
+//  2. Fall back to HEAD~1 (legacy behavior, race-prone with concurrent completions)
 //
 // Returns (commitHash, diffRef) where commitHash is for `git log -1 <hash>`
 // and diffRef is for `git diff <ref>` (e.g., "abc1234^..abc1234").
@@ -324,26 +323,18 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 		}
 	}
 
-	// Strategy 2: find most recent commit by the completing agent.
-	if taskFound && l.config.ActorResolver != nil {
-		name := l.config.ActorResolver(task.CompletedBy)
-		if name != "" {
-			hash := gitCommand(repo, "log", "--author="+name, "-1", "--format=%H")
-			if hash != "" {
-				return hash, hash + "^.." + hash
-			}
-		}
-	}
-
-	// Strategy 3: fall back to HEAD~1 (race-prone with concurrent completions).
+	// Strategy 2: fall back to HEAD~1 (race-prone with concurrent completions).
 	fmt.Printf("[%s] warning: no commit hash found for task, falling back to HEAD~1\n", l.agent.Name())
 	return "HEAD", "HEAD~1"
 }
 
 // extractCommitHash scans text for a 7-40 character hex string that looks like
 // a git commit hash and verifies it exists in the repo. Returns the full hash
-// if found, empty string otherwise.
+// if found, empty string otherwise. Caps at maxRevParseAttempts to satisfy
+// the BOUNDED invariant.
 func extractCommitHash(text, repoPath string) string {
+	const maxRevParseAttempts = 5
+	attempts := 0
 	for _, word := range strings.Fields(text) {
 		// Strip trailing punctuation (commas, periods, parens).
 		cleaned := strings.TrimRight(word, ".,;:()[]")
@@ -354,6 +345,9 @@ func extractCommitHash(text, repoPath string) string {
 			continue
 		}
 		// Verify the hash exists in the repo.
+		if attempts++; attempts > maxRevParseAttempts {
+			break
+		}
 		full := gitCommand(repoPath, "rev-parse", "--verify", cleaned+"^{commit}")
 		if full != "" {
 			return full
