@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS telemetry_role_definitions (
     has_persona     BOOLEAN NOT NULL DEFAULT false,
     category        TEXT,
     depends_on      TEXT[],
-    origin          TEXT NOT NULL DEFAULT 'bootstrap',
+    origin          TEXT NOT NULL DEFAULT 'bootstrap' CHECK (origin IN ('bootstrap', 'spawned')),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -347,6 +347,11 @@ func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 ALTER TABLE telemetry_agent_snapshots ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
 ALTER TABLE telemetry_phases ADD COLUMN IF NOT EXISTS exit_criteria TEXT;
 ALTER TABLE telemetry_role_definitions ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'bootstrap';
+DO $$ BEGIN
+  ALTER TABLE telemetry_role_definitions ADD CONSTRAINT telemetry_role_definitions_origin_check
+    CHECK (origin IN ('bootstrap', 'spawned'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Backfill exit_criteria for phases seeded before this column existed.
 -- Only updates rows where exit_criteria is NULL (won't clobber manual edits).
@@ -380,20 +385,20 @@ WHERE telemetry_phases.phase = v.phase AND telemetry_phases.exit_criteria IS NUL
 		return fmt.Errorf("telemetry seed role definitions: %w", err)
 	}
 	for _, u := range phaseUpdates {
-		var q string
 		if u.completedAt != "" {
-			q = fmt.Sprintf(
-				`UPDATE telemetry_phases SET status = '%s', started_at = '%s', completed_at = '%s', notes = '%s' WHERE phase = %d AND status = '%s'`,
+			if _, err := pool.Exec(ctx,
+				`UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = $3, notes = $4 WHERE phase = $5 AND status = $6`,
 				u.status, u.startedAt, u.completedAt, u.notes, u.phase, u.from,
-			)
+			); err != nil {
+				return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
+			}
 		} else {
-			q = fmt.Sprintf(
-				`UPDATE telemetry_phases SET status = '%s', started_at = '%s', notes = '%s' WHERE phase = %d AND status = '%s'`,
+			if _, err := pool.Exec(ctx,
+				`UPDATE telemetry_phases SET status = $1, started_at = $2, notes = $3 WHERE phase = $4 AND status = $5`,
 				u.status, u.startedAt, u.notes, u.phase, u.from,
-			)
-		}
-		if _, err := pool.Exec(ctx, q); err != nil {
-			return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
+			); err != nil {
+				return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
+			}
 		}
 	}
 	return nil

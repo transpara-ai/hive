@@ -49,6 +49,7 @@ func TestRegisterAgentWithNewFields(t *testing.T) {
 		MaxIterations: 500,
 		WatchPatterns: []string{"work.task.created", "work.task.assigned"},
 		CanOperate:    true,
+		Origin:        "bootstrap",
 	})
 	w.RegisterAgent(AgentRegistration{
 		Name:          "guardian",
@@ -57,10 +58,20 @@ func TestRegisterAgentWithNewFields(t *testing.T) {
 		MaxIterations: 500,
 		WatchPatterns: []string{},
 		CanOperate:    false,
+		Origin:        "bootstrap",
+	})
+	w.RegisterAgent(AgentRegistration{
+		Name:          "researcher",
+		Role:          "researcher",
+		Model:         "claude-sonnet-4-6",
+		MaxIterations: 200,
+		WatchPatterns: []string{"work.task.assigned"},
+		CanOperate:    false,
+		Origin:        "spawned",
 	})
 
-	if got := w.Agents(); got != 2 {
-		t.Fatalf("Agents() = %d, want 2", got)
+	if got := w.Agents(); got != 3 {
+		t.Fatalf("Agents() = %d, want 3", got)
 	}
 
 	w.mu.RLock()
@@ -73,6 +84,9 @@ func TestRegisterAgentWithNewFields(t *testing.T) {
 	if len(impl.WatchPatterns) != 2 {
 		t.Errorf("implementer.WatchPatterns len = %d, want 2", len(impl.WatchPatterns))
 	}
+	if impl.Origin != "bootstrap" {
+		t.Errorf("implementer.Origin = %q, want %q", impl.Origin, "bootstrap")
+	}
 
 	guard := w.agents[1]
 	if guard.CanOperate {
@@ -80,6 +94,14 @@ func TestRegisterAgentWithNewFields(t *testing.T) {
 	}
 	if len(guard.WatchPatterns) != 0 {
 		t.Errorf("guardian.WatchPatterns len = %d, want 0", len(guard.WatchPatterns))
+	}
+	if guard.Origin != "bootstrap" {
+		t.Errorf("guardian.Origin = %q, want %q", guard.Origin, "bootstrap")
+	}
+
+	researcher := w.agents[2]
+	if researcher.Origin != "spawned" {
+		t.Errorf("researcher.Origin = %q, want %q", researcher.Origin, "spawned")
 	}
 }
 
@@ -276,6 +298,14 @@ func TestSchemaContainsNewTables(t *testing.T) {
 	// Verify exit_criteria column exists in telemetry_phases CREATE TABLE.
 	if !strings.Contains(schema, "exit_criteria") {
 		t.Error("schema missing exit_criteria column on telemetry_phases")
+	}
+
+	// Verify origin column with CHECK constraint exists.
+	if !strings.Contains(schema, "origin") {
+		t.Error("schema missing origin column on telemetry_role_definitions")
+	}
+	if !strings.Contains(schema, "CHECK (origin IN") {
+		t.Error("schema missing CHECK constraint on origin column")
 	}
 }
 

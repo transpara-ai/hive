@@ -32,7 +32,7 @@ type AgentRegistration struct {
 	WatchPatterns []string
 	CanOperate    bool
 	Tier          string
-	Origin        string // "bootstrap" for StarterAgents, "dynamic" for spawned
+	Origin        string // "bootstrap" for StarterAgents, "spawned" for dynamic
 }
 
 // agentEventRecord stores the most recent event observed from a specific agent
@@ -136,7 +136,7 @@ func (w *Writer) persistRoleDefinition(reg AgentRegistration) {
 			can_operate = EXCLUDED.can_operate,
 			max_iterations = EXCLUDED.max_iterations,
 			watch_patterns = EXCLUDED.watch_patterns,
-			origin = EXCLUDED.origin,
+			origin = COALESCE(telemetry_role_definitions.origin, EXCLUDED.origin),
 			status = 'running',
 			updated_at = now()`,
 		reg.Role,
