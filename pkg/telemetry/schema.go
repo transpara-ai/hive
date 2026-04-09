@@ -165,6 +165,7 @@ INSERT INTO telemetry_phase_agents (phase, agent_role) VALUES
     (1, 'sysmon'), (1, 'allocator'),
     (2, 'cto'), (2, 'reviewer'),
     (3, 'spawner'),
+    (4, 'researcher'),
     (4, 'critic'), (4, 'taskmanager'), (4, 'incidentcommander'),
     (4, 'securityreviewer'), (4, 'memorykeeper'), (4, 'gapdetector'),
     (5, 'integrator'),
@@ -204,7 +205,7 @@ VALUES
      'running', true,  false, 'product',    '{}', 0),
     -- Non-running roles (designed/defined/missing)
     ('researcher',        'Researcher',        'A', 'Explore unknown territory, read docs',
-     'defined',  true,  true,  'knowledge',   '{}', NULL),
+     'defined',  true,  true,  'knowledge',   '{}', 4),
     ('architect',         'Architect',         'A', 'Decompose problems into implementable plans',
      'defined',  true,  true,  'product',     '{}', NULL),
     ('builder',           'Builder',           'A', 'Write code, run tests, commit',
