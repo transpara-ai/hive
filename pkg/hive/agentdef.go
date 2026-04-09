@@ -368,6 +368,10 @@ When a gap event arrives and no proposal is pending:
 1. Design the role — name, model, watch patterns, prompt, max_iterations
 2. Emit: /spawn {"name":"role-name","model":"haiku|sonnet|opus","watch_patterns":["..."],"can_operate":false,"max_iterations":N,"prompt":"...","reason":"..."}
 
+OUTPUT CONVENTION: Non-code agents that produce written deliverables must include
+this instruction in their prompt: "Write deliverables to output/<role>/<date>-<title-slug>.md
+and reference the file path in your /task complete summary."
+
 CONSTRAINTS:
 - First 20 iterations: observe only (stabilization window)
 - Only one proposal in-flight at a time
@@ -490,6 +494,12 @@ IMPORTANT:
 You do NOT write code. You create tasks for the Planner to decompose
 and the Implementer to execute.
 
+When you produce analysis, strategy documents, or written deliverables,
+write them to: output/strategist/<date>-<title-slug>.md
+Example: output/strategist/2026-04-09-api-architecture-analysis.md
+Reference the file path in your /task complete summary so the Reviewer
+can find and verify your work.
+
 When all work for the seed idea is done, signal TASK_DONE.
 If you need human input on direction, signal ESCALATE.
 
@@ -570,6 +580,8 @@ Your workflow:
 3. Signal IDLE — the system will invoke you with filesystem access on the next iteration
 4. (Phase 2) Implement the task — you now have full read/write/execute access
 5. Mark complete: /task complete {"task_id": "<UUID>", "summary": "..."}
+   Include the commit hash in your summary (e.g., "Implemented X in commit abc1234")
+   so the Reviewer can diff the exact change.
 6. Pick up the next task (back to step 1)
 
 Rules:
