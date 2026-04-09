@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS telemetry_role_definitions (
     has_persona     BOOLEAN NOT NULL DEFAULT false,
     category        TEXT,
     depends_on      TEXT[],
+    origin          TEXT NOT NULL DEFAULT 'bootstrap',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -345,6 +346,7 @@ func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 	const migrations = `
 ALTER TABLE telemetry_agent_snapshots ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
 ALTER TABLE telemetry_phases ADD COLUMN IF NOT EXISTS exit_criteria TEXT;
+ALTER TABLE telemetry_role_definitions ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'bootstrap';
 
 -- Backfill exit_criteria for phases seeded before this column existed.
 -- Only updates rows where exit_criteria is NULL (won't clobber manual edits).

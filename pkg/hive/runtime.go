@@ -268,6 +268,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 				WatchPatterns: def.WatchPatterns,
 				CanOperate:    def.CanOperate,
 				Tier:          def.EffectiveTier(),
+				Origin:        "bootstrap",
 			})
 		}
 

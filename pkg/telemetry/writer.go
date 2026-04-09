@@ -32,6 +32,7 @@ type AgentRegistration struct {
 	WatchPatterns []string
 	CanOperate    bool
 	Tier          string
+	Origin        string // "bootstrap" for StarterAgents, "dynamic" for spawned
 }
 
 // agentEventRecord stores the most recent event observed from a specific agent
@@ -119,18 +120,23 @@ func (w *Writer) persistRoleDefinition(reg AgentRegistration) {
 	if tier == "" {
 		tier = "A"
 	}
+	origin := reg.Origin
+	if origin == "" {
+		origin = "bootstrap"
+	}
 
 	_, err := w.pool.Exec(ctx,
 		`INSERT INTO telemetry_role_definitions (
 			role, name, tier, model, can_operate, max_iterations,
-			watch_patterns, status, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', now())
+			watch_patterns, origin, status, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', now())
 		ON CONFLICT (role) DO UPDATE SET
 			tier = EXCLUDED.tier,
 			model = EXCLUDED.model,
 			can_operate = EXCLUDED.can_operate,
 			max_iterations = EXCLUDED.max_iterations,
 			watch_patterns = EXCLUDED.watch_patterns,
+			origin = EXCLUDED.origin,
 			status = 'running',
 			updated_at = now()`,
 		reg.Role,
@@ -140,6 +146,7 @@ func (w *Writer) persistRoleDefinition(reg AgentRegistration) {
 		reg.CanOperate,
 		reg.MaxIterations,
 		reg.WatchPatterns,
+		origin,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetry: persist role definition %s: %v\n", reg.Role, err)

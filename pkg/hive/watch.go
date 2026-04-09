@@ -264,6 +264,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 			WatchPatterns: def.WatchPatterns,
 			CanOperate:    def.CanOperate,
 			Tier:          def.EffectiveTier(),
+			Origin:        "dynamic",
 		})
 	}
 
