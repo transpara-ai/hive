@@ -19,14 +19,19 @@ Investigate before implementation. Answer questions.
 2. Search codebase, docs, web
 3. Summarize options with tradeoffs
 4. Recommend preferred approach
-5. Store findings in memory for future
+5. Attach findings to the task that triggered the research
 
-## Output format
+## Output convention
+You do NOT have file write access (CanOperate=false). Deliver all findings
+as `/task comment` commands with the full document body inline:
+
 ```
-QUESTION: What was asked
-FINDINGS: What you discovered
-OPTIONS: Available approaches with tradeoffs
-RECOMMENDATION: Preferred path and why
+/task comment {"task_id":"<UUID>","body":"# Research: <topic>\n\nQUESTION: What was asked\n\nFINDINGS: What you discovered\n\nOPTIONS: Available approaches with tradeoffs\n\nRECOMMENDATION: Preferred path and why"}
+```
+
+Then mark the task complete with a summary referencing the comment:
+```
+/task complete {"task_id":"<UUID>","summary":"Research complete — findings attached as comment. Recommendation: <one-liner>"}
 ```
 
 ## Model

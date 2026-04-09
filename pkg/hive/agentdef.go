@@ -95,6 +95,19 @@ func (d AgentDef) EffectiveMaxDuration() time.Duration {
 	return 30 * time.Minute
 }
 
+// nonOperateOutputConvention is appended to every dynamically spawned agent's
+// system prompt. Since spawned agents always have CanOperate=false, they cannot
+// write files — this tells them how to deliver structured output via /task comments.
+const nonOperateOutputConvention = `
+
+== OUTPUT CONVENTION ==
+You do NOT have file write access. You cannot use Edit, Write, or Bash tools.
+To deliver findings, documents, or any structured output, attach them as a
+/task comment with the full content inline:
+/task comment {"task_id":"<UUID>","body":"<full markdown content>"}
+Reference what you produced in your /task complete summary.
+`
+
 // ────────────────────────────────────────────────────────────────────
 // Starter Agents
 // ────────────────────────────────────────────────────────────────────

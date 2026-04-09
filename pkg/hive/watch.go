@@ -229,11 +229,15 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		maxIter = budgetEv.NewBudget
 	}
 
+	// Inject output convention for non-operate agents. The Spawner's prompt
+	// tells it to include this, but LLMs forget — enforce it structurally.
+	prompt := proposal.Prompt + nonOperateOutputConvention
+
 	def := AgentDef{
 		Name:          proposal.Name,
 		Role:          proposal.Name, // name == role for dynamically spawned agents
 		Model:         mapModelName(proposal.Model),
-		SystemPrompt:  proposal.Prompt,
+		SystemPrompt:  prompt,
 		WatchPatterns: proposal.WatchPatterns,
 		CanOperate:    false, // trust must be earned; always false for spawned agents
 		MaxIterations: maxIter,
