@@ -29,144 +29,209 @@ type Thought struct {
 
 // ─── OpenBrainClient ────────────────────────────────────────────────────────
 
-// OpenBrainClient implements ThoughtStore against the Open Brain HTTP API.
+// OpenBrainClient implements ThoughtStore via Open Brain's JSON-RPC 2.0 MCP
+// endpoint. The endpoint is a Supabase Edge Function that speaks MCP over
+// HTTP streaming (SSE). Authentication is via ?key= query parameter.
 type OpenBrainClient struct {
-	baseURL    string
-	apiKey     string
+	endpoint   string // full URL including ?key= param
 	httpClient *http.Client
+	nextID     int
 }
 
-// NewOpenBrainClient creates a client with a 5-second timeout.
-// apiKey may be empty — the Authorization header is omitted when blank.
+// NewOpenBrainClient creates a client targeting the Open Brain MCP endpoint.
+// baseURL is the edge function URL (e.g. https://xxx.supabase.co/functions/v1/open-brain-mcp).
+// apiKey is the MCP access key appended as ?key= query parameter.
 func NewOpenBrainClient(baseURL, apiKey string) *OpenBrainClient {
+	endpoint := strings.TrimRight(baseURL, "/")
+	if apiKey != "" {
+		endpoint += "?key=" + apiKey
+	}
 	return &OpenBrainClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
+		endpoint: endpoint,
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 	}
 }
 
-// Capture POSTs content to baseURL+"/capture_thought".
-// It retries once on a transient (network or 5xx) failure.
+// Capture stores a thought via the capture_thought MCP tool.
 func (c *OpenBrainClient) Capture(content string) error {
-	body, err := json.Marshal(map[string]string{"content": content})
+	_, err := c.callTool("capture_thought", map[string]interface{}{
+		"content": content,
+	})
 	if err != nil {
-		return fmt.Errorf("openbrain: marshal capture body: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/capture_thought", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("openbrain: build capture request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return fmt.Errorf("openbrain: capture request: %w", err)
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("openbrain: capture returned status %d", resp.StatusCode)
+		return fmt.Errorf("openbrain: capture: %w", err)
 	}
 	return nil
 }
 
-// SearchRecent POSTs to baseURL+"/search_thoughts" and filters by maxAge.
+// SearchRecent queries thoughts via the search_thoughts MCP tool, filtering by maxAge.
 func (c *OpenBrainClient) SearchRecent(query string, maxAge time.Duration) ([]Thought, error) {
-	body, err := json.Marshal(map[string]interface{}{
-		"query": query,
-		"limit": 5,
+	result, err := c.callTool("search_thoughts", map[string]interface{}{
+		"query":     query,
+		"limit":     5,
+		"threshold": 0.5,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openbrain: marshal search body: %w", err)
+		return nil, fmt.Errorf("openbrain: search: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/search_thoughts", bytes.NewReader(body))
+	// The result is a JSON-RPC content array: [{"type":"text","text":"..."}]
+	// The text field contains the formatted thought list from Open Brain.
+	// Parse the thoughts from the text content.
+	return c.parseSearchResult(result, maxAge)
+}
+
+// callTool sends a JSON-RPC 2.0 tools/call request and returns the result text.
+func (c *OpenBrainClient) callTool(toolName string, args map[string]interface{}) (string, error) {
+	c.nextID++
+	rpcReq := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      toolName,
+			"arguments": args,
+		},
+		"id": c.nextID,
+	}
+
+	body, err := json.Marshal(rpcReq)
 	if err != nil {
-		return nil, fmt.Errorf("openbrain: build search request: %w", err)
+		return "", fmt.Errorf("marshal: %w", err)
+	}
+
+	resp, err := c.doWithRetry(body)
+	if err != nil {
+		return "", err
+	}
+
+	return resp, nil
+}
+
+// doWithRetry sends a JSON-RPC request and parses the SSE response.
+// Retries once on network error or 5xx.
+func (c *OpenBrainClient) doWithRetry(body []byte) (string, error) {
+	result, err := c.doOnce(body)
+	if err != nil {
+		// Retry once.
+		result, err = c.doOnce(body)
+	}
+	return result, err
+}
+
+// doOnce sends body to the endpoint and parses the SSE response.
+func (c *OpenBrainClient) doOnce(body []byte) (string, error) {
+	req, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := c.doWithRetry(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openbrain: search request: %w", err)
+		return "", fmt.Errorf("request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 500 {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		return "", fmt.Errorf("server error: status %d", resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		return nil, fmt.Errorf("openbrain: search returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
 
-	// Response is an array of {content, created_at} objects.
-	var raw []struct {
-		Content   string `json:"content"`
-		CreatedAt string `json:"created_at"`
+	// Parse SSE response. Look for "data:" lines containing JSON-RPC result.
+	return c.parseSSE(resp.Body)
+}
+
+// parseSSE reads an SSE stream and extracts the JSON-RPC result text.
+// Format: "event: message\ndata: {json-rpc response}\n\n"
+func (c *OpenBrainClient) parseSSE(r io.Reader) (string, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read SSE: %w", err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("openbrain: decode search response: %w", err)
+
+	// Find the last "data:" line (SSE may have multiple events).
+	body := string(raw)
+	var lastData string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			lastData = strings.TrimPrefix(line, "data:")
+			lastData = strings.TrimSpace(lastData)
+		}
+	}
+
+	if lastData == "" {
+		// Response may be plain JSON (not SSE). Try parsing raw body directly.
+		lastData = strings.TrimSpace(body)
+	}
+
+	// Parse JSON-RPC response.
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(lastData), &rpcResp); err != nil {
+		return "", fmt.Errorf("parse JSON-RPC response: %w (raw: %.200s)", err, lastData)
+	}
+	if rpcResp.Error != nil {
+		return "", fmt.Errorf("JSON-RPC error: %s", rpcResp.Error.Message)
+	}
+
+	// Concatenate all text content blocks.
+	var sb strings.Builder
+	for _, c := range rpcResp.Result.Content {
+		if c.Type == "text" {
+			sb.WriteString(c.Text)
+		}
+	}
+	return sb.String(), nil
+}
+
+// parseSearchResult extracts thoughts from the search_thoughts tool response.
+// The response text contains formatted thought entries with timestamps.
+func (c *OpenBrainClient) parseSearchResult(text string, maxAge time.Duration) ([]Thought, error) {
+	if text == "" {
+		return nil, nil
 	}
 
 	cutoff := time.Now().Add(-maxAge)
-	var thoughts []Thought
-	for _, r := range raw {
-		ts, err := time.Parse(time.RFC3339, r.CreatedAt)
-		if err != nil {
-			// Skip unparseable timestamps rather than failing the whole call.
-			continue
-		}
-		if ts.Before(cutoff) {
-			continue
-		}
-		thoughts = append(thoughts, Thought{
-			Content:    r.Content,
-			CapturedAt: ts,
-		})
-	}
-	return thoughts, nil
-}
 
-// doWithRetry executes req and retries once on error or 5xx response.
-// The request body must be re-readable — callers must use bytes.NewReader.
-func (c *OpenBrainClient) doWithRetry(req *http.Request) (*http.Response, error) {
-	// Clone the body bytes so we can replay on retry.
-	var bodyBytes []byte
-	if req.Body != nil {
-		var buf bytes.Buffer
-		if _, err := io.Copy(&buf, req.Body); err != nil {
-			return nil, err
+	// Try parsing as JSON array first (some responses are structured).
+	var structured []struct {
+		Content   string `json:"content"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal([]byte(text), &structured); err == nil && len(structured) > 0 {
+		var thoughts []Thought
+		for _, s := range structured {
+			ts, err := time.Parse(time.RFC3339, s.CreatedAt)
+			if err != nil {
+				continue
+			}
+			if ts.Before(cutoff) {
+				continue
+			}
+			thoughts = append(thoughts, Thought{Content: s.Content, CapturedAt: ts})
 		}
-		req.Body.Close()
-		bodyBytes = buf.Bytes()
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		req.ContentLength = int64(len(bodyBytes))
+		return thoughts, nil
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err == nil && resp.StatusCode < 500 {
-		return resp, nil
-	}
-	if err == nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		resp.Body.Close()
-	}
-
-	// Retry once.
-	if bodyBytes != nil {
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		req.ContentLength = int64(len(bodyBytes))
-	}
-	return c.httpClient.Do(req)
+	// Fallback: treat as a single text response. The content itself is the thought.
+	// Use current time as CapturedAt since the timestamp isn't structured.
+	return []Thought{{Content: text, CapturedAt: time.Now()}}, nil
 }
 
 // ─── StubThoughtStore ───────────────────────────────────────────────────────
