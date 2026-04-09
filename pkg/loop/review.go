@@ -247,9 +247,11 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 
 	// Git context — only if RepoPath is configured.
 	if l.config.RepoPath != "" {
-		commit := gitCommand(l.config.RepoPath, "log", "--oneline", "-1")
-		fileStat := gitCommand(l.config.RepoPath, "diff", "HEAD~1", "--stat")
-		diff := gitCommand(l.config.RepoPath, "diff", "HEAD~1")
+		commitHash, diffRef := l.resolveCommitForTask(task, ok)
+
+		commit := gitCommand(l.config.RepoPath, "log", "--oneline", "-1", commitHash)
+		fileStat := gitCommand(l.config.RepoPath, "diff", diffRef, "--stat")
+		diff := gitCommand(l.config.RepoPath, "diff", diffRef)
 
 		sb.WriteString("RECENT COMMIT:\n")
 		if commit != "" {
@@ -303,6 +305,72 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 // ────────────────────────────────────────────────────────────────────
 // Git Helpers
 // ────────────────────────────────────────────────────────────────────
+
+// resolveCommitForTask determines the correct commit hash and diff reference
+// for a completed task. Uses three strategies in order:
+//  1. Extract commit hash from the task summary (e.g., "Implemented X in commit abc1234")
+//  2. Find the most recent commit by the completing agent (git log --author)
+//  3. Fall back to HEAD~1 (legacy behavior, race-prone)
+//
+// Returns (commitHash, diffRef) where commitHash is for `git log -1 <hash>`
+// and diffRef is for `git diff <ref>` (e.g., "abc1234^..abc1234").
+func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bool) (string, string) {
+	repo := l.config.RepoPath
+
+	// Strategy 1: extract hash from summary text.
+	if taskFound && task.Summary != "" {
+		if hash := extractCommitHash(task.Summary, repo); hash != "" {
+			return hash, hash + "^.." + hash
+		}
+	}
+
+	// Strategy 2: find most recent commit by the completing agent.
+	if taskFound && l.config.ActorResolver != nil {
+		name := l.config.ActorResolver(task.CompletedBy)
+		if name != "" {
+			hash := gitCommand(repo, "log", "--author="+name, "-1", "--format=%H")
+			if hash != "" {
+				return hash, hash + "^.." + hash
+			}
+		}
+	}
+
+	// Strategy 3: fall back to HEAD~1 (race-prone with concurrent completions).
+	fmt.Printf("[%s] warning: no commit hash found for task, falling back to HEAD~1\n", l.agent.Name())
+	return "HEAD", "HEAD~1"
+}
+
+// extractCommitHash scans text for a 7-40 character hex string that looks like
+// a git commit hash and verifies it exists in the repo. Returns the full hash
+// if found, empty string otherwise.
+func extractCommitHash(text, repoPath string) string {
+	for _, word := range strings.Fields(text) {
+		// Strip trailing punctuation (commas, periods, parens).
+		cleaned := strings.TrimRight(word, ".,;:()[]")
+		if len(cleaned) < 7 || len(cleaned) > 40 {
+			continue
+		}
+		if !isHex(cleaned) {
+			continue
+		}
+		// Verify the hash exists in the repo.
+		full := gitCommand(repoPath, "rev-parse", "--verify", cleaned+"^{commit}")
+		if full != "" {
+			return full
+		}
+	}
+	return ""
+}
+
+// isHex returns true if s contains only hexadecimal characters.
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
 
 // gitCommand runs a git command in the given directory and returns stdout.
 // Returns empty string on any error (best-effort).
