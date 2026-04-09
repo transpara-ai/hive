@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#faf8f5">
+  <title>Grocery List</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="header-row">
+        <div class="header-brand">
+          <h1 class="app-title">Grocery List</h1>
+          <p id="item-count" class="item-count" aria-live="polite"></p>
+        </div>
+        <button
+          type="button"
+          id="theme-toggle"
+          class="theme-toggle"
+          aria-label="Toggle dark mode"
+          title="Toggle dark mode"
+        >
+          <span class="theme-icon theme-icon--light" aria-hidden="true">☀</span>
+          <span class="theme-icon theme-icon--dark" aria-hidden="true">☾</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="category-list" class="content-area"></main>
+
+    <footer class="input-dock">
+      <form id="add-form" class="add-form" autocomplete="off">
+        <div class="add-form-grid">
+          <input
+            type="text"
+            id="item-input"
+            class="add-input"
+            placeholder="Add an item…"
+            maxlength="100"
+            required
+            aria-label="Item name"
+          >
+          <select id="category-select" class="add-select" aria-label="Category">
+            <option value="produce">Produce</option>
+            <option value="dairy">Dairy</option>
+            <option value="meat">Meat</option>
+            <option value="bakery">Bakery</option>
+            <option value="frozen">Frozen</option>
+            <option value="beverages">Beverages</option>
+            <option value="pantry">Pantry</option>
+            <option value="other">Other</option>
+          </select>
+          <button type="submit" class="add-btn" aria-label="Add item">
+            <span class="add-btn-icon" aria-hidden="true">+</span>
+            <span class="add-btn-label">Add</span>
+          </button>
+        </div>
+      </form>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
