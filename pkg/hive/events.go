@@ -3,6 +3,7 @@ package hive
 import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 	"github.com/lovyou-ai/hive/pkg/membrane"
 )
 
@@ -20,6 +21,8 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeRunStarted, EventTypeRunCompleted,
 		EventTypeAgentSpawned, EventTypeAgentStopped,
 		EventTypeProgress,
+		// Agent loop heartbeat (pkg/checkpoint).
+		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
 		EventTypeSiteRespond, EventTypeSiteExpress,
 		EventTypeSiteAssert, EventTypeSiteProgress,
@@ -90,6 +93,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.agent.spawned", event.Unmarshal[AgentSpawnedContent])
 	event.RegisterContentUnmarshaler("hive.agent.stopped", event.Unmarshal[AgentStoppedContent])
 	event.RegisterContentUnmarshaler("hive.progress", event.Unmarshal[ProgressContent])
+	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }
 
 // RegisterWithRegistry registers all hive event types with the given registry
