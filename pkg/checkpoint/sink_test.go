@@ -4,8 +4,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 )
 
 // failingThoughtStore is a ThoughtStore that always returns an error.
@@ -21,13 +19,13 @@ func (f *failingThoughtStore) SearchRecent(_ string, _ time.Duration) ([]Thought
 
 func TestDefaultSink_OnBoundary_CallsCapture(t *testing.T) {
 	stub := NewStubThoughtStore()
-	sink := NewDefaultSink(stub, nil, types.ActorID{}, "implementer")
+	sink := NewDefaultSink(stub, nil, "implementer")
 
 	snap := LoopSnapshot{
 		Role:          "implementer",
 		Iteration:     3,
 		MaxIterations: 10,
-		Signal:        "ACTIVE",
+		Signal:        SignalActive,
 	}
 	sink.OnBoundary(TaskCompleted, snap)
 
@@ -38,7 +36,7 @@ func TestDefaultSink_OnBoundary_CallsCapture(t *testing.T) {
 
 func TestDefaultSink_OnBoundary_CaptureFailure(t *testing.T) {
 	failing := &failingThoughtStore{}
-	sink := NewDefaultSink(failing, nil, types.ActorID{}, "guardian")
+	sink := NewDefaultSink(failing, nil, "guardian")
 
 	snap := LoopSnapshot{
 		Role:      "guardian",
@@ -48,6 +46,37 @@ func TestDefaultSink_OnBoundary_CaptureFailure(t *testing.T) {
 
 	// Must not panic.
 	sink.OnBoundary(HaltSignal, snap)
+}
+
+func TestDefaultSink_OnHeartbeat_CallsEmitter(t *testing.T) {
+	var called bool
+	emitter := func(snap LoopSnapshot) error {
+		called = true
+		return nil
+	}
+	sink := NewDefaultSink(NewStubThoughtStore(), emitter, "sysmon")
+	snap := LoopSnapshot{Role: "sysmon", Iteration: 10, Signal: SignalActive}
+	sink.OnHeartbeat(snap)
+	if !called {
+		t.Error("OnHeartbeat should have called the emitter")
+	}
+}
+
+func TestDefaultSink_OnHeartbeat_EmitterFailure(t *testing.T) {
+	emitter := func(snap LoopSnapshot) error {
+		return errors.New("emit failed")
+	}
+	sink := NewDefaultSink(NewStubThoughtStore(), emitter, "sysmon")
+	snap := LoopSnapshot{Role: "sysmon", Iteration: 10, Signal: SignalActive}
+	// Must not panic.
+	sink.OnHeartbeat(snap)
+}
+
+func TestDefaultSink_OnHeartbeat_NilEmitter(t *testing.T) {
+	sink := NewDefaultSink(NewStubThoughtStore(), nil, "sysmon")
+	snap := LoopSnapshot{Role: "sysmon", Iteration: 10, Signal: SignalActive}
+	// Must not panic.
+	sink.OnHeartbeat(snap)
 }
 
 func TestNopSink(t *testing.T) {

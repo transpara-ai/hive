@@ -109,49 +109,59 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 
 	// ── Tier 1: Chain replay for cold-start agents ────────────────────────────
 
-	// Budget replay applies to all roles; do it once.
-	budgets, err := ReplayBudgetFromStore(s)
-	if err != nil {
-		log.Printf("checkpoint: recover: budget replay error: %v — budgets unavailable", err)
+	// Only run chain replay if at least one agent is cold-starting.
+	hasCold := false
+	for _, rs := range result {
+		if rs.Mode == ModeCold {
+			hasCold = true
+			break
+		}
 	}
 
-	ctoState, err := ReplayCTOFromStore(s)
-	if err != nil {
-		log.Printf("checkpoint: recover: CTO replay error: %v — CTO state unavailable", err)
-	}
-
-	spawnerState, err := ReplaySpawnerFromStore(s)
-	if err != nil {
-		log.Printf("checkpoint: recover: Spawner replay error: %v — Spawner state unavailable", err)
-	}
-
-	reviewerState, err := ReplayReviewerFromStore(s)
-	if err != nil {
-		log.Printf("checkpoint: recover: Reviewer replay error: %v — Reviewer state unavailable", err)
-	}
-
-	for _, role := range agents {
-		rs := result[role]
-		if rs.Mode != ModeCold {
-			continue
+	if hasCold {
+		budgets, err := ReplayBudgetFromStore(s)
+		if err != nil {
+			log.Printf("checkpoint: recover: budget replay error: %v — budgets unavailable", err)
 		}
 
-		// Attach budget state (keyed by role name).
-		if budgets != nil {
-			if bs, ok := budgets[role]; ok {
-				bsCopy := bs
-				rs.BudgetState = &bsCopy
+		ctoState, err := ReplayCTOFromStore(s)
+		if err != nil {
+			log.Printf("checkpoint: recover: CTO replay error: %v — CTO state unavailable", err)
+		}
+
+		spawnerState, err := ReplaySpawnerFromStore(s)
+		if err != nil {
+			log.Printf("checkpoint: recover: Spawner replay error: %v — Spawner state unavailable", err)
+		}
+
+		reviewerState, err := ReplayReviewerFromStore(s)
+		if err != nil {
+			log.Printf("checkpoint: recover: Reviewer replay error: %v — Reviewer state unavailable", err)
+		}
+
+		for _, role := range agents {
+			rs := result[role]
+			if rs.Mode != ModeCold {
+				continue
 			}
-		}
 
-		// Attach role-specific chain state.
-		switch role {
-		case "cto":
-			rs.CTOState = ctoState
-		case "spawner":
-			rs.SpawnerState = spawnerState
-		case "reviewer":
-			rs.ReviewerState = reviewerState
+			// Attach budget state (keyed by role name).
+			if budgets != nil {
+				if bs, ok := budgets[role]; ok {
+					bsCopy := bs
+					rs.BudgetState = &bsCopy
+				}
+			}
+
+			// Attach role-specific chain state.
+			switch role {
+			case RoleCTO:
+				rs.CTOState = ctoState
+			case RoleSpawner:
+				rs.SpawnerState = spawnerState
+			case RoleReviewer:
+				rs.ReviewerState = reviewerState
+			}
 		}
 	}
 

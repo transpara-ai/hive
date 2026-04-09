@@ -158,7 +158,9 @@ func (w *Writer) UpdateRebootSurvival(role, survival string) {
 	if w.pool == nil {
 		return
 	}
-	_, err := w.pool.Exec(context.Background(),
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := w.pool.Exec(ctx,
 		`UPDATE telemetry_role_definitions SET reboot_survival = $1, updated_at = now() WHERE role = $2`,
 		survival, role)
 	if err != nil {

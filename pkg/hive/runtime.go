@@ -291,13 +291,11 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	if r.telemetryWriter != nil {
 		for role, rs := range recoveryStates {
-			var survival string
+			survival := checkpoint.SurvivalRoleOnly
 			if rs != nil && rs.Mode == checkpoint.ModeWarm {
-				survival = "full"
-			} else {
-				survival = "role-only"
+				survival = checkpoint.SurvivalFull
 			}
-			r.telemetryWriter.UpdateRebootSurvival(role, survival)
+			r.telemetryWriter.UpdateRebootSurvival(role, string(survival))
 		}
 	}
 
@@ -358,7 +356,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 			// Checkpoint recovery and sink.
 			RecoveryState:     recoveryStates[def.Name],
-			Sink:              buildCheckpointSink(thoughtStore, r.store, agent.ID(), def.Name),
+			Sink:              buildCheckpointSink(thoughtStore, def.Name),
 			HeartbeatInterval: heartbeatInterval,
 
 			OnIteration: func(iteration int, response string) {
@@ -418,11 +416,13 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 // buildCheckpointSink constructs a CheckpointSink for an agent.
 // Returns nil when thoughtStore is nil (disables checkpointing gracefully).
-func buildCheckpointSink(thoughts checkpoint.ThoughtStore, s store.Store, actorID types.ActorID, role string) checkpoint.CheckpointSink {
+// The heartbeat emitter is nil here — the loop wires it in Run() where it
+// has access to the agent's event emission path.
+func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoint.CheckpointSink {
 	if thoughts == nil {
 		return nil
 	}
-	return checkpoint.NewDefaultSink(thoughts, s, actorID, role)
+	return checkpoint.NewDefaultSink(thoughts, nil, role)
 }
 
 // spawnAgent creates a hiveagent.Agent from an AgentDef.

@@ -52,12 +52,18 @@ func newSpawnerState() *spawnerState {
 }
 
 // InitSpawnerFromRecovery seeds spawner state from chain replay.
-func (s *spawnerState) InitSpawnerFromRecovery(state *checkpoint.SpawnerRecoveredState) {
+// iteration is the recovered loop iteration count — needed to correctly
+// evaluate stabilization windows and rejection cooldowns.
+func (s *spawnerState) InitSpawnerFromRecovery(state *checkpoint.SpawnerRecoveredState, iteration int) {
 	if state == nil {
 		return
 	}
+	s.iteration = iteration
 	for k := range state.RecentRejections {
-		s.recentRejections[k] = 0
+		// Set rejection iteration to a value that preserves the cooldown window.
+		// We don't know the exact iteration of rejection, so use iteration - 1
+		// to allow re-proposal after one more cooldown window (50 iterations).
+		s.recentRejections[k] = iteration - 1
 	}
 	for k, v := range state.ProcessedGaps {
 		s.processedGaps[k] = v

@@ -161,16 +161,19 @@ type Loop struct {
 	adjustmentHistory []budget.AdjustmentRecord
 
 	// ctoCooldowns and ctoConfig are populated in New() when role == "cto".
-	// Only accessed from the Run() goroutine.
+	// Initialized in New() (including recovery seeding), then exclusively
+	// accessed from the Run() goroutine — no mutex needed.
 	ctoCooldowns *CTOCooldowns
 	ctoConfig    CTOConfig
 
 	// spawnerState is populated in New() when role == "spawner".
-	// Only accessed from the Run() goroutine.
+	// Initialized in New() (including recovery seeding), then exclusively
+	// accessed from the Run() goroutine — no mutex needed.
 	spawnerState *spawnerState
 
 	// reviewerState is populated in New() when role == "reviewer".
-	// Only accessed from the Run() goroutine.
+	// Initialized in New() (including recovery seeding), then exclusively
+	// accessed from the Run() goroutine — no mutex needed.
 	reviewerState *reviewerState
 
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
@@ -235,7 +238,7 @@ func New(cfg Config) (*Loop, error) {
 			l.ctoCooldowns.InitCTOFromRecovery(cfg.RecoveryState.CTOState)
 		}
 		if l.spawnerState != nil && cfg.RecoveryState.SpawnerState != nil {
-			l.spawnerState.InitSpawnerFromRecovery(cfg.RecoveryState.SpawnerState)
+			l.spawnerState.InitSpawnerFromRecovery(cfg.RecoveryState.SpawnerState, cfg.RecoveryState.Iteration)
 		}
 		if l.reviewerState != nil && cfg.RecoveryState.ReviewerState != nil {
 			l.reviewerState.InitReviewerFromRecovery(cfg.RecoveryState.ReviewerState)
@@ -257,10 +260,8 @@ func (l *Loop) Run(ctx context.Context) Result {
 	}
 
 	iteration := 0
-	recoveryFirstIter := false
 	if l.config.RecoveryState != nil && l.config.RecoveryState.Mode == checkpoint.ModeWarm {
 		iteration = l.config.RecoveryState.Iteration
-		recoveryFirstIter = true
 		fmt.Fprintf(os.Stderr, "[%s] warm-started at iteration %d\n", l.agent.Name(), iteration)
 	}
 	consecutiveEmpty := 0
@@ -278,11 +279,6 @@ func (l *Loop) Run(ctx context.Context) Result {
 
 		iteration++
 		l.iteration = iteration
-
-		if recoveryFirstIter {
-			recoveryFirstIter = false
-			// Intent will be injected in buildPrompt via Config.RecoveryState
-		}
 
 		// 1. OBSERVE — gather context from the graph.
 		observation, err := l.observe(ctx)
@@ -1061,11 +1057,21 @@ func (l *Loop) currentSnapshot() checkpoint.LoopSnapshot {
 		Role:          string(l.agent.Role()),
 		Iteration:     l.iteration,
 		MaxIterations: l.config.Budget.MaxIterations,
-		Signal:        "ACTIVE",
+		Signal:        checkpoint.SignalActive,
 	}
-	bs := l.budget.Snapshot()
-	snap.TokensUsed = bs.TokensUsed
-	snap.CostUSD = bs.CostUSD
+	if l.budget != nil {
+		bs := l.budget.Snapshot()
+		snap.TokensUsed = bs.TokensUsed
+		snap.CostUSD = bs.CostUSD
+	}
+	// Populate task fields from current assigned task, if any.
+	if l.config.TaskStore != nil {
+		if task := l.nextAssignedTask(); task.ID.Value() != "" {
+			snap.CurrentTaskID = task.ID.Value()
+			snap.CurrentTask = task.Title
+			snap.TaskStatus = "in-progress"
+		}
+	}
 	return snap
 }
 
