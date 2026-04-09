@@ -9,6 +9,7 @@ import (
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -48,6 +49,26 @@ func newSpawnerState() *spawnerState {
 		recentRejections: make(map[string]int),
 		processedGaps:    make(map[string]bool),
 	}
+}
+
+// InitSpawnerFromRecovery seeds spawner state from chain replay.
+// iteration is the recovered loop iteration count — needed to correctly
+// evaluate stabilization windows and rejection cooldowns.
+func (s *spawnerState) InitSpawnerFromRecovery(state *checkpoint.SpawnerRecoveredState, iteration int) {
+	if state == nil {
+		return
+	}
+	s.iteration = iteration
+	for k := range state.RecentRejections {
+		// Set rejection iteration to a value that preserves the cooldown window.
+		// We don't know the exact iteration of rejection, so use iteration - 1
+		// to allow re-proposal after one more cooldown window (50 iterations).
+		s.recentRejections[k] = iteration - 1
+	}
+	for k, v := range state.ProcessedGaps {
+		s.processedGaps[k] = v
+	}
+	s.pendingProposal = state.PendingProposal
 }
 
 // update processes the current batch of pending events and increments the

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 	"github.com/lovyou-ai/work"
 )
 
@@ -54,6 +55,18 @@ func newReviewerState() *reviewerState {
 	return &reviewerState{
 		reviewHistory:  make(map[string]*taskReviewRecord),
 		completedTasks: make(map[string]work.TaskCompletedContent),
+	}
+}
+
+// InitReviewerFromRecovery seeds reviewer state from chain replay.
+func (s *reviewerState) InitReviewerFromRecovery(state *checkpoint.ReviewerRecoveredState) {
+	if state == nil {
+		return
+	}
+	for taskID, count := range state.ReviewCounts {
+		s.reviewHistory[taskID] = &taskReviewRecord{
+			reviewCount: count,
+		}
 	}
 }
 

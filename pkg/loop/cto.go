@@ -9,6 +9,7 @@ import (
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 )
 
 // GapCommand represents the parsed /gap command from CTO LLM output.
@@ -123,6 +124,22 @@ func NewCTOCooldowns() *CTOCooldowns {
 		gapByCategory:     make(map[string]int),
 		directiveByTarget: make(map[string]int),
 		emittedGaps:       make(map[string]bool),
+	}
+}
+
+// InitCTOFromRecovery seeds CTO cooldown state from chain replay.
+func (c *CTOCooldowns) InitCTOFromRecovery(state *checkpoint.CTORecoveredState) {
+	if state == nil {
+		return
+	}
+	for k, v := range state.GapByCategory {
+		c.gapByCategory[k] = v
+	}
+	for k, v := range state.DirectiveByTarget {
+		c.directiveByTarget[k] = v
+	}
+	for k, v := range state.EmittedGaps {
+		c.emittedGaps[k] = v
 	}
 }
 

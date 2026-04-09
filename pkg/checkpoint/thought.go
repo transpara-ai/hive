@@ -1,5 +1,7 @@
-// Package checkpoint formats and parses structured thought records for Open Brain capture.
-// It has zero dependencies on other hive packages — pure stdlib only.
+// Package checkpoint provides reboot survival infrastructure: thought formatting/parsing,
+// heartbeat events, Open Brain integration, chain replay, and recovery orchestration.
+// Core types (LoopSnapshot, BoundaryTrigger, format/parse) use pure stdlib.
+// Heartbeat and replay modules import eventgraph and work for store access.
 package checkpoint
 
 import (
@@ -42,6 +44,27 @@ const (
 	BudgetAdjusted   BoundaryTrigger = "budget_adjusted"
 	HaltSignal       BoundaryTrigger = "halt_signal"
 )
+
+// RebootSurvival classifies how well an agent survives a reboot.
+type RebootSurvival string
+
+const (
+	SurvivalFull     RebootSurvival = "full"      // warm-started from Open Brain thought
+	SurvivalRoleOnly RebootSurvival = "role-only"  // cold-started from chain replay
+	SurvivalNone     RebootSurvival = "none"       // did not spawn
+)
+
+// AgentRole constants for role-specific recovery state routing.
+// These match the Name/Role strings in agentdef.go StarterAgents.
+const (
+	RoleCTO      = "cto"
+	RoleSpawner  = "spawner"
+	RoleReviewer = "reviewer"
+)
+
+// SignalActive is the default signal value for agents that are running normally.
+// Other signal values (IDLE, ESCALATE, HALT, TASK_DONE) are defined in pkg/loop.
+const SignalActive = "ACTIVE"
 
 // FormatCheckpoint produces a human-readable, embedding-friendly thought record.
 //

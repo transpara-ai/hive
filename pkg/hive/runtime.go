@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
@@ -23,6 +24,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/lovyou-ai/agent"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 	"github.com/lovyou-ai/hive/pkg/knowledge"
 	"github.com/lovyou-ai/hive/pkg/loop"
 	"github.com/lovyou-ai/hive/pkg/membrane"
@@ -241,6 +243,62 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	go distiller.Run(ctx)
 	fmt.Fprintf(os.Stderr, "Knowledge: distiller started (5m interval)\n")
 
+	// --- Checkpoint recovery ---
+	var thoughtStore checkpoint.ThoughtStore
+	var recoveryStates map[string]*checkpoint.RecoveryState
+
+	openBrainURL := os.Getenv("OPEN_BRAIN_URL")
+	openBrainKey := os.Getenv("OPEN_BRAIN_KEY")
+	if openBrainURL != "" {
+		thoughtStore = checkpoint.NewOpenBrainClient(openBrainURL, openBrainKey)
+	}
+
+	staleness := 2 * time.Hour
+	if s := os.Getenv("CHECKPOINT_STALENESS"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil {
+			staleness = d
+		}
+	}
+
+	heartbeatInterval := 10
+	if s := os.Getenv("CHECKPOINT_HEARTBEAT_INTERVAL"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			heartbeatInterval = n
+		}
+	}
+
+	// Collect role names for recovery.
+	var roleNames []string
+	for _, def := range r.defs {
+		roleNames = append(roleNames, def.Name)
+	}
+
+	recoveryStates, recoverErr := checkpoint.RecoverAll(roleNames, thoughtStore, r.store, staleness)
+	if recoverErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: checkpoint recovery: %v\n", recoverErr)
+	}
+
+	// Log recovery summary.
+	warmCount := 0
+	for _, rs := range recoveryStates {
+		if rs != nil && rs.Mode == checkpoint.ModeWarm {
+			warmCount++
+		}
+	}
+	if len(recoveryStates) > 0 {
+		fmt.Fprintf(os.Stderr, "Checkpoint: %d/%d agents warm-started\n", warmCount, len(recoveryStates))
+	}
+
+	if r.telemetryWriter != nil {
+		for role, rs := range recoveryStates {
+			survival := checkpoint.SurvivalRoleOnly
+			if rs != nil && rs.Mode == checkpoint.ModeWarm {
+				survival = checkpoint.SurvivalFull
+			}
+			r.telemetryWriter.UpdateRebootSurvival(role, string(survival))
+		}
+	}
+
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
@@ -296,6 +354,11 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 				return a.DisplayName()
 			},
 
+			// Checkpoint recovery and sink.
+			RecoveryState:     recoveryStates[def.Name],
+			Sink:              buildCheckpointSink(thoughtStore, def.Name),
+			HeartbeatInterval: heartbeatInterval,
+
 			OnIteration: func(iteration int, response string) {
 				fmt.Fprintf(os.Stderr, "[%s] iteration %d (%d chars)\n",
 					def.Name, iteration, len(response))
@@ -315,6 +378,8 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		r.telemetryWriter.SubscribeToBus(r.graph.Bus())
 		fmt.Fprintf(os.Stderr, "Telemetry: writer started (%d agents registered)\n", r.telemetryWriter.Agents())
 	}
+
+	// TODO: wire hive summary capture trigger here (bus subscription for run-boundary events).
 
 	// Watch for approved role proposals and spawn new agents mid-session.
 	go r.watchForApprovedRoles(ctx)
@@ -347,6 +412,17 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	fmt.Fprintf(os.Stderr, "\nCompleted in %s\n", dur.Round(time.Second))
 	return nil
+}
+
+// buildCheckpointSink constructs a CheckpointSink for an agent.
+// Returns nil when thoughtStore is nil (disables checkpointing gracefully).
+// The heartbeat emitter is nil here — the loop wires it in Run() where it
+// has access to the agent's event emission path.
+func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoint.CheckpointSink {
+	if thoughts == nil {
+		return nil
+	}
+	return checkpoint.NewDefaultSink(thoughts, nil, role)
 }
 
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
