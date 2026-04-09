@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 	hiveagent "github.com/lovyou-ai/agent"
 	"github.com/lovyou-ai/hive/pkg/budget"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 	"github.com/lovyou-ai/hive/pkg/knowledge"
 	"github.com/lovyou-ai/hive/pkg/resources"
 	"github.com/lovyou-ai/work"
@@ -123,6 +125,19 @@ type Config struct {
 	// KnowledgeStore provides access to distilled insights for context
 	// enrichment. Optional. When nil, agents run without knowledge injection.
 	KnowledgeStore knowledge.KnowledgeStore
+
+	// RecoveryState holds recovered state from a prior run. When set and Mode
+	// is ModeWarm, the loop seeds iteration counter, skips stabilization, and
+	// injects intent into the first iteration. Nil means first boot.
+	RecoveryState *checkpoint.RecoveryState
+
+	// Sink receives boundary and heartbeat signals for checkpointing.
+	// Nil means no checkpointing.
+	Sink checkpoint.CheckpointSink
+
+	// HeartbeatInterval is iterations between heartbeat emissions when no
+	// boundary trigger has fired. Default 10.
+	HeartbeatInterval int
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
@@ -157,6 +172,15 @@ type Loop struct {
 	// reviewerState is populated in New() when role == "reviewer".
 	// Only accessed from the Run() goroutine.
 	reviewerState *reviewerState
+
+	// sink receives checkpoint signals. Nil-safe — callers check before use.
+	sink checkpoint.CheckpointSink
+
+	// lastCheckpointIter tracks when last boundary or heartbeat fired.
+	lastCheckpointIter int
+
+	// heartbeatInterval is iterations between heartbeats. 0 means disabled.
+	heartbeatInterval int
 }
 
 // New creates a new agentic loop.
@@ -182,6 +206,14 @@ func New(cfg Config) (*Loop, error) {
 		budget:  budget,
 		config:  cfg,
 		wake:    make(chan struct{}, 1),
+	}
+
+	if cfg.Sink != nil {
+		l.sink = cfg.Sink
+	}
+	l.heartbeatInterval = cfg.HeartbeatInterval
+	if l.heartbeatInterval <= 0 {
+		l.heartbeatInterval = 10
 	}
 
 	if string(cfg.Agent.Role()) == "cto" {
@@ -212,6 +244,12 @@ func (l *Loop) Run(ctx context.Context) Result {
 	}
 
 	iteration := 0
+	recoveryFirstIter := false
+	if l.config.RecoveryState != nil && l.config.RecoveryState.Mode == checkpoint.ModeWarm {
+		iteration = l.config.RecoveryState.Iteration
+		recoveryFirstIter = true
+		fmt.Fprintf(os.Stderr, "[%s] warm-started at iteration %d\n", l.agent.Name(), iteration)
+	}
 	consecutiveEmpty := 0
 
 	for {
@@ -227,6 +265,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 
 		iteration++
 		l.iteration = iteration
+
+		if recoveryFirstIter {
+			recoveryFirstIter = false
+			// Intent will be injected in buildPrompt via Config.RecoveryState
+		}
 
 		// 1. OBSERVE — gather context from the graph.
 		observation, err := l.observe(ctx)
@@ -270,6 +313,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 
 			// Auto-complete the task after successful Operate.
 			l.completeTask(task, result.Summary)
+			if l.sink != nil {
+				l.sink.OnBoundary(checkpoint.TaskCompleted, l.currentSnapshot())
+				l.lastCheckpointIter = l.iteration
+			}
 		} else {
 			// Reason path: standard observe-reason loop.
 			prompt := l.buildPrompt(observation, iteration)
@@ -285,6 +332,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 
 		if l.config.OnIteration != nil {
 			l.config.OnIteration(iteration, response)
+		}
+
+		if l.sink != nil && l.heartbeatInterval > 0 {
+			if l.iteration-l.lastCheckpointIter >= l.heartbeatInterval {
+				l.sink.OnHeartbeat(l.currentSnapshot())
+				l.lastCheckpointIter = l.iteration
+			}
 		}
 
 		// 2.5. PROCESS task commands from the response.
@@ -458,6 +512,18 @@ func (l *Loop) buildPrompt(observation string, iteration int) string {
 	sb.WriteString(fmt.Sprintf("You are %s (%s), iteration %d of your agentic loop.\n\n",
 		l.agent.Name(), l.agent.Role(), iteration))
 
+	if l.config.RecoveryState != nil && l.config.RecoveryState.Mode == checkpoint.ModeWarm && iteration <= l.config.RecoveryState.Iteration+1 {
+		sb.WriteString("\n## Recovery Context\nYou are resuming after a restart. Your last checkpoint:\n")
+		sb.WriteString(l.config.RecoveryState.Intent)
+		sb.WriteString("\n\n")
+		if l.config.RecoveryState.HiveSummary != "" {
+			sb.WriteString("Hive context:\n")
+			sb.WriteString(l.config.RecoveryState.HiveSummary)
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("Resume from where you left off. Do not restart completed work.\n\n")
+	}
+
 	if l.config.Task != "" && iteration == 1 {
 		sb.WriteString(fmt.Sprintf("## Your Task\n%s\n\n", l.config.Task))
 	}
@@ -605,12 +671,20 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 
 	switch sig.Signal {
 	case SignalHalt:
+		if l.sink != nil {
+			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
+			l.lastCheckpointIter = l.iteration
+		}
 		r := l.result(StopHalt, iteration, sig.Reason)
 		return &r
 	case SignalEscalate:
 		if err := l.agent.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, sig.Reason)); err != nil {
 			fmt.Printf("warning: escalation event failed: %v\n", err)
+		}
+		if l.sink != nil {
+			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
+			l.lastCheckpointIter = l.iteration
 		}
 		r := l.result(StopEscalation, iteration, sig.Reason)
 		return &r
@@ -811,6 +885,10 @@ func (l *Loop) autoAssignOpenTask() {
 				}
 				if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
 					fmt.Printf("  → auto-assigned: %s — %s\n", t.ID.Value(), t.Title)
+					if l.sink != nil {
+						l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
+						l.lastCheckpointIter = l.iteration
+					}
 				}
 				return
 			}
@@ -925,6 +1003,20 @@ func (l *Loop) completeTask(task work.Task, summary string) {
 	} else {
 		fmt.Printf("  → task completed: %s — %s\n", task.ID.Value(), task.Title)
 	}
+}
+
+// currentSnapshot builds a LoopSnapshot from current loop state.
+func (l *Loop) currentSnapshot() checkpoint.LoopSnapshot {
+	snap := checkpoint.LoopSnapshot{
+		Role:          string(l.agent.Role()),
+		Iteration:     l.iteration,
+		MaxIterations: l.config.Budget.MaxIterations,
+		Signal:        "ACTIVE",
+	}
+	bs := l.budget.Snapshot()
+	snap.TokensUsed = bs.TokensUsed
+	snap.CostUSD = bs.CostUSD
+	return snap
 }
 
 // AgentResult pairs a loop result with the agent's role and name,
