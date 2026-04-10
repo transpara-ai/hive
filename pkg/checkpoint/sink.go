@@ -35,6 +35,12 @@ func NewDefaultSink(thoughts ThoughtStore, emitHB HeartbeatEmitter, role string)
 	}
 }
 
+// SetHeartbeatEmitter wires the heartbeat callback after construction.
+// Called by the loop once it has access to the agent's event emission path.
+func (d *DefaultSink) SetHeartbeatEmitter(emitHB HeartbeatEmitter) {
+	d.emitHB = emitHB
+}
+
 // OnBoundary formats a checkpoint thought and captures it in Open Brain.
 // On failure it logs a warning to stderr — it never blocks or panics.
 func (d *DefaultSink) OnBoundary(trigger BoundaryTrigger, snap LoopSnapshot) {

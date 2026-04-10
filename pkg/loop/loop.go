@@ -213,6 +213,15 @@ func New(cfg Config) (*Loop, error) {
 
 	if cfg.Sink != nil {
 		l.sink = cfg.Sink
+		// Wire the heartbeat emitter now that we have the agent.
+		// The sink was constructed in runtime.go without the agent —
+		// this closes the gap so OnHeartbeat actually writes to the chain.
+		if ds, ok := l.sink.(*checkpoint.DefaultSink); ok {
+			ds.SetHeartbeatEmitter(func(snap checkpoint.LoopSnapshot) error {
+				hb := checkpoint.HeartbeatFromSnapshot(snap)
+				return l.agent.EmitHeartbeat(hb)
+			})
+		}
 	}
 	l.heartbeatInterval = cfg.HeartbeatInterval
 	if l.heartbeatInterval <= 0 {
