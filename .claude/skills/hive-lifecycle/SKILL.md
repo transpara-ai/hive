@@ -1,11 +1,44 @@
 ---
 name: hive-lifecycle
-description: "Manage the lovyou-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'start the hive', 'stop the hive', 'restart the hive', 'hive status', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
+description: "Manage the lovyou-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
 ---
 
 # Hive Lifecycle Management
 
-Commands for starting, stopping, restarting, and checking the lovyou-ai hive stack on nucbuntu.
+Commands for starting, stopping, restarting, running, and monitoring the lovyou-ai hive stack on nucbuntu.
+
+## Hive Help
+
+When the user says `hive help`, `hive --help`, or `hive commands`, print this summary and stop — do not execute anything:
+
+```
+Hive Lifecycle Commands:
+
+  hive up                  Start postgres + work-server + hive runtime
+  hive down                Graceful shutdown (SIGINT → force kill → verify)
+  hive restart             Down then up
+  hive status              Check all components (docker, processes, ports, auth)
+  hive run <idea>          Start hive with an idea (legacy multi-agent mode)
+  hive run --pipeline      Scout → Builder → Critic pipeline
+  hive run --role <role>   Single agent mode (builder/scout/critic/monitor)
+  hive run --council       Convene all agents for deliberation
+
+  hive monitor             Live telemetry, phases, event stream
+  hive logs                Tail hive + work-server logs
+  hive approve <role>      Manually approve a pending role proposal
+  hive inject <task>       Send work to running hive via webhook
+
+  hive clean               Nuke telemetry, keep event chain
+  hive nuke                Full reset (destroys chain — use with caution)
+
+  hive help                This message
+
+Environment (not CLI flags):
+  OPEN_BRAIN_URL           Checkpoint recovery via Open Brain
+  OPEN_BRAIN_KEY           Open Brain MCP access key
+  CHECKPOINT_STALENESS     Max thought age before cold-start (default: 2h)
+  CHECKPOINT_HEARTBEAT_INTERVAL  Iterations between heartbeats (default: 10)
+```
 
 ## Stack Components
 
@@ -133,7 +166,7 @@ go run ./cmd/hive \
     --store postgres://hive:hive@localhost:5432/hive
 ```
 
-### Full Lifecycle (growth enabled)
+### Full Autonomy (growth + loop + approve)
 
 All flags combined for maximum autonomy:
 
@@ -168,6 +201,27 @@ curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry
 
 # Dashboard
 echo "Open: http://nucbuntu:8080/telemetry/"
+```
+
+---
+
+## Hive Run (Runner / Pipeline Mode)
+
+Run individual agents or the Scout-Builder-Critic pipeline against lovyou.ai tasks.
+This is an alternative to the legacy multi-agent runtime above.
+
+```bash
+# Single agent — works one task matching its role
+go run ./cmd/hive --role builder --space hive --one-shot
+
+# Full pipeline — Scout finds work, Builder implements, Critic reviews
+go run ./cmd/hive --pipeline --space hive
+
+# Daemon — pipeline on a loop
+go run ./cmd/hive --daemon --interval 30m --space hive
+
+# Council — deliberation session
+go run ./cmd/hive --council --topic "Should we add a caching layer?"
 ```
 
 ---
@@ -280,6 +334,86 @@ else
     echo "Clean — using Claude Max subscription via claude-cli"
 fi
 ```
+
+---
+
+## Monitoring a Run
+
+While the hive is running:
+
+```bash
+# Live telemetry (agent states, iterations, cost)
+curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/agents | jq .
+
+# Phase progress
+curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/phases | jq .
+
+# Event stream (last 20 events)
+curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/events | jq '.[-20:]'
+
+# Dashboard
+echo "Open: http://nucbuntu:8080/telemetry/"
+```
+
+### After a Run
+
+```bash
+# Check what was built
+cd $HIVE_REPO
+git log --oneline -10
+
+# Check task completion
+docker exec hive-postgres-1 psql -U hive -d hive -t -c \
+    "SELECT status, COUNT(*) FROM tasks GROUP BY status"
+
+# Total cost
+docker exec hive-postgres-1 psql -U hive -d hive -t -c \
+    "SELECT SUM(cost_usd) FROM telemetry_agent_snapshots WHERE recorded_at > now() - interval '1 hour'"
+```
+
+---
+
+## Flag Reference
+
+### Legacy Runtime (multi-agent coordination)
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--human` | (required) | Human operator name — always `Michael` |
+| `--idea` | (required) | Seed idea for the agent civilization |
+| `--store` | in-memory | Postgres DSN for persistence |
+| `--approve-requests` | false | Auto-approve authority requests (file writes, git ops) |
+| `--approve-roles` | false | Auto-approve role proposals (skip Guardian approval) |
+| `--loop` | false | Keep agents alive when idle (block on bus) |
+| `--repo` | current dir | Path to repo for Implementer's Operate |
+
+### Runner / Pipeline Mode
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--role` | | Single agent: builder, scout, critic, monitor |
+| `--pipeline` | false | Scout + Builder + Critic in sequence |
+| `--daemon` | false | Loop pipeline at `--interval` |
+| `--interval` | 30m | Daemon cycle interval |
+| `--council` | false | Convene all agents for deliberation |
+| `--topic` | | Focus question for council |
+| `--space` | hive | lovyou.ai space slug |
+| `--budget` | 10.0 | Daily budget in USD |
+| `--one-shot` | false | Work one task then exit |
+| `--pr` | false | Create feature branch + PR instead of pushing to main |
+| `--worktrees` | false | Each Builder task gets its own git worktree |
+| `--repos` | | Named repos: `name=path,name=path` |
+| `--auto-clone` | false | Clone missing repos from registry URLs |
+
+### Environment Variables (not CLI flags)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPEN_BRAIN_URL` | (none) | Open Brain MCP endpoint for checkpoint recovery |
+| `OPEN_BRAIN_KEY` | (none) | Open Brain MCP access key |
+| `CHECKPOINT_STALENESS` | 2h | Max thought age before cold-start |
+| `CHECKPOINT_HEARTBEAT_INTERVAL` | 10 | Iterations between heartbeat events on chain |
+| `DATABASE_URL` | (none) | Alternative to `--store` |
 
 ---
 
@@ -406,7 +540,7 @@ curl -s http://localhost:8081/health
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | "Invalid API key" on all agents | `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY` set in environment | `unset ANTHROPIC_API_KEY HIVE_ANTHROPIC_API_KEY` and remove from `.bashrc` |
-| "connection refused" on :8080 | Work-server not running | Start it (Hive Up step 2) |
+| "connection refused" on :8080 | Work-server not running | Start it (Hive Up step 3) |
 | Dashboard shows "57m ago" everywhere | Hive died but telemetry data persists | Clean Slate, then restart |
 | All agents show $0.000 cost | Hive just started, no iterations yet | Wait 2-3 minutes |
 | "database unavailable" in API | Postgres not running | `docker compose up -d postgres` |
@@ -416,3 +550,4 @@ curl -s http://localhost:8081/health
 | Zombie processes after hive down | `go run` child processes survive parent kill | `ss -tlnp \| grep 8081` to find PID, then `kill -9 <PID>` |
 | Role proposed but never spawns | Missing `hive.role.approved` or `agent.budget.adjusted` | Run `go run ./cmd/approve-role --role <name> --store postgres://...` |
 | Webhook returns "connection refused" on :8081 | Event listener not started or zombie holding port | Kill zombies, restart hive |
+| All agents cold-start on reboot | `OPEN_BRAIN_URL` not set | Export `OPEN_BRAIN_URL` and `OPEN_BRAIN_KEY` in environment |
