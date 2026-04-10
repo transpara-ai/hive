@@ -7,6 +7,39 @@ description: "Manage the lovyou-ai hive stack lifecycle on nucbuntu. Use wheneve
 
 Commands for starting, stopping, restarting, running, and monitoring the lovyou-ai hive stack on nucbuntu.
 
+## Hive Help
+
+When the user says `hive help`, `hive --help`, or `hive commands`, print this summary and stop — do not execute anything:
+
+```
+Hive Lifecycle Commands:
+
+  hive up                  Start postgres + work-server + hive runtime
+  hive down                Graceful shutdown (SIGINT → force kill → verify)
+  hive restart             Down then up
+  hive status              Check all components (docker, processes, ports, auth)
+  hive run <idea>          Start hive with an idea (legacy multi-agent mode)
+  hive run --pipeline      Scout → Builder → Critic pipeline
+  hive run --role <role>   Single agent mode (builder/scout/critic/monitor)
+  hive run --council       Convene all agents for deliberation
+
+  hive monitor             Live telemetry, phases, event stream
+  hive logs                Tail hive + work-server logs
+  hive approve <role>      Manually approve a pending role proposal
+  hive inject <task>       Send work to running hive via webhook
+
+  hive clean               Nuke telemetry, keep event chain
+  hive nuke                Full reset (destroys chain — use with caution)
+
+  hive help                This message
+
+Environment (not CLI flags):
+  OPEN_BRAIN_URL           Checkpoint recovery via Open Brain
+  OPEN_BRAIN_KEY           Open Brain MCP access key
+  CHECKPOINT_STALENESS     Max thought age before cold-start (default: 2h)
+  CHECKPOINT_HEARTBEAT_INTERVAL  Iterations between heartbeats (default: 10)
+```
+
 ## Stack Components
 
 | Component | Process | Repo | How It Runs |
