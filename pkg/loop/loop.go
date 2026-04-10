@@ -263,6 +263,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 	if l.config.RecoveryState != nil && l.config.RecoveryState.Mode == checkpoint.ModeWarm {
 		iteration = l.config.RecoveryState.Iteration
 		fmt.Fprintf(os.Stderr, "[%s] warm-started at iteration %d\n", l.agent.Name(), iteration)
+	} else if l.config.RecoveryState != nil && l.config.RecoveryState.Iteration > 0 {
+		// Cold-start with replayed iteration — seed the counter to prevent
+		// stabilization window re-triggering and cooldown map incoherence.
+		iteration = l.config.RecoveryState.Iteration
+		fmt.Fprintf(os.Stderr, "[%s] cold-started at iteration %d (from chain replay)\n", l.agent.Name(), iteration)
 	}
 	consecutiveEmpty := 0
 

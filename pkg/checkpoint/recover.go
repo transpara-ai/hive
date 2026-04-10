@@ -139,10 +139,23 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 			log.Printf("checkpoint: recover: Reviewer replay error: %v — Reviewer state unavailable", err)
 		}
 
+		// Replay iteration counters from heartbeat + agent.stopped events.
+		// Without this, cold-started agents reset to iteration 0, making
+		// replayed cooldown maps incoherent with the loop counter.
+		iterations, err := ReplayIterationFromStore(s)
+		if err != nil {
+			log.Printf("checkpoint: recover: iteration replay error: %v — iterations unavailable", err)
+		}
+
 		for _, role := range agents {
 			rs := result[role]
 			if rs.Mode != ModeCold {
 				continue
+			}
+
+			// Seed iteration from chain replay.
+			if iter, ok := iterations[role]; ok && iter > rs.Iteration {
+				rs.Iteration = iter
 			}
 
 			// Attach budget state (keyed by role name).

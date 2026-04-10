@@ -267,10 +267,24 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		}
 	}
 
-	// Collect role names for recovery.
+	// Collect role names for recovery — starters + any dynamically spawned
+	// agents discovered from hive.role.approved events on the chain.
 	var roleNames []string
 	for _, def := range r.defs {
 		roleNames = append(roleNames, def.Name)
+	}
+	dynamicNames, dynErr := checkpoint.ReplayDynamicAgentsFromStore(r.store)
+	if dynErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: dynamic agent discovery: %v\n", dynErr)
+	}
+	starterSet := make(map[string]bool, len(roleNames))
+	for _, n := range roleNames {
+		starterSet[n] = true
+	}
+	for _, n := range dynamicNames {
+		if !starterSet[n] {
+			roleNames = append(roleNames, n)
+		}
 	}
 
 	recoveryStates, recoverErr := checkpoint.RecoverAll(roleNames, thoughtStore, r.store, staleness)

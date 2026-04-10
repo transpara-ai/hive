@@ -1,6 +1,7 @@
 package checkpoint
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -192,6 +193,93 @@ func ReplayReviewerFromStore(s store.Store) (*ReviewerRecoveredState, error) {
 	}
 
 	return state, nil
+}
+
+// ReplayIterationFromStore scans heartbeat and agent.stopped events to find the
+// highest known iteration for each agent role. This fills the cold-start gap
+// where iteration counters reset to 0, breaking cooldown windows, stabilization
+// gates, and budget accounting.
+func ReplayIterationFromStore(s store.Store) (map[string]int, error) {
+	result := make(map[string]int)
+	if s == nil {
+		return result, nil
+	}
+
+	// Scan heartbeat events — these carry the most granular iteration data.
+	heartbeats, err := fetchAllByType(s, EventTypeAgentHeartbeat)
+	if err != nil {
+		// Heartbeat events may not exist yet (first run). Not fatal.
+		heartbeats = nil
+	}
+	for _, ev := range heartbeats {
+		c, ok := ev.Content().(HeartbeatContent)
+		if !ok {
+			continue
+		}
+		if c.Iteration > result[c.Role] {
+			result[c.Role] = c.Iteration
+		}
+	}
+
+	// Scan agent.stopped events — these record the final iteration count.
+	// AgentStoppedContent is defined in pkg/hive (can't import — circular).
+	// Use structural typing: any content with Name() and Iterations() fields.
+	stopped, err := fetchAllByType(s, types.MustEventType("hive.agent.stopped"))
+	if err != nil {
+		// May not exist in fresh stores. Not fatal.
+		stopped = nil
+	}
+	for _, ev := range stopped {
+		// AgentStoppedContent has json fields Name and Iterations.
+		// Since we can't import the type, extract via json round-trip.
+		// AgentStoppedContent is in pkg/hive — can't import (circular).
+		// Marshal the content to JSON and extract Name + Iterations.
+		raw, mErr := json.Marshal(ev.Content())
+		if mErr != nil {
+			continue
+		}
+		var fields struct {
+			Name       string `json:"Name"`
+			Iterations int    `json:"Iterations"`
+		}
+		if uErr := json.Unmarshal(raw, &fields); uErr != nil {
+			continue
+		}
+		if fields.Name != "" && fields.Iterations > result[fields.Name] {
+			result[fields.Name] = fields.Iterations
+		}
+	}
+
+	return result, nil
+}
+
+// ReplayDynamicAgentsFromStore scans hive.role.approved events to discover
+// dynamically spawned agent names. Returns the deduplicated list of approved
+// role names so they can be included in RecoverAll alongside starter agents.
+func ReplayDynamicAgentsFromStore(s store.Store) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+
+	events, err := fetchAllByType(s, event.EventTypeRoleApproved)
+	if err != nil {
+		return nil, fmt.Errorf("fetch hive.role.approved: %w", err)
+	}
+
+	var names []string
+	seen := make(map[string]bool)
+	for _, ev := range events {
+		c, ok := ev.Content().(event.RoleApprovedContent)
+		if !ok {
+			continue
+		}
+		if !seen[c.Name] {
+			seen[c.Name] = true
+			names = append(names, c.Name)
+		}
+	}
+
+	return names, nil
 }
 
 // fetchAllByType pages through all events of a given type using cursor pagination.

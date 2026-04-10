@@ -91,11 +91,32 @@ func TestReplayReviewerFromStore_Empty(t *testing.T) {
 	}
 }
 
-// Populated-store tests would require constructing event.Event values with
-// properly registered content types from the eventgraph and work packages.
-// The event store's ByType call requires content unmarshalers to be registered
-// (via work.init() and event.RegisterContentUnmarshaler calls). Constructing
-// a populated in-memory store with typed events requires importing eventgraph's
-// memstore and emitting events through a proper graph — which is an integration
-// test pattern used in pkg/loop/*_integration_test.go. Those tests are out of
-// scope here; the nil-store tests cover the initialization contract.
+// TestReplayIterationFromStore_Empty verifies that a nil store returns an
+// initialized empty map with no error.
+func TestReplayIterationFromStore_Empty(t *testing.T) {
+	result, err := ReplayIterationFromStore(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil map, got nil")
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(result))
+	}
+}
+
+// TestReplayDynamicAgentsFromStore_Empty verifies that a nil store returns nil, nil.
+func TestReplayDynamicAgentsFromStore_Empty(t *testing.T) {
+	result, err := ReplayDynamicAgentsFromStore(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil, got %v", result)
+	}
+}
+
+// Populated-store tests require constructing events through a proper graph
+// (see pkg/loop/*_integration_test.go for the pattern). Out of scope here;
+// the nil-store tests cover the initialization contract.
