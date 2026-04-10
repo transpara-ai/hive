@@ -119,14 +119,16 @@ func (c *OpenBrainClient) doWithRetry(body []byte) (string, error) {
 	return result, err
 }
 
-// doOnce sends body to the endpoint and parses the SSE response.
+// doOnce sends body to the endpoint and parses the response.
+// The MCP Streamable HTTP transport requires Accept: application/json, text/event-stream.
+// The server may respond with either content type — we handle both.
 func (c *OpenBrainClient) doOnce(body []byte) (string, error) {
 	req, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -139,12 +141,17 @@ func (c *OpenBrainClient) doOnce(body []byte) (string, error) {
 		return "", fmt.Errorf("server error: status %d", resp.StatusCode)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		return "", fmt.Errorf("status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d: %.200s", resp.StatusCode, string(errBody))
 	}
 
-	// Parse SSE response. Look for "data:" lines containing JSON-RPC result.
-	return c.parseSSE(resp.Body)
+	// Parse based on content type. The server currently always returns SSE,
+	// but the MCP spec allows plain JSON — handle both.
+	ct := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "text/event-stream") {
+		return c.parseSSE(resp.Body)
+	}
+	return c.parseJSON(resp.Body)
 }
 
 // parseSSE reads an SSE stream and extracts the JSON-RPC result text.
@@ -167,11 +174,23 @@ func (c *OpenBrainClient) parseSSE(r io.Reader) (string, error) {
 	}
 
 	if lastData == "" {
-		// Response may be plain JSON (not SSE). Try parsing raw body directly.
-		lastData = strings.TrimSpace(body)
+		return "", fmt.Errorf("no data lines in SSE response (%.200s)", body)
 	}
 
-	// Parse JSON-RPC response.
+	return extractRPCText([]byte(lastData))
+}
+
+// parseJSON reads a plain JSON response body (non-SSE).
+func (c *OpenBrainClient) parseJSON(r io.Reader) (string, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read JSON: %w", err)
+	}
+	return extractRPCText(raw)
+}
+
+// extractRPCText parses a JSON-RPC 2.0 response and concatenates text content blocks.
+func extractRPCText(data []byte) (string, error) {
 	var rpcResp struct {
 		Result struct {
 			Content []struct {
@@ -183,14 +202,13 @@ func (c *OpenBrainClient) parseSSE(r io.Reader) (string, error) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal([]byte(lastData), &rpcResp); err != nil {
-		return "", fmt.Errorf("parse JSON-RPC response: %w (raw: %.200s)", err, lastData)
+	if err := json.Unmarshal(data, &rpcResp); err != nil {
+		return "", fmt.Errorf("parse JSON-RPC: %w (raw: %.200s)", err, string(data))
 	}
 	if rpcResp.Error != nil {
 		return "", fmt.Errorf("JSON-RPC error: %s", rpcResp.Error.Message)
 	}
 
-	// Concatenate all text content blocks.
 	var sb strings.Builder
 	for _, c := range rpcResp.Result.Content {
 		if c.Type == "text" {
