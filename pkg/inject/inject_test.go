@@ -128,6 +128,16 @@ func TestBuildEvent_EmptyActor(t *testing.T) {
 	}
 }
 
+func TestBuildEvent_InvalidPriority(t *testing.T) {
+	_, err := BuildEvent(Options{FileContent: "x", SourceFile: "x.md", Priority: "urgent"})
+	if err == nil {
+		t.Error("BuildEvent: expected error for invalid priority, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid priority") {
+		t.Errorf("error = %q; want to contain %q", err.Error(), "invalid priority")
+	}
+}
+
 func TestTitleFromFilename_Empty(t *testing.T) {
 	// filepath.Base("") returns "." — document expected behaviour.
 	got := TitleFromFilename("")

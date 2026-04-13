@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lovyou-ai/work"
 )
 
 // TitleFromFilename derives a human-readable title from a file path.
@@ -62,7 +64,7 @@ type Payload struct {
 func BuildPayload(opts Options) Payload {
 	priority := opts.Priority
 	if priority == "" {
-		priority = "medium"
+		priority = string(work.DefaultPriority)
 	}
 	p := Payload{
 		SourceFile: opts.SourceFile,
@@ -87,10 +89,23 @@ type Event struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
+// validPriorities is the set of accepted priority values.
+var validPriorities = map[work.TaskPriority]bool{
+	work.PriorityLow:      true,
+	work.PriorityMedium:   true,
+	work.PriorityHigh:     true,
+	work.PriorityCritical: true,
+}
+
 // BuildEvent constructs an Event from Options.
 // Title defaults to TitleFromFilename(opts.SourceFile) when empty.
 // Actor is passed through as-is; callers are responsible for supplying a value.
+// Returns an error if Priority is non-empty and not one of: low, medium, high, critical.
 func BuildEvent(opts Options) (Event, error) {
+	if opts.Priority != "" && !validPriorities[work.TaskPriority(opts.Priority)] {
+		return Event{}, fmt.Errorf("invalid priority %q: must be low, medium, high, or critical", opts.Priority)
+	}
+
 	title := opts.Title
 	if title == "" {
 		title = TitleFromFilename(opts.SourceFile)
@@ -101,7 +116,7 @@ func BuildEvent(opts Options) (Event, error) {
 		return Event{}, fmt.Errorf("marshal payload: %w", err)
 	}
 	return Event{
-		ID:        fmt.Sprintf("idea-file-%d", time.Now().Unix()),
+		ID:        fmt.Sprintf("idea-file-%d", time.Now().UnixNano()),
 		NodeTitle: title,
 		Op:        "intend",
 		Actor:     opts.Actor,
