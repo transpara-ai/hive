@@ -10,6 +10,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/hive/pkg/runner"
+	"github.com/lovyou-ai/work"
 )
 
 // dispatchMu serializes webhook dispatch calls against each other.
@@ -88,18 +89,21 @@ func (r *Runtime) dispatchIntend(op runner.OpEvent) error {
 	if title == "" {
 		title = "Site task (no title)"
 	}
-	// Extract description from payload if available.
+	// Extract description and priority from payload if available.
 	var desc string
+	var priority string
 	if len(op.Payload) > 0 {
 		var p struct {
 			Description string `json:"description"`
 			Body        string `json:"body"`
+			Priority    string `json:"priority"`
 		}
 		if json.Unmarshal(op.Payload, &p) == nil {
 			desc = p.Description
 			if desc == "" {
 				desc = p.Body
 			}
+			priority = p.Priority
 		}
 	}
 
@@ -107,7 +111,11 @@ func (r *Runtime) dispatchIntend(op runner.OpEvent) error {
 	if err != nil {
 		return err
 	}
-	task, err := r.tasks.Create(r.humanID, title, desc, causes, r.convID)
+	var priorityArgs []work.TaskPriority
+	if priority != "" {
+		priorityArgs = append(priorityArgs, work.TaskPriority(priority))
+	}
+	task, err := r.tasks.Create(r.humanID, title, desc, causes, r.convID, priorityArgs...)
 	if err != nil {
 		return fmt.Errorf("dispatch intend: %w", err)
 	}
