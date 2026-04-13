@@ -88,7 +88,10 @@ func TestBuildEvent(t *testing.T) {
 		Title:       "Custom Title",
 		Actor:       "Alice",
 	}
-	ev := BuildEvent(opts)
+	ev, err := BuildEvent(opts)
+	if err != nil {
+		t.Fatalf("BuildEvent: %v", err)
+	}
 
 	if ev.NodeTitle != "Custom Title" {
 		t.Errorf("NodeTitle = %q; want %q", ev.NodeTitle, "Custom Title")
@@ -115,10 +118,22 @@ func TestBuildEvent(t *testing.T) {
 	}
 }
 
-func TestBuildEvent_DefaultActor(t *testing.T) {
-	ev := BuildEvent(Options{FileContent: "x", SourceFile: "x.md"})
-	if ev.Actor != "Michael" {
-		t.Errorf("Actor = %q; want default %q", ev.Actor, "Michael")
+func TestBuildEvent_EmptyActor(t *testing.T) {
+	ev, err := BuildEvent(Options{FileContent: "x", SourceFile: "x.md"})
+	if err != nil {
+		t.Fatalf("BuildEvent: %v", err)
+	}
+	if ev.Actor != "" {
+		t.Errorf("Actor = %q; want empty string when not set", ev.Actor)
+	}
+}
+
+func TestTitleFromFilename_Empty(t *testing.T) {
+	// filepath.Base("") returns "." — document expected behaviour.
+	got := TitleFromFilename("")
+	want := ""
+	if got != want {
+		t.Errorf("TitleFromFilename(%q) = %q; want %q", "", got, want)
 	}
 }
 
@@ -136,13 +151,14 @@ func TestPost(t *testing.T) {
 		FileContent: "test content",
 		SourceFile:  "test.md",
 	}
-	ev := BuildEvent(opts)
-
-	parts := strings.TrimPrefix(ts.URL, "http://")
-	hostPort := strings.SplitN(parts, ":", 2)
-
-	err := Post(ev, hostPort[0], hostPort[1])
+	ev, err := BuildEvent(opts)
 	if err != nil {
+		t.Fatalf("BuildEvent: %v", err)
+	}
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	if err := Post(ev, addr); err != nil {
 		t.Fatalf("Post: %v", err)
 	}
 	if received.Op != "intend" {
@@ -150,5 +166,22 @@ func TestPost(t *testing.T) {
 	}
 	if received.NodeTitle != "Test" {
 		t.Errorf("received NodeTitle = %q; want %q", received.NodeTitle, "Test")
+	}
+}
+
+func TestPost_Non200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ev, err := BuildEvent(Options{FileContent: "x", SourceFile: "x.md"})
+	if err != nil {
+		t.Fatalf("BuildEvent: %v", err)
+	}
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	if err := Post(ev, addr); err == nil {
+		t.Error("Post: expected error for HTTP 500, got nil")
 	}
 }

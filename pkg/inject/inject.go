@@ -12,8 +12,8 @@ import (
 )
 
 // TitleFromFilename derives a human-readable title from a file path.
-// It strips the directory, removes all extensions, replaces - and _ with
-// spaces, and title-cases each word.
+// It strips the directory, removes the last extension, replaces - _ and
+// remaining dots with spaces, and title-cases each word.
 func TitleFromFilename(path string) string {
 	name := filepath.Base(path)
 	if ext := filepath.Ext(name); ext != "" {
@@ -89,36 +89,36 @@ type Event struct {
 
 // BuildEvent constructs an Event from Options.
 // Title defaults to TitleFromFilename(opts.SourceFile) when empty.
-// Actor defaults to "Michael" when empty.
-func BuildEvent(opts Options) Event {
+// Actor is passed through as-is; callers are responsible for supplying a value.
+func BuildEvent(opts Options) (Event, error) {
 	title := opts.Title
 	if title == "" {
 		title = TitleFromFilename(opts.SourceFile)
 	}
-	actor := opts.Actor
-	if actor == "" {
-		actor = "Michael"
-	}
 	payload := BuildPayload(opts)
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return Event{}, fmt.Errorf("marshal payload: %w", err)
+	}
 	return Event{
 		ID:        fmt.Sprintf("idea-file-%d", time.Now().Unix()),
 		NodeTitle: title,
 		Op:        "intend",
-		Actor:     actor,
+		Actor:     opts.Actor,
 		ActorKind: "human",
 		Payload:   payloadJSON,
-	}
+	}, nil
 }
 
-// Post marshals ev to JSON and HTTP POSTs it to http://<host>:<port>/event.
+// Post marshals ev to JSON and HTTP POSTs it to http://<addr>/event.
+// addr must be in host:port format.
 // Returns an error if the request fails or the server returns non-200.
-func Post(ev Event, host, port string) error {
+func Post(ev Event, addr string) error {
 	body, err := json.Marshal(ev)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	url := fmt.Sprintf("http://%s:%s/event", host, port)
+	url := fmt.Sprintf("http://%s/event", addr)
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
 	if err != nil {
 		return fmt.Errorf("post to %s: %w", url, err)
