@@ -15,11 +15,18 @@ import (
 	"github.com/lovyou-ai/hive/pkg/inject"
 )
 
+func defaultActor() string {
+	if v := os.Getenv("HIVE_HUMAN"); v != "" {
+		return v
+	}
+	return "Michael"
+}
+
 func main() {
 	title := flag.String("title", "", "Override title (default: derived from filename)")
 	description := flag.String("description", "", "Short summary (file content moves to body field)")
 	priority := flag.String("priority", "medium", "Task priority: low, medium, high, critical")
-	actor := flag.String("actor", "Michael", "Who is injecting the idea")
+	actor := flag.String("actor", defaultActor(), "Who is injecting the idea (default: $HIVE_HUMAN or Michael)")
 	host := flag.String("host", "localhost", "Hive listener host")
 	port := flag.String("port", "8081", "Hive listener port")
 	flag.Parse()

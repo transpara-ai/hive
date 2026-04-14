@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/lovyou-ai/work"
 )
 
@@ -18,6 +20,10 @@ import (
 // remaining dots with spaces, and title-cases each word.
 func TitleFromFilename(path string) string {
 	name := filepath.Base(path)
+	// filepath.Base("") returns "." — treat as empty.
+	if name == "." {
+		return ""
+	}
 	if ext := filepath.Ext(name); ext != "" {
 		name = strings.TrimSuffix(name, ext)
 	}
@@ -116,7 +122,7 @@ func BuildEvent(opts Options) (Event, error) {
 		return Event{}, fmt.Errorf("marshal payload: %w", err)
 	}
 	return Event{
-		ID:        fmt.Sprintf("idea-file-%d", time.Now().UnixNano()),
+		ID:        "idea-file-" + uuid.New().String(),
 		NodeTitle: title,
 		Op:        "intend",
 		Actor:     opts.Actor,
@@ -141,7 +147,8 @@ func Post(ev Event, addr string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("hive returned HTTP %d", resp.StatusCode)
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return fmt.Errorf("hive returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
 	return nil
 }
