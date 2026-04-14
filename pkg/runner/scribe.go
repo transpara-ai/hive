@@ -56,7 +56,7 @@ It's a JSONL file — each line is a JSON object with "role" (human/assistant) a
 3. Extract the 5-10 most important reasoning chains — the WHY behind decisions
 4. For each, assert a claim on the graph:
 
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"assert","title":"Reasoning: <INSIGHT>","body":"<FULL REASONING CHAIN — what was said, why it mattered, what it changed>"}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"assert","title":"Reasoning: <INSIGHT>","body":"<FULL REASONING CHAIN — what was said, why it mattered, what it changed>"}'
 
 ## What to Extract
 - Corrections: "Matt said X was wrong because Y" → the Y is the insight
@@ -71,7 +71,7 @@ curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json
 - Capture reasoning, not just conclusions
 - Reference specific moments: "when discussing the Observer, Matt asked..."
 - Attention is finite — only assert what changes how the hive thinks
-`, latestTranscript, apiKey, r.cfg.SpaceSlug)
+`, latestTranscript, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.HiveDir,

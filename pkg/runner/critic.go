@@ -142,8 +142,8 @@ VERDICT: PASS
 VERDICT: REVISE
 
 If REVISE, create a fix task (causes links to the build being reviewed — Invariant 2: CAUSALITY):
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"task","title":"Fix: <subject>","description":"<what needs fixing>","priority":"high"%s}'
-`, diff, apiKey, r.cfg.SpaceSlug, causesSuffix)
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"Fix: <subject>","description":"<what needs fixing>","priority":"high"%s}'
+`, diff, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug, causesSuffix)
 
 		result, err := op.Operate(ctx, decision.OperateTask{
 			WorkDir:     r.cfg.RepoPath,

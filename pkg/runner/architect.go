@@ -55,7 +55,7 @@ func (r *Runner) runArchitect(ctx context.Context) {
 		if milestone != nil {
 			milestoneID = milestone.ID
 		}
-		instruction := buildArchitectOperateInstruction(context, r.cfg.SpaceSlug, milestoneID)
+		instruction := buildArchitectOperateInstruction(context, r.cfg.SpaceSlug, milestoneID, r.cfg.APIBase)
 		result, err := op.Operate(ctx, decision.OperateTask{
 			WorkDir:     r.cfg.RepoPath,
 			Instruction: instruction,
@@ -217,7 +217,7 @@ type architectSubtask struct {
 // lovyou.ai API — no text parsing needed.
 // milestoneID, when non-empty, is embedded in the curl payload as "causes":[milestoneID]
 // so every created task declares its causal parent (Invariant 2: CAUSALITY).
-func buildArchitectOperateInstruction(context, spaceSlug, milestoneID string) string {
+func buildArchitectOperateInstruction(context, spaceSlug, milestoneID, apiBase string) string {
 	apiKey := os.Getenv("LOVYOU_API_KEY")
 	causesSuffix := ""
 	if milestoneID != "" {
@@ -233,7 +233,7 @@ func buildArchitectOperateInstruction(context, spaceSlug, milestoneID string) st
 Create each task by running a curl command. Do NOT output formatted text — execute the commands directly.
 
 For each task, run:
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<DESCRIPTION>","priority":"high"%s}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<DESCRIPTION>","priority":"high"%s}'
 
 Create 2-4 tasks. Each should:
 - Change 1-3 files maximum
@@ -242,9 +242,9 @@ Create 2-4 tasks. Each should:
 - The FIRST task should be the foundation the others build on
 
 After creating all tasks, verify by listing the board:
-curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board" | head -200
+curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/board" | head -200
 
-Do NOT explain your plan in text. Just create the tasks.`, context, apiKey, spaceSlug, causesSuffix, apiKey, spaceSlug)
+Do NOT explain your plan in text. Just create the tasks.`, context, apiKey, apiBase, spaceSlug, causesSuffix, apiKey, apiBase, spaceSlug)
 }
 
 func buildArchitectPrompt(sharedCtx, repoCtx, scoutReport string) string {

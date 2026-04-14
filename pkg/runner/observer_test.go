@@ -66,7 +66,7 @@ func TestBuildPart2Instruction(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildPart2Instruction(tc.spaceSlug, tc.apiKey, tc.claimsSummary)
+			got := buildPart2Instruction(tc.spaceSlug, tc.apiKey, tc.claimsSummary, "https://lovyou.ai")
 
 			if tc.wantSkip && !strings.Contains(got, "Skipped") {
 				t.Errorf("expected skip message, got: %q", got)
@@ -135,7 +135,7 @@ func TestBuildOutputInstruction(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildOutputInstruction(tc.spaceSlug, tc.apiKey)
+			got := buildOutputInstruction(tc.spaceSlug, tc.apiKey, "https://lovyou.ai")
 
 			if tc.wantTextFmt && !strings.Contains(got, "TASK_TITLE:") {
 				t.Errorf("expected text task format, got: %q", got)
@@ -161,7 +161,7 @@ func TestBuildOutputInstruction(t *testing.T) {
 
 func TestBuildPart2InstructionBoardAndClaims(t *testing.T) {
 	// When apiKey is set, both the /board and /knowledge?tab=claims URLs must appear.
-	got := buildPart2Instruction("hive", "lv_key", "")
+	got := buildPart2Instruction("hive", "lv_key", "", "https://lovyou.ai")
 
 	if !strings.Contains(got, "/board") {
 		t.Errorf("expected /board URL in part2 instruction, got: %q", got)
@@ -365,7 +365,7 @@ func TestBuildClaimsSummary(t *testing.T) {
 // added in iteration 369. Category A must direct inline action; the hard rule must forbid
 // creating a task to close a task.
 func TestBuildOutputInstructionCategoryModel(t *testing.T) {
-	got := buildOutputInstruction("hive", "lv_testkey")
+	got := buildOutputInstruction("hive", "lv_testkey", "https://lovyou.ai")
 
 	// Category A: must instruct inline action via op=complete and op=edit.
 	if !strings.Contains(got, "Category A") {
@@ -392,7 +392,7 @@ func TestBuildOutputInstructionCategoryModel(t *testing.T) {
 // TestBuildOutputInstructionNoAntiPatternWhenNoKey verifies the fallback (no apiKey) path
 // does not contain the category model — it's only relevant when direct API access is possible.
 func TestBuildOutputInstructionNoAntiPatternWhenNoKey(t *testing.T) {
-	got := buildOutputInstruction("hive", "")
+	got := buildOutputInstruction("hive", "", "https://lovyou.ai")
 
 	if strings.Contains(got, "Category A") {
 		t.Errorf("Category A should not appear in no-key output, got: %q", got)
@@ -405,7 +405,7 @@ func TestBuildOutputInstructionNoAntiPatternWhenNoKey(t *testing.T) {
 // TestBuildPart2InstructionMetaTaskItem verifies item 7 (meta-tasks) was added to the
 // Part 2 audit checklist and instructs inline closure — not task creation.
 func TestBuildPart2InstructionMetaTaskItem(t *testing.T) {
-	got := buildPart2Instruction("hive", "lv_testkey", "")
+	got := buildPart2Instruction("hive", "lv_testkey", "", "https://lovyou.ai")
 
 	// Item 7 must be present.
 	if !strings.Contains(got, "Meta-tasks") {
@@ -431,7 +431,7 @@ func TestBuildPart2InstructionMetaTaskItem(t *testing.T) {
 // TestBuildPart2InstructionMetaTaskItemSkippedWhenNoKey verifies item 7 is irrelevant
 // without an API key (the whole section is skipped).
 func TestBuildPart2InstructionMetaTaskItemSkippedWhenNoKey(t *testing.T) {
-	got := buildPart2Instruction("hive", "", "")
+	got := buildPart2Instruction("hive", "", "", "https://lovyou.ai")
 
 	// Whole Part 2 is skipped — meta-task instructions shouldn't appear.
 	if strings.Contains(got, "Meta-tasks") {
@@ -520,7 +520,7 @@ TASK_CAUSE: cause-node-2`
 // includes the "causes" field when an API key is set. Observer-created tasks
 // must declare a cause to satisfy Invariant 2 (CAUSALITY).
 func TestBuildOutputInstructionCausesFieldPresent(t *testing.T) {
-	got := buildOutputInstruction("hive", "lv_testkey")
+	got := buildOutputInstruction("hive", "lv_testkey", "https://lovyou.ai")
 	if !strings.Contains(got, `"causes"`) {
 		t.Errorf("expected 'causes' field in curl template (Invariant 2: CAUSALITY), got: %q", got)
 	}
@@ -530,7 +530,7 @@ func TestBuildOutputInstructionCausesFieldPresent(t *testing.T) {
 // (no API key) does not contain the causes field — it's only meaningful when
 // the Observer can make direct API calls.
 func TestBuildOutputInstructionNoCausesWhenNoKey(t *testing.T) {
-	got := buildOutputInstruction("hive", "")
+	got := buildOutputInstruction("hive", "", "https://lovyou.ai")
 	if strings.Contains(got, `"causes"`) {
 		t.Errorf("causes field should not appear in no-key output, got: %q", got)
 	}
@@ -789,7 +789,7 @@ func TestBuildObserverInstruction(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildObserverInstruction(tc.repoPath, tc.spaceSlug, tc.apiKey, "")
+			got := buildObserverInstruction(tc.repoPath, tc.spaceSlug, tc.apiKey, "", "https://lovyou.ai")
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(got, part) {

@@ -48,6 +48,7 @@ Environment (not CLI flags):
 | **pgadmin** | Docker container | docker-compose.yml | `docker compose up -d pgadmin` |
 | **hive** | Go binary (foreground or background) | lovyou-ai-hive | `go run ./cmd/hive` |
 | **work-server** | Go binary (foreground or background) | lovyou-ai-work | `go run ./cmd/work-server` |
+| **localapi** | Go binary (background) | lovyou-ai-hive | `go run ./cmd/localapi` |
 | **dashboard** | Static HTML (no process) | lovyou-ai-summary | Served via GitHub Pages or file server |
 
 ## Paths
@@ -224,6 +225,38 @@ go run ./cmd/hive --daemon --interval 30m --space hive
 go run ./cmd/hive --council --topic "Should we add a caching layer?"
 ```
 
+### Local Pipeline (no lovyou.ai dependency)
+
+Requires the local API server (`cmd/localapi`) running alongside postgres.
+
+```bash
+# 1. Start localapi (if not already running)
+cd $HIVE_REPO
+nohup go run ./cmd/localapi/ > /tmp/localapi.log 2>&1 &
+echo $! > /tmp/localapi.pid
+echo "localapi started (PID: $(cat /tmp/localapi.pid))"
+
+# Verify
+curl -s http://localhost:8082/health  # → "ok"
+
+# 2. Seed a task for the pipeline to work on
+curl -s -X POST http://localhost:8082/app/hive/op \
+  -H "Authorization: Bearer dev" \
+  -H "Content-Type: application/json" \
+  -d '{"op":"intend","kind":"task","title":"Build a habit tracker CLI","description":"Go CLI: habit add, habit check, habit streak. SQLite storage. Include tests.","priority":"high"}'
+
+# 3. Run the pipeline against local API
+go run ./cmd/hive \
+    --pipeline \
+    --api http://localhost:8082 \
+    --space hive \
+    --store postgres://hive:hive@localhost:5432/hive \
+    --human Michael \
+    --pr
+```
+
+No `LOVYOU_API_KEY` needed — defaults to "dev" for localhost.
+
 ---
 
 ## Hive Down
@@ -325,6 +358,10 @@ curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:8080/telemetry/heal
 echo ""
 echo "=== Agent Count ==="
 docker exec hive-postgres-1 psql -U hive -d hive -t -c "SELECT COUNT(DISTINCT agent_role) FROM telemetry_agent_snapshots WHERE recorded_at > now() - interval '5 minutes'" 2>/dev/null || echo "No recent snapshots"
+
+echo ""
+echo "=== Local API ==="
+curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:8082/health 2>/dev/null || echo "Not running"
 
 echo ""
 echo "=== Auth Check ==="

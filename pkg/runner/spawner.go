@@ -104,7 +104,7 @@ Every unhandled failure is a missing agent. If a problem occurs and no agent exi
 - Use knowledge.search to find recent diagnostics and pipeline failures
 - Read loop/diagnostics.jsonl for failure patterns
 - Check the board for tasks that reveal missing capabilities:
-  curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board"
+  curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/board"
 
 ## Steps
 1. Read recent diagnostics — are there recurring failures no agent handles?
@@ -124,7 +124,7 @@ Every unhandled failure is a missing agent. If a problem occurs and no agent exi
 - Every new agent gets a task to wire it into the pipeline
 
 If no gaps are found, say "No agency gaps detected."`,
-		len(agentFiles), strings.Join(agentFiles, ", "), apiKey, r.cfg.SpaceSlug)
+		len(agentFiles), strings.Join(agentFiles, ", "), apiKey, r.cfg.APIBase, r.cfg.SpaceSlug)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.HiveDir,

@@ -157,7 +157,12 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 	// Resolve API key.
 	apiKey := os.Getenv("LOVYOU_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("LOVYOU_API_KEY required")
+		if strings.Contains(apiBase, "localhost") || strings.Contains(apiBase, "127.0.0.1") {
+			apiKey = "dev"
+			log.Printf("[pipeline] no LOVYOU_API_KEY — using 'dev' for local API")
+		} else {
+			return fmt.Errorf("LOVYOU_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
+		}
 	}
 
 	// Resolve repo path.
@@ -195,6 +200,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 		RepoPath:   absRepo,
 		HiveDir:    hiveDir,
 		APIClient:  client,
+		APIBase:   apiBase,
 		Provider:   provider,
 		RolePrompt: rolePrompt,
 		BudgetUSD:  budget,
@@ -242,6 +248,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 		RepoPath:     absRepo,
 		HiveDir:      hiveDir,
 		APIClient:    client,
+		APIBase:     apiBase,
 		Provider:     provider,
 		BudgetUSD:    budget,
 		CouncilTopic: topic,
@@ -257,7 +264,12 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 
 	apiKey := os.Getenv("LOVYOU_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("LOVYOU_API_KEY required")
+		if strings.Contains(apiBase, "localhost") || strings.Contains(apiBase, "127.0.0.1") {
+			apiKey = "dev"
+			log.Printf("[pipeline] no LOVYOU_API_KEY — using 'dev' for local API")
+		} else {
+			return fmt.Errorf("LOVYOU_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
+		}
 	}
 
 	if repoPath == "" {
@@ -354,6 +366,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			RepoPath:   activeRepo,
 			HiveDir:    hiveDir,
 			APIClient:  client,
+		APIBase:   apiBase,
 			Provider:   provider,
 			RolePrompt: runner.LoadRolePrompt(hiveDir, role),
 			BudgetUSD:  budget,

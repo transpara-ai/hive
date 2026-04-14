@@ -282,11 +282,11 @@ func (r *Runner) runReflectorOperate(ctx context.Context, op decision.IOperator)
 2. One knowledge.search for "lesson" to check the latest lesson number
 3. Write COVER/BLIND/ZOOM/FORMALIZE to loop/reflections.md (append)
 4. Assert lesson %d on the graph:
-   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"assert","title":"Lesson %d: <SHORT DESCRIPTION>","body":"<DETAILS>"%s}'
+   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"assert","title":"Lesson %d: <SHORT DESCRIPTION>","body":"<DETAILS>"%s}'
 5. Post reflection as document:
-   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"document","title":"Reflection: iter %d","description":"<COVER/BLIND/ZOOM/FORMALIZE>"%s}'
+   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"document","title":"Reflection: iter %d","description":"<COVER/BLIND/ZOOM/FORMALIZE>"%s}'
 
-No codebase exploration. Read artifacts, reflect, write, done.`, nextLessonNum, apiKey, r.cfg.SpaceSlug, nextLessonNum, causesSuffix, apiKey, r.cfg.SpaceSlug, nextLessonNum, causesSuffix)
+No codebase exploration. Read artifacts, reflect, write, done.`, nextLessonNum, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug, nextLessonNum, causesSuffix, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug, nextLessonNum, causesSuffix)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.HiveDir,

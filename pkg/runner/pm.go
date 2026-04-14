@@ -54,20 +54,20 @@ func (r *Runner) runPM(ctx context.Context) {
 6. Do NOT read files. Do NOT search knowledge. Just read the board and create the milestone.
 
 ## How to read the board
-curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board"
+curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/board"
 
 Look for:
 - "pinned": true — the Director's goal with the priority queue
 - "state": "open" or "active" — existing work (if any exists, STOP — don't create more)
 
 ## How to create a milestone
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<BODY WITH TARGET REPO AND SUBTASKS>","priority":"high","causes":["<PINNED_GOAL_ID>"]}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<BODY WITH TARGET REPO AND SUBTASKS>","priority":"high","causes":["<PINNED_GOAL_ID>"]}'
 
 ## %s
 
 If the board already has open tasks: respond with "Board has work. No action needed." and stop.
 If there is no pinned goal: respond with "No pinned goal. Waiting for Director." and stop.
-`, apiKey, slug, apiKey, slug, repoList)
+`, apiKey, r.cfg.APIBase, slug, apiKey, r.cfg.APIBase, slug, repoList)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.HiveDir,

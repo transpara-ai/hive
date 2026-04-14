@@ -68,12 +68,12 @@ func (r *Runner) runScoutOperate(ctx context.Context, op decision.IOperator) {
 5. Identify ONE gap — product gaps outrank code gaps
 6. Write the gap report to loop/scout.md with: Gap, Evidence, Impact, Scope, Suggestion
 7. Also post the report as a document to the board:
-   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"express","title":"Scout Report: <GAP>","body":"<REPORT>"}'
+   curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"express","title":"Scout Report: <GAP>","body":"<REPORT>"}'
 
 ## Target repo: %s
 
 Write the report. Be specific — name files, functions, and exact changes.`,
-		os.Getenv("LOVYOU_API_KEY"), r.cfg.SpaceSlug, r.cfg.RepoPath)
+		os.Getenv("LOVYOU_API_KEY"), r.cfg.APIBase, r.cfg.SpaceSlug, r.cfg.RepoPath)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.RepoPath,

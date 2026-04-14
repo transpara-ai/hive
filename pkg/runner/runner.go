@@ -51,6 +51,7 @@ type Config struct {
 	RepoPath   string // absolute path to the repo to operate on
 	HiveDir    string // path to hive repo (for state.md, role prompts)
 	APIClient  *api.Client
+	APIBase    string // Base URL for agent curl commands (e.g. "http://localhost:8082")
 	Provider   intelligence.Provider
 	RolePrompt string // loaded from agents/{role}.md
 	Interval   time.Duration

@@ -60,7 +60,7 @@ func RunCouncil(ctx context.Context, cfg Config) error {
 			if canOperate {
 				// Operate mode: agent can search knowledge, read code, check the board.
 				apiKey := os.Getenv("LOVYOU_API_KEY")
-				instruction := buildCouncilOperateInstruction(m.role, m.prompt, cfg.CouncilTopic, cfg.SpaceSlug, apiKey)
+				instruction := buildCouncilOperateInstruction(m.role, m.prompt, cfg.CouncilTopic, cfg.SpaceSlug, apiKey, cfg.APIBase)
 				result, err := op.Operate(ctx, decision.OperateTask{
 					WorkDir:     cfg.HiveDir,
 					Instruction: instruction,
@@ -289,7 +289,7 @@ func synthesizeCouncil(members []councilMember) string {
 // buildCouncilOperateInstruction creates the instruction for a council member
 // using Operate(). The agent can search knowledge, read code, and check the
 // board before speaking — grounded deliberation, not blind opinion.
-func buildCouncilOperateInstruction(role, rolePrompt, topic, spaceSlug, apiKey string) string {
+func buildCouncilOperateInstruction(role, rolePrompt, topic, spaceSlug, apiKey, apiBase string) string {
 	question := "What's the most important thing right now from your perspective? What risk or gap is invisible to others? What would you prioritize?"
 	if topic != "" {
 		question = fmt.Sprintf("The Director has focused this council on: **%s**\n\nDeliberate on this question from your role's perspective. Be deep, specific, and honest.", topic)
@@ -305,14 +305,14 @@ Before speaking, SEARCH for relevant knowledge to ground your perspective:
 - Use knowledge.search to find prior work, decisions, and context
 - Use knowledge.primitives to check which ontology primitives are relevant
 - Use knowledge.get to read specific docs, blog posts, or reflections
-- Use Bash to check the board: curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board"
+- Use Bash to check the board: curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/board"
 
 ## Your Task
 %s
 
 Search first, then speak. Ground your perspective in what you find.
 Respond in 10-20 lines. Be specific — name files, features, primitives.
-Disagree with other roles if you must. Name what's missing.`, role, rolePrompt, apiKey, spaceSlug, question)
+Disagree with other roles if you must. Name what's missing.`, role, rolePrompt, apiKey, apiBase, spaceSlug, question)
 }
 
 func truncateForPost(s string, maxLen int) string {

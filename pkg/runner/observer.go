@@ -46,7 +46,7 @@ func (r *Runner) runObserver(ctx context.Context) {
 	if apiKey == "" {
 		log.Printf("[observer] LOVYOU_API_KEY not set; graph integrity audit will be skipped")
 	}
-	instruction := buildObserverInstruction(r.cfg.RepoPath, r.cfg.SpaceSlug, apiKey, claimsSummary)
+	instruction := buildObserverInstruction(r.cfg.RepoPath, r.cfg.SpaceSlug, apiKey, claimsSummary, r.cfg.APIBase)
 
 	// Use Operate() — the Observer needs file access to grep patterns, read templates, etc.
 	op, ok := r.cfg.Provider.(decision.IOperator)
@@ -218,8 +218,8 @@ func buildClaimsSummary(claims []api.Node) string {
 	return fmt.Sprintf("%d claims exist%s. Titles: %s", len(claims), suffix, strings.Join(titles, ", "))
 }
 
-func buildObserverInstruction(repoPath, spaceSlug, apiKey, claimsSummary string) string {
-	part2 := buildPart2Instruction(spaceSlug, apiKey, claimsSummary)
+func buildObserverInstruction(repoPath, spaceSlug, apiKey, claimsSummary, apiBase string) string {
+	part2 := buildPart2Instruction(spaceSlug, apiKey, claimsSummary, apiBase)
 	return fmt.Sprintf(`You are the Observer. Audit both the product AND the hive's own graph for integrity.
 
 ## Your repo: %s
@@ -227,7 +227,7 @@ func buildObserverInstruction(repoPath, spaceSlug, apiKey, claimsSummary string)
 ## Part 1: Product Audit
 
 1. **Consistency:** Grep entity kind constants. For each, verify handler, route, sidebar nav, create form exist.
-2. **Route health:** curl key pages — https://lovyou.ai/, /discover, /hive — check status codes.
+2. **Route health:** curl key pages — the base URL, /discover, /hive — check status codes.
 3. **User flow:** Is there a clear path from landing → sign in → create space → use product?
 
 %s
@@ -241,10 +241,10 @@ Also use mcp__knowledge__knowledge_search to check:
 
 %s
 
-If everything looks good, say "No issues found."`, repoPath, part2, buildOutputInstruction(spaceSlug, apiKey))
+If everything looks good, say "No issues found."`, repoPath, part2, buildOutputInstruction(spaceSlug, apiKey, apiBase))
 }
 
-func buildPart2Instruction(spaceSlug, apiKey, claimsSummary string) string {
+func buildPart2Instruction(spaceSlug, apiKey, claimsSummary, apiBase string) string {
 	if apiKey == "" {
 		return `## Part 2: Graph Integrity Audit
 
@@ -260,11 +260,11 @@ func buildPart2Instruction(spaceSlug, apiKey, claimsSummary string) string {
 %s
 Check the hive's own data on the board for structural issues:
 
-curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/board"
+curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/board"
 
 Also fetch claims to audit knowledge integrity (claims exist — do not report zero without checking):
 
-curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "https://lovyou.ai/app/%s/knowledge?tab=claims&limit=50"
+curl -s -H "Authorization: Bearer %s" -H "Accept: application/json" "%s/app/%s/knowledge?tab=claims&limit=50"
 
 Look for:
 1. **Unlinked nodes** — critiques/claims that don't reference the build they review
@@ -275,10 +275,10 @@ Look for:
 6. **Claim integrity** — claims with no body, no causes, or stuck in challenged state with no resolution
 7. **Meta-tasks** — any task whose sole purpose is to close/complete another task. These are board noise. Close BOTH the meta-task AND the target task inline using op=complete. Do not create a new task for this.
 
-**Board hygiene rule:** If you find a task that says "close task X" or "complete task Y" or "mark Z as done", that is a meta-task created by a prior Observer bug. Close the meta-task itself with op=complete. Then evaluate whether the target task should also be closed.`, groundTruth, apiKey, spaceSlug, apiKey, spaceSlug)
+**Board hygiene rule:** If you find a task that says "close task X" or "complete task Y" or "mark Z as done", that is a meta-task created by a prior Observer bug. Close the meta-task itself with op=complete. Then evaluate whether the target task should also be closed.`, groundTruth, apiKey, apiBase, spaceSlug, apiKey, apiBase, spaceSlug)
 }
 
-func buildOutputInstruction(spaceSlug, apiKey string) string {
+func buildOutputInstruction(spaceSlug, apiKey, apiBase string) string {
 	if apiKey == "" {
 		return `Report the most important findings (max 2) as:
 TASK_TITLE: <title>
@@ -294,23 +294,23 @@ If the action requires no code change — closing a false-positive, completing a
 removing board noise — execute it directly with op=complete or op=edit:
 
 Close a false-positive task:
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"complete","node_id":"<NODE_ID>"}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"complete","node_id":"<NODE_ID>"}'
 
 Mark a task active/in-progress:
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"edit","node_id":"<NODE_ID>","state":"active"}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"edit","node_id":"<NODE_ID>","state":"active"}'
 
 Heuristic: if you can fix it without writing code, fix it now. Do not defer.
 
 ### Category B — Code changes needed (create a task, max 2)
 Only create a task if the finding requires a Builder to write or change code:
 
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "https://lovyou.ai/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<DESCRIPTION>","priority":"<PRIORITY>","causes":["<NODE_ID>"]}'
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"<TITLE>","description":"<DESCRIPTION>","priority":"<PRIORITY>","causes":["<NODE_ID>"]}'
 
 Replace <NODE_ID> with the ID of the specific board node, claim, or document that
 triggered this finding (Invariant 2: CAUSALITY — every intend op must declare its cause).
 Use the ID you found in the board or knowledge query above.
 
-**Rule:** Creating a task to close a task is always wrong. Close it yourself.`, apiKey, spaceSlug, apiKey, spaceSlug, apiKey, spaceSlug)
+**Rule:** Creating a task to close a task is always wrong. Close it yourself.`, apiKey, apiBase, spaceSlug, apiKey, apiBase, spaceSlug, apiKey, apiBase, spaceSlug)
 }
 
 // Helper: grep registered routes from handlers.go.
@@ -338,9 +338,9 @@ func (r *Runner) grepEntityKinds() string {
 // Helper: check if the live site is up.
 func (r *Runner) checkLiveHealth() string {
 	pages := []string{
-		"https://lovyou.ai/",
-		"https://lovyou.ai/discover",
-		"https://lovyou.ai/search",
+		r.cfg.APIBase + "/",
+		r.cfg.APIBase + "/discover",
+		r.cfg.APIBase + "/search",
 	}
 	var results []string
 	for _, url := range pages {
