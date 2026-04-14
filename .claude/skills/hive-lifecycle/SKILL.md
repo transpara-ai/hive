@@ -19,7 +19,7 @@ Hive Lifecycle Commands:
   hive restart             Down then up
   hive status              Check all components (docker, processes, ports, auth)
   hive run <idea>          Start hive with an idea (legacy multi-agent mode)
-  hive run --pipeline      Scout → Builder → Critic pipeline
+  hive run --pipeline      Scout → Builder → Critic pipeline (loops at --interval, default 30m)
   hive run --role <role>   Single agent mode (builder/scout/critic/monitor)
   hive run --council       Convene all agents for deliberation
 
@@ -221,11 +221,14 @@ This is an alternative to the legacy multi-agent runtime above.
 # Single agent — works one task matching its role
 go run ./cmd/hive --role builder --space hive --one-shot
 
-# Full pipeline — Scout finds work, Builder implements, Critic reviews
+# Full pipeline — loops at --interval (default 30m)
 go run ./cmd/hive --pipeline --space hive
 
-# Daemon — pipeline on a loop
-go run ./cmd/hive --daemon --interval 30m --space hive
+# Pipeline with custom interval
+go run ./cmd/hive --pipeline --interval 15m --space hive
+
+# Single pipeline cycle (no loop)
+go run ./cmd/hive --pipeline --one-shot --space hive
 
 # Council — deliberation session
 go run ./cmd/hive --council --topic "Should we add a caching layer?"
@@ -435,14 +438,13 @@ docker exec hive-postgres-1 psql -U hive -d hive -t -c \
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--role` | | Single agent: builder, scout, critic, monitor |
-| `--pipeline` | false | Scout + Builder + Critic in sequence |
-| `--daemon` | false | Loop pipeline at `--interval` |
-| `--interval` | 30m | Daemon cycle interval |
+| `--pipeline` | false | Scout + Builder + Critic pipeline (loops at `--interval`) |
+| `--interval` | 30m | Pipeline cycle interval |
 | `--council` | false | Convene all agents for deliberation |
 | `--topic` | | Focus question for council |
 | `--space` | hive | lovyou.ai space slug |
 | `--budget` | 10.0 | Daily budget in USD |
-| `--one-shot` | false | Work one task then exit |
+| `--one-shot` | false | Run once then exit (single pipeline cycle or single task) |
 | `--pr` | false | Create feature branch + PR instead of pushing to main |
 | `--worktrees` | false | Each Builder task gets its own git worktree |
 | `--repos` | | Named repos: `name=path,name=path` |
