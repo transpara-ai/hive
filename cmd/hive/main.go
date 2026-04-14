@@ -14,13 +14,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -70,6 +73,8 @@ func run() error {
 	prMode := flag.Bool("pr", false, "Create a feature branch and open a PR instead of pushing directly to main")
 	useWorktrees := flag.Bool("worktrees", false, "Each Builder task gets its own git worktree for isolation")
 	autoClone := flag.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
+	ingestSpec := flag.String("ingest", "", "Ingest a spec markdown file as a task (path to .md file)")
+	ingestPriority := flag.String("priority", "high", "Task priority for --ingest: low|medium|high|critical")
 
 	// Shared flags.
 	repo := flag.String("repo", "", "Path to repo for Operate (default: current dir)")
@@ -84,6 +89,9 @@ func run() error {
 	loop := flag.Bool("loop", false, "Keep agents alive when idle — block on bus instead of quiescing")
 	flag.Parse()
 
+	if *ingestSpec != "" {
+		return runIngest(*ingestSpec, *space, *apiBase, *ingestPriority)
+	}
 	if *council {
 		return runCouncilCmd(*space, *apiBase, *repo, *budget, *councilTopic)
 	}
@@ -115,6 +123,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --daemon               Run pipeline in a loop at --interval")
 	fmt.Fprintln(os.Stderr, "  --role ROLE             Run a single agent role (builder, scout, critic, monitor)")
 	fmt.Fprintln(os.Stderr, "  --council              Convene all agents for deliberation")
+	fmt.Fprintln(os.Stderr, "  --ingest PATH          Ingest a spec markdown file as a task")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Hive flags (use with --human):")
 	fmt.Fprintln(os.Stderr, "  --idea TEXT             Seed idea for agents to work on")
@@ -146,6 +155,71 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  hive --human Michael --approve-requests --approve-roles --loop --store postgres://...")
 	fmt.Fprintln(os.Stderr, "  hive --pipeline --repo ../site --space hive --budget 10")
 	fmt.Fprintln(os.Stderr, "  hive --role builder --repo ../site --one-shot")
+	fmt.Fprintln(os.Stderr, "  hive --ingest spec.md --space hive --api http://localhost:8082")
+}
+
+// ─── Ingest mode ─────────────────────────────────────────────────────
+
+// runIngest reads a markdown spec file and posts it as a task to the local API.
+func runIngest(specPath, space, apiBase, priority string) error {
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read spec: %w", err)
+	}
+	body := string(data)
+
+	// Derive title from first H1, or fall back to filename.
+	title := strings.TrimSuffix(filepath.Base(specPath), filepath.Ext(specPath))
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "# ") {
+			title = strings.TrimSpace(strings.TrimPrefix(line, "# "))
+			break
+		}
+	}
+	title = "[SPEC] " + title
+
+	apiKey := os.Getenv("LOVYOU_API_KEY")
+	if apiKey == "" {
+		apiKey = "dev"
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"op":          "intend",
+		"kind":        "task",
+		"title":       title,
+		"description": body,
+		"priority":    priority,
+	})
+
+	url := fmt.Sprintf("%s/app/%s/op", apiBase, space)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("post to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		Node struct {
+			ID string `json:"id"`
+		} `json:"node"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	fmt.Printf("ingested: %s — %s\n", result.Node.ID, title)
+	return nil
 }
 
 // ─── Runner mode ─────────────────────────────────────────────────────
