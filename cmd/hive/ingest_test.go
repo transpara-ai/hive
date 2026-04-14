@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,7 +94,7 @@ func TestRunIngest(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if tt.errContain != "" && !containsStr(err.Error(), tt.errContain) {
+				if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errContain)
 				}
 				return
@@ -106,11 +107,11 @@ func TestRunIngest(t *testing.T) {
 			if gotPayload["title"] != tt.wantTitle {
 				t.Errorf("title = %q, want %q", gotPayload["title"], tt.wantTitle)
 			}
-			if gotPayload["op"] != "intend" {
-				t.Errorf("op = %q, want %q", gotPayload["op"], "intend")
+			if gotPayload["op"] != ingestOp {
+				t.Errorf("op = %q, want %q", gotPayload["op"], ingestOp)
 			}
-			if gotPayload["kind"] != "task" {
-				t.Errorf("kind = %q, want %q", gotPayload["kind"], "task")
+			if gotPayload["kind"] != ingestKind {
+				t.Errorf("kind = %q, want %q", gotPayload["kind"], ingestKind)
 			}
 			if gotPayload["priority"] != tt.priority {
 				t.Errorf("priority = %q, want %q", gotPayload["priority"], tt.priority)
@@ -132,7 +133,7 @@ func TestRunIngest_MissingAPIKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
-	if !containsStr(err.Error(), "LOVYOU_API_KEY required") {
+	if !strings.Contains(err.Error(), "LOVYOU_API_KEY required") {
 		t.Errorf("error %q should mention LOVYOU_API_KEY", err.Error())
 	}
 }
@@ -145,15 +146,3 @@ func TestRunIngest_MissingFile(t *testing.T) {
 	}
 }
 
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && searchStr(s, substr)
-}
-
-func searchStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
