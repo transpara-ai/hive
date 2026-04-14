@@ -8,6 +8,10 @@
 //
 //	go run ./cmd/hive --role builder --repo ../site --space hive
 //
+// Ingest mode: posts a spec markdown file as a task to the local API.
+//
+//	go run ./cmd/hive --ingest spec.md --space hive --api http://localhost:8082
+//
 // Legacy mode (runtime): spawns all agents, coordinates via event graph.
 //
 //	go run ./cmd/hive --human Matt --idea "description"
@@ -73,6 +77,8 @@ func run() error {
 	prMode := flag.Bool("pr", false, "Create a feature branch and open a PR instead of pushing directly to main")
 	useWorktrees := flag.Bool("worktrees", false, "Each Builder task gets its own git worktree for isolation")
 	autoClone := flag.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
+
+	// Ingest mode flags.
 	ingestSpec := flag.String("ingest", "", "Ingest a spec markdown file as a task (path to .md file)")
 	ingestPriority := flag.String("priority", "high", "Task priority for --ingest: low|medium|high|critical")
 
@@ -160,8 +166,18 @@ func printUsage() {
 
 // ─── Ingest mode ─────────────────────────────────────────────────────
 
+const (
+	ingestTitlePrefix = "[SPEC] "
+	ingestOp         = "intend"
+	ingestKind       = "task"
+	ingestTimeout    = 30 * time.Second
+)
+
 // runIngest reads a markdown spec file and posts it as a task to the local API.
 func runIngest(specPath, space, apiBase, priority string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("read spec: %w", err)
@@ -176,23 +192,29 @@ func runIngest(specPath, space, apiBase, priority string) error {
 			break
 		}
 	}
-	title = "[SPEC] " + title
+	title = ingestTitlePrefix + title
 
+	// Resolve API key.
 	apiKey := os.Getenv("LOVYOU_API_KEY")
 	if apiKey == "" {
-		apiKey = "dev"
+		return fmt.Errorf("LOVYOU_API_KEY required")
 	}
 
-	payload, _ := json.Marshal(map[string]string{
-		"op":          "intend",
-		"kind":        "task",
+	payload, err := json.Marshal(map[string]string{
+		"op":          ingestOp,
+		"kind":        ingestKind,
 		"title":       title,
 		"description": body,
 		"priority":    priority,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
 
 	url := fmt.Sprintf("%s/app/%s/op", apiBase, space)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	ctx, cancel := context.WithTimeout(ctx, ingestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -205,7 +227,10 @@ func runIngest(specPath, space, apiBase, priority string) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
@@ -217,6 +242,9 @@ func runIngest(specPath, space, apiBase, priority string) error {
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
+	}
+	if result.Node.ID == "" {
+		return fmt.Errorf("server returned empty node ID")
 	}
 	fmt.Printf("ingested: %s — %s\n", result.Node.ID, title)
 	return nil
