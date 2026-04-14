@@ -166,11 +166,12 @@ func printUsage() {
 // ─── Ingest mode ─────────────────────────────────────────────────────
 
 const (
-	ingestTitlePrefix = "[SPEC] "
-	ingestOp         = "intend"
-	ingestKind       = "task"
-	ingestTimeout    = 30 * time.Second
-	ingestGitHubOrg  = "transpara-ai"
+	ingestTitlePrefix  = "[SPEC] "
+	ingestOp           = "intend"
+	ingestKind         = "task"
+	ingestTimeout      = 30 * time.Second
+	ingestDefaultOrg   = "transpara-ai"
+	ingestDefaultLang  = "go"
 )
 
 // runIngest reads a markdown spec file, creates a repo for it (if needed),
@@ -200,7 +201,7 @@ func runIngest(specPath, space, apiBase, priority string) error {
 	var repoPath string
 	if os.Getenv("HIVE_INGEST_SKIP_REPO") == "" {
 		var err error
-		repoPath, err = ensureSpecRepo(slug)
+		repoPath, err = ensureSpecRepo(slug, body)
 		if err != nil {
 			return fmt.Errorf("ensure repo: %w", err)
 		}
@@ -260,22 +261,46 @@ func runIngest(specPath, space, apiBase, priority string) error {
 	}
 	fmt.Printf("ingested: %s — %s\n", result.Node.ID, title)
 	if repoPath != "" {
-		fmt.Printf("repo:     %s/%s → %s\n", ingestGitHubOrg, slug, repoPath)
+		fmt.Printf("repo:     %s/%s → %s\n", ingestOrg(), slug, repoPath)
 	}
 	return nil
 }
 
+// ingestOrg returns the GitHub org for ingest repos.
+// Reads HIVE_GITHUB_ORG, then GIT_ORG from config.env, falls back to default.
+func ingestOrg() string {
+	if v := os.Getenv("HIVE_GITHUB_ORG"); v != "" {
+		return v
+	}
+	if v := os.Getenv("GIT_ORG"); v != "" {
+		return v
+	}
+	return ingestDefaultOrg
+}
+
+// detectLanguage guesses the project language from spec content.
+// Returns "go" if no language-specific keywords are found.
+func detectLanguage(body string) (lang, buildCmd, testCmd string) {
+	lower := strings.ToLower(body)
+	switch {
+	case strings.Contains(lower, "typescript") || strings.Contains(lower, "package.json") || strings.Contains(lower, "node.js"):
+		return "typescript", "npm run build", "npm test"
+	case strings.Contains(lower, "python") || strings.Contains(lower, "requirements.txt") || strings.Contains(lower, "pyproject.toml"):
+		return "python", "python -m build", "python -m pytest"
+	case strings.Contains(lower, "rust") || strings.Contains(lower, "cargo.toml"):
+		return "rust", "cargo build", "cargo test"
+	default:
+		return ingestDefaultLang, "go build -buildvcs=false ./...", "go test -buildvcs=false ./..."
+	}
+}
+
 // slugify converts a title to a kebab-case repo slug.
-// Strips the [SPEC] prefix, common boilerplate words, and special characters.
+// Strips the [SPEC] prefix, common boilerplate prefixes, and non-alphanumeric characters.
 func slugify(title string) string {
 	s := strings.TrimPrefix(title, ingestTitlePrefix)
 	// Strip common prefixes that don't add meaning to a repo name.
 	for _, prefix := range []string{"Work Description: ", "Work Description:", "Spec: ", "Spec:"} {
 		s = strings.TrimPrefix(s, prefix)
-	}
-	// Strip trailing context like "for Transpara Platform".
-	if idx := strings.LastIndex(s, " for "); idx > 10 {
-		s = s[:idx]
 	}
 	s = strings.ToLower(s)
 	// Replace non-alphanumeric runs with a single hyphen.
@@ -299,7 +324,9 @@ func slugify(title string) string {
 
 // ensureSpecRepo creates a GitHub repo and local directory for a spec slug
 // if they don't already exist, and registers the repo in repos.json.
-func ensureSpecRepo(slug string) (string, error) {
+// Returns early if the slug is already registered and the directory exists on disk.
+func ensureSpecRepo(slug, specBody string) (string, error) {
+	org := ingestOrg()
 	hiveDir := findHiveDir()
 	reposJSONPath := filepath.Join(hiveDir, "repos.json")
 
@@ -309,28 +336,34 @@ func ensureSpecRepo(slug string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
-	// Check if already in repos.json.
-	if repoInRegistry(reposJSONPath, slug) {
+	// Check if already in repos.json and on disk.
+	registered, regErr := repoInRegistry(reposJSONPath, slug)
+	if regErr != nil {
+		return "", fmt.Errorf("check registry: %w", regErr)
+	}
+	if registered {
 		if _, err := os.Stat(repoDir); err == nil {
 			log.Printf("[ingest] repo %s already exists at %s", slug, repoDir)
 			return repoDir, nil
 		}
 	}
 
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", org, slug)
+
 	// Create GitHub repo (ignore error if it already exists).
 	ghCreate := exec.Command("gh", "repo", "create",
-		ingestGitHubOrg+"/"+slug,
+		org+"/"+slug,
 		"--private",
 		"--description", fmt.Sprintf("Built by hive pipeline from [SPEC] %s", slug),
 	)
 	if out, err := ghCreate.CombinedOutput(); err != nil {
-		// "already exists" is fine.
-		if !strings.Contains(string(out), "already exists") {
-			return "", fmt.Errorf("gh repo create: %s", out)
+		outStr := string(out)
+		if !strings.Contains(outStr, "already exists") {
+			return "", fmt.Errorf("gh repo create: %s", outStr)
 		}
-		log.Printf("[ingest] repo %s/%s already exists on GitHub", ingestGitHubOrg, slug)
+		log.Printf("[ingest] repo %s/%s already exists on GitHub", org, slug)
 	} else {
-		log.Printf("[ingest] created repo %s/%s", ingestGitHubOrg, slug)
+		log.Printf("[ingest] created repo %s/%s", org, slug)
 	}
 
 	// Init local directory if it doesn't exist.
@@ -338,12 +371,13 @@ func ensureSpecRepo(slug string) (string, error) {
 		if err := os.MkdirAll(repoDir, 0755); err != nil {
 			return "", fmt.Errorf("mkdir: %w", err)
 		}
+		// Push directly to the URL to avoid "origin" remote naming convention issues.
 		for _, args := range [][]string{
 			{"init"},
-			{"remote", "add", "origin", fmt.Sprintf("https://github.com/%s/%s.git", ingestGitHubOrg, slug)},
+			{"remote", "add", org, repoURL},
 			{"checkout", "-b", "main"},
 			{"commit", "--allow-empty", "-m", "init: repo for " + slug},
-			{"push", "-u", "origin", "main"},
+			{"push", "-u", org, "main"},
 		} {
 			cmd := exec.Command("git", args...)
 			cmd.Dir = repoDir
@@ -355,47 +389,56 @@ func ensureSpecRepo(slug string) (string, error) {
 	}
 
 	// Add to repos.json if not already present.
-	if !repoInRegistry(reposJSONPath, slug) {
-		if err := addToRegistry(reposJSONPath, slug, repoDir); err != nil {
+	registered, regErr = repoInRegistry(reposJSONPath, slug)
+	if regErr != nil {
+		return "", fmt.Errorf("check registry: %w", regErr)
+	}
+	if !registered {
+		lang, buildCmd, testCmd := detectLanguage(specBody)
+		if err := addToRegistry(reposJSONPath, slug, repoDir, org, lang, buildCmd, testCmd); err != nil {
 			return "", fmt.Errorf("update repos.json: %w", err)
 		}
-		log.Printf("[ingest] added %s to repos.json", slug)
+		log.Printf("[ingest] added %s to repos.json (lang=%s)", slug, lang)
 	}
 
 	return repoDir, nil
 }
 
 // repoInRegistry checks if a slug already exists in repos.json.
-func repoInRegistry(path, slug string) bool {
+// Returns false with nil error if repos.json does not exist (not yet bootstrapped).
+func repoInRegistry(path, slug string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
-	}
-	var reg struct {
-		Repos []struct {
-			Name string `json:"name"`
-		} `json:"repos"`
-	}
-	if err := json.Unmarshal(data, &reg); err != nil {
-		return false
-	}
-	for _, r := range reg.Repos {
-		if r.Name == slug {
-			return true
+		if os.IsNotExist(err) {
+			return false, nil
 		}
-	}
-	return false
-}
-
-// addToRegistry appends a new repo entry to repos.json.
-func addToRegistry(path, slug, absPath string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
+		return false, fmt.Errorf("read %s: %w", path, err)
 	}
 	var reg registry.Registry
 	if err := json.Unmarshal(data, &reg); err != nil {
-		return err
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	for _, r := range reg.Repos {
+		if r.Name == slug {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// addToRegistry appends a new repo entry to repos.json.
+// Creates an empty registry if the file does not exist.
+func addToRegistry(path, slug, absPath, org, lang, buildCmd, testCmd string) error {
+	var reg registry.Registry
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		// Bootstrap empty registry.
+	} else if err := json.Unmarshal(data, &reg); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 
 	// Compute relative path from repos.json dir.
@@ -407,16 +450,16 @@ func addToRegistry(path, slug, absPath string) error {
 
 	reg.Repos = append(reg.Repos, registry.Repo{
 		Name:      slug,
-		URL:       fmt.Sprintf("https://github.com/%s/%s", ingestGitHubOrg, slug),
+		URL:       fmt.Sprintf("https://github.com/%s/%s", org, slug),
 		LocalPath: relPath,
-		Language:  "go",
-		BuildCmd:  "go build -buildvcs=false ./...",
-		TestCmd:   "go test -buildvcs=false ./...",
+		Language:  lang,
+		BuildCmd:  buildCmd,
+		TestCmd:   testCmd,
 	})
 
 	out, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal registry: %w", err)
 	}
 	return os.WriteFile(path, append(out, '\n'), 0644)
 }

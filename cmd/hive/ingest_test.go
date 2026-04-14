@@ -152,18 +152,86 @@ func TestRunIngest_MissingFile(t *testing.T) {
 	}
 }
 
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantLang string
+	}{
+		{"go default", "Build a REST API with endpoints", "go"},
+		{"typescript", "Use TypeScript and package.json for the build", "typescript"},
+		{"python", "Install via requirements.txt and run pytest", "python"},
+		{"rust", "Add to Cargo.toml and compile with cargo build", "rust"},
+		{"node.js", "A Node.js server with express", "typescript"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lang, _, _ := detectLanguage(tt.body)
+			if lang != tt.wantLang {
+				t.Errorf("detectLanguage() lang = %q, want %q", lang, tt.wantLang)
+			}
+		})
+	}
+}
+
+func TestRepoInRegistry(t *testing.T) {
+	dir := t.TempDir()
+
+	// Missing file returns false, nil.
+	missing := filepath.Join(dir, "nope.json")
+	found, err := repoInRegistry(missing, "foo")
+	if err != nil {
+		t.Fatalf("missing file: unexpected error: %v", err)
+	}
+	if found {
+		t.Error("missing file: expected false")
+	}
+
+	// Valid file with entries.
+	valid := filepath.Join(dir, "repos.json")
+	if err := os.WriteFile(valid, []byte(`{"repos":[{"name":"site"},{"name":"hive"}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	found, err = repoInRegistry(valid, "site")
+	if err != nil {
+		t.Fatalf("valid lookup: %v", err)
+	}
+	if !found {
+		t.Error("expected site to be found")
+	}
+	found, err = repoInRegistry(valid, "nope")
+	if err != nil {
+		t.Fatalf("valid lookup: %v", err)
+	}
+	if found {
+		t.Error("expected nope to not be found")
+	}
+
+	// Malformed file returns error.
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte(`{not json`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repoInRegistry(bad, "foo")
+	if err == nil {
+		t.Error("malformed file: expected error")
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"[SPEC] MATLAB Integration Endpoint for Transpara Platform", "matlab-integration-endpoint"},
-		{"[SPEC] Work Description: Build a REST API for Users", "build-a-rest-api"},
+		{"[SPEC] MATLAB Integration Endpoint for Transpara Platform", "matlab-integration-endpoint-for-transpara-platform"},
+		{"[SPEC] Work Description: Build a REST API for Users", "build-a-rest-api-for-users"},
 		{"[SPEC] Simple Title", "simple-title"},
-		{"[SPEC] Spec: Auth System for Mobile App", "auth-system"},
+		{"[SPEC] Spec: Auth System for Mobile App", "auth-system-for-mobile-app"},
 		{"[SPEC] Already-Kebab-Case", "already-kebab-case"},
 		{"[SPEC] Lots   of   spaces", "lots-of-spaces"},
 		{"[SPEC] Special!@#$Characters", "special-characters"},
+		{"[SPEC] Support for Pagination", "support-for-pagination"},
+		{"[SPEC] Support for Rate-Limiting", "support-for-rate-limiting"},
 		{"", "spec"},
 	}
 	for _, tt := range tests {
