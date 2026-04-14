@@ -285,6 +285,17 @@ func TestWarmStartIntegration_TaskRecovery(t *testing.T) {
 		} else {
 			t.Logf("PASS: ReplayBudgetFromStore succeeded (agents: %d)", len(budgets))
 		}
+
+		// ── Cleanup: mark test task as done so it doesn't pollute the board ──
+		cleanupCauses := []types.EventID{taskID}
+		if err := tasks.WaiveArtifact(humanID, taskID, "test cleanup — no deliverable", cleanupCauses, convID); err != nil {
+			t.Logf("cleanup: waive artifact: %v (may already be waived)", err)
+		}
+		if err := tasks.Complete(humanID, taskID, "test cleanup", cleanupCauses, convID); err != nil {
+			t.Logf("cleanup: complete task: %v (may already be completed)", err)
+		} else {
+			t.Logf("cleanup: marked task %s as completed", taskID)
+		}
 	})
 }
 
