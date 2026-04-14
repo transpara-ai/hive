@@ -23,6 +23,12 @@ Hive Lifecycle Commands:
   hive run --role <role>   Single agent mode (builder/scout/critic/monitor)
   hive run --council       Convene all agents for deliberation
 
+  hive ingest <file>       Ingest a spec markdown file as a board task
+  hive tasks               List open tasks on the board
+  hive agents              Show agent roster with models and session state
+  hive budget <agent> <n>  Override an agent's iteration budget at runtime
+  hive council [<topic>]   Convene all agents for deliberation on a topic
+
   hive monitor             Live telemetry, phases, event stream
   hive logs                Tail hive + work-server logs
   hive approve <role>      Manually approve a pending role proposal
