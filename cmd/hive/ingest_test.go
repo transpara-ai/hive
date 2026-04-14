@@ -12,6 +12,9 @@ import (
 )
 
 func TestRunIngest(t *testing.T) {
+	// Skip repo creation in tests — no real GitHub calls.
+	t.Setenv("HIVE_INGEST_SKIP_REPO", "1")
+
 	tests := []struct {
 		name       string
 		markdown   string
@@ -121,6 +124,8 @@ func TestRunIngest(t *testing.T) {
 }
 
 func TestRunIngest_MissingAPIKey(t *testing.T) {
+	t.Setenv("HIVE_INGEST_SKIP_REPO", "1")
+
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "spec.md")
 	if err := os.WriteFile(specPath, []byte("# Test\n"), 0644); err != nil {
@@ -139,6 +144,7 @@ func TestRunIngest_MissingAPIKey(t *testing.T) {
 }
 
 func TestRunIngest_MissingFile(t *testing.T) {
+	t.Setenv("HIVE_INGEST_SKIP_REPO", "1")
 	t.Setenv("LOVYOU_API_KEY", "test-key")
 	err := runIngest("/nonexistent/spec.md", "hive", "http://localhost:9999", "high")
 	if err == nil {
@@ -146,3 +152,26 @@ func TestRunIngest_MissingFile(t *testing.T) {
 	}
 }
 
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"[SPEC] MATLAB Integration Endpoint for Transpara Platform", "matlab-integration-endpoint"},
+		{"[SPEC] Work Description: Build a REST API for Users", "build-a-rest-api"},
+		{"[SPEC] Simple Title", "simple-title"},
+		{"[SPEC] Spec: Auth System for Mobile App", "auth-system"},
+		{"[SPEC] Already-Kebab-Case", "already-kebab-case"},
+		{"[SPEC] Lots   of   spaces", "lots-of-spaces"},
+		{"[SPEC] Special!@#$Characters", "special-characters"},
+		{"", "spec"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := slugify(tt.input)
+			if got != tt.want {
+				t.Errorf("slugify(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

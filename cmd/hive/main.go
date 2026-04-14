@@ -170,9 +170,11 @@ const (
 	ingestOp         = "intend"
 	ingestKind       = "task"
 	ingestTimeout    = 30 * time.Second
+	ingestGitHubOrg  = "transpara-ai"
 )
 
-// runIngest reads a markdown spec file and posts it as a task to the local API.
+// runIngest reads a markdown spec file, creates a repo for it (if needed),
+// registers it in repos.json, and posts it as a task to the local API.
 func runIngest(specPath, space, apiBase, priority string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -192,6 +194,17 @@ func runIngest(specPath, space, apiBase, priority string) error {
 		}
 	}
 	title = ingestTitlePrefix + title
+
+	// Derive repo slug and ensure it exists (skip in test mode).
+	slug := slugify(title)
+	var repoPath string
+	if os.Getenv("HIVE_INGEST_SKIP_REPO") == "" {
+		var err error
+		repoPath, err = ensureSpecRepo(slug)
+		if err != nil {
+			return fmt.Errorf("ensure repo: %w", err)
+		}
+	}
 
 	// Resolve API key.
 	apiKey := os.Getenv("LOVYOU_API_KEY")
@@ -246,7 +259,166 @@ func runIngest(specPath, space, apiBase, priority string) error {
 		return fmt.Errorf("server returned empty node ID")
 	}
 	fmt.Printf("ingested: %s — %s\n", result.Node.ID, title)
+	if repoPath != "" {
+		fmt.Printf("repo:     %s/%s → %s\n", ingestGitHubOrg, slug, repoPath)
+	}
 	return nil
+}
+
+// slugify converts a title to a kebab-case repo slug.
+// Strips the [SPEC] prefix, common boilerplate words, and special characters.
+func slugify(title string) string {
+	s := strings.TrimPrefix(title, ingestTitlePrefix)
+	// Strip common prefixes that don't add meaning to a repo name.
+	for _, prefix := range []string{"Work Description: ", "Work Description:", "Spec: ", "Spec:"} {
+		s = strings.TrimPrefix(s, prefix)
+	}
+	// Strip trailing context like "for Transpara Platform".
+	if idx := strings.LastIndex(s, " for "); idx > 10 {
+		s = s[:idx]
+	}
+	s = strings.ToLower(s)
+	// Replace non-alphanumeric runs with a single hyphen.
+	var b strings.Builder
+	prevHyphen := true // suppress leading hyphen
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevHyphen = false
+		} else if !prevHyphen {
+			b.WriteByte('-')
+			prevHyphen = true
+		}
+	}
+	result := strings.TrimRight(b.String(), "-")
+	if result == "" {
+		result = "spec"
+	}
+	return result
+}
+
+// ensureSpecRepo creates a GitHub repo and local directory for a spec slug
+// if they don't already exist, and registers the repo in repos.json.
+func ensureSpecRepo(slug string) (string, error) {
+	hiveDir := findHiveDir()
+	reposJSONPath := filepath.Join(hiveDir, "repos.json")
+
+	// Determine local path (sibling to hive repo, like ../site).
+	repoDir, err := filepath.Abs(filepath.Join(hiveDir, "..", slug))
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+
+	// Check if already in repos.json.
+	if repoInRegistry(reposJSONPath, slug) {
+		if _, err := os.Stat(repoDir); err == nil {
+			log.Printf("[ingest] repo %s already exists at %s", slug, repoDir)
+			return repoDir, nil
+		}
+	}
+
+	// Create GitHub repo (ignore error if it already exists).
+	ghCreate := exec.Command("gh", "repo", "create",
+		ingestGitHubOrg+"/"+slug,
+		"--private",
+		"--description", fmt.Sprintf("Built by hive pipeline from [SPEC] %s", slug),
+	)
+	if out, err := ghCreate.CombinedOutput(); err != nil {
+		// "already exists" is fine.
+		if !strings.Contains(string(out), "already exists") {
+			return "", fmt.Errorf("gh repo create: %s", out)
+		}
+		log.Printf("[ingest] repo %s/%s already exists on GitHub", ingestGitHubOrg, slug)
+	} else {
+		log.Printf("[ingest] created repo %s/%s", ingestGitHubOrg, slug)
+	}
+
+	// Init local directory if it doesn't exist.
+	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(repoDir, 0755); err != nil {
+			return "", fmt.Errorf("mkdir: %w", err)
+		}
+		for _, args := range [][]string{
+			{"init"},
+			{"remote", "add", "origin", fmt.Sprintf("https://github.com/%s/%s.git", ingestGitHubOrg, slug)},
+			{"checkout", "-b", "main"},
+			{"commit", "--allow-empty", "-m", "init: repo for " + slug},
+			{"push", "-u", "origin", "main"},
+		} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = repoDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return "", fmt.Errorf("git %s: %s", args[0], out)
+			}
+		}
+		log.Printf("[ingest] initialized local repo at %s", repoDir)
+	}
+
+	// Add to repos.json if not already present.
+	if !repoInRegistry(reposJSONPath, slug) {
+		if err := addToRegistry(reposJSONPath, slug, repoDir); err != nil {
+			return "", fmt.Errorf("update repos.json: %w", err)
+		}
+		log.Printf("[ingest] added %s to repos.json", slug)
+	}
+
+	return repoDir, nil
+}
+
+// repoInRegistry checks if a slug already exists in repos.json.
+func repoInRegistry(path, slug string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var reg struct {
+		Repos []struct {
+			Name string `json:"name"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal(data, &reg); err != nil {
+		return false
+	}
+	for _, r := range reg.Repos {
+		if r.Name == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// addToRegistry appends a new repo entry to repos.json.
+func addToRegistry(path, slug, absPath string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var reg registry.Registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		return err
+	}
+
+	// Compute relative path from repos.json dir.
+	dir := filepath.Dir(path)
+	relPath, err := filepath.Rel(dir, absPath)
+	if err != nil {
+		relPath = absPath
+	}
+
+	reg.Repos = append(reg.Repos, registry.Repo{
+		Name:      slug,
+		URL:       fmt.Sprintf("https://github.com/%s/%s", ingestGitHubOrg, slug),
+		LocalPath: relPath,
+		Language:  "go",
+		BuildCmd:  "go build -buildvcs=false ./...",
+		TestCmd:   "go test -buildvcs=false ./...",
+	})
+
+	out, err := json.MarshalIndent(reg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0644)
 }
 
 // ─── Runner mode ─────────────────────────────────────────────────────
