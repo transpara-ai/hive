@@ -330,14 +330,15 @@ var phaseUpdates = []struct {
 		startedAt: "2026-04-06",
 		notes:     "Active frontier. Awaiting first organic spawn via growth loop.",
 	},
-	// Phase 4 complete: Tier B emergence — first organic agents spawned.
+	// Phase 4 revert: exit criteria require >= 3 Tier B roles spawned
+	// organically. Only 1 (researcher) proposed+approved. Previous completion
+	// on 2026-04-09 was premature — reverted 2026-04-15.
 	{
-		phase:       4,
-		from:        "in_progress",
-		status:      "complete",
-		startedAt:   "2026-04-06",
-		completedAt: "2026-04-09",
-		notes:       "Tier B emergence complete. Growth loop validated end-to-end with organic agent spawns.",
+		phase:     4,
+		from:      "complete",
+		status:    "in_progress",
+		startedAt: "2026-04-06",
+		notes:     "Reverted: only 1 of 3 required Tier B spawns (researcher). Exit criteria not met.",
 	},
 }
 
@@ -411,7 +412,7 @@ WHERE telemetry_phases.phase = v.phase AND telemetry_phases.exit_criteria IS NUL
 			}
 		} else {
 			if _, err := pool.Exec(ctx,
-				`UPDATE telemetry_phases SET status = $1, started_at = $2, notes = $3 WHERE phase = $4 AND status = $5`,
+				`UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = NULL, notes = $3 WHERE phase = $4 AND status = $5`,
 				u.status, u.startedAt, u.notes, u.phase, u.from,
 			); err != nil {
 				return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
