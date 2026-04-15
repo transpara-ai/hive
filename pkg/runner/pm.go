@@ -11,13 +11,47 @@ import (
 )
 
 // runPM reads the board, finds the pinned goal, and creates ONE milestone
-// if the board has no open work. Simple. DB-only. No file reads.
+// if the board has no open work. Short-circuits before calling the LLM when
+// the board has no pinned goal or already has open work tasks.
 func (r *Runner) runPM(ctx context.Context) {
 	if !r.cfg.OneShot && r.tick%16 != 0 {
 		return
 	}
 
 	log.Printf("[pm] tick %d: deciding next priority", r.tick)
+
+	// Pre-check: read board in Go to avoid expensive LLM calls when
+	// there's nothing to do or work already exists.
+	if r.cfg.APIClient != nil {
+		tasks, err := r.cfg.APIClient.GetTasks(r.cfg.SpaceSlug, "")
+		if err == nil {
+			hasPinnedGoal := false
+			hasOpenWork := false
+			for _, t := range tasks {
+				if t.Pinned {
+					hasPinnedGoal = true
+					continue
+				}
+				if t.Kind == "task" && t.State != "done" && t.State != "closed" {
+					hasOpenWork = true
+				}
+			}
+			if !hasPinnedGoal {
+				log.Printf("[pm] no pinned goal on board, skipping LLM call")
+				if r.cfg.OneShot {
+					r.done = true
+				}
+				return
+			}
+			if hasOpenWork {
+				log.Printf("[pm] board already has open tasks, skipping LLM call")
+				if r.cfg.OneShot {
+					r.done = true
+				}
+				return
+			}
+		}
+	}
 
 	op, canOperate := r.cfg.Provider.(decision.IOperator)
 	if !canOperate {
