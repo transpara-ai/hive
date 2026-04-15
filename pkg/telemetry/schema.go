@@ -5,8 +5,16 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Phase status constants — no magic strings.
+const (
+	PhaseBlocked    = "blocked"
+	PhaseInProgress = "in_progress"
+	PhaseComplete   = "complete"
 )
 
 const schema = `
@@ -283,8 +291,8 @@ var phaseUpdates = []struct {
 }{
 	{
 		phase:       2,
-		from:        "blocked",
-		status:      "complete",
+		from:        PhaseBlocked,
+		status:      PhaseComplete,
 		startedAt:   "2026-04-04",
 		completedAt: "2026-04-05",
 		notes:       "CTO graduated: running on Opus with /gap + /directive commands, leadership briefing, 15-iteration stabilization window, Guardian awareness. Reviewer deferred to Phase 4.",
@@ -292,32 +300,32 @@ var phaseUpdates = []struct {
 	// Phase 2 notes update: Reviewer graduated 2026-04-06, knowledge infra operational.
 	{
 		phase:       2,
-		from:        "complete",
-		status:      "complete",
+		from:        PhaseComplete,
+		status:      PhaseComplete,
 		startedAt:   "2026-04-04",
 		completedAt: "2026-04-06",
 		notes:       "CTO graduated 2026-04-05. Reviewer graduated 2026-04-06. Knowledge Enrichment Infrastructure operational. 9 agents running.",
 	},
 	{
 		phase:     3,
-		from:      "blocked",
-		status:    "in_progress",
+		from:      PhaseBlocked,
+		status:    PhaseInProgress,
 		startedAt: "2026-04-05",
 		notes:     "Spawner unblocked by CTO graduation. CTO gap detection feeds role proposals.",
 	},
 	// Phase 3 notes update: Spawner graduated, growth loop mechanically complete.
 	{
 		phase:     3,
-		from:      "in_progress",
-		status:    "in_progress",
+		from:      PhaseInProgress,
+		status:    PhaseInProgress,
 		startedAt: "2026-04-05",
 		notes:     "Spawner graduated and running. Growth loop mechanically complete — awaiting first live validation (real gap producing a real spawned agent).",
 	},
 	// Phase 3 complete: Spawner graduated, growth loop validated.
 	{
 		phase:       3,
-		from:        "in_progress",
-		status:      "complete",
+		from:        PhaseInProgress,
+		status:      PhaseComplete,
 		startedAt:   "2026-04-05",
 		completedAt: "2026-04-06",
 		notes:       "Spawner graduated and running. Growth loop complete: gap → propose → approve → budget → spawn validated end-to-end.",
@@ -325,18 +333,26 @@ var phaseUpdates = []struct {
 	// Phase 4 unlocked: growth loop active, awaiting first organic spawn.
 	{
 		phase:     4,
-		from:      "blocked",
-		status:    "in_progress",
+		from:      PhaseBlocked,
+		status:    PhaseInProgress,
 		startedAt: "2026-04-06",
 		notes:     "Active frontier. Awaiting first organic spawn via growth loop.",
 	},
-	// Phase 4 revert: exit criteria require >= 3 Tier B roles spawned
-	// organically. Only 1 (researcher) proposed+approved. Previous completion
-	// on 2026-04-09 was premature — reverted 2026-04-15.
+	// Phase 4 premature completion (2026-04-09): preserved for replay on fresh installs.
+	{
+		phase:       4,
+		from:        PhaseInProgress,
+		status:      PhaseComplete,
+		startedAt:   "2026-04-06",
+		completedAt: "2026-04-09",
+		notes:       "Tier B emergence complete. Growth loop validated end-to-end with organic agent spawns.",
+	},
+	// Phase 4 revert (2026-04-15): exit criteria require >= 3 Tier B roles
+	// spawned organically. Only 1 (researcher) proposed+approved.
 	{
 		phase:     4,
-		from:      "complete",
-		status:    "in_progress",
+		from:      PhaseComplete,
+		status:    PhaseInProgress,
 		startedAt: "2026-04-06",
 		notes:     "Reverted: only 1 of 3 required Tier B spawns (researcher). Exit criteria not met.",
 	},
@@ -403,20 +419,23 @@ WHERE telemetry_phases.phase = v.phase AND telemetry_phases.exit_criteria IS NUL
 		return fmt.Errorf("telemetry seed role definitions: %w", err)
 	}
 	for _, u := range phaseUpdates {
+		var query string
+		var args []any
 		if u.completedAt != "" {
-			if _, err := pool.Exec(ctx,
-				`UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = $3, notes = $4 WHERE phase = $5 AND status = $6`,
-				u.status, u.startedAt, u.completedAt, u.notes, u.phase, u.from,
-			); err != nil {
-				return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
-			}
+			query = `UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = $3, notes = $4 WHERE phase = $5 AND status = $6`
+			args = []any{u.status, u.startedAt, u.completedAt, u.notes, u.phase, u.from}
 		} else {
-			if _, err := pool.Exec(ctx,
-				`UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = NULL, notes = $3 WHERE phase = $4 AND status = $5`,
-				u.status, u.startedAt, u.notes, u.phase, u.from,
-			); err != nil {
-				return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
-			}
+			query = `UPDATE telemetry_phases SET status = $1, started_at = $2, completed_at = NULL, notes = $3 WHERE phase = $4 AND status = $5`
+			args = []any{u.status, u.startedAt, u.notes, u.phase, u.from}
+		}
+		tag, err := pool.Exec(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("telemetry phase update (phase %d): %w", u.phase, err)
+		}
+		if tag.RowsAffected() > 0 {
+			slog.Info("telemetry phase update applied",
+				"phase", u.phase, "from", u.from, "to", u.status,
+				"rows", tag.RowsAffected())
 		}
 	}
 	return nil

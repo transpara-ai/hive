@@ -131,4 +131,21 @@ func TestEnsureTablesIntegration(t *testing.T) {
 			t.Errorf("integrator depends_on has %d entries, want 2", len(deps))
 		}
 	})
+
+	t.Run("phase4_reverted_to_in_progress", func(t *testing.T) {
+		var status string
+		var completedAt *string
+		err := pool.QueryRow(ctx,
+			"SELECT status, completed_at::text FROM telemetry_phases WHERE phase = 4",
+		).Scan(&status, &completedAt)
+		if err != nil {
+			t.Fatalf("query phase 4: %v", err)
+		}
+		if status != PhaseInProgress {
+			t.Errorf("phase 4 status = %q, want %q", status, PhaseInProgress)
+		}
+		if completedAt != nil {
+			t.Errorf("phase 4 completed_at = %v, want NULL", *completedAt)
+		}
+	})
 }
