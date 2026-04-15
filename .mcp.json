@@ -2,7 +2,7 @@
   "mcpServers": {
     "github": {
       "type": "http",
-      "url": "http://localhost:8083/mcp"
+      "url": "http://nucbuntu:8084/mcp"
     }
   }
 }
