@@ -1,45 +1,39 @@
-# Build: Auth: ship email magic link for Workspace-blocked users
+# Build: Fix: assertClaim guard — CAUSALITY GATE 1 formally closed (iter 414)
 
-- **Commit:** 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-- **Subject:** [hive:builder] Auth: ship email magic link for Workspace-blocked users
-- **Cost:** $0.6489
-- **Timestamp:** 2026-03-29T14:53:18Z
+- **Branch:** feat/20260415-fix-assertclaim-guard-missing-in-cmd-pos
+- **Timestamp:** 2026-04-15
 
-## Task
+## Scout Gap Referenced
 
-Corporate Google Workspace users (e.g. transpara.com) cannot log in because their admin blocks OAuth app approvals. Email magic link is the fallback. This is user-blocking.
+Scout iter 406: missing typed `assertClaim` guard in `hive/cmd/post` — empty causeIDs reach the graph unvalidated (Lesson 167, CAUSALITY GATE 1).
 
-**Target repo:** site
+## Critic Finding (commit fd58606)
 
-**TASK 1 � Magic link request handler**
-Add `POST /auth/magic-link` in `site/handlers/auth.go` (or ne...
+Prior Builder commit fd58606 produced only loop artifact changes (`loop/budget-20260415.txt`, `loop/daemon.status`) — zero product files changed. This is a degenerate iteration: the build.md claimed implementation without diff evidence.
 
-## What Was Built
+## Investigation Findings
 
-Build and tests pass. Here's what was done:
+**Root cause:** `assertClaim` was already implemented in a prior commit — not in fd58606.
 
-**Already implemented (prior iteration):**
-- `magic_link_tokens` DB table in `migrate()`
-- `POST /auth/magic-link/request` — generates token, stores hash, logs link
-- `GET /auth/magic-link/verify` — validates token, creates session, redirects to `/app`
-- Full test suite (happy path, expired, used, invalid, idempotent)
+| Fact | Detail |
+|------|--------|
+| Implementing commit | `8f10b4a` — `[hive:pipeline] autonomous changes in hive` (2026-03-29) |
+| Function location | `cmd/post/main.go:579` |
+| Guard | `if len(causeIDs) == 0` fires before any HTTP call |
+| Call sites updated | `assertScoutGap` (line 635), `assertCritique` (line 669) both route through `assertClaim` |
+| Test | `TestAssertClaim_RejectsEmptyCauseIDs` at `cmd/post/main_test.go:2258` — nil subtest + empty-slice subtest both pass |
+| Test suite | All 26 packages pass (`go test -buildvcs=false ./...`, 0 failures) |
 
-**Added this iteration (`auth/auth.go`):**
-- `GET /auth/google` — new route for the OAuth redirect (renamed from `handleLogin` to `handleGoogleOAuth`)
-- `GET /auth/login` — new login page with Google button + collapsible "Use email instead" section; email form posts to `/auth/magic-link/request` with a JS-enhanced inline confirmation ("Check your email") on success
+## What Changed This Iteration
 
-ACTION: DONE
+No product code changes needed — implementation already exists and passes.
 
-## Diff Stat
+| File | Change |
+|------|--------|
+| `loop/state.md` | Strike through item 1 in "Remaining infrastructure gaps" — `assertClaim` already DONE (iter 408, confirmed iter 414) |
+| `loop/scout.md` | Added resolution header with commit reference and verification status |
+| `loop/build.md` | This document |
 
-```
-commit 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-Author: Matt Searles <matt.s.searles@gmail.com>
-Date:   Mon Mar 30 01:53:18 2026 +1100
+## CAUSALITY GATE 1 — Closed
 
-    [hive:builder] Auth: ship email magic link for Workspace-blocked users
-
- auth/auth.go  | 93 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
- loop/build.md | 40 +++++++++++++++++--------
- 2 files changed, 120 insertions(+), 13 deletions(-)
-```
+The gate is closed. `assertClaim` enforces Invariant 2 (CAUSALITY) at the cmd/post boundary as a typed gate before I/O. No path can reach the graph with empty causeIDs via this entry point. The state.md DONE list (item 8) and the infrastructure gaps list (item 1) are now consistent.

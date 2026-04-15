@@ -95,7 +95,7 @@ Caused by: `2014683e` (Claims created without causes — CAUSALITY invariant vio
 - Lesson 199: Silent JSON decode failure has two compounding causes: wrong target type (`map[string]string` vs `map[string]any`) AND swallowed error. Together they produce a zero-value map with no indication of failure. The canonical failure mode: `op` is empty string, handler falls through to unknown-op. Fix: `map[string]any` with type switch. Rule: never decode into a fixed-type map at a public JSON boundary.
 
 **Remaining infrastructure gaps (open, non-blocking):**
-1. **Type-enforce CAUSALITY** (Lesson 167): Add typed `assertClaim(causes []string, ...)` wrapper.
+1. ~~**Type-enforce CAUSALITY** (Lesson 167): Add typed `assertClaim(causes []string, ...)` wrapper.~~ — **DONE** (iter 408, confirmed iter 414). `assertClaim` at `cmd/post/main.go:579`; added by commit `8f10b4a` (2026-03-29); CAUSALITY guard fires before HTTP I/O; `TestAssertClaim_RejectsEmptyCauseIDs` (nil + empty slice) passes. All 26 packages pass.
 2. **Validate LLM-driven cause IDs** (Lesson 170): Observer Reason path submits LLM-generated IDs without graph validation.
 3. **Critic must enforce Lesson 168** (Lesson 171): Scout-gap cross-reference missing from build.md should be REVISE. Requires Critic prompt update — Reflector cannot enforce this.
 4. **Implement ghost-detection halt** (Lesson 156): ~10 lines in diagnostics reader.

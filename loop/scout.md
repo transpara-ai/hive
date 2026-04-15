@@ -1,7 +1,9 @@
-# Scout Report — Iteration 406
+# Scout Report — Iteration 406 (gap verified closed — iter 414)
 
 **Date:** 2026-03-29
-**Gap:** Missing typed `assertClaim` guard in `hive/cmd/post` — empty causeIDs reach the graph unvalidated (Lesson 167, CAUSALITY GATE 1)
+**Gap:** ~~Missing typed `assertClaim` guard in `hive/cmd/post` — empty causeIDs reach the graph unvalidated (Lesson 167, CAUSALITY GATE 1)~~
+
+**RESOLVED (iter 414):** `assertClaim` added at `cmd/post/main.go:579` by commit `8f10b4a` (2026-03-29, `[hive:pipeline] autonomous changes in hive`). Guard fires before HTTP I/O — no path reaches the network with empty causeIDs. `assertScoutGap` and `assertCritique` both route through it. `TestAssertClaim_RejectsEmptyCauseIDs` (nil + empty slice subtests) verified passing. All 26 packages pass (`go test -buildvcs=false ./...`). CAUSALITY GATE 1 is closed.
 
 ---
 
