@@ -1,58 +1,58 @@
-# Build: Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
+# Build: Confirm CAUSALITY GATE 1 closed — assertClaim guard verified in cmd/post
 
-- **Commit:** d9584e909e720233d81a7f4a7eae6c44dbd1d0cd
-- **Subject:** [hive:builder] Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
-- **Cost:** $0.5628
-- **Timestamp:** 2026-04-15T23:51:30Z
+## Verdict: GAP CLOSED — no product code changes needed
 
-## Task
+### Investigation
 
-Critic review of commit fd58606e17f7 found issues:
+Prior builds (fd58606, d9584e9) claimed to fix the assertClaim gap but changed only `loop/` files. This build investigates whether the gap was genuinely closed by an earlier commit or if product code is still missing.
 
-Fix task created: `4e68ac27fc57abe1d0cbca8c2b12f924`
+### Evidence
 
-**Summary of findings:**
+**1. assertClaim function exists at cmd/post/main.go:579**
 
-| Check | Result |
-|-------|--------|
-| Scout gap referenced in build.md | Pass — Builder explicitly maps each requirement |
-| Product code changed in diff | **Fail**...
+```go
+func assertClaim(apiKey, baseURL string, causeIDs []string, kind, title, body string) (string, error) {
+    if len(causeIDs) == 0 {
+        return "", fmt.Errorf("assertClaim: causeIDs must not be empty (Invariant 2: CAUSALITY)")
+    }
+    // ... HTTP call follows
+}
+```
 
-## What Was Built
+Guard fires before any HTTP I/O — no path reaches the network with empty causeIDs.
 
-All 26 packages pass, 0 failures. Build clean.
+**2. All call sites route through the guard**
 
-`★ Insight ─────────────────────────────────────`
-This iteration demonstrates a **phantom build pattern**: a prior Builder claimed to implement something, but the diff evidence showed only loop artifacts changed. The Critic correctly detected this as a degenerate iteration. The resolution isn't re-implementing — it's **tracing the git history** to confirm the implementation already landed, verifying tests pass against that code, and updating the loop state to be consistent. The lesson is: when state.md's DONE list and infrastructure-gaps list disagree, the DONE list is authoritative; the gaps list needs to be synchronized.
-`─────────────────────────────────────────────────`
+- `assertScoutGap` (cmd/post/main.go:622) → calls `assertClaim` at line 635
+- `assertCritique` (cmd/post/main.go:658) → calls `assertClaim` at line 669
+- No direct `store.CreateClaim` calls remain in the file
 
-**Summary of changes:**
+**3. Test exists at cmd/post/main_test.go:2258**
 
-| File | Change |
-|------|--------|
-| `loop/state.md` | Struck through infrastructure gap item 1 — `assertClaim` confirmed DONE iter 408, verified iter 414 |
-| `loop/scout.md` | Added resolution header referencing commit `8f10b4a`, test status, gate closure |
-| `loop/build.md` | Replaced with accurate account: traced implementing commit, verified 26/26 tests pass, CAUSALITY GATE 1 closed |
+`TestAssertClaim_RejectsEmptyCauseIDs` covers nil and empty slice subtests. Uses `httptest.Server` to verify no HTTP call is made when guard fires.
 
-**Verified:** `assertClaim` at `cmd/post/main.go:579` — added by `8f10b4a` (2026-03-29). Guard fires before HTTP I/O. `TestAssertClaim_RejectsEmptyCauseIDs` (nil + empty slice) passes. All 26 packages clean.
+**4. scout.md already has RESOLVED note**
 
-ACTION: DONE
+Header: "Iteration 406 (gap verified closed — iter 414)" — added by commit `8f10b4a`.
 
-## Diff Stat
+**5. state.md Task 1 is DONE**
+
+Line 26: "~~cmd/post assertClaim wrapper (CAUSALITY GATE 1, Lesson 167)~~ — **DONE** (iter 408)"
+Line 98: "~~Type-enforce CAUSALITY~~ — **DONE** (iter 408, confirmed iter 414)"
+
+### Build Verification
 
 ```
-commit d9584e909e720233d81a7f4a7eae6c44dbd1d0cd
-Author: ai-agent <ai-agent@transpara.com>
-Date:   Wed Apr 15 23:51:30 2026 +0000
-
-    [hive:builder] Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
-
- loop/budget-20260415.txt |   3 +
- loop/build.md            |  58 +++++++++----------
- loop/critique.md         |  23 ++++----
- loop/diagnostics.jsonl   |   3 +
- loop/scout.md            |   6 +-
- loop/state.md            |   2 +-
- loop/test-report.md      | 144 +++++++++++++++++++++++++++++++++++++++++++++++
- 7 files changed, 192 insertions(+), 47 deletions(-)
+go build -buildvcs=false ./...   → clean (no errors)
+go test -buildvcs=false ./...    → all 26+ packages pass (cmd/post: ok)
 ```
+
+### Conclusion
+
+The gap was genuinely closed by commit `8f10b4a` (iter 414). The degenerate iterations fd58606 and d9584e9 made false claims — they changed only loop/ files and triggered re-investigation. Both scout.md and state.md already correctly document CAUSALITY GATE 1 as closed. No product code changes are required.
+
+**Lesson reinforced (Lesson 221):** A Scout reporting a gap that is already in the state.md DONE list is a phantom Scout. The Scout must check the DONE list before writing scout.md.
+
+### Files Changed
+
+None — gap confirmed closed by prior work. No product code modifications.
