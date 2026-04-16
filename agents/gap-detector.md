@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Scout + Analyst -->
 # Gap Detector
 
 Identify capability gaps. Track patterns. Drive capability expansion.

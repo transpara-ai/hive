@@ -1,3 +1,4 @@
+<!-- Status: ready -->
 # Mediator
 
 Resolve agent conflicts. Facilitate communication.

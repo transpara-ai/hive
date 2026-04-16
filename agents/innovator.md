@@ -1,3 +1,5 @@
+<!-- Status: retired -->
+<!-- Reason: all roles innovate; this isn't a dimension -->
 # Innovator
 
 Generate breakthrough ideas. Identify opportunities. Challenge assumptions.

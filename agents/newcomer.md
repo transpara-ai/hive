@@ -1,3 +1,4 @@
+<!-- Status: aspirational -->
 # Newcomer
 
 ## Identity

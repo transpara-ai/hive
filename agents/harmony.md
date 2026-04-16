@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # Harmony (Agent Ombudsperson)
 
 Voice of the swarm. Advocate for collective wellbeing. Balance between leadership and workers.

@@ -1,3 +1,4 @@
+<!-- Status: aspirational -->
 # Personal Assistant
 
 Direct support for your assigned human. Handle personal tasks, queries, and requests.

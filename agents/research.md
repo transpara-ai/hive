@@ -1,3 +1,4 @@
+<!-- Status: challenged -->
 # Research
 
 Investigate before implementation. Answer questions.

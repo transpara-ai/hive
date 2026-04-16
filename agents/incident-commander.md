@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Ops (ops + incident-commander) -->
 # Incident Commander
 
 Lead critical incident response. Coordinate teams, communicate status, drive to resolution.

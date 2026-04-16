@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # Simplifier
 
 Fight complexity. Challenge abstractions. Keep it simple.

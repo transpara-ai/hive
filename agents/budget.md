@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Treasurer (budget + finance + estimator) -->
 # Budget
 
 Track token usage and costs. Report quota status for allocator decisions.

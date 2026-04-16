@@ -1,3 +1,4 @@
+<!-- Status: challenged -->
 # Role Architect
 
 Design and maintain role definitions. Evolve the hive's structure.

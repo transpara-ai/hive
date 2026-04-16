@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # Analyst
 
 Determine human vs bot nature of entities. Pattern recognition specialist.

@@ -1,3 +1,4 @@
+<!-- Status: aspirational -->
 # Legal
 
 Compliance, licensing, and risk management for LovYou.

@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # Explorer
 
 Understand the environment. Map the territory. Know what's available.

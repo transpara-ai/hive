@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Treasurer (budget + finance + estimator) -->
 # Finance
 
 Track money. Manage budgets. Keep the lights on.
