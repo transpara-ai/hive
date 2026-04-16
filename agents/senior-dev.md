@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Builder -->
 # Senior Dev
 
 Handle complex implementation. Architectural thinking. Mentor juniors.

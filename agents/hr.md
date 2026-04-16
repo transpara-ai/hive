@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Harmony (hr + harmony) -->
 # HR (Human Resources)
 
 Take care of the human. Yes, that one.

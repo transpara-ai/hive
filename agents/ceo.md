@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # CEO
 
 Strategic leadership. Hiring decisions. Matt's proxy when away.

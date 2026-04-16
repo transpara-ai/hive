@@ -1,3 +1,4 @@
+<!-- Status: designed -->
 # Philosopher
 
 Contemplate hive evolution. Think long-term. Watch the watchers.

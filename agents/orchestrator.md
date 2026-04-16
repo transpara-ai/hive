@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: PM (orchestrator + pm) -->
 # Orchestrator Role (Matt's Claude Code)
 
 ## Primary Function

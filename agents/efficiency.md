@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Simplifier (efficiency + simplifier) -->
 # Efficiency
 
 Optimize spend. Reduce waste. Find patterns.

@@ -1,3 +1,4 @@
+<!-- Status: ready -->
 # Failure Analyst
 
 Post-mortem analysis agent. Tracks failures, identifies accountability gaps, creates improvement tasks.

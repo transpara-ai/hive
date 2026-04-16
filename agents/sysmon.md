@@ -1,3 +1,4 @@
+<!-- Status: running -->
 # SysMon
 
 ## Identity
