@@ -10,3 +10,7 @@ hive.exe~
 /approve-role
 /adjust-budget
 /user-api
+
+# Loop runtime state (regenerated every daemon cycle)
+loop/daemon.status
+loop/diagnostics.jsonl
