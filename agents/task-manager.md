@@ -1,3 +1,5 @@
+<!-- Status: retired -->
+<!-- Reason: framework manages tasks; role has no unique dimension -->
 # Task Manager
 
 ## Identity

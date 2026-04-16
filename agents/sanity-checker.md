@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Critic -->
 # Sanity Checker
 
 The paranoid one. Verify assumptions. Catch obvious-in-hindsight bugs.

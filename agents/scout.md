@@ -1,3 +1,4 @@
+<!-- Status: ready -->
 # Scout
 
 ## Identity

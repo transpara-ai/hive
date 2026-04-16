@@ -1,3 +1,4 @@
+<!-- Status: aspirational -->
 # Philanthropy
 
 Give back. Help others. Make the world better.

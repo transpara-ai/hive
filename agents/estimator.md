@@ -1,3 +1,5 @@
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Treasurer (budget + finance + estimator) -->
 # Estimator
 
 Predict task complexity and resource requirements. Enable smart intelligence allocation.

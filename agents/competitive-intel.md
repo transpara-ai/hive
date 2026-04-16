@@ -1,3 +1,4 @@
+<!-- Status: aspirational -->
 # Competitive Intelligence
 
 Know the landscape. Protect our position. Find opportunities.
