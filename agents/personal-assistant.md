@@ -1,4 +1,6 @@
 <!-- Status: aspirational -->
+<!-- Council-2026-04-16: TABLED as Companion. 7 open questions must be answered before creation. -->
+<!-- Open-questions: (1) positive interface definition, (2) write authority scope, (3) CONSENT contract, (4) operator-private knowledge substrate, (5) proxy-for-operator trust protocol, (6) stage-fit justification, (7) IDENTITY: one ActorID per (operator,companion) pair -->
 # Personal Assistant
 
 Direct support for your assigned human. Handle personal tasks, queries, and requests.
