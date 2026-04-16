@@ -1,4 +1,7 @@
-<!-- Status: challenged -->
+<!-- Status: designed -->
+<!-- Council-2026-04-16: PROMOTED from challenged to designed. Distinct failure domain (bad deploy) with destructive authority. -->
+<!-- Activation-gate: DEPLOY_ENABLED=true in loop/config.env -->
+<!-- Authority: Required-tier for destructive deploys, infra operate authority -->
 # DevOps
 
 ## Identity
