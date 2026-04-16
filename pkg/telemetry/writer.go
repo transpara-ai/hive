@@ -608,6 +608,58 @@ func hiveRuntimeSummary(eventType string, content interface{}) string {
 	return ""
 }
 
+// PipelineAgentSnapshot captures a single phase completion in pipeline mode.
+// Fields map directly to telemetry_agent_snapshots columns. Fields that the
+// pipeline doesn't track (actor_id, trust_score, etc.) are written as zero/nil.
+type PipelineAgentSnapshot struct {
+	Role      string
+	Model     string
+	State     string  // e.g. "done", "error"
+	Iteration int     // phase sequence number within the cycle
+	CostUSD   float64
+	TokensIn  int
+	TokensOut int
+	Message   string // optional last message or summary
+}
+
+// WritePipelineSnapshot inserts a single agent snapshot row from pipeline mode.
+// This is a fire-and-forget INSERT — no bus, no BudgetRegistry, no registered
+// agents. Safe to call with a nil pool (logs a warning and returns).
+func (w *Writer) WritePipelineSnapshot(snap PipelineAgentSnapshot) {
+	if w.pool == nil {
+		fmt.Fprintf(os.Stderr, "telemetry: WritePipelineSnapshot called with nil pool — skipping\n")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	msg := snap.Message
+	if len(msg) > 500 {
+		msg = msg[:500]
+	}
+
+	_, err := w.pool.Exec(ctx,
+		`INSERT INTO telemetry_agent_snapshots
+			(agent_role, actor_id, state, model, iteration, max_iterations,
+			 tokens_used, cost_usd, trust_score, last_event_type, last_event_at, last_message, errors)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, now(), $10, 0)`,
+		snap.Role,
+		"pipeline:"+snap.Role, // synthetic actor_id for pipeline agents
+		snap.State,
+		snap.Model,
+		snap.Iteration,
+		0, // max_iterations: pipeline doesn't have a fixed max
+		int64(snap.TokensIn+snap.TokensOut),
+		snap.CostUSD,
+		"pipeline.phase.done", // last_event_type
+		msg,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: pipeline snapshot %s: %v\n", snap.Role, err)
+	}
+}
+
 // truncate shortens s to maxLen runes, appending "…" if truncated.
 func truncate(s string, maxLen int) string {
 	runes := []rune(s)

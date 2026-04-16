@@ -99,6 +99,9 @@ type Runner struct {
 // Worktree returns the active worktree context, or nil if not using worktrees.
 func (r *Runner) Worktree() *WorktreeContext { return r.worktree }
 
+// Cost returns a snapshot of the runner's cost tracker.
+func (r *Runner) Cost() CostTracker { return r.cost }
+
 // New creates a Runner.
 func New(cfg Config) *Runner {
 	if cfg.Interval == 0 {

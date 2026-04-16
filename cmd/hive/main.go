@@ -104,9 +104,9 @@ func run() error {
 	if *pipeline || *role == "pipeline" {
 		repoMap := parseRepos(*repos, *repo)
 		if *oneShot {
-			return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *useWorktrees, *autoClone)
+			return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *useWorktrees, *autoClone, *storeDSN)
 		}
-		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *useWorktrees, *autoClone)
+		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *useWorktrees, *autoClone, *storeDSN)
 	}
 	if *role != "" {
 		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
@@ -574,7 +574,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 // ─── Pipeline mode ───────────────────────────────────────────────────
 
 // runPipeline runs Scout → Builder → Critic in sequence. One full cycle.
-func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode, useWorktrees, autoClone bool) error {
+func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode, useWorktrees, autoClone bool, storeDSN string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -703,9 +703,48 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 	}
 	sm := runner.NewPipelineStateMachine(smRunner, makeRunner)
 
-	// After each phase, persist the session ID so the next iteration resumes warm.
+	// Create telemetry writer for pipeline snapshots.
+	var tw *telemetry.Writer
+	dsn := storeDSN
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+	if dsn != "" {
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			log.Printf("[pipeline] telemetry: bad DSN: %v", err)
+		} else {
+			cfg.MaxConns = 3
+			pool, err := pgxpool.NewWithConfig(ctx, cfg)
+			if err != nil {
+				log.Printf("[pipeline] telemetry: pool create: %v", err)
+			} else {
+				tw = telemetry.NewWriter(pool, nil, nil)
+				log.Printf("[pipeline] telemetry writer connected")
+			}
+		}
+	}
+
+	// After each phase, persist the session ID and emit telemetry.
+	phaseSeq := 0
 	type sessionGetter interface{ SessionID() string }
 	sm.SetPostPhase(func(role string, provider interface{}) {
+		phaseSeq++
+
+		// Emit telemetry snapshot for this phase.
+		if tw != nil {
+			cost := sm.CurrentRunner().Cost()
+			tw.WritePipelineSnapshot(telemetry.PipelineAgentSnapshot{
+				Role:      role,
+				Model:     runner.ModelForRole(role),
+				State:     "done",
+				Iteration: phaseSeq,
+				CostUSD:   cost.TotalCostUSD,
+				TokensIn:  cost.InputTokens,
+				TokensOut: cost.OutputTokens,
+			})
+		}
+
 		sg, ok := provider.(sessionGetter)
 		if !ok {
 			log.Printf("[pipeline] provider for %s does not expose SessionID (type: %T)", role, provider)
@@ -797,7 +836,7 @@ const (
 // runDaemon loops runPipeline at the given interval until SIGINT/SIGTERM.
 // On pipeline failure it retries after a short backoff. After 3 consecutive
 // failures it halts. Writes loop/daemon.status after each cycle.
-func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode, useWorktrees, autoClone bool) error {
+func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode, useWorktrees, autoClone bool, storeDSN string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -829,7 +868,7 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 			daemonResetToMain(repoPath)
 		}
 
-		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode, useWorktrees, autoClone)
+		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode, useWorktrees, autoClone, storeDSN)
 
 		elapsed := time.Since(start)
 		spent = dailyBudget.Spent()
