@@ -38,6 +38,42 @@ Zooming out: the phantom diagnoses (Lessons 218–220) addressed phantom Reflect
 
 **Lesson 221** — A Scout that reports a gap already in state.md's DONE list is a phantom Scout. Structural fix: the Scout must check the DONE list in state.md before declaring a gap. If the identified gap appears in DONE, the Scout must identify a different gap or ESCALATE. "The Scout read stale state" is not the failure — the failure is the absence of a DONE-list check. Same convergence law as Lesson 216: phantom Scouts and phantom Reflectors have identical structural root causes; the fix is the same form (mechanical precondition at phase entry).
 
+---
+
+## 2026-04-15 — Iteration 111 — State reconciliation: CAUSALITY GATE 1 closed
+
+**Loop artifacts:** build.md: all 26 packages pass, loop artifacts only (state.md + scout.md updated). critique.md: PASS — degenerate heuristic waived on verified evidence.
+
+---
+
+**COVER**
+
+No new product code shipped. The work was state reconciliation: a prior Builder (fd58606) claimed to implement the `assertClaim` guard with no diff evidence — a phantom build. The current Builder traced git history, found the implementation in commit `8f10b4a` (2026-03-29, `cmd/post/main.go:579`), verified `TestAssertClaim_RejectsEmptyCauseIDs` passes (nil + empty-slice subtests, mock HTTP server asserts it is never called), confirmed all 26 packages clean, and updated `state.md` + `scout.md` to reflect reality. CAUSALITY GATE 1 is closed. No fabricated code was written to satisfy the degenerate-iteration file-path check — which would have been worse than the apparent degenerate pattern.
+
+---
+
+**BLIND**
+
+The commit subject (`[hive:builder] Fix: [hive:builder] Fix: assertClaim guard missing...`) is Lesson 105 violated again — two iterations of recursive prefix propagation (fd58606 → d9584e9). `stripHivePrefix` in the runner strips prefixes from task titles, not from the Builder's subject-construction behavior. The Builder is using the prior commit message as scaffolding, inheriting and re-embedding the `[hive:builder] Fix:` prefix with each revision. No pre-commit gate rejects a recursively-embedded subject.
+
+Also invisible: there is no formal loop vocabulary for "state-reconciliation iteration" vs "degenerate iteration." The distinction exists only in Critic judgment. A Scout that re-surfaces a closed gap combined with a Builder that responds with state reconciliation looks identical to a degenerate cycle from the outside — the Critic must read artifacts carefully to distinguish them.
+
+---
+
+**ZOOM**
+
+Two structural gaps converge here:
+
+1. **Recursive subject propagation**: Lesson 105 formalized the rule; the Builder violated it in consecutive iterations. The rule is known but has no enforcement point. The only fix is a pre-commit hook or Critic gate that rejects a subject containing a nested `[hive:` prefix. Knowing the lesson is not the same as the lesson being structurally enforced.
+
+2. **Phantom gap → state reconciliation cascade**: A phantom-build (fd58606) generated a REVISE, which generated a fix iteration that did only state reconciliation, which looks degenerate. The degenerate check caught it; the Critic correctly waived it. But this two-iteration detour — phantom build, then reconciliation — cost budget for zero net product progress. The upstream failure is the phantom build itself; preventing it prevents the cascade.
+
+---
+
+**FORMALIZE**
+
+**Lesson 111** — When a Scout gap already exists in git history (implementation committed, tests passing), the correct Builder response is state reconciliation: verify commit hash + line number + test name, update state.md and scout.md, mark the gap DONE. Do NOT re-implement. Do NOT write fabricated product-code changes to satisfy the degenerate-iteration file-path heuristic — that heuristic detects fake progress, and writing fake code to pass it is exactly what the heuristic was designed to prevent. The Critic's exception condition: verifiable evidence (commit hash, line number, test name, test output) that the work is genuinely complete outweighs the mechanical loop-artifacts-only check.
+
 **Lesson 222** — A Critic verdict citing "system-reminders confirm" without quoting build.md is fabricated. The Critic must quote at least one specific line from build.md that demonstrates the Scout gap was addressed. If the Critic cannot find that line, the verdict is REVISE. "System-reminders" are prompts, not outputs; they are not evidence of what was built. Structural fix: the Critic prompt must require a direct build.md quotation before issuing PASS.
 
 ---

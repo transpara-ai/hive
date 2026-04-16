@@ -630,3 +630,8 @@
 {"phase":"builder","outcome":"task.done","repo":"lovyou-ai-hive","board_open":5,"duration_secs":97.862930729,"cost_usd":0.41012505000000005,"timestamp":"2026-04-15T23:46:14Z"}
 {"phase":"tester","outcome":"tests.pass","repo":"lovyou-ai-hive","board_open":5,"duration_secs":106.830948339,"cost_usd":0.19627635,"timestamp":"2026-04-15T23:48:01Z"}
 {"phase":"critic","outcome":"critique.revise","repo":"lovyou-ai-hive","board_open":7,"duration_secs":50.097849144,"cost_usd":0.1405488,"timestamp":"2026-04-15T23:48:51Z"}
+{"phase":"builder","outcome":"task.done","repo":"lovyou-ai-hive","revise_count":1,"board_open":6,"duration_secs":158.98298662,"cost_usd":0.5628290999999999,"timestamp":"2026-04-15T23:51:30Z"}
+{"phase":"tester","outcome":"tests.pass","repo":"lovyou-ai-hive","revise_count":1,"board_open":6,"duration_secs":180.039177036,"cost_usd":0.22368555,"timestamp":"2026-04-15T23:54:30Z"}
+{"phase":"critic","outcome":"critique.pass","repo":"lovyou-ai-hive","revise_count":1,"board_open":6,"duration_secs":81.164902694,"cost_usd":0.19952939999999997,"timestamp":"2026-04-15T23:55:51Z"}
+{"phase":"reflector","outcome":"reflection.done","repo":"lovyou-ai-hive","revise_count":1,"board_open":6,"duration_secs":97.473088952,"cost_usd":0.25469295,"timestamp":"2026-04-15T23:57:29Z"}
+{"phase":"observer","outcome":"audit.done","repo":"lovyou-ai-hive","revise_count":1,"board_open":6,"duration_secs":204.73077813,"cost_usd":0.6751016999999999,"timestamp":"2026-04-16T00:00:53Z"}

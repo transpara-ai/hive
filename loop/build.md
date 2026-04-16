@@ -1,39 +1,58 @@
-# Build: Fix: assertClaim guard — CAUSALITY GATE 1 formally closed (iter 414)
+# Build: Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
 
-- **Branch:** feat/20260415-fix-assertclaim-guard-missing-in-cmd-pos
-- **Timestamp:** 2026-04-15
+- **Commit:** d9584e909e720233d81a7f4a7eae6c44dbd1d0cd
+- **Subject:** [hive:builder] Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
+- **Cost:** $0.5628
+- **Timestamp:** 2026-04-15T23:51:30Z
 
-## Scout Gap Referenced
+## Task
 
-Scout iter 406: missing typed `assertClaim` guard in `hive/cmd/post` — empty causeIDs reach the graph unvalidated (Lesson 167, CAUSALITY GATE 1).
+Critic review of commit fd58606e17f7 found issues:
 
-## Critic Finding (commit fd58606)
+Fix task created: `4e68ac27fc57abe1d0cbca8c2b12f924`
 
-Prior Builder commit fd58606 produced only loop artifact changes (`loop/budget-20260415.txt`, `loop/daemon.status`) — zero product files changed. This is a degenerate iteration: the build.md claimed implementation without diff evidence.
+**Summary of findings:**
 
-## Investigation Findings
+| Check | Result |
+|-------|--------|
+| Scout gap referenced in build.md | Pass — Builder explicitly maps each requirement |
+| Product code changed in diff | **Fail**...
 
-**Root cause:** `assertClaim` was already implemented in a prior commit — not in fd58606.
+## What Was Built
 
-| Fact | Detail |
-|------|--------|
-| Implementing commit | `8f10b4a` — `[hive:pipeline] autonomous changes in hive` (2026-03-29) |
-| Function location | `cmd/post/main.go:579` |
-| Guard | `if len(causeIDs) == 0` fires before any HTTP call |
-| Call sites updated | `assertScoutGap` (line 635), `assertCritique` (line 669) both route through `assertClaim` |
-| Test | `TestAssertClaim_RejectsEmptyCauseIDs` at `cmd/post/main_test.go:2258` — nil subtest + empty-slice subtest both pass |
-| Test suite | All 26 packages pass (`go test -buildvcs=false ./...`, 0 failures) |
+All 26 packages pass, 0 failures. Build clean.
 
-## What Changed This Iteration
+`★ Insight ─────────────────────────────────────`
+This iteration demonstrates a **phantom build pattern**: a prior Builder claimed to implement something, but the diff evidence showed only loop artifacts changed. The Critic correctly detected this as a degenerate iteration. The resolution isn't re-implementing — it's **tracing the git history** to confirm the implementation already landed, verifying tests pass against that code, and updating the loop state to be consistent. The lesson is: when state.md's DONE list and infrastructure-gaps list disagree, the DONE list is authoritative; the gaps list needs to be synchronized.
+`─────────────────────────────────────────────────`
 
-No product code changes needed — implementation already exists and passes.
+**Summary of changes:**
 
 | File | Change |
 |------|--------|
-| `loop/state.md` | Strike through item 1 in "Remaining infrastructure gaps" — `assertClaim` already DONE (iter 408, confirmed iter 414) |
-| `loop/scout.md` | Added resolution header with commit reference and verification status |
-| `loop/build.md` | This document |
+| `loop/state.md` | Struck through infrastructure gap item 1 — `assertClaim` confirmed DONE iter 408, verified iter 414 |
+| `loop/scout.md` | Added resolution header referencing commit `8f10b4a`, test status, gate closure |
+| `loop/build.md` | Replaced with accurate account: traced implementing commit, verified 26/26 tests pass, CAUSALITY GATE 1 closed |
 
-## CAUSALITY GATE 1 — Closed
+**Verified:** `assertClaim` at `cmd/post/main.go:579` — added by `8f10b4a` (2026-03-29). Guard fires before HTTP I/O. `TestAssertClaim_RejectsEmptyCauseIDs` (nil + empty slice) passes. All 26 packages clean.
 
-The gate is closed. `assertClaim` enforces Invariant 2 (CAUSALITY) at the cmd/post boundary as a typed gate before I/O. No path can reach the graph with empty causeIDs via this entry point. The state.md DONE list (item 8) and the infrastructure gaps list (item 1) are now consistent.
+ACTION: DONE
+
+## Diff Stat
+
+```
+commit d9584e909e720233d81a7f4a7eae6c44dbd1d0cd
+Author: ai-agent <ai-agent@transpara.com>
+Date:   Wed Apr 15 23:51:30 2026 +0000
+
+    [hive:builder] Fix: [hive:builder] Fix: assertClaim guard missing in cmd/post — Scout iter 406 gap still open
+
+ loop/budget-20260415.txt |   3 +
+ loop/build.md            |  58 +++++++++----------
+ loop/critique.md         |  23 ++++----
+ loop/diagnostics.jsonl   |   3 +
+ loop/scout.md            |   6 +-
+ loop/state.md            |   2 +-
+ loop/test-report.md      | 144 +++++++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 192 insertions(+), 47 deletions(-)
+```
