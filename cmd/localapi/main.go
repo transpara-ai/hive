@@ -15,11 +15,16 @@ import (
 func main() {
 	addr := flag.String("addr", ":8082", "listen address")
 	apiKey := flag.String("api-key", "dev", "API key for authentication")
+	siteDB := flag.Bool("site-db", false, "connect to site database instead of hive (reads nodes table)")
 	flag.Parse()
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://hive:hive@localhost:5432/hive?sslmode=disable"
+		if *siteDB {
+			dsn = "postgres://hive:hive@localhost:5432/site?sslmode=disable"
+		} else {
+			dsn = "postgres://hive:hive@localhost:5432/hive?sslmode=disable"
+		}
 	}
 
 	db, err := sql.Open("pgx", dsn)
@@ -32,14 +37,26 @@ func main() {
 		log.Fatalf("ping db: %v", err)
 	}
 
-	if err := localapi.Migrate(db); err != nil {
-		log.Fatalf("migrate: %v", err)
+	var store *localapi.Store
+	if *siteDB {
+		if err := localapi.MigrateIfLocal(db, "nodes"); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+		store = localapi.NewSiteStore(db)
+	} else {
+		if err := localapi.Migrate(db); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+		store = localapi.NewStore(db)
 	}
 
-	store := localapi.NewStore(db)
 	handler := localapi.NewServer(store, *apiKey)
 
-	fmt.Printf("localapi listening on %s (key=%s)\n", *addr, *apiKey)
+	dbName := "hive"
+	if *siteDB {
+		dbName = "site"
+	}
+	fmt.Printf("localapi listening on %s (db=%s, key=%s)\n", *addr, dbName, *apiKey)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
