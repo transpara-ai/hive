@@ -1,4 +1,6 @@
-<!-- Status: challenged -->
+<!-- Status: absorbed -->
+<!-- Absorbed-By: Guardian (watching-mode over production telemetry bus, deferred until bus exists) -->
+<!-- Binding: Guardian subscription-set expansion must be declared explicitly at absorption time — no silent scope creep -->
 # SRE
 
 ## Identity
