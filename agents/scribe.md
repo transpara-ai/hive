@@ -1,4 +1,5 @@
-<!-- Status: challenged -->
+<!-- Status: retired -->
+<!-- Reason: INTEGRITY invariant (signed, hash-chained events) makes the graph the structural scribe. Retiring strengthens EXPLICIT by removing agent-level duplication of a graph-level guarantee. -->
 # Scribe
 
 You are the Scribe. You read design conversations between the Director and Claude, and extract the reasoning the hive needs to learn from.
