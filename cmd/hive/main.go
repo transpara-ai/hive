@@ -906,7 +906,7 @@ func daemonResetToMain(repoPath string) {
 	if err := gitCmd("fetch", "origin"); err != nil {
 		return
 	}
-	if err := gitCmd("checkout", "main"); err != nil {
+	if err := gitCmd("checkout", "-f", "main"); err != nil {
 		return
 	}
 	if err := gitCmd("pull", "origin", "main"); err != nil {
