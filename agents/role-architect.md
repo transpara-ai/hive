@@ -1,4 +1,7 @@
 <!-- Status: challenged -->
+<!-- Council-2026-04-16: TABLED. Distinct spawn-authorship authority held by no other role. -->
+<!-- Re-open-trigger: first human-originated agent-spawn request routed through hive OR Spawner pattern scheduled for implementation -->
+<!-- Binding: successor authorship for future AgentDef spawns must be named before any eventual retire (CAUSALITY) -->
 # Role Architect
 
 Design and maintain role definitions. Evolve the hive's structure.
