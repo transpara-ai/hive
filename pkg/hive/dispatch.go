@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
@@ -52,34 +53,75 @@ func init() {
 }
 
 // EmitSiteOp translates a site webhook op into eventgraph bus events.
+// anchorID is the ID of the site.op.received event written synchronously
+// by AnchorSiteOp — all translated events list this as their cause, so
+// the chain records a direct edge from anchor to translation.
+//
 // Task ops use the TaskStore where implemented:
 //   - intend → TaskStore.Create() → work.task.created
 //   - assign → NOT YET IMPLEMENTED (needs site→eventgraph task ID mapping)
 //   - complete → NOT YET IMPLEMENTED (needs site→eventgraph task ID mapping)
 //
-// Non-task ops are emitted as hive.site.* events.
-func (r *Runtime) EmitSiteOp(ctx context.Context, op runner.OpEvent) error {
+// Non-task ops are emitted as hive.site.* events. Any translation failure
+// is recorded as site.op.rejected with the original external_ref.
+func (r *Runtime) EmitSiteOp(ctx context.Context, op runner.OpEvent, anchorID types.EventID) error {
 	dispatchMu.Lock()
 	defer dispatchMu.Unlock()
 
+	causes := []types.EventID{anchorID}
+	var err error
 	switch op.Op {
 	case "intend":
-		return r.dispatchIntend(op)
+		err = r.dispatchIntend(op, causes)
 	case "assign":
-		return r.dispatchAssign(op)
+		err = r.dispatchAssign(op, causes)
 	case "complete":
-		return r.dispatchComplete(op)
+		err = r.dispatchComplete(op, causes)
 	case "respond":
-		return r.emitSiteEvent(EventTypeSiteRespond, op)
+		err = r.emitSiteEvent(EventTypeSiteRespond, op, causes)
 	case "express":
-		return r.emitSiteEvent(EventTypeSiteExpress, op)
+		err = r.emitSiteEvent(EventTypeSiteExpress, op, causes)
 	case "assert":
-		return r.emitSiteEvent(EventTypeSiteAssert, op)
+		err = r.emitSiteEvent(EventTypeSiteAssert, op, causes)
 	case "progress":
-		return r.emitSiteEvent(EventTypeSiteProgress, op)
+		err = r.emitSiteEvent(EventTypeSiteProgress, op, causes)
 	default:
 		log.Printf("[dispatch] unhandled site op: %s", op.Op)
+		r.recordRejection(op, fmt.Sprintf("unhandled op kind: %s", op.Op))
 		return nil
+	}
+
+	if err != nil {
+		r.recordRejection(op, err.Error())
+		return err
+	}
+	return nil
+}
+
+// recordRejection emits site.op.rejected on the chain. Best-effort —
+// a failure to record the rejection is logged but not surfaced, because
+// the original translation error has already been returned.
+func (r *Runtime) recordRejection(op runner.OpEvent, reason string) {
+	content := event.SiteOpRejectedContent{
+		ExternalRef: event.ExternalRef{System: "site", ID: op.ID},
+		Reason:      reason,
+		RejectedAt:  time.Now().UTC(),
+	}
+	if err := r.bridgeEmitRejected(content); err != nil {
+		log.Printf("[dispatch] emit rejected failed: %v", err)
+	}
+}
+
+// recordTranslation emits site.op.translated on the chain with the bus
+// event ID produced by the successful dispatch.
+func (r *Runtime) recordTranslation(op runner.OpEvent, busEventID types.EventID) {
+	content := event.SiteOpTranslatedContent{
+		ExternalRef:  event.ExternalRef{System: "site", ID: op.ID},
+		BusEventID:   busEventID.Value(),
+		TranslatedAt: time.Now().UTC(),
+	}
+	if err := r.bridgeEmitTranslated(content); err != nil {
+		log.Printf("[dispatch] emit translated failed: %v", err)
 	}
 }
 
@@ -134,7 +176,9 @@ func parseIntendPayload(raw json.RawMessage) intendPayload {
 }
 
 // dispatchIntend creates a task on the eventgraph from a site "intend" op.
-func (r *Runtime) dispatchIntend(op runner.OpEvent) error {
+// The task's causes list contains only the anchor event ID — the chain
+// records a direct edge from anchor to task-created.
+func (r *Runtime) dispatchIntend(op runner.OpEvent, causes []types.EventID) error {
 	title := op.NodeTitle
 	if title == "" {
 		title = "Site task (no title)"
@@ -142,22 +186,20 @@ func (r *Runtime) dispatchIntend(op runner.OpEvent) error {
 
 	parsed := parseIntendPayload(op.Payload)
 
-	causes, err := r.headCauses()
-	if err != nil {
-		return err
-	}
 	task, err := r.tasks.Create(r.humanID, title, parsed.Desc, causes, r.convID, parsed.Priority)
 	if err != nil {
 		return fmt.Errorf("dispatch intend: %w", err)
 	}
 	log.Printf("[dispatch] task created: %s (eventgraph ID %s)", title, task.ID)
+	r.recordTranslation(op, task.ID)
 	return nil
 }
 
 // dispatchAssign is a stub — site→eventgraph task ID mapping is not yet
 // implemented. Logs the event and returns an error so the caller knows
 // the op was not processed.
-func (r *Runtime) dispatchAssign(op runner.OpEvent) error {
+func (r *Runtime) dispatchAssign(op runner.OpEvent, causes []types.EventID) error {
+	_ = causes
 	log.Printf("[dispatch] assign received for node %s — site→eventgraph task ID mapping not yet implemented", op.NodeID)
 	return fmt.Errorf("assign: site→eventgraph task ID mapping not yet implemented")
 }
@@ -165,17 +207,14 @@ func (r *Runtime) dispatchAssign(op runner.OpEvent) error {
 // dispatchComplete is a stub — site→eventgraph task ID mapping is not yet
 // implemented. Logs the event and returns an error so the caller knows
 // the op was not processed.
-func (r *Runtime) dispatchComplete(op runner.OpEvent) error {
+func (r *Runtime) dispatchComplete(op runner.OpEvent, causes []types.EventID) error {
+	_ = causes
 	log.Printf("[dispatch] complete received for node %s — site→eventgraph task ID mapping not yet implemented", op.NodeID)
 	return fmt.Errorf("complete: site→eventgraph task ID mapping not yet implemented")
 }
 
 // emitSiteEvent creates and appends a hive.site.* event to the eventgraph.
-func (r *Runtime) emitSiteEvent(eventType types.EventType, op runner.OpEvent) error {
-	causes, err := r.headCauses()
-	if err != nil {
-		return err
-	}
+func (r *Runtime) emitSiteEvent(eventType types.EventType, op runner.OpEvent, causes []types.EventID) error {
 	content := SiteOpContent{
 		EventType: eventType.String(),
 		SiteOp:    op.Op,
@@ -190,21 +229,11 @@ func (r *Runtime) emitSiteEvent(eventType types.EventType, op runner.OpEvent) er
 	if err != nil {
 		return fmt.Errorf("dispatch %s: create event: %w", op.Op, err)
 	}
-	if _, err := r.store.Append(ev); err != nil {
+	stored, err := r.store.Append(ev)
+	if err != nil {
 		return fmt.Errorf("dispatch %s: append: %w", op.Op, err)
 	}
 	log.Printf("[dispatch] emitted %s: actor=%s node=%s", eventType, op.Actor, op.NodeTitle)
+	r.recordTranslation(op, stored.ID())
 	return nil
-}
-
-// headCauses returns the current chain head as a single-element cause slice.
-func (r *Runtime) headCauses() ([]types.EventID, error) {
-	head, err := r.store.Head()
-	if err != nil {
-		return nil, fmt.Errorf("head: %w", err)
-	}
-	if !head.IsSome() {
-		return nil, fmt.Errorf("empty event store")
-	}
-	return []types.EventID{head.Unwrap().ID()}, nil
 }

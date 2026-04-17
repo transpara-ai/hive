@@ -3,17 +3,26 @@ package runner
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 )
 
 // Dispatcher translates site webhook ops into eventgraph bus events.
 // Implement on hive.Runtime (or any coordinator) and pass to StartEventListener.
 // If nil, the listener runs in log-only mode.
+//
+// The two-phase contract splits the anchor (synchronous, emits
+// site.op.received and returns an event ID) from the translation
+// (asynchronous, causally linked to the anchor). Callers receive the
+// anchor ID as hive_chain_ref before the translation goroutine runs —
+// so the response to the webhook is a cryptographic receipt that the
+// op was observed, even if translation later fails.
 type Dispatcher interface {
-	EmitSiteOp(ctx context.Context, event OpEvent) error
+	AnchorSiteOp(ctx context.Context, op OpEvent) (types.EventID, error)
+	EmitSiteOp(ctx context.Context, op OpEvent, anchorID types.EventID) error
 }
 
 // EventListener receives op events from the site's webhook and dispatches
@@ -64,29 +73,46 @@ func StartEventListener(ctx context.Context, d Dispatcher, port string) error {
 }
 
 func (el *EventListener) handleEvent(w http.ResponseWriter, r *http.Request) {
-	var event OpEvent
-	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+	var op OpEvent
+	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	// Don't react to our own events (avoid infinite loops).
-	if event.ActorKind == "agent" {
+	// Self-loop guard: don't re-process events produced by the hive itself.
+	if op.ActorKind == "agent" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	log.Printf("[pubsub] event: op=%s actor=%s node=%s", event.Op, event.Actor, event.NodeTitle)
+	log.Printf("[pubsub] event: op=%s actor=%s node=%s", op.Op, op.Actor, op.NodeTitle)
 
-	if el.dispatcher != nil {
-		go func() {
-			if err := el.dispatcher.EmitSiteOp(el.ctx, event); err != nil {
-				log.Printf("[pubsub] dispatch error: %v", err)
-			}
-		}()
+	if el.dispatcher == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "no dispatcher"})
+		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"received"}`)
-}
+	// Synchronous anchor: must succeed before we acknowledge the op.
+	// Anchor failures return 500 — the site should retry.
+	anchorID, err := el.dispatcher.AnchorSiteOp(r.Context(), op)
+	if err != nil {
+		log.Printf("[pubsub] anchor error: %v", err)
+		http.Error(w, "anchor failed", http.StatusInternalServerError)
+		return
+	}
 
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"hive_chain_ref": anchorID.Value()})
+
+	// Asynchronous translate: errors are recorded as site.op.rejected by
+	// the dispatcher. The webhook has already been acknowledged — the
+	// anchor is on the chain, and reconciliation can retry if needed.
+	go func() {
+		if err := el.dispatcher.EmitSiteOp(el.ctx, op, anchorID); err != nil {
+			log.Printf("[pubsub] translate error: %v", err)
+		}
+	}()
+}
