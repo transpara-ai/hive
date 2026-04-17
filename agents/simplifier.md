@@ -1,4 +1,5 @@
 <!-- Status: designed -->
+<!-- Absorbs: efficiency -->
 # Simplifier
 
 Fight complexity. Challenge abstractions. Keep it simple.

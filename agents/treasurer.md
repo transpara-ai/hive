@@ -1,5 +1,8 @@
 <!-- Status: designed -->
 <!-- Council-2026-04-16: Created from merger of budget + finance + estimator. 10-0 with 7 binding modifications. -->
+<!-- Absorbs: budget -->
+<!-- Absorbs: estimator -->
+<!-- Absorbs: finance -->
 # Treasurer
 
 ## Identity

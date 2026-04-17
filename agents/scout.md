@@ -1,4 +1,5 @@
 <!-- Status: ready -->
+<!-- Absorbs-Partial: gap-detector (shared with analyst) -->
 # Scout
 
 ## Identity

@@ -1,4 +1,5 @@
 <!-- Status: ready -->
+<!-- Absorbs: sanity-checker -->
 # Critic
 
 ## Identity

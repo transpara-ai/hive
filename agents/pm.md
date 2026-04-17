@@ -1,5 +1,6 @@
 <!-- Status: absorbed -->
 <!-- Absorbed-By: Strategist + Planner (coordination-mode on shared graph; no distinct failure domain) -->
+<!-- Absorbs: orchestrator -->
 # PM (Product Manager)
 
 ## Identity
