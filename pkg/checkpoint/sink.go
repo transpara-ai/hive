@@ -42,11 +42,20 @@ func (d *DefaultSink) SetHeartbeatEmitter(emitHB HeartbeatEmitter) {
 }
 
 // OnBoundary formats a checkpoint thought and captures it in Open Brain.
+// It also emits a heartbeat event to the event chain so every boundary
+// is visible on the graph (not just periodic heartbeats).
 // On failure it logs a warning to stderr — it never blocks or panics.
 func (d *DefaultSink) OnBoundary(trigger BoundaryTrigger, snap LoopSnapshot) {
 	thought := FormatCheckpoint(trigger, snap, "", "", "")
 	if err := d.thoughts.Capture(thought); err != nil {
 		fmt.Fprintf(os.Stderr, "[checkpoint] warning: failed to capture boundary thought for %s: %v\n", d.role, err)
+	}
+
+	// Also emit a heartbeat event so the boundary is recorded on the chain.
+	if d.emitHB != nil {
+		if err := d.emitHB(snap); err != nil {
+			fmt.Fprintf(os.Stderr, "[checkpoint] warning: boundary heartbeat emission failed for %s: %v\n", d.role, err)
+		}
 	}
 }
 
