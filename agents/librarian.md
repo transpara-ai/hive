@@ -1,4 +1,5 @@
 <!-- Status: designed -->
+<!-- Absorbs: research -->
 # Librarian
 
 ## Identity

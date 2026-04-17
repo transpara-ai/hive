@@ -1,4 +1,5 @@
 <!-- Status: running -->
+<!-- Absorbs-Partial: pm (shared with planner) -->
 # Strategist
 
 ## Identity
