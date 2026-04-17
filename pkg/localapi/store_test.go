@@ -117,3 +117,54 @@ func TestListNodes_FilterByKindAndState(t *testing.T) {
 		t.Fatalf("expected 'task done', got %q", done[0].Title)
 	}
 }
+
+func TestNewStoreTableName(t *testing.T) {
+	store := NewStore(nil)
+	if store.tableName != "local_nodes" {
+		t.Errorf("NewStore: tableName = %q, want %q", store.tableName, "local_nodes")
+	}
+}
+
+func TestNewSiteStoreTableName(t *testing.T) {
+	store := NewSiteStore(nil)
+	if store.tableName != "nodes" {
+		t.Errorf("NewSiteStore: tableName = %q, want %q", store.tableName, "nodes")
+	}
+}
+
+func TestResolveSpaceID_LocalPassthrough(t *testing.T) {
+	store := NewStore(nil)
+	slug := "demo"
+	got := store.ResolveSpaceID(slug)
+	if got != slug {
+		t.Errorf("ResolveSpaceID (local): got %q, want %q", got, slug)
+	}
+}
+
+func TestStrPtr(t *testing.T) {
+	empty := strPtr("")
+	if empty == nil {
+		t.Fatal("strPtr(\"\") returned nil")
+	}
+	if *empty != "" {
+		t.Errorf("strPtr(\"\"): got %q, want %q", *empty, "")
+	}
+
+	val := strPtr("hello")
+	if val == nil {
+		t.Fatal("strPtr(\"hello\") returned nil")
+	}
+	if *val != "hello" {
+		t.Errorf("strPtr(\"hello\"): got %q, want %q", *val, "hello")
+	}
+}
+
+func TestNilIfEmpty(t *testing.T) {
+	if nilIfEmpty("") != nil {
+		t.Error("nilIfEmpty(\"\") should return nil")
+	}
+	got := nilIfEmpty("x")
+	if got == nil || *got != "x" {
+		t.Errorf("nilIfEmpty(\"x\"): got %v, want pointer to \"x\"", got)
+	}
+}

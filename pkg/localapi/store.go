@@ -48,12 +48,36 @@ type Agent struct {
 
 // Store provides CRUD operations backed by a local Postgres database.
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	tableName string
 }
 
 // NewStore creates a Store wrapping the given database connection.
+// It uses the "local_nodes" table (hive database).
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, tableName: "local_nodes"}
+}
+
+// NewSiteStore creates a Store that reads from the "nodes" table in the site
+// database. The site DB already has the nodes table, so migration is skipped
+// for it. Slug-to-UUID resolution is enabled automatically.
+func NewSiteStore(db *sql.DB) *Store {
+	return &Store{db: db, tableName: "nodes"}
+}
+
+// ResolveSpaceID maps a URL slug to the space_id used in the nodes table.
+// For the local DB the slug IS the space_id. For the site DB the slug must be
+// resolved via the spaces table (space_id is a UUID hash).
+func (s *Store) ResolveSpaceID(slug string) string {
+	if s.tableName != "nodes" {
+		return slug
+	}
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM spaces WHERE slug = $1`, slug).Scan(&id)
+	if err != nil {
+		return slug // fall back to slug if lookup fails
+	}
+	return id
 }
 
 // ---------------------------------------------------------------------------
@@ -83,8 +107,15 @@ func (s *Store) CreateNode(spaceID string, n Node) (*Node, error) {
 	}
 
 	var createdAt, updatedAt time.Time
+	// Site DB columns (assignee, assignee_id, author, author_id, author_kind)
+	// are NOT NULL with '' defaults, so we must pass empty strings not NULL.
+	optStr := nilIfEmpty
+	if s.tableName == "nodes" {
+		optStr = strPtr
+	}
+
 	err := s.db.QueryRow(`
-		INSERT INTO local_nodes
+		INSERT INTO `+s.tableName+`
 			(id, space_id, parent_id, kind, title, body, state, priority,
 			 assignee, assignee_id, author, author_id, author_kind,
 			 due_date, pinned)
@@ -92,8 +123,8 @@ func (s *Store) CreateNode(spaceID string, n Node) (*Node, error) {
 		RETURNING created_at, updated_at`,
 		n.ID, n.SpaceID, nilIfEmpty(n.ParentID), n.Kind, n.Title, n.Body,
 		n.State, n.Priority,
-		nilIfEmpty(n.Assignee), nilIfEmpty(n.AssigneeID),
-		nilIfEmpty(n.Author), nilIfEmpty(n.AuthorID), nilIfEmpty(n.AuthorKind),
+		optStr(n.Assignee), optStr(n.AssigneeID),
+		optStr(n.Author), optStr(n.AuthorID), optStr(n.AuthorKind),
 		nilIfEmpty(n.DueDate), n.Pinned,
 	).Scan(&createdAt, &updatedAt)
 	if err != nil {
@@ -110,7 +141,7 @@ func (s *Store) GetNode(id string) (*Node, error) {
 		SELECT id, space_id, parent_id, kind, title, body, state, priority,
 		       assignee, assignee_id, author, author_id, author_kind,
 		       due_date, pinned, created_at, updated_at
-		FROM local_nodes WHERE id = $1`, id))
+		FROM `+s.tableName+` WHERE id = $1`, id))
 	if err != nil {
 		return nil, fmt.Errorf("GetNode: %w", err)
 	}
@@ -123,7 +154,7 @@ func (s *Store) ListNodes(spaceID, kind, state string) ([]Node, error) {
 	query := `SELECT id, space_id, parent_id, kind, title, body, state, priority,
 	                 assignee, assignee_id, author, author_id, author_kind,
 	                 due_date, pinned, created_at, updated_at
-	          FROM local_nodes WHERE 1=1`
+	          FROM ` + s.tableName + ` WHERE 1=1`
 	args := []any{}
 	idx := 1
 
@@ -163,13 +194,13 @@ func (s *Store) ListNodes(spaceID, kind, state string) ([]Node, error) {
 
 // UpdateNodeState sets the state of a node and bumps updated_at.
 func (s *Store) UpdateNodeState(id, state string) error {
-	_, err := s.db.Exec(`UPDATE local_nodes SET state = $1, updated_at = now() WHERE id = $2`, state, id)
+	_, err := s.db.Exec(`UPDATE `+s.tableName+` SET state = $1, updated_at = now() WHERE id = $2`, state, id)
 	return err
 }
 
 // ClaimNode assigns a node to the given assignee.
 func (s *Store) ClaimNode(id, assignee string) error {
-	_, err := s.db.Exec(`UPDATE local_nodes SET assignee = $1, updated_at = now() WHERE id = $2`, assignee, id)
+	_, err := s.db.Exec(`UPDATE `+s.tableName+` SET assignee = $1, updated_at = now() WHERE id = $2`, assignee, id)
 	return err
 }
 
@@ -181,8 +212,8 @@ func (s *Store) CompleteNode(id string) error {
 // ChildCounts returns (total, done) child counts for a parent node.
 func (s *Store) ChildCounts(parentID string) (int, int) {
 	var total, done int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM local_nodes WHERE parent_id = $1`, parentID).Scan(&total)
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM local_nodes WHERE parent_id = $1 AND state = 'done'`, parentID).Scan(&done)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+s.tableName+` WHERE parent_id = $1`, parentID).Scan(&total)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+s.tableName+` WHERE parent_id = $1 AND state = 'done'`, parentID).Scan(&done)
 	return total, done
 }
 
@@ -190,7 +221,7 @@ func (s *Store) ChildCounts(parentID string) (int, int) {
 // and returns the highest N found. Returns 0 if none match.
 func (s *Store) MaxLessonNumber(spaceID string) int {
 	re := regexp.MustCompile(`Lesson\s+(\d+):`)
-	rows, err := s.db.Query(`SELECT title FROM local_nodes WHERE space_id = $1`, spaceID)
+	rows, err := s.db.Query(`SELECT title FROM `+s.tableName+` WHERE space_id = $1`, spaceID)
 	if err != nil {
 		return 0
 	}
@@ -214,7 +245,7 @@ func (s *Store) MaxLessonNumber(spaceID string) int {
 // NodeExists returns true if a node with the given ID exists.
 func (s *Store) NodeExists(id string) bool {
 	var exists bool
-	_ = s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM local_nodes WHERE id = $1)`, id).Scan(&exists)
+	_ = s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM `+s.tableName+` WHERE id = $1)`, id).Scan(&exists)
 	return exists
 }
 
@@ -228,7 +259,7 @@ func (s *Store) SearchNodesByTitle(spaceID, prefix string, limit int) ([]Node, e
 		SELECT id, space_id, parent_id, kind, title, body, state, priority,
 		       assignee, assignee_id, author, author_id, author_kind,
 		       due_date, pinned, created_at, updated_at
-		FROM local_nodes
+		FROM `+s.tableName+`
 		WHERE space_id = $1 AND title LIKE $2
 		ORDER BY created_at DESC
 		LIMIT $3`, spaceID, prefix+"%", limit)
@@ -346,6 +377,10 @@ func nilIfEmpty(s string) *string {
 	}
 	return &s
 }
+
+// strPtr returns a pointer to s (including empty strings). Used for NOT NULL
+// text columns in the site database that default to '' instead of NULL.
+func strPtr(s string) *string { return &s }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {

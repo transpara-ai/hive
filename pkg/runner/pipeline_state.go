@@ -131,6 +131,10 @@ func NewPipelineStateMachine(defaultRunner *Runner, factory RunnerFactory) *Pipe
 // SetPostPhase registers a callback that runs after each phase completes.
 func (sm *PipelineStateMachine) SetPostPhase(fn PostPhaseFunc) { sm.postPhase = fn }
 
+// CurrentRunner returns the runner for the phase that just completed.
+// Useful in PostPhase callbacks for reading cost or other phase metrics.
+func (sm *PipelineStateMachine) CurrentRunner() *Runner { return sm.runner }
+
 // State returns the current state.
 func (sm *PipelineStateMachine) State() PipelineState { return sm.state }
 

@@ -66,7 +66,8 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	nodes, err := s.store.ListNodes(slug, "", "")
+	spaceID := s.store.ResolveSpaceID(slug)
+	nodes, err := s.store.ListNodes(spaceID, "", "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -84,6 +85,7 @@ func (s *server) handleBoard(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	spaceID := s.store.ResolveSpaceID(slug)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -112,7 +114,7 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			Body:     stringField(m, "description", ""),
 			Priority: stringField(m, "priority", ""),
 		}
-		created, err := s.store.CreateNode(slug, n)
+		created, err := s.store.CreateNode(spaceID, n)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -159,7 +161,7 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			ParentID: stringField(m, "parent_id", ""),
 			Body:     stringField(m, "body", ""),
 		}
-		created, err := s.store.CreateNode(slug, n)
+		created, err := s.store.CreateNode(spaceID, n)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -172,7 +174,7 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			Title: stringField(m, "title", ""),
 			Body:  stringField(m, "body", ""),
 		}
-		created, err := s.store.CreateNode(slug, n)
+		created, err := s.store.CreateNode(spaceID, n)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -185,7 +187,7 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			Title: stringField(m, "title", ""),
 			Body:  stringField(m, "body", ""),
 		}
-		created, err := s.store.CreateNode(slug, n)
+		created, err := s.store.CreateNode(spaceID, n)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -198,7 +200,7 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			Title: stringField(m, "title", ""),
 			Body:  stringField(m, "body", ""),
 		}
-		created, err := s.store.CreateNode(slug, n)
+		created, err := s.store.CreateNode(spaceID, n)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -226,7 +228,8 @@ func (s *server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleDocuments(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	nodes, err := s.store.ListNodes(slug, "document", "")
+	spaceID := s.store.ResolveSpaceID(slug)
+	nodes, err := s.store.ListNodes(spaceID, "document", "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -239,14 +242,15 @@ func (s *server) handleDocuments(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	spaceID := s.store.ResolveSpaceID(slug)
 
 	if r.URL.Query().Get("op") == "max_lesson" {
-		max := s.store.MaxLessonNumber(slug)
+		max := s.store.MaxLessonNumber(spaceID)
 		writeJSON(w, map[string]any{"max_lesson": max})
 		return
 	}
 
-	nodes, err := s.store.ListNodes(slug, "claim", "")
+	nodes, err := s.store.ListNodes(spaceID, "claim", "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -259,7 +263,8 @@ func (s *server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	nodes, err := s.store.ListNodes(slug, "post", "")
+	spaceID := s.store.ResolveSpaceID(slug)
+	nodes, err := s.store.ListNodes(spaceID, "post", "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
