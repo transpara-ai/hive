@@ -49,6 +49,7 @@ import (
 
 	"github.com/lovyou-ai/hive/pkg/api"
 	"github.com/lovyou-ai/hive/pkg/hive"
+	"github.com/lovyou-ai/hive/pkg/reconciliation"
 	"github.com/lovyou-ai/hive/pkg/registry"
 	"github.com/lovyou-ai/hive/pkg/runner"
 	"github.com/lovyou-ai/hive/pkg/telemetry"
@@ -112,7 +113,7 @@ func run() error {
 		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
 	}
 	if *human != "" {
-		return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *loop)
+		return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *loop, *space, *apiBase)
 	}
 
 	printUsage()
@@ -1125,7 +1126,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath string, loop bool) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath string, loop bool, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1237,6 +1238,24 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 			log.Printf("event listener exited: %v", err)
 		}
 	}()
+
+	// Reconciliation ticker: polls the site for ops missed by the webhook
+	// path (site restart, network partition, hive downtime) and replays
+	// them through the same dispatcher. Requires postgres + an API key —
+	// otherwise the ticker can't store a watermark or talk to the site.
+	apiKey := os.Getenv("LOVYOU_API_KEY")
+	if pool != nil && apiKey != "" && space != "" {
+		if err := reconciliation.EnsureTables(ctx, pool); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: reconciliation tables: %v (continuing without reconciliation)\n", err)
+		} else {
+			source := reconciliation.NewHTTPSource(apiBase, apiKey)
+			ticker := reconciliation.NewTicker(pool, rt, source, space)
+			go ticker.Start(ctx)
+			fmt.Fprintf(os.Stderr, "Reconciliation: polling %s/api/hive/site-ops for space=%s\n", apiBase, space)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "Reconciliation: skipped (need --store, LOVYOU_API_KEY, and --space)")
+	}
 
 	if err := rt.Run(ctx, idea); err != nil {
 		return fmt.Errorf("run: %w", err)
