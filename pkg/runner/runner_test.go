@@ -508,6 +508,66 @@ func TestWriteBuildArtifactDocumentCauses(t *testing.T) {
 	}
 }
 
+// TestWriteBuildArtifactTitleNormalized verifies that the Build: document
+// title strips retry prefixes from the task title, so that critic.go's
+// lookup (which also normalizes the commit subject) finds the document
+// across retry cycles. Without this, retries store "Build: Fix: Fix: X"
+// but look up "Build: X" — permanent miss.
+func TestWriteBuildArtifactTitleNormalized(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := io.ReadAll(r.Body)
+		var m map[string]any
+		if json.Unmarshal(data, &m) == nil {
+			bodies = append(bodies, m)
+		}
+		_, _ = w.Write([]byte(`{"op":"intend","node":{"id":"doc-1","kind":"document","title":"Build: X","created_at":"","updated_at":""}}`))
+	}))
+	defer srv.Close()
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "Add feature")
+
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+	r := New(Config{
+		HiveDir:   hiveDir,
+		RepoPath:  repoDir,
+		SpaceSlug: "hive",
+		APIClient: api.New(srv.URL, "test-key"),
+	})
+
+	task := api.Node{ID: "task-42", Title: "[hive:builder] Fix: [hive:builder] Fix: X", Kind: "task"}
+	r.writeBuildArtifact(task, 0.001, "summary")
+
+	var docTitle string
+	for _, b := range bodies {
+		if kind, _ := b["kind"].(string); kind == "document" {
+			docTitle, _ = b["title"].(string)
+			break
+		}
+	}
+	want := "Build: X"
+	if docTitle != want {
+		t.Errorf("build document title = %q, want %q (retry prefixes must be stripped)", docTitle, want)
+	}
+}
+
 func TestStripHivePrefix(t *testing.T) {
 	tests := []struct {
 		name   string

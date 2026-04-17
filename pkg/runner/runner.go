@@ -544,8 +544,10 @@ func (r *Runner) writeBuildArtifact(t api.Node, costUSD float64, operateSummary 
 	}
 
 	// Also post to graph as a document caused by the task that triggered the build.
+	// Title is normalized so the lookup in critic.go (which normalizes the
+	// commit subject the same way) finds this document on retry cycles.
 	if r.cfg.APIClient != nil {
-		title := fmt.Sprintf("Build: %s", t.Title)
+		title := fmt.Sprintf("Build: %s", stripRetryPrefixes(t.Title))
 		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, title, content, []string{t.ID})
 	}
 }
