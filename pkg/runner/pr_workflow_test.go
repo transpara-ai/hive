@@ -6,21 +6,51 @@ import (
 	"time"
 )
 
-// TestFixTitleDedup asserts that fixTitle never produces a "Fix: Fix: …" prefix.
+// TestFixTitleDedup asserts that fixTitle collapses all retry-prefix layers
+// (both [hive:*] and "Fix: ") before prepending a single "Fix: ". Without full
+// normalization, compounded inputs produce "Fix: Fix: Fix: …" across cycles
+// and branch slugs degrade to "fix-hive-builder-fix-hive-builder-…".
 func TestFixTitleDedup(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"Fix: something", "Fix: something"},    // already prefixed — no double
-		{"something", "Fix: something"},         // plain subject gets prefix
-		{"Add feature", "Fix: Add feature"},     // plain subject gets prefix
-		{"Fix: Fix: nested", "Fix: Fix: nested"}, // starts with Fix: — returned unchanged
+		{"Fix: something", "Fix: something"},
+		{"something", "Fix: something"},
+		{"Add feature", "Fix: Add feature"},
+		{"Fix: Fix: nested", "Fix: nested"},
+		{"[hive:builder] Add feature", "Fix: Add feature"},
+		{"[hive:builder] Fix: X", "Fix: X"},
+		{"[hive:builder] Fix: [hive:builder] Fix: X", "Fix: X"},
+		{"[hive:critic] [hive:builder] Fix: Fix: X", "Fix: X"},
 	}
 	for _, tt := range tests {
 		got := fixTitle(tt.input)
 		if got != tt.want {
 			t.Errorf("fixTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestStripRetryPrefixes isolates the normalization helper.
+func TestStripRetryPrefixes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"X", "X"},
+		{"Fix: X", "X"},
+		{"Fix: Fix: X", "X"},
+		{"[hive:builder] X", "X"},
+		{"[hive:builder] Fix: X", "X"},
+		{"[hive:builder] Fix: [hive:builder] Fix: X", "X"},
+		{"[hive:critic] [hive:builder] Fix: Fix: X", "X"},
+		{"[hive:unterminated X", "[hive:unterminated X"},
+	}
+	for _, tt := range tests {
+		got := stripRetryPrefixes(tt.input)
+		if got != tt.want {
+			t.Errorf("stripRetryPrefixes(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -38,8 +68,10 @@ func TestBranchSlug(t *testing.T) {
 	})
 
 	t.Run("special chars stripped", func(t *testing.T) {
+		// Leading "Fix: " is a retry-cycle prefix and is collapsed by
+		// normalization — see retry_prefixes_stripped_before_slug.
 		got := branchSlug("Fix: something (v2)", date)
-		want := "feat/20260327-fix-something-v2"
+		want := "feat/20260327-something-v2"
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
@@ -55,6 +87,26 @@ func TestBranchSlug(t *testing.T) {
 		slug := got[len(prefix):]
 		if len(slug) > 40 {
 			t.Errorf("slug portion %q exceeds 40 chars (len=%d)", slug, len(slug))
+		}
+	})
+
+	// Compounded retry prefixes must collapse before sluggification — otherwise
+	// the tail (the meaningful part of the title) gets lost to 40-char
+	// truncation and all retries produce near-identical branch names.
+	t.Run("retry prefixes stripped before slug", func(t *testing.T) {
+		compounded := "[hive:builder] Fix: [hive:builder] Fix: add validation test for landing page"
+		got := branchSlug(compounded, date)
+		want := "feat/20260327-add-validation-test-for-landing-page"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("single hive prefix stripped", func(t *testing.T) {
+		got := branchSlug("[hive:builder] Add OAuth integration", date)
+		want := "feat/20260327-add-oauth-integration"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 }

@@ -324,10 +324,12 @@ func parseVerdict(content string) string {
 	return "PASS" // default to pass if no verdict found
 }
 
-// fixTitle returns "Fix: {subject}", stripping any existing "Fix: " prefix
-// before prepending to avoid title compounding across review cycles.
+// fixTitle returns "Fix: {core}", where core is the subject with all leading
+// [hive:*] role prefixes and "Fix: " prefixes stripped. Without full
+// normalization, inputs like "[hive:builder] Fix: X" would produce
+// "Fix: [hive:builder] Fix: X" — compounding across review cycles.
 func fixTitle(subject string) string {
-	return "Fix: " + strings.TrimPrefix(subject, "Fix: ")
+	return "Fix: " + stripRetryPrefixes(subject)
 }
 
 func extractIssues(content string) string {

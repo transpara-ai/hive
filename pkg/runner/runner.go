@@ -739,6 +739,27 @@ func stripHivePrefix(s string) string {
 	return s
 }
 
+// stripRetryPrefixes strips the layers that Critic-driven retries add to a
+// task title: leading [hive:*] role prefixes and "Fix: " prefixes, in any
+// interleaving. Returns the core title.
+//
+// Examples:
+//   "[hive:builder] Fix: X"                        → "X"
+//   "[hive:builder] Fix: [hive:builder] Fix: X"    → "X"
+//   "[hive:critic] [hive:builder] Fix: Fix: X"     → "X"
+func stripRetryPrefixes(s string) string {
+	for {
+		before := s
+		s = stripHivePrefix(s)
+		for strings.HasPrefix(s, "Fix: ") {
+			s = strings.TrimPrefix(s, "Fix: ")
+		}
+		if s == before {
+			return s
+		}
+	}
+}
+
 func parseAction(summary string) string {
 	lines := strings.Split(summary, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -781,8 +802,17 @@ func (r *Runner) printCostSummary() {
 // branchSlug converts a task title to a git branch name.
 // Format: feat/YYYYMMDD-{slug}, where the slug portion is lowercase
 // alphanumeric with hyphens, truncated at 40 characters.
+//
+// The title is normalized before sluggification: leading [hive:*] prefixes
+// and repeated "Fix: " prefixes are collapsed to the core title. Without
+// this, Critic-driven retries compound the title into
+// "[hive:builder] Fix: [hive:builder] Fix: X", which slugs to
+// "fix-hive-builder-fix-hive-builder-..." and loses the meaningful tail
+// to the 40-char truncation.
 func branchSlug(title string, date time.Time) string {
 	dateStr := date.Format("20060102")
+
+	title = stripRetryPrefixes(title)
 
 	var b strings.Builder
 	prevHyphen := true // start true to suppress leading hyphens
