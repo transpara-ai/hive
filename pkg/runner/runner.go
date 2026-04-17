@@ -636,8 +636,11 @@ func (r *Runner) commitAndPush(t api.Node) error {
 		return fmt.Errorf("git add: %w", err)
 	}
 
-	// Commit.
-	msg := fmt.Sprintf("[hive:%s] %s", r.cfg.Role, stripHivePrefix(t.Title))
+	// Commit. Use full retry-prefix stripping (not just [hive:*]) so that a
+	// task titled "Fix: X" and a later "Fix: Fix: X" both produce the same
+	// commit subject "[hive:builder] X" — otherwise the Build: document
+	// lookup in critic.go (which also normalizes) drifts from the commit key.
+	msg := fmt.Sprintf("[hive:%s] %s", r.cfg.Role, stripRetryPrefixes(t.Title))
 	if err := r.git("commit", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}

@@ -1883,6 +1883,13 @@ func TestStripFixPrefixes(t *testing.T) {
 		{"", ""},
 		{"NotFix: foo", "NotFix: foo"},
 		{"fix: lowercase", "fix: lowercase"}, // case-sensitive
+		// Retry-cycle compounding: [hive:*] layers must be stripped too so
+		// board dedup matches legacy "[hive:builder] Fix: X" entries.
+		{"[hive:builder] foo", "foo"},
+		{"[hive:builder] Fix: foo", "foo"},
+		{"[hive:builder] Fix: [hive:builder] Fix: foo", "foo"},
+		{"[hive:critic] [hive:builder] Fix: Fix: foo", "foo"},
+		{"[hive:unterminated foo", "[hive:unterminated foo"},
 	}
 	for _, tt := range tests {
 		got := stripFixPrefixes(tt.input)

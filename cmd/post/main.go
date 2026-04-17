@@ -224,13 +224,31 @@ func syncMindState(apiKey, baseURL, state string) error {
 	return nil
 }
 
-// stripFixPrefixes strips all leading "Fix: " prefixes from a title,
-// returning the core title. e.g. "Fix: Fix: X" → "X".
+// stripFixPrefixes strips the layers retry cycles add to a task title:
+// leading "[hive:*]" role prefixes and "Fix: " prefixes, in any
+// interleaving. Returns the core title.
+//
+// Kept in sync with pkg/runner.stripRetryPrefixes — board dedup must
+// match legacy titles that carry both a role prefix and a Fix: layer
+// (e.g. "[hive:builder] Fix: X"), otherwise findExistingTask silently
+// misses duplicates and the board accumulates compounded retry nodes.
 func stripFixPrefixes(title string) string {
-	for strings.HasPrefix(title, "Fix: ") {
-		title = strings.TrimPrefix(title, "Fix: ")
+	for {
+		before := title
+		for strings.HasPrefix(title, "[hive:") {
+			end := strings.Index(title, "]")
+			if end == -1 {
+				break
+			}
+			title = strings.TrimSpace(title[end+1:])
+		}
+		for strings.HasPrefix(title, "Fix: ") {
+			title = strings.TrimPrefix(title, "Fix: ")
+		}
+		if title == before {
+			return title
+		}
 	}
-	return title
 }
 
 // findExistingTask searches the board for a task whose title, after stripping

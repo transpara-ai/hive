@@ -96,10 +96,12 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	}
 
 	// Look up the Build: document for this commit to use as a cause for the
-	// critique claim and any fix tasks (Invariant 2: CAUSALITY).
+	// critique claim and any fix tasks (Invariant 2: CAUSALITY). Uses the
+	// same normalization as the commit-subject writer in runner.go, so the
+	// lookup key matches the title under which Build: documents are created.
 	var buildCauses []string
 	if r.cfg.APIClient != nil {
-		subject := stripHivePrefix(c.subject)
+		subject := stripRetryPrefixes(c.subject)
 		if buildNode := r.cfg.APIClient.LatestByTitle(r.cfg.SpaceSlug, "Build: "+subject); buildNode != nil {
 			buildCauses = []string{buildNode.ID}
 		}
