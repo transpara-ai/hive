@@ -42,13 +42,17 @@ type agentEventRecord struct {
 	recordedAt time.Time
 }
 
-// Writer snapshots agent and hive state to postgres on a timer.
-// It is pure Go infrastructure — no LLM dependency, no token budget.
+// Writer snapshots agent and hive state to postgres. Bus-driven by default —
+// the SubscribeToBus drain goroutine schedules a per-role debounced snapshot
+// when events arrive. A slower safety ticker (60s) still runs to catch
+// idle-but-important state (budget drift, trust score refreshes, chain ok).
+// Pure Go infrastructure — no LLM dependency, no token budget.
 type Writer struct {
 	pool           *pgxpool.Pool
 	store          store.Store
 	budgetRegistry *resources.BudgetRegistry
 	interval       time.Duration
+	debounceDelay  time.Duration
 
 	mu     sync.RWMutex
 	agents []AgentRegistration
@@ -62,19 +66,39 @@ type Writer struct {
 	// Protected by mu.
 	lastAgentEvents map[string]agentEventRecord
 
+	// debounceTimers holds one active timer per agent role. When an event
+	// arrives for role X the timer is reset; after debounceDelay of quiet
+	// the timer fires collectAndWriteForRole(X). Protected by mu.
+	debounceTimers map[string]*time.Timer
+
 	// chainOK caches the last VerifyChain result. Full verification runs
 	// on a slower cadence (every 5 minutes) to avoid walking the full chain
-	// every 10 seconds.
+	// on every safety tick.
 	chainOK         bool
 	lastChainVerify time.Time
 }
 
 // NewWriter creates a telemetry writer. The writer does not start until Start is called.
+//
+// interval is the safety-tick cadence (default 60s, env TELEMETRY_INTERVAL in
+// seconds). Primary snapshot path is bus-driven via SubscribeToBus and a
+// per-role debounce. The ticker is a fallback that still fires on agent
+// registration and on idle chains so dashboards never go completely stale.
+//
+// debounceDelay is how long the writer waits after the last observed event
+// for a role before writing that role's snapshot (default 500ms, env
+// TELEMETRY_DEBOUNCE_MS). Lower = more writes, tighter dashboard latency.
 func NewWriter(pool *pgxpool.Pool, s store.Store, reg *resources.BudgetRegistry) *Writer {
-	interval := 10 * time.Second
+	interval := 60 * time.Second
 	if v := os.Getenv("TELEMETRY_INTERVAL"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil && d > 0 {
 			interval = time.Duration(d) * time.Second
+		}
+	}
+	debounceDelay := 500 * time.Millisecond
+	if v := os.Getenv("TELEMETRY_DEBOUNCE_MS"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			debounceDelay = time.Duration(d) * time.Millisecond
 		}
 	}
 	return &Writer{
@@ -82,8 +106,10 @@ func NewWriter(pool *pgxpool.Pool, s store.Store, reg *resources.BudgetRegistry)
 		store:           s,
 		budgetRegistry:  reg,
 		interval:        interval,
+		debounceDelay:   debounceDelay,
 		lastResponses:   make(map[string]string),
 		lastAgentEvents: make(map[string]agentEventRecord),
+		debounceTimers:  make(map[string]*time.Timer),
 		chainOK:         true,
 	}
 }
@@ -202,7 +228,10 @@ func (w *Writer) Start(ctx context.Context) {
 }
 
 // SubscribeToBus subscribes to all events on the bus and writes them to
-// the telemetry_event_stream table. Returns the subscription ID for cleanup.
+// the telemetry_event_stream table. Each event also schedules a debounced
+// per-role snapshot of the originating agent — the primary path for
+// keeping telemetry_agent_snapshots fresh. Returns the subscription ID
+// for cleanup.
 func (w *Writer) SubscribeToBus(b bus.IBus) bus.SubscriptionID {
 	// Buffer events to avoid blocking the bus delivery goroutine.
 	ch := make(chan event.Event, 256)
@@ -216,13 +245,23 @@ func (w *Writer) SubscribeToBus(b bus.IBus) bus.SubscriptionID {
 		}
 	})
 
-	// Drain goroutine writes events to postgres and tracks per-agent event times.
+	// Drain goroutine writes events to postgres, tracks per-agent event
+	// times, and schedules debounced snapshots for the originating role.
 	go func() {
 		for ev := range ch {
-			// Update per-agent last event record before writing, so the
-			// timestamp is as close as possible to when the event was observed.
 			sourceID := ev.Source().Value()
+
+			// Look up the role this event came from. Events from
+			// unregistered sources (human actors, external) still land
+			// in telemetry_event_stream but don't trigger a snapshot.
+			var role string
 			w.mu.Lock()
+			for _, reg := range w.agents {
+				if reg.Agent.ID().Value() == sourceID {
+					role = reg.Role
+					break
+				}
+			}
 			w.lastAgentEvents[sourceID] = agentEventRecord{
 				eventType:  ev.Type().Value(),
 				recordedAt: time.Now(),
@@ -230,10 +269,102 @@ func (w *Writer) SubscribeToBus(b bus.IBus) bus.SubscriptionID {
 			w.mu.Unlock()
 
 			w.writeEvent(ev)
+
+			if role != "" {
+				w.scheduleSnapshot(role)
+			}
 		}
 	}()
 
 	return subID
+}
+
+// scheduleSnapshot resets (or starts) the debounce timer for one role.
+// When the timer fires, collectAndWriteForRole writes a single row into
+// telemetry_agent_snapshots. Consecutive events within debounceDelay
+// collapse into a single write — the dashboard sees the terminal state,
+// not every intermediate.
+func (w *Writer) scheduleSnapshot(role string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if t, ok := w.debounceTimers[role]; ok {
+		t.Stop()
+	}
+	w.debounceTimers[role] = time.AfterFunc(w.debounceDelay, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		w.collectAndWriteForRole(ctx, role)
+	})
+}
+
+// collectAndWriteForRole writes one telemetry_agent_snapshots row for a
+// specific role. Cheaper than collectAndWrite: no hive snapshot, no
+// batch trust query, no big transaction. Called from the debounce timer
+// scheduled by SubscribeToBus. If the role isn't registered, no-op.
+func (w *Writer) collectAndWriteForRole(ctx context.Context, role string) {
+	w.mu.RLock()
+	var reg *AgentRegistration
+	for i := range w.agents {
+		if w.agents[i].Role == role {
+			reg = &w.agents[i]
+			break
+		}
+	}
+	if reg == nil {
+		w.mu.RUnlock()
+		return
+	}
+	// Copy everything we need under the lock, then release before the DB call.
+	actorID := reg.Agent.ID().Value()
+	name := reg.Name
+	model := reg.Model
+	maxIter := reg.MaxIterations
+	regRole := reg.Role
+	state := reg.Agent.State().String()
+
+	lastMessage := w.lastResponses[name]
+
+	var lastEventType string
+	var lastEventAt *time.Time
+	if rec, ok := w.lastAgentEvents[actorID]; ok {
+		lastEventType = rec.eventType
+		t := rec.recordedAt
+		lastEventAt = &t
+	}
+
+	budgetReg := w.budgetRegistry
+	w.mu.RUnlock()
+
+	iteration := 0
+	tokensUsed := int64(0)
+	costUSD := 0.0
+	if budgetReg != nil {
+		for _, e := range budgetReg.Snapshot() {
+			if e.Name != name {
+				continue
+			}
+			snap := e.Budget.Snapshot()
+			iteration = snap.Iterations
+			tokensUsed = int64(snap.TokensUsed)
+			costUSD = snap.CostUSD
+			maxIter = e.MaxIterations
+			break
+		}
+	}
+
+	// Trust score is expensive to fetch per-role (one query per snapshot);
+	// leave it nil on the fast path and let the 60s safety tick refresh.
+	_, err := w.pool.Exec(ctx,
+		`INSERT INTO telemetry_agent_snapshots
+			(agent_role, actor_id, state, model, iteration, max_iterations,
+			 tokens_used, cost_usd, trust_score, last_event_type, last_event_at, last_message, errors)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11, 0)`,
+		regRole, actorID, state, model, iteration, maxIter,
+		tokensUsed, costUSD, lastEventType, lastEventAt, lastMessage,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: agent snapshot %s (debounced): %v\n", name, err)
+	}
 }
 
 func (w *Writer) collectAndWrite(ctx context.Context) {

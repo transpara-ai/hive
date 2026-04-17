@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/work"
@@ -326,6 +328,109 @@ func TestSeedDataNonEmpty(t *testing.T) {
 			t.Errorf("%s missing ON CONFLICT (not idempotent)", name)
 		}
 	}
+}
+
+// TestScheduleSnapshotCoalesces verifies the per-role debounce replaces
+// the pending timer on each call, so a burst of events collapses to one
+// snapshot write. Coalescing is observable via timer identity: the second
+// call must install a new timer AND stop the previous one.
+func TestScheduleSnapshotCoalesces(t *testing.T) {
+	w := &Writer{
+		debounceDelay:   100 * time.Millisecond,
+		lastResponses:   make(map[string]string),
+		lastAgentEvents: make(map[string]agentEventRecord),
+		debounceTimers:  make(map[string]*time.Timer),
+	}
+
+	w.scheduleSnapshot("builder")
+	w.mu.RLock()
+	t1 := w.debounceTimers["builder"]
+	w.mu.RUnlock()
+	if t1 == nil {
+		t.Fatal("first scheduleSnapshot did not install a timer")
+	}
+
+	w.scheduleSnapshot("builder")
+	w.mu.RLock()
+	t2 := w.debounceTimers["builder"]
+	w.mu.RUnlock()
+	if t2 == nil {
+		t.Fatal("second scheduleSnapshot did not install a timer")
+	}
+	if t1 == t2 {
+		t.Fatal("second call reused the same timer — coalescing broken")
+	}
+	// t1 was stopped inside scheduleSnapshot before being replaced. A
+	// second Stop() reports whether the timer was still pending; false
+	// here confirms the first timer is dead.
+	if t1.Stop() {
+		t.Error("first timer was still pending — scheduleSnapshot failed to stop it")
+	}
+}
+
+// TestScheduleSnapshotPerRoleIndependent verifies timers are keyed by
+// role: events from role A do not cancel role B's pending snapshot.
+func TestScheduleSnapshotPerRoleIndependent(t *testing.T) {
+	w := &Writer{
+		debounceDelay:   100 * time.Millisecond,
+		lastResponses:   make(map[string]string),
+		lastAgentEvents: make(map[string]agentEventRecord),
+		debounceTimers:  make(map[string]*time.Timer),
+	}
+
+	w.scheduleSnapshot("alpha")
+	w.scheduleSnapshot("beta")
+
+	w.mu.RLock()
+	ta := w.debounceTimers["alpha"]
+	tb := w.debounceTimers["beta"]
+	w.mu.RUnlock()
+	if ta == nil || tb == nil {
+		t.Fatalf("expected both timers, got alpha=%v beta=%v", ta != nil, tb != nil)
+	}
+	if ta == tb {
+		t.Fatal("alpha and beta share a timer — per-role isolation broken")
+	}
+	// Both should still be pending, meaning per-role debounces are independent.
+	if !ta.Stop() {
+		t.Error("alpha timer was unexpectedly stopped")
+	}
+	if !tb.Stop() {
+		t.Error("beta timer was unexpectedly stopped")
+	}
+}
+
+// TestScheduleSnapshotConcurrentSafe verifies scheduleSnapshot is safe
+// to call from many goroutines at once — the drain goroutine can burst
+// events and we rely on the internal mutex to serialise.
+func TestScheduleSnapshotConcurrentSafe(t *testing.T) {
+	w := &Writer{
+		debounceDelay:   50 * time.Millisecond,
+		lastResponses:   make(map[string]string),
+		lastAgentEvents: make(map[string]agentEventRecord),
+		debounceTimers:  make(map[string]*time.Timer),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.scheduleSnapshot("builder")
+		}()
+	}
+	wg.Wait()
+
+	w.mu.RLock()
+	count := len(w.debounceTimers)
+	w.mu.RUnlock()
+	if count != 1 {
+		t.Errorf("debounceTimers len = %d after 50 concurrent calls for same role; want 1", count)
+	}
+
+	// Wait for the debounce to elapse. For an unregistered role,
+	// collectAndWriteForRole is a no-op, so the timer firing must not panic.
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestTruncate(t *testing.T) {
