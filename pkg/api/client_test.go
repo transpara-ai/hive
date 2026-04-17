@@ -461,3 +461,81 @@ func TestEscalateTaskError(t *testing.T) {
 		t.Error("EscalateTask with 500: expected error")
 	}
 }
+
+// TestMirrorToSiteMarshalsStruct verifies MirrorToSite serialises a struct
+// body into JSON and hits /api/hive/mirror. This is the mainline path used
+// by bridge dispatch after anchor — the server stamps hive_chain_ref back
+// onto the site node.
+func TestMirrorToSiteMarshalsStruct(t *testing.T) {
+	var gotPath, gotCT string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stamped":true}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	payload := struct {
+		NodeID       string `json:"node_id"`
+		HiveChainRef string `json:"hive_chain_ref"`
+	}{NodeID: "node-1", HiveChainRef: "evt-anchor"}
+
+	var out map[string]bool
+	if err := c.MirrorToSite(payload, &out); err != nil {
+		t.Fatalf("MirrorToSite: %v", err)
+	}
+	if gotPath != "/api/hive/mirror" {
+		t.Errorf("path = %q; want /api/hive/mirror", gotPath)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q; want application/json", gotCT)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(gotBody, &decoded); err != nil {
+		t.Fatalf("unmarshal sent body: %v", err)
+	}
+	if decoded["node_id"] != "node-1" || decoded["hive_chain_ref"] != "evt-anchor" {
+		t.Errorf("body = %s; want node_id=node-1 hive_chain_ref=evt-anchor", gotBody)
+	}
+	if !out["stamped"] {
+		t.Errorf("out decoded = %v; want stamped=true", out)
+	}
+}
+
+// TestMirrorToSiteRawBytesPassthrough verifies []byte bodies are sent
+// as-is without re-marshalling (which would base64-encode them).
+func TestMirrorToSiteRawBytesPassthrough(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	raw := []byte(`{"already":"json"}`)
+	if err := c.MirrorToSite(raw, nil); err != nil {
+		t.Fatalf("MirrorToSite: %v", err)
+	}
+	if string(gotBody) != `{"already":"json"}` {
+		t.Errorf("body = %q; want raw bytes passed through", gotBody)
+	}
+}
+
+// TestMirrorToSiteError verifies upstream HTTP errors surface to the caller.
+func TestMirrorToSiteError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	err := c.MirrorToSite(map[string]string{"x": "y"}, nil)
+	if err == nil {
+		t.Error("MirrorToSite with 502: expected error")
+	}
+}

@@ -415,15 +415,7 @@ func (c *Client) EscalateTask(slug, taskID, reason, assigneeID string) error {
 	if assigneeID != "" {
 		body["assignee_id"] = assigneeID
 	}
-	data, _ := json.Marshal(body)
-	u := fmt.Sprintf("%s/api/hive/escalation", c.base)
-	req, err := http.NewRequest("POST", u, strings.NewReader(string(data)))
-	if err != nil {
-		return err
-	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
-	return c.do(req, nil)
+	return c.postJSON("/api/hive/escalation", body, nil)
 }
 
 // UpdateAgentSession persists a new session ID for the named agent persona.
@@ -487,14 +479,48 @@ func (c *Client) NodeExists(slug, id string) bool {
 // PostDiagnostic sends a phase event to the /api/hive/diagnostic endpoint.
 // The event is stored in the site's database so /hive/feed works in production.
 // Returns nil on success. Non-fatal: callers should log but not abort on error.
+// payload must be pre-marshalled JSON.
 func (c *Client) PostDiagnostic(payload []byte) error {
-	req, err := http.NewRequest("POST", c.base+"/api/hive/diagnostic", bytes.NewReader(payload))
+	return c.postJSON("/api/hive/diagnostic", payload, nil)
+}
+
+// MirrorToSite pushes a hive event update back to the site via
+// /api/hive/mirror so site nodes can be stamped with hive_chain_ref.
+// Called after hive emits a terminal spec event (e.g. hive.spec.completed).
+// body is an arbitrary JSON-serialisable payload; out is optional.
+// The successful call is recorded on the chain as site.op.mirrored by
+// the caller — this method does not emit.
+func (c *Client) MirrorToSite(body any, out any) error {
+	return c.postJSON("/api/hive/mirror", body, out)
+}
+
+// postJSON marshals body as JSON and POSTs it to path (relative to c.base).
+// When body is a []byte or json.RawMessage, it is sent as-is without
+// re-marshalling (avoids base64 encoding []byte). Pass nil for body to
+// send an empty body, and nil for out to ignore the response payload.
+func (c *Client) postJSON(path string, body any, out any) error {
+	var reader io.Reader
+	switch v := body.(type) {
+	case nil:
+		// empty body
+	case []byte:
+		reader = bytes.NewReader(v)
+	case json.RawMessage:
+		reader = bytes.NewReader(v)
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("postJSON marshal: %w", err)
+		}
+		reader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest("POST", c.base+path, reader)
 	if err != nil {
-		return err
+		return fmt.Errorf("postJSON request: %w", err)
 	}
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	return c.do(req, nil)
+	return c.do(req, out)
 }
 
 func (c *Client) setHeaders(req *http.Request) {
