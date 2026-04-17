@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
@@ -65,6 +66,14 @@ type Runtime struct {
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
+
+	// Bridge actor for synchronous site-op anchors. Constructed lazily on
+	// first AnchorSiteOp call via bridgeOnce. bridgeMu serialises emit+read
+	// pairs against LastEvent() so concurrent webhooks each observe their
+	// own anchor ID.
+	bridgeAgent *hiveagent.Agent
+	bridgeOnce  sync.Once
+	bridgeMu    sync.Mutex
 
 	// Options.
 	approveRequests bool
