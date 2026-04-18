@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // routeAndDispatch is the entry point for the subcommand router.
@@ -124,8 +125,63 @@ func cmdCivilizationDaemon(args []string) error {
 	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, true, *space, *apiBase)
 }
 
+// ─── pipeline ─────────────────────────────────────────────────────────────────
+
+func cmdPipeline(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: hive pipeline <run|daemon> [flags]")
+	}
+	subverb := args[0]
+	rest := args[1:]
+	switch subverb {
+	case "run":
+		return cmdPipelineRun(rest)
+	case "daemon":
+		return cmdPipelineDaemon(rest)
+	case "-h", "--help":
+		fmt.Println("usage: hive pipeline <run|daemon> [flags]")
+		return nil
+	default:
+		return fmt.Errorf("unknown pipeline subverb %q (want run|daemon)", subverb)
+	}
+}
+
+func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, prMode, worktrees, autoClone *bool) {
+	space = fs.String("space", "hive", "lovyou.ai space slug")
+	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	repo = fs.String("repo", "", "Path to repo (default: current dir)")
+	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	storeDSN = fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
+	repos = fs.String("repos", "", "Named repos: name=path,name=path")
+	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
+	prMode = fs.Bool("pr", false, "Create feature branch and open PR instead of pushing to main")
+	worktrees = fs.Bool("worktrees", false, "Each Builder task gets its own git worktree")
+	autoClone = fs.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
+	return
+}
+
+func cmdPipelineRun(args []string) error {
+	fs := flag.NewFlagSet("pipeline run", flag.ContinueOnError)
+	space, apiBase, repo, agentID, storeDSN, repos, budget, prMode, worktrees, autoClone := pipelineFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoMap := parseRepos(*repos, *repo)
+	return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *worktrees, *autoClone, *storeDSN)
+}
+
+func cmdPipelineDaemon(args []string) error {
+	fs := flag.NewFlagSet("pipeline daemon", flag.ContinueOnError)
+	space, apiBase, repo, agentID, storeDSN, repos, budget, prMode, worktrees, autoClone := pipelineFlags(fs)
+	interval := fs.Duration("interval", 30*time.Minute, "Pipeline cycle interval")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoMap := parseRepos(*repos, *repo)
+	return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *worktrees, *autoClone, *storeDSN)
+}
+
 // Stubs — replaced by real implementations in later tasks.
-func cmdPipeline(args []string) error { return fmt.Errorf("pipeline: not implemented") }
-func cmdRole(args []string) error     { return fmt.Errorf("role: not implemented") }
-func cmdIngest(args []string) error   { return fmt.Errorf("ingest: not implemented") }
-func cmdCouncil(args []string) error  { return fmt.Errorf("council: not implemented") }
+func cmdRole(args []string) error    { return fmt.Errorf("role: not implemented") }
+func cmdIngest(args []string) error  { return fmt.Errorf("ingest: not implemented") }
+func cmdCouncil(args []string) error { return fmt.Errorf("council: not implemented") }
