@@ -1,21 +1,21 @@
 // Command hive runs hive agents.
 //
-// Pipeline mode: runs Scout → Builder → Critic in a loop (default 30m interval).
+// Usage:
 //
-//	go run ./cmd/hive --pipeline --repo ../site --space hive
-//	go run ./cmd/hive --pipeline --one-shot --repo ../site   # single cycle
+//	hive <verb> [subverb] [flags]
 //
-// Single role: one process per agent role, polls lovyou.ai.
+// Verbs:
 //
-//	go run ./cmd/hive --role builder --repo ../site --space hive
+//	hive civilization run         Multi-agent runtime, one-shot
+//	hive civilization daemon      Multi-agent runtime, long-running
+//	hive pipeline run             Scout→Builder→Critic, one cycle
+//	hive pipeline daemon          Scout→Builder→Critic, looping
+//	hive role <name> run          Single agent (builder|scout|critic|monitor), one task
+//	hive role <name> daemon       Single agent, continuous
+//	hive ingest <file>            Post a markdown spec as a task
+//	hive council [--topic ...]    Convene one deliberation
 //
-// Ingest mode: posts a spec markdown file as a task to the local API.
-//
-//	go run ./cmd/hive --ingest spec.md --space hive --api http://localhost:8082
-//
-// Legacy mode (runtime): spawns all agents, coordinates via event graph.
-//
-//	go run ./cmd/hive --human Matt --idea "description"
+// Run 'hive <verb> --help' for verb-specific flags.
 package main
 
 import (
@@ -24,7 +24,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -64,104 +63,7 @@ func main() {
 }
 
 func run() error {
-	// Runner mode flags.
-	role := flag.String("role", "", "Agent role (builder, scout, critic, monitor). Enables runner mode.")
-	pipeline := flag.Bool("pipeline", false, "Run Scout → Builder → Critic pipeline (loops at --interval)")
-	interval := flag.Duration("interval", 30*time.Minute, "Pipeline cycle interval (default: 30m, use with --pipeline)")
-	council := flag.Bool("council", false, "Convene all agents for deliberation")
-	councilTopic := flag.String("topic", "", "Focus the council on a specific question")
-	space := flag.String("space", "hive", "lovyou.ai space slug")
-	apiBase := flag.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
-	budget := flag.Float64("budget", 10.0, "Daily budget in USD")
-	agentID := flag.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
-	oneShot := flag.Bool("one-shot", false, "Run once then exit (single pipeline cycle or single task)")
-	prMode := flag.Bool("pr", false, "Create a feature branch and open a PR instead of pushing directly to main")
-	useWorktrees := flag.Bool("worktrees", false, "Each Builder task gets its own git worktree for isolation")
-	autoClone := flag.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
-
-	// Ingest mode flags.
-	ingestSpec := flag.String("ingest", "", "Ingest a spec markdown file as a task (path to .md file)")
-	ingestPriority := flag.String("priority", "high", "Task priority for --ingest: low|medium|high|critical")
-
-	// Shared flags.
-	repo := flag.String("repo", "", "Path to repo for Operate (default: current dir)")
-	repos := flag.String("repos", "", "Named repos for pipeline: name=path,name=path (e.g. site=../site,hive=.)")
-
-	// Legacy runtime mode flags.
-	human := flag.String("human", "", "Human operator name")
-	idea := flag.String("idea", "", "Seed idea for agents to work on")
-	storeDSN := flag.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
-	approveRequests := flag.Bool("approve-requests", false, "Auto-approve authority requests (file writes, git ops)")
-	approveRoles := flag.Bool("approve-roles", false, "Auto-approve role proposals (skip Guardian approval)")
-	loop := flag.Bool("loop", false, "Keep agents alive when idle — block on bus instead of quiescing")
-	flag.Parse()
-
-	if *ingestSpec != "" {
-		return runIngest(*ingestSpec, *space, *apiBase, *ingestPriority)
-	}
-	if *council {
-		return runCouncilCmd(*space, *apiBase, *repo, *budget, *councilTopic)
-	}
-	if *pipeline || *role == "pipeline" {
-		repoMap := parseRepos(*repos, *repo)
-		if *oneShot {
-			return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *useWorktrees, *autoClone, *storeDSN)
-		}
-		return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *useWorktrees, *autoClone, *storeDSN)
-	}
-	if *role != "" {
-		return runRunner(*role, *space, *apiBase, *repo, *budget, *agentID, *oneShot, *prMode)
-	}
-	if *human != "" {
-		return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *loop, *space, *apiBase)
-	}
-
-	printUsage()
-	return fmt.Errorf("specify --pipeline, --role, or --human")
-}
-
-func printUsage() {
-	fmt.Fprintln(os.Stderr, "usage: hive [mode] [flags]")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Modes:")
-	fmt.Fprintln(os.Stderr, "  --human NAME           Start hive with human operator (default mode)")
-	fmt.Fprintln(os.Stderr, "  --pipeline             Run Scout → Builder → Critic pipeline (loops at --interval)")
-	fmt.Fprintln(os.Stderr, "  --role ROLE             Run a single agent role (builder, scout, critic, monitor)")
-	fmt.Fprintln(os.Stderr, "  --council              Convene all agents for deliberation")
-	fmt.Fprintln(os.Stderr, "  --ingest PATH          Ingest a spec markdown file as a task")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Hive flags (use with --human):")
-	fmt.Fprintln(os.Stderr, "  --idea TEXT             Seed idea for agents to work on")
-	fmt.Fprintln(os.Stderr, "  --store DSN             Store DSN (postgres://... or empty for in-memory)")
-	fmt.Fprintln(os.Stderr, "  --repo PATH             Path to repo for Operate (default: current dir)")
-	fmt.Fprintln(os.Stderr, "  --approve-requests      Auto-approve authority requests (file writes, git ops)")
-	fmt.Fprintln(os.Stderr, "  --approve-roles         Auto-approve role proposals (skip Guardian approval)")
-	fmt.Fprintln(os.Stderr, "  --loop                  Keep agents alive when idle (block on bus)")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Pipeline flags:")
-	fmt.Fprintln(os.Stderr, "  --space SLUG            lovyou.ai space slug (default: hive)")
-	fmt.Fprintln(os.Stderr, "  --api URL               lovyou.ai API base URL")
-	fmt.Fprintln(os.Stderr, "  --budget USD            Daily budget in USD (default: 10)")
-	fmt.Fprintln(os.Stderr, "  --agent-id ID           Agent's lovyou.ai user ID")
-	fmt.Fprintln(os.Stderr, "  --repos NAME=PATH,...   Named repos for pipeline")
-	fmt.Fprintln(os.Stderr, "  --pr                    Create feature branch + PR instead of pushing to main")
-	fmt.Fprintln(os.Stderr, "  --worktrees             Each task gets its own git worktree")
-	fmt.Fprintln(os.Stderr, "  --auto-clone            Clone missing repos from registry URLs")
-	fmt.Fprintln(os.Stderr, "  --interval DURATION     Pipeline cycle interval (default: 30m)")
-	fmt.Fprintln(os.Stderr, "  --one-shot              Run once then exit (single cycle or single task)")
-	fmt.Fprintln(os.Stderr, "  --topic TEXT            Focus council on a specific question")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Environment:")
-	fmt.Fprintln(os.Stderr, "  DATABASE_URL            Fallback for --store")
-	fmt.Fprintln(os.Stderr, "  HIVE_LISTENER_PORT      Webhook listener port (default: 8081)")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Examples:")
-	fmt.Fprintln(os.Stderr, "  hive --human Michael --idea 'Build a REST API' --store postgres://hive:hive@localhost:5432/hive")
-	fmt.Fprintln(os.Stderr, "  hive --human Michael --approve-requests --approve-roles --loop --store postgres://...")
-	fmt.Fprintln(os.Stderr, "  hive --pipeline --repo ../site --space hive --budget 10 --interval 15m")
-	fmt.Fprintln(os.Stderr, "  hive --pipeline --one-shot --repo ../site --space hive  # single cycle")
-	fmt.Fprintln(os.Stderr, "  hive --role builder --repo ../site --one-shot")
-	fmt.Fprintln(os.Stderr, "  hive --ingest spec.md --space hive --api http://localhost:8082")
+	return routeAndDispatch(os.Args[1:])
 }
 
 // ─── Ingest mode ─────────────────────────────────────────────────────

@@ -1,35 +1,26 @@
 package main
 
 import (
-	"flag"
-	"os"
 	"strings"
 	"testing"
 )
 
-// TestRunNoFlags verifies that run() with no mode flags returns an error
-// listing the available modes. This ensures the dispatch logic is intact
-// after refactoring (e.g. merging --daemon into --pipeline).
+// TestRunNoFlags verifies that running with no verb produces a help-style
+// error mentioning the available verbs.
 func TestRunNoFlags(t *testing.T) {
-	// Reset flag state so run() sees a clean set.
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-
-	err := run()
+	err := routeAndDispatch(nil)
 	if err == nil {
-		t.Fatal("expected error when no mode flags are set")
+		t.Fatal("expected error when no verb given")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "--pipeline") {
-		t.Errorf("error should mention --pipeline, got: %s", msg)
+	for _, want := range []string{"civilization", "pipeline", "role", "ingest", "council"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error should mention %q, got: %s", want, msg)
+		}
 	}
-	if !strings.Contains(msg, "--role") {
-		t.Errorf("error should mention --role, got: %s", msg)
-	}
-	if !strings.Contains(msg, "--human") {
-		t.Errorf("error should mention --human, got: %s", msg)
-	}
-	// --daemon should NOT appear (it was removed).
-	if strings.Contains(msg, "--daemon") {
-		t.Errorf("error should not mention --daemon (removed), got: %s", msg)
+	for _, gone := range []string{"--pipeline", "--role", "--human", "--loop", "--one-shot"} {
+		if strings.Contains(msg, gone) {
+			t.Errorf("error should NOT mention removed flag %q, got: %s", gone, msg)
+		}
 	}
 }
