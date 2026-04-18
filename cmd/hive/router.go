@@ -234,6 +234,37 @@ func cmdRoleDaemon(role string, args []string) error {
 	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, false, *prMode)
 }
 
-// Stubs — replaced by real implementations in later tasks.
-func cmdIngest(args []string) error  { return fmt.Errorf("ingest: not implemented") }
-func cmdCouncil(args []string) error { return fmt.Errorf("council: not implemented") }
+// ─── ingest ───────────────────────────────────────────────────────────────────
+
+func cmdIngest(args []string) error {
+	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
+	space := fs.String("space", "hive", "lovyou.ai space slug")
+	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	priority := fs.String("priority", "high", "Task priority: low|medium|high|critical")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: hive ingest <file.md> [flags] (spec file required)")
+	}
+	if len(rest) > 1 {
+		return fmt.Errorf("ingest takes exactly one positional argument (spec file path)")
+	}
+	return runIngest(rest[0], *space, *apiBase, *priority)
+}
+
+// ─── council ──────────────────────────────────────────────────────────────────
+
+func cmdCouncil(args []string) error {
+	fs := flag.NewFlagSet("council", flag.ContinueOnError)
+	space := fs.String("space", "hive", "lovyou.ai space slug")
+	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	repo := fs.String("repo", "", "Path to repo (default: current dir)")
+	budget := fs.Float64("budget", 10.0, "Daily budget in USD")
+	topic := fs.String("topic", "", "Focus the council on a specific question")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return runCouncilCmd(*space, *apiBase, *repo, *budget, *topic)
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,29 @@ func TestCmdRoleUnknownSubverb(t *testing.T) {
 	err := cmdRole([]string{"builder", "frob"})
 	if err == nil || !strings.Contains(err.Error(), "frob") {
 		t.Fatalf("expected unknown-subverb error, got: %v", err)
+	}
+}
+
+func TestCmdIngestRequiresFile(t *testing.T) {
+	err := cmdIngest(nil)
+	if err == nil || !strings.Contains(err.Error(), "file") {
+		t.Fatalf("expected file-required error, got: %v", err)
+	}
+}
+
+func TestCmdCouncilNoArgsOK(t *testing.T) {
+	// council with no flags should attempt to dispatch (may fail on API,
+	// but should not fail on flag parsing). We assert no flag-parsing error.
+	//
+	// Skip in unit-test environments: runCouncilCmd spawns claude-cli which
+	// blocks indefinitely when an LLM provider is available. Set
+	// HIVE_TEST_INTEGRATION=1 to run this test in an integration environment.
+	if os.Getenv("HIVE_TEST_INTEGRATION") == "" {
+		t.Skip("skipping council integration test (set HIVE_TEST_INTEGRATION=1 to enable)")
+	}
+	err := cmdCouncil([]string{"--topic", "x", "--api", "http://invalid.local"})
+	// We tolerate any error EXCEPT a flag-parsing error.
+	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("flag-parsing error: %v", err)
 	}
 }
