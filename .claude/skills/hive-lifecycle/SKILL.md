@@ -94,6 +94,7 @@ may leave orphaned processes holding ports 8080/8081.
 ```bash
 # 0. Kill zombies from previous runs
 pkill -f "cmd/hive" 2>/dev/null
+# Matches both old --human form and new "civilization" form via cmd/hive
 pkill -f "/hive --human" 2>/dev/null
 pkill -f "cmd/work-server" 2>/dev/null
 pkill -f "work-server-fre" 2>/dev/null
@@ -124,7 +125,7 @@ echo "Work-server started (PID: $(cat /tmp/work-server.pid))"
 
 # 4. Hive (foreground — so you can see output and Ctrl+C to stop)
 cd $HIVE_REPO
-go run ./cmd/hive \
+go run ./cmd/hive civilization run \
     --human Michael \
     --store postgres://hive:hive@localhost:5432/hive \
     --idea "your task description here"
@@ -134,7 +135,7 @@ To run the hive in the background instead:
 
 ```bash
 cd $HIVE_REPO
-nohup go run ./cmd/hive \
+nohup go run ./cmd/hive civilization run \
     --human Michael \
     --store postgres://hive:hive@localhost:5432/hive \
     --idea "your task description here" \
@@ -149,7 +150,7 @@ Pass `--approve-requests` to auto-approve authority requests (file writes, git o
 Pass `--approve-roles` to auto-approve role proposals (bypasses Guardian `/approve`).
 
 ```bash
-go run ./cmd/hive \
+go run ./cmd/hive civilization run \
     --human Michael \
     --approve-requests \
     --approve-roles \
@@ -163,26 +164,24 @@ involvement needed. New agents spawn within 5 seconds of being proposed.
 
 ### Hive Up with Loop
 
-Pass `--loop` to keep agents alive when idle — they block on the bus instead of
+Use `civilization daemon` to keep agents alive when idle — they block on the bus instead of
 quiescing. Useful for long-running hives where work arrives via the webhook.
 
 ```bash
-go run ./cmd/hive \
+go run ./cmd/hive civilization daemon \
     --human Michael \
-    --loop \
     --store postgres://hive:hive@localhost:5432/hive
 ```
 
-### Full Autonomy (growth + loop + approve)
+### Full Autonomy (growth + daemon + approve)
 
 All flags combined for maximum autonomy:
 
 ```bash
-go run ./cmd/hive \
+go run ./cmd/hive civilization daemon \
     --human Michael \
     --approve-requests \
     --approve-roles \
-    --loop \
     --store postgres://hive:hive@localhost:5432/hive
 ```
 
@@ -219,19 +218,19 @@ This is an alternative to the legacy multi-agent runtime above.
 
 ```bash
 # Single agent — works one task matching its role
-go run ./cmd/hive --role builder --space hive --one-shot
+go run ./cmd/hive role builder run --space hive
 
 # Full pipeline — loops at --interval (default 30m)
-go run ./cmd/hive --pipeline --space hive
+go run ./cmd/hive pipeline daemon --space hive
 
 # Pipeline with custom interval
-go run ./cmd/hive --pipeline --interval 15m --space hive
+go run ./cmd/hive pipeline daemon --interval 15m --space hive
 
 # Single pipeline cycle (no loop)
-go run ./cmd/hive --pipeline --one-shot --space hive
+go run ./cmd/hive pipeline run --space hive
 
 # Council — deliberation session
-go run ./cmd/hive --council --topic "Should we add a caching layer?"
+go run ./cmd/hive council --topic "Should we add a caching layer?"
 ```
 
 ### Local Pipeline (no lovyou.ai dependency)
@@ -255,12 +254,10 @@ curl -s -X POST http://localhost:8082/app/hive/op \
   -d '{"op":"intend","kind":"task","title":"Build a habit tracker CLI","description":"Go CLI: habit add, habit check, habit streak. SQLite storage. Include tests.","priority":"high"}'
 
 # 3. Run the pipeline against local API
-go run ./cmd/hive \
-    --pipeline \
+go run ./cmd/hive pipeline daemon \
     --api http://localhost:8082 \
     --space hive \
     --store postgres://hive:hive@localhost:5432/hive \
-    --human Michael \
     --pr
 ```
 
@@ -276,11 +273,13 @@ Graceful shutdown in reverse dependency order. **Always verify zombies are dead*
 ```bash
 # 1. Stop hive (graceful — sends SIGINT, agents run retirement ceremonies)
 pkill -INT -f "cmd/hive" 2>/dev/null
+# Matches both old --human form and new "civilization" form via cmd/hive
 pkill -INT -f "/hive --human" 2>/dev/null
 sleep 5
 
 # 2. Kill any zombies (go run children that survived SIGINT)
 pkill -9 -f "cmd/hive" 2>/dev/null
+# Matches both old --human form and new "civilization" form via cmd/hive
 pkill -9 -f "/hive --human" 2>/dev/null
 sleep 2
 
@@ -334,7 +333,7 @@ WORK_HUMAN=Michael WORK_API_KEY=dev DATABASE_URL=postgres://hive:hive@localhost:
 echo $! > /tmp/work-server.pid
 
 cd $HIVE_REPO
-go run ./cmd/hive \
+go run ./cmd/hive civilization run \
     --human Michael \
     --store postgres://hive:hive@localhost:5432/hive \
     --idea "your task description here"
@@ -421,34 +420,60 @@ docker exec hive-postgres-1 psql -U hive -d hive -t -c \
 
 ## Flag Reference
 
-### Legacy Runtime (multi-agent coordination)
+### `civilization run` (multi-agent, one-shot)
 
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--human` | (required) | Human operator name — always `Michael` |
-| `--idea` | (required) | Seed idea for the agent civilization |
+| `--idea` | "" | Freeform seed |
+| `--spec` | "" | Path to markdown spec file (POSTed via ingest channel) |
 | `--store` | in-memory | Postgres DSN for persistence |
-| `--approve-requests` | false | Auto-approve authority requests (file writes, git ops) |
-| `--approve-roles` | false | Auto-approve role proposals (skip Guardian approval) |
-| `--loop` | false | Keep agents alive when idle (block on bus) |
 | `--repo` | current dir | Path to repo for Implementer's Operate |
+| `--approve-requests` | false | Auto-approve authority requests |
+| `--approve-roles` | false | Auto-approve role proposals |
+| `--space`, `--api` | `hive`, `https://lovyou.ai` | lovyou.ai targeting |
 
-### Runner / Pipeline Mode
+### `civilization daemon` (multi-agent, long-running)
+
+Same flags as `civilization run` except `--idea` becomes `--seed-spec PATH` (optional initial spec; daemon survives past quiescence regardless).
+
+### `pipeline run` / `pipeline daemon`
+
+| Flag | Default | Purpose | Where |
+|------|---------|---------|-------|
+| `--space` | `hive` | lovyou.ai space slug | both |
+| `--api` | `https://lovyou.ai` | lovyou.ai API base URL | both |
+| `--repo` | current dir | Path to repo | both |
+| `--repos` | "" | Named repos: `name=path,...` | both |
+| `--budget` | 10.0 | Daily budget in USD | both |
+| `--agent-id` | "" | Agent's lovyou.ai user ID | both |
+| `--store` | in-memory | Postgres DSN | both |
+| `--pr` | false | Branch + PR instead of pushing to main | both |
+| `--worktrees` | false | Per-task worktrees | both |
+| `--auto-clone` | false | Clone missing repos | both |
+| `--interval` | 30m | Cycle interval | `daemon` only |
+
+### `role <name> run` / `role <name> daemon`
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--role` | | Single agent: builder, scout, critic, monitor |
-| `--pipeline` | false | Scout + Builder + Critic pipeline (loops at `--interval`) |
-| `--interval` | 30m | Pipeline cycle interval |
-| `--council` | false | Convene all agents for deliberation |
-| `--topic` | | Focus question for council |
-| `--space` | hive | lovyou.ai space slug |
-| `--budget` | 10.0 | Daily budget in USD |
-| `--one-shot` | false | Run once then exit (single pipeline cycle or single task) |
-| `--pr` | false | Create feature branch + PR instead of pushing to main |
-| `--worktrees` | false | Each Builder task gets its own git worktree |
-| `--repos` | | Named repos: `name=path,name=path` |
-| `--auto-clone` | false | Clone missing repos from registry URLs |
+| `--space`, `--api`, `--repo`, `--agent-id`, `--budget`, `--pr` | (as above) | Same as pipeline |
+
+`run` runs a single task with throttling disabled. `daemon` runs continuously with throttled phases.
+
+### `council`
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--topic` | "" | Focus question |
+| `--space`, `--api`, `--repo`, `--budget` | (as pipeline) | |
+
+### `ingest <file>`
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--space`, `--api` | (as pipeline) | |
+| `--priority` | `high` | Task priority: low\|medium\|high\|critical |
 
 ### Environment Variables (not CLI flags)
 
