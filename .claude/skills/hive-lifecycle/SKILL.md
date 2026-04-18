@@ -18,10 +18,10 @@ Hive Lifecycle Commands:
   hive down                Graceful shutdown (SIGINT → force kill → verify)
   hive restart             Down then up
   hive status              Check all components (docker, processes, ports, auth)
-  hive run <idea>          Start hive with an idea (legacy multi-agent mode)
-  hive run --pipeline      Scout → Builder → Critic pipeline (loops at --interval, default 30m)
-  hive run --role <role>   Single agent mode (builder/scout/critic/monitor)
-  hive run --council       Convene all agents for deliberation
+  hive run <idea>          Start civilization run with an idea (multi-agent mode)
+  hive run pipeline        Scout → Builder → Critic pipeline daemon (loops at --interval, default 30m)
+  hive run role <role>     Single agent mode (builder/scout/critic/monitor)
+  hive run council         Convene all agents for deliberation
 
   hive ingest <file>       Ingest a spec markdown file as a board task
   hive tasks               List open tasks on the board
