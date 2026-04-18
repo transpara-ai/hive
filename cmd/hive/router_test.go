@@ -27,3 +27,24 @@ func TestRouteAndDispatchUnknownVerb(t *testing.T) {
 		t.Errorf("error should name the unknown verb, got: %s", err.Error())
 	}
 }
+
+func TestCmdCivilizationRequiresSubverb(t *testing.T) {
+	err := cmdCivilization(nil)
+	if err == nil || !strings.Contains(err.Error(), "run") || !strings.Contains(err.Error(), "daemon") {
+		t.Fatalf("expected subverb-required error, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationRunRequiresHuman(t *testing.T) {
+	err := cmdCivilization([]string{"run"})
+	if err == nil || !strings.Contains(err.Error(), "--human") {
+		t.Fatalf("expected --human required error, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationUnknownSubverb(t *testing.T) {
+	err := cmdCivilization([]string{"frob"})
+	if err == nil || !strings.Contains(err.Error(), "frob") {
+		t.Fatalf("expected unknown-subverb error, got: %v", err)
+	}
+}
