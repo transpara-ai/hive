@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -92,19 +91,12 @@ func TestCmdIngestRequiresFile(t *testing.T) {
 	}
 }
 
-func TestCmdCouncilNoArgsOK(t *testing.T) {
-	// council with no flags should attempt to dispatch (may fail on API,
-	// but should not fail on flag parsing). We assert no flag-parsing error.
-	//
-	// Skip in unit-test environments: runCouncilCmd spawns claude-cli which
-	// blocks indefinitely when an LLM provider is available. Set
-	// HIVE_TEST_INTEGRATION=1 to run this test in an integration environment.
-	if os.Getenv("HIVE_TEST_INTEGRATION") == "" {
-		t.Skip("skipping council integration test (set HIVE_TEST_INTEGRATION=1 to enable)")
+func TestCmdCouncilRejectsUnknownFlag(t *testing.T) {
+	err := cmdCouncil([]string{"--banana", "x"})
+	if err == nil {
+		t.Fatal("expected error for unknown flag")
 	}
-	err := cmdCouncil([]string{"--topic", "x", "--api", "http://invalid.local"})
-	// We tolerate any error EXCEPT a flag-parsing error.
-	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
-		t.Fatalf("flag-parsing error: %v", err)
+	if !strings.Contains(err.Error(), "banana") {
+		t.Fatalf("error should mention unknown flag name, got: %v", err)
 	}
 }

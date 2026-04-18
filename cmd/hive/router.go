@@ -240,7 +240,7 @@ func cmdIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	space := fs.String("space", "hive", "lovyou.ai space slug")
 	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
-	priority := fs.String("priority", "high", "Task priority: low|medium|high|critical")
+	priority := fs.String("priority", "normal", "Task priority: high|normal|low")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
