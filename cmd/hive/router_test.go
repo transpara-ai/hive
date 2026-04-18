@@ -62,3 +62,24 @@ func TestCmdPipelineUnknownSubverb(t *testing.T) {
 		t.Fatalf("expected unknown-subverb error, got: %v", err)
 	}
 }
+
+func TestCmdRoleRequiresName(t *testing.T) {
+	err := cmdRole(nil)
+	if err == nil || !strings.Contains(err.Error(), "role name") {
+		t.Fatalf("expected role-name-required error, got: %v", err)
+	}
+}
+
+func TestCmdRoleRequiresSubverb(t *testing.T) {
+	err := cmdRole([]string{"builder"})
+	if err == nil || !strings.Contains(err.Error(), "run") || !strings.Contains(err.Error(), "daemon") {
+		t.Fatalf("expected subverb-required error, got: %v", err)
+	}
+}
+
+func TestCmdRoleUnknownSubverb(t *testing.T) {
+	err := cmdRole([]string{"builder", "frob"})
+	if err == nil || !strings.Contains(err.Error(), "frob") {
+		t.Fatalf("expected unknown-subverb error, got: %v", err)
+	}
+}

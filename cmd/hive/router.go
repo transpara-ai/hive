@@ -181,7 +181,59 @@ func cmdPipelineDaemon(args []string) error {
 	return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *worktrees, *autoClone, *storeDSN)
 }
 
+// ─── role ─────────────────────────────────────────────────────────────────────
+
+func cmdRole(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: hive role <name> <run|daemon> [flags] (role name required)")
+	}
+	roleName := args[0]
+	if len(args) < 2 {
+		return fmt.Errorf("usage: hive role %s <run|daemon> [flags]", roleName)
+	}
+	subverb := args[1]
+	rest := args[2:]
+	switch subverb {
+	case "run":
+		return cmdRoleRun(roleName, rest)
+	case "daemon":
+		return cmdRoleDaemon(roleName, rest)
+	case "-h", "--help":
+		fmt.Printf("usage: hive role %s <run|daemon> [flags]\n", roleName)
+		return nil
+	default:
+		return fmt.Errorf("unknown role subverb %q (want run|daemon)", subverb)
+	}
+}
+
+func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, prMode *bool) {
+	space = fs.String("space", "hive", "lovyou.ai space slug")
+	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	repo = fs.String("repo", "", "Path to repo (default: current dir)")
+	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
+	prMode = fs.Bool("pr", false, "Create feature branch and open PR instead of pushing to main")
+	return
+}
+
+func cmdRoleRun(role string, args []string) error {
+	fs := flag.NewFlagSet("role "+role+" run", flag.ContinueOnError)
+	space, apiBase, repo, agentID, budget, prMode := roleFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, true, *prMode)
+}
+
+func cmdRoleDaemon(role string, args []string) error {
+	fs := flag.NewFlagSet("role "+role+" daemon", flag.ContinueOnError)
+	space, apiBase, repo, agentID, budget, prMode := roleFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, false, *prMode)
+}
+
 // Stubs — replaced by real implementations in later tasks.
-func cmdRole(args []string) error    { return fmt.Errorf("role: not implemented") }
 func cmdIngest(args []string) error  { return fmt.Errorf("ingest: not implemented") }
 func cmdCouncil(args []string) error { return fmt.Errorf("council: not implemented") }
