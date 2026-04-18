@@ -117,7 +117,7 @@ func (r *Runtime) recordRejection(op runner.OpEvent, reason string) {
 func (r *Runtime) recordTranslation(op runner.OpEvent, busEventID types.EventID) {
 	content := event.SiteOpTranslatedContent{
 		ExternalRef:  event.ExternalRef{System: "site", ID: op.ID},
-		BusEventID:   busEventID.Value(),
+		BusEventID:   busEventID,
 		TranslatedAt: time.Now().UTC(),
 	}
 	if err := r.bridgeEmitTranslated(content); err != nil {
