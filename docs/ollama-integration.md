@@ -176,10 +176,10 @@ ollama pull gemma4:27b
 
 # Run the hive with Ollama
 cd hive
-HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive --human Matt --idea "Build a task manager"
+HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive civilization run --human Matt --idea "Build a task manager"
 
 # With a custom Ollama host
-OLLAMA_HOST=http://192.168.1.10:11434 HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive --human Matt --idea "..."
+OLLAMA_HOST=http://192.168.1.10:11434 HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive civilization run --human Matt --idea "..."
 ```
 
 Default behaviour (no env vars) is unchanged — falls back to `claude-cli` and per-role model defaults.

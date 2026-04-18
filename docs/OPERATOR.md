@@ -14,10 +14,10 @@ The CTO agent filters escalations. Only truly structural decisions should reach 
 
 ```bash
 # Local dev (in-memory, ephemeral)
-go run ./cmd/hive --human Matt --idea "Build a task management app"
+go run ./cmd/hive civilization run --human Matt --idea "Build a task management app"
 
 # With Postgres (persistent across runs)
-go run ./cmd/hive --human Matt --store "postgres://..." --idea "..."
+go run ./cmd/hive civilization run --human Matt --store "postgres://..." --idea "..."
 ```
 
 The pipeline runs: Research → Design → Simplify → Build → Review → Test → Integrate. The Guardian checks integrity after every phase.

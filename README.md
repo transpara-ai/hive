@@ -17,10 +17,10 @@ go build ./...
 go test ./...
 
 # Run with an idea (in-memory store)
-go run ./cmd/hive --human Matt --idea "Build a task management app"
+go run ./cmd/hive civilization run --human Matt --idea "Build a task management app"
 
 # Run with Postgres
-go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive" --idea "..."
+go run ./cmd/hive civilization run --human Matt --store "postgres://hive:hive@localhost:5432/hive" --idea "..."
 ```
 
 ## Docs

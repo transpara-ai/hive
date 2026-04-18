@@ -148,29 +148,39 @@ go test ./...
 
 ```bash
 # Basic run — agents coordinate via tasks to build from an idea
-go run ./cmd/hive --human Matt --idea "Build a task management app with kanban boards"
+go run ./cmd/hive civilization run --human Matt --idea "Build a task management app with kanban boards"
 
 # With Postgres persistence
-go run ./cmd/hive --human Matt --store "postgres://hive:hive@localhost:5432/hive" --idea "Build a CLI tool"
+go run ./cmd/hive civilization run --human Matt --store "postgres://hive:hive@localhost:5432/hive" --idea "Build a CLI tool"
 
 # Auto-approve authority requests and role proposals (dev/testing)
-go run ./cmd/hive --human Matt --approve-requests --approve-roles --idea "Build a REST API"
+go run ./cmd/hive civilization run --human Matt --approve-requests --approve-roles --idea "Build a REST API"
 
 # Full autonomy: approve everything, stay alive for webhook work
-go run ./cmd/hive --human Matt --approve-requests --approve-roles --loop --store "postgres://hive:hive@localhost:5432/hive"
+go run ./cmd/hive civilization daemon --human Matt --approve-requests --approve-roles --store "postgres://hive:hive@localhost:5432/hive"
 
 # Point at an existing repo for the Implementer to modify
-go run ./cmd/hive --human Matt --approve-requests --repo /path/to/repo --idea "add error handling to the API"
+go run ./cmd/hive civilization run --human Matt --approve-requests --repo /path/to/repo --idea "add error handling to the API"
 ```
 
-Flags (run `hive` with no args for full help):
+Subcommands:
+- `civilization run` / `civilization daemon` — multi-agent runtime (one-shot or long-running)
+- `pipeline run` / `pipeline daemon` — Scout→Builder→Critic state machine
+- `role <name> run` / `role <name> daemon` — single agent
+- `ingest <file>` — post a markdown spec as a task
+- `council [--topic STR]` — convene one deliberation
+
+Civilization flags:
 - `--human` — Human operator name (required)
-- `--idea` — Seed idea for agents to work on
-- `--store` — Store DSN (`postgres://...` or empty for in-memory)
-- `--approve-requests` — Auto-approve authority requests (file writes, git ops)
-- `--approve-roles` — Auto-approve role proposals (skip Guardian approval)
-- `--loop` — Keep agents alive when idle (block on bus for webhook work)
-- `--repo` — Path to repo for Implementer's Operate (default: current dir)
+- `--idea` — Freeform seed (run only)
+- `--spec PATH` — Markdown spec file as seed (run only)
+- `--seed-spec PATH` — Optional initial spec for daemon
+- `--store DSN` — Postgres DSN or empty for in-memory
+- `--repo PATH` — Path for agent file ops (default: current dir)
+- `--approve-requests` — Auto-approve authority requests
+- `--approve-roles` — Auto-approve role proposals
+
+Run `go run ./cmd/hive <verb> --help` for verb-specific flags.
 
 Can also set `DATABASE_URL` env var instead of `--store`.
 

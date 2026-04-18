@@ -126,12 +126,13 @@ The hive modifies its own codebase via the core loop (see [CORE-LOOP.md](CORE-LO
 ## How It Runs
 
 ```bash
-go run ./cmd/hive \
+go run ./cmd/hive civilization run \
   --human Matt \
   --store postgres://hive:hive@localhost:5432/hive \
   --repo /path/to/target \
   --idea "Build feature X" \
-  --yes
+  --approve-requests \
+  --approve-roles
 ```
 
 All agents start concurrently. They observe the graph, pick up tasks, write code, coordinate via events, and stop when quiescent or budget-exhausted.
