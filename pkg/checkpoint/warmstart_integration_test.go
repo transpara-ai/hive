@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,25 +24,37 @@ import (
 // This is the hive's fundamental persistence guarantee: if the process dies,
 // all committed events are durable and the causal chain is intact.
 //
-// Requires: docker compose up -d postgres (DSN: postgres://hive:hive@localhost:5432/hive)
-// Skip: automatically skipped when HIVE_TEST_DSN is unset.
+// Requires HIVE_TEST_DSN pointing at a disposable Postgres database. The test
+// TRUNCATEs events/event_causes/edges at start and end — never point it at a
+// shared or production database.
 func TestWarmStartIntegration_TaskRecovery(t *testing.T) {
 	dsn := os.Getenv("HIVE_TEST_DSN")
 	if dsn == "" {
-		dsn = "postgres://hive:hive@localhost:5432/hive"
-		// Try to connect; skip if unavailable.
-		pool, err := pgxpool.New(context.Background(), dsn)
-		if err != nil {
-			t.Skipf("Postgres unavailable (set HIVE_TEST_DSN): %v", err)
-		}
-		if err := pool.Ping(context.Background()); err != nil {
-			pool.Close()
-			t.Skipf("Postgres unavailable (set HIVE_TEST_DSN): %v", err)
-		}
-		pool.Close()
+		t.Skip("HIVE_TEST_DSN not set — skipping. Point it at a disposable test database (e.g. docker compose up -d postgres).")
 	}
 
 	ctx := context.Background()
+
+	// Wipe the test DB before and after so fixtures from prior runs never
+	// accumulate — an append-only event graph has no per-row delete, and
+	// a shared DSN would otherwise pollute any dashboard reading the same DB.
+	truncate := func(label string) {
+		pool, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			t.Fatalf("%s: pool: %v", label, err)
+		}
+		defer pool.Close()
+		s, err := pgstore.NewPostgresStoreFromPool(ctx, pool)
+		if err != nil {
+			t.Fatalf("%s: store: %v", label, err)
+		}
+		defer s.Close()
+		if err := s.Truncate(ctx); err != nil {
+			t.Fatalf("%s: truncate: %v", label, err)
+		}
+	}
+	truncate("pre-test")
+	t.Cleanup(func() { truncate("post-test") })
 
 	// Register content unmarshalers so Postgres can deserialize all event types.
 	// We register work types (needed for task ops) and hive types as passthrough
@@ -189,28 +200,6 @@ func TestWarmStartIntegration_TaskRecovery(t *testing.T) {
 		factory := event.NewEventFactory(registry)
 
 		tasks := work.NewTaskStore(s, factory, signer)
-
-		// Register cleanup so test tasks are marked done even if assertions fatal.
-		t.Cleanup(func() {
-			head, err := s.Head()
-			if err != nil || !head.IsSome() {
-				t.Logf("cleanup: no head event, skipping task cleanup")
-				return
-			}
-			causes := []types.EventID{head.Unwrap().ID()}
-			if err := tasks.WaiveArtifact(humanID, taskID, "test cleanup — no deliverable", causes, convID); err != nil {
-				if !strings.Contains(err.Error(), "already") {
-					t.Errorf("cleanup: waive artifact: %v", err)
-				}
-			}
-			if err := tasks.Complete(humanID, taskID, "test cleanup", causes, convID); err != nil {
-				if !strings.Contains(err.Error(), "already") {
-					t.Errorf("cleanup: complete task: %v", err)
-				}
-			} else {
-				t.Logf("cleanup: marked task %s as completed", taskID)
-			}
-		})
 
 		// ── Check 1: pending tasks still present ──────────────────────────
 
