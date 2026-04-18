@@ -16,6 +16,11 @@ func TestRouteAndDispatchNoArgs(t *testing.T) {
 			t.Errorf("error should mention %q, got: %s", want, msg)
 		}
 	}
+	for _, gone := range []string{"--pipeline", "--role", "--human", "--loop", "--one-shot"} {
+		if strings.Contains(msg, gone) {
+			t.Errorf("error should NOT mention removed flag %q, got: %s", gone, msg)
+		}
+	}
 }
 
 func TestRouteAndDispatchUnknownVerb(t *testing.T) {

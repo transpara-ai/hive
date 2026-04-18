@@ -24,6 +24,8 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -57,6 +59,13 @@ import (
 
 func main() {
 	if err := run(); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		if errors.Is(err, errUsage) {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

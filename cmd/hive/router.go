@@ -1,18 +1,23 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
 	"time"
 )
 
+// errUsage marks errors that are usage messages, not real failures.
+// main() prints them without an "error:" prefix.
+var errUsage = errors.New("usage")
+
 // routeAndDispatch is the entry point for the subcommand router.
 // It switches on args[0] and delegates to the matching cmd* function.
 // Returns an error listing the available verbs when no verb is given.
 func routeAndDispatch(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: hive <verb> [subverb] [flags]\n\n%s", helpText())
+		return fmt.Errorf("%w: hive <verb> [subverb] [flags]\n\n%s", errUsage, helpText())
 	}
 
 	verb := args[0]
@@ -58,7 +63,7 @@ func helpText() string {
 
 func cmdCivilization(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: hive civilization <run|daemon> [flags]")
+		return fmt.Errorf("%w: hive civilization <run|daemon> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -129,7 +134,7 @@ func cmdCivilizationDaemon(args []string) error {
 
 func cmdPipeline(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: hive pipeline <run|daemon> [flags]")
+		return fmt.Errorf("%w: hive pipeline <run|daemon> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -185,11 +190,11 @@ func cmdPipelineDaemon(args []string) error {
 
 func cmdRole(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: hive role <name> <run|daemon> [flags] (role name required)")
+		return fmt.Errorf("%w: hive role <name> <run|daemon> [flags] (role name required)", errUsage)
 	}
 	roleName := args[0]
 	if len(args) < 2 {
-		return fmt.Errorf("usage: hive role %s <run|daemon> [flags]", roleName)
+		return fmt.Errorf("%w: hive role %s <run|daemon> [flags]", errUsage, roleName)
 	}
 	subverb := args[1]
 	rest := args[2:]
@@ -246,7 +251,7 @@ func cmdIngest(args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		return fmt.Errorf("usage: hive ingest <file.md> [flags] (spec file required)")
+		return fmt.Errorf("%w: hive ingest <file.md> [flags] (spec file required)", errUsage)
 	}
 	if len(rest) > 1 {
 		return fmt.Errorf("ingest takes exactly one positional argument (spec file path)")
