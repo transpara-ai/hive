@@ -78,6 +78,55 @@ func TestEnsureTablesIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("checkpoint_verifier_in_phase_1", func(t *testing.T) {
+		var exists bool
+		err := pool.QueryRow(ctx,
+			"SELECT EXISTS(SELECT 1 FROM telemetry_phase_agents WHERE phase = 1 AND agent_role = 'checkpoint-verifier')",
+		).Scan(&exists)
+		if err != nil {
+			t.Fatalf("query checkpoint-verifier: %v", err)
+		}
+		if !exists {
+			t.Error("checkpoint-verifier not found in phase 1")
+		}
+	})
+
+	t.Run("task_curator_in_phase_4", func(t *testing.T) {
+		var exists bool
+		err := pool.QueryRow(ctx,
+			"SELECT EXISTS(SELECT 1 FROM telemetry_phase_agents WHERE phase = 4 AND agent_role = 'task-curator')",
+		).Scan(&exists)
+		if err != nil {
+			t.Fatalf("query task-curator: %v", err)
+		}
+		if !exists {
+			t.Error("task-curator not found in phase 4")
+		}
+	})
+
+	t.Run("legacy_taskmanager_removed", func(t *testing.T) {
+		var count int
+		err := pool.QueryRow(ctx,
+			"SELECT COUNT(*) FROM telemetry_phase_agents WHERE agent_role = 'taskmanager'",
+		).Scan(&count)
+		if err != nil {
+			t.Fatalf("query legacy taskmanager: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("legacy taskmanager still present in phase_agents (%d rows)", count)
+		}
+
+		err = pool.QueryRow(ctx,
+			"SELECT COUNT(*) FROM telemetry_role_definitions WHERE role = 'taskmanager'",
+		).Scan(&count)
+		if err != nil {
+			t.Fatalf("query legacy taskmanager role: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("legacy taskmanager still present in role_definitions (%d rows)", count)
+		}
+	})
+
 	t.Run("exit_criteria_column", func(t *testing.T) {
 		var criteria *string
 		err := pool.QueryRow(ctx,

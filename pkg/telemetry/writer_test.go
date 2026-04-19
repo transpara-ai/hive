@@ -312,20 +312,28 @@ func TestSchemaContainsNewTables(t *testing.T) {
 }
 
 func TestSeedDataNonEmpty(t *testing.T) {
-	seeds := map[string]string{
-		"seedLayers":          seedLayers,
-		"seedPhaseAgents":     seedPhaseAgents,
-		"seedRoleDefinitions": seedRoleDefinitions,
+	// Idempotency can be achieved via either ON CONFLICT (merge-style) or
+	// DELETE+INSERT (authoritative). seedPhaseAgents uses DELETE+INSERT so
+	// the seed is the single source of truth — removing a row from the seed
+	// deletes it from the DB on next startup. The other seeds preserve
+	// writer-set runtime fields and therefore use ON CONFLICT.
+	seeds := map[string]struct {
+		sql           string
+		idempotentVia string // "ON CONFLICT" or "DELETE"
+	}{
+		"seedLayers":          {seedLayers, "ON CONFLICT"},
+		"seedPhaseAgents":     {seedPhaseAgents, "DELETE"},
+		"seedRoleDefinitions": {seedRoleDefinitions, "ON CONFLICT"},
 	}
-	for name, sql := range seeds {
-		if len(strings.TrimSpace(sql)) == 0 {
+	for name, s := range seeds {
+		if len(strings.TrimSpace(s.sql)) == 0 {
 			t.Errorf("%s is empty", name)
 		}
-		if !strings.Contains(sql, "INSERT INTO") {
+		if !strings.Contains(s.sql, "INSERT INTO") {
 			t.Errorf("%s missing INSERT INTO", name)
 		}
-		if !strings.Contains(sql, "ON CONFLICT") {
-			t.Errorf("%s missing ON CONFLICT (not idempotent)", name)
+		if !strings.Contains(s.sql, s.idempotentVia) {
+			t.Errorf("%s missing %q (not idempotent)", name, s.idempotentVia)
 		}
 	}
 }
