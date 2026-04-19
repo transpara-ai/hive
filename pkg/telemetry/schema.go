@@ -168,19 +168,23 @@ ON CONFLICT (layer) DO UPDATE SET
     depth = EXCLUDED.depth, description = EXCLUDED.description;
 `
 
+// seedPhaseAgents is the authoritative phase→role mapping. Uses DELETE+INSERT
+// rather than ON CONFLICT DO NOTHING so the seed is the single source of truth:
+// rows removed from this list disappear on next startup, and renames (e.g.
+// taskmanager → task-curator) don't leave stale rows behind.
 const seedPhaseAgents = `
+DELETE FROM telemetry_phase_agents;
 INSERT INTO telemetry_phase_agents (phase, agent_role) VALUES
     (0, 'guardian'), (0, 'strategist'), (0, 'planner'), (0, 'implementer'),
-    (1, 'sysmon'), (1, 'allocator'),
+    (1, 'sysmon'), (1, 'allocator'), (1, 'checkpoint-verifier'),
     (2, 'cto'), (2, 'reviewer'),
     (3, 'spawner'),
     (4, 'researcher'),
-    (4, 'critic'), (4, 'taskmanager'), (4, 'incidentcommander'),
+    (4, 'critic'), (4, 'task-curator'), (4, 'incidentcommander'),
     (4, 'securityreviewer'), (4, 'memorykeeper'), (4, 'gapdetector'),
     (5, 'integrator'),
     (6, 'pm'), (6, 'finance'), (6, 'customersvc'), (6, 'sre'), (6, 'devops'), (6, 'legal'),
-    (7, 'philosopher'), (7, 'rolearchitect'), (7, 'harmony'), (7, 'politician')
-ON CONFLICT (phase, agent_role) DO NOTHING;
+    (7, 'philosopher'), (7, 'rolearchitect'), (7, 'harmony'), (7, 'politician');
 `
 
 // seedRoleDefinitions populates ALL known roles — both running and non-running.
@@ -199,6 +203,8 @@ VALUES
     ('sysmon',        'SysMon',        'A', 'Health monitoring, resource tracking',
      'running', true,  true,  'resource',   '{guardian}', 1),
     ('allocator',     'Allocator',     'A', 'Token budget management across agents',
+     'running', true,  true,  'resource',   '{guardian,sysmon}', 1),
+    ('checkpoint-verifier', 'CheckpointVerifier', 'A', 'Verify checkpoint integrity after restart, confirm agent continuity',
      'running', true,  true,  'resource',   '{guardian,sysmon}', 1),
     ('cto',           'CTO',           'A', 'Technical leadership, architecture decisions, gap detection',
      'running', true,  true,  'governance', '{guardian,sysmon,allocator}', 2),
@@ -227,7 +233,7 @@ VALUES
      'defined',  true,  true,  'product',     '{}', 4),
     ('estimator',         'Estimator',         'B', 'Predict effort, flag unrealistic plans',
      'defined',  true,  true,  'governance',  '{}', 4),
-    ('taskmanager',       'TaskManager',       'B', 'Prioritize work, resolve conflicts',
+    ('task-curator',      'TaskCurator',       'B', 'Prioritize work, resolve conflicts, groom the task backlog',
      'designed', false, false, NULL,           '{}', 4),
     ('incidentcommander', 'IncidentCommander', 'B', 'Coordinate emergency response',
      'designed', false, false, NULL,           '{}', 4),
@@ -386,6 +392,10 @@ DO $$ BEGIN
     CHECK (reboot_survival IN ('full', 'role-only', 'none'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- Remove stale 'taskmanager' role, renamed to 'task-curator' (see seedRoleDefinitions).
+-- Idempotent: no-op on fresh installs or after first migration pass.
+DELETE FROM telemetry_role_definitions WHERE role = 'taskmanager';
 
 -- Backfill exit_criteria for phases seeded before this column existed.
 -- Only updates rows where exit_criteria is NULL (won't clobber manual edits).
