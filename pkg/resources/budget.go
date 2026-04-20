@@ -65,6 +65,19 @@ func NewBudgetForTest(cfg BudgetConfig, start time.Time) *Budget {
 	return newBudgetAt(cfg, start)
 }
 
+// SeedConsumed restores consumed counters from a previous run's checkpoint.
+// This closes the reboot-survival gap where a restarted agent would otherwise
+// get a full fresh budget, violating the BUDGET invariant. Only the iteration
+// counter, token total, and cost are seeded — detailed breakdowns (input vs
+// output tokens, cache tokens) are lost across restarts by design.
+func (b *Budget) SeedConsumed(iterations, tokens int, costUSD float64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.iterations = iterations
+	b.tokensUsed = tokens
+	b.costUSD = costUSD
+}
+
 // Record adds resource consumption from one iteration.
 func (b *Budget) Record(tokens int, costUSD float64) {
 	b.mu.Lock()

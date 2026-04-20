@@ -121,6 +121,12 @@ type ParsedCheckpoint struct {
 	Trigger string
 	Status  string
 	Budget  string
+
+	// TokensUsed and CostUSD are extracted from the BUDGET line so a restarted
+	// agent can reseed its counters and honour the BUDGET invariant across reboots.
+	TokensUsed int
+	CostUSD    float64
+
 	Task    string
 	Intent  string
 	Next    string
@@ -151,6 +157,7 @@ func ParseCheckpoint(text string) (ParsedCheckpoint, error) {
 			p.Status = strings.TrimSpace(strings.TrimPrefix(line, "STATUS:"))
 		case strings.HasPrefix(line, "BUDGET:"):
 			p.Budget = strings.TrimSpace(strings.TrimPrefix(line, "BUDGET:"))
+			parseBudgetLine(p.Budget, &p)
 		case strings.HasPrefix(line, "TASK:"):
 			p.Task = strings.TrimSpace(strings.TrimPrefix(line, "TASK:"))
 		case strings.HasPrefix(line, "INTENT:"):
@@ -209,6 +216,31 @@ func parseHeader(line string, p *ParsedCheckpoint) error {
 	p.Timestamp = ts
 
 	return nil
+}
+
+// parseBudgetLine extracts TokensUsed and CostUSD from the BUDGET line body.
+// Input format (produced by FormatCheckpoint):
+//
+//	"N/M iterations, T tokens, $C.CC"
+//
+// Failures are silent — missing or malformed segments leave the field at zero,
+// which is safe because the recovery path treats zeros as "nothing to seed".
+func parseBudgetLine(body string, p *ParsedCheckpoint) {
+	for _, seg := range strings.Split(body, ",") {
+		seg = strings.TrimSpace(seg)
+		switch {
+		case strings.HasSuffix(seg, " tokens"):
+			numStr := strings.TrimSuffix(seg, " tokens")
+			if n, err := strconv.Atoi(numStr); err == nil {
+				p.TokensUsed = n
+			}
+		case strings.HasPrefix(seg, "$"):
+			numStr := strings.TrimPrefix(seg, "$")
+			if f, err := strconv.ParseFloat(numStr, 64); err == nil {
+				p.CostUSD = f
+			}
+		}
+	}
 }
 
 // AgentSummary is a compact view of a single agent's current state.

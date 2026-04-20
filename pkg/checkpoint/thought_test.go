@@ -82,6 +82,12 @@ func TestFormatParseCheckpoint_RoundTrip(t *testing.T) {
 	if !strings.Contains(parsed.Budget, "$0.63") {
 		t.Errorf("Budget: got %q, expected to contain %q", parsed.Budget, "$0.63")
 	}
+	if parsed.TokensUsed != 4200 {
+		t.Errorf("TokensUsed: got %d, want 4200", parsed.TokensUsed)
+	}
+	if parsed.CostUSD != 0.63 {
+		t.Errorf("CostUSD: got %v, want 0.63", parsed.CostUSD)
+	}
 	if parsed.Task != "task-42 -- add error handling to API -- in-progress" {
 		t.Errorf("Task: got %q", parsed.Task)
 	}
@@ -233,5 +239,65 @@ func TestParseHeader_Timestamp(t *testing.T) {
 	}
 	if !parsed.Timestamp.Equal(wantTime) {
 		t.Errorf("Timestamp: got %v, want %v", parsed.Timestamp, wantTime)
+	}
+}
+
+// TestParseCheckpoint_BudgetFields exercises the BUDGET-line number extraction
+// directly so recovery code can trust the values independent of the round-trip.
+func TestParseCheckpoint_BudgetFields(t *testing.T) {
+	cases := []struct {
+		name       string
+		budget     string
+		wantTokens int
+		wantCost   float64
+	}{
+		{
+			name:       "well-formed",
+			budget:     "BUDGET: 7/20 iterations, 4200 tokens, $0.63",
+			wantTokens: 4200,
+			wantCost:   0.63,
+		},
+		{
+			name:       "zero values",
+			budget:     "BUDGET: 0/20 iterations, 0 tokens, $0.00",
+			wantTokens: 0,
+			wantCost:   0,
+		},
+		{
+			name:       "large values",
+			budget:     "BUDGET: 99/100 iterations, 1234567 tokens, $123.45",
+			wantTokens: 1234567,
+			wantCost:   123.45,
+		},
+		{
+			name:       "malformed tokens leaves zero",
+			budget:     "BUDGET: 7/20 iterations, abc tokens, $0.63",
+			wantTokens: 0,
+			wantCost:   0.63,
+		},
+		{
+			name:       "missing cost leaves zero",
+			budget:     "BUDGET: 7/20 iterations, 4200 tokens",
+			wantTokens: 4200,
+			wantCost:   0,
+		},
+	}
+
+	header := "[CHECKPOINT] implementer agent -- iteration ~7, 2025-01-01T00:00:00Z\n\n"
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text := header + tc.budget + "\n"
+			parsed, err := checkpoint.ParseCheckpoint(text)
+			if err != nil {
+				t.Fatalf("ParseCheckpoint: %v", err)
+			}
+			if parsed.TokensUsed != tc.wantTokens {
+				t.Errorf("TokensUsed: got %d, want %d", parsed.TokensUsed, tc.wantTokens)
+			}
+			if parsed.CostUSD != tc.wantCost {
+				t.Errorf("CostUSD: got %v, want %v", parsed.CostUSD, tc.wantCost)
+			}
+		})
 	}
 }
