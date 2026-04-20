@@ -252,6 +252,17 @@ func New(cfg Config) (*Loop, error) {
 		if l.reviewerState != nil && cfg.RecoveryState.ReviewerState != nil {
 			l.reviewerState.InitReviewerFromRecovery(cfg.RecoveryState.ReviewerState)
 		}
+		// Seed consumed budget so a restarted agent honours the BUDGET
+		// invariant instead of getting a full fresh allowance. Only runs when
+		// the prior run actually recorded consumption — zero values on a cold
+		// start are a no-op overwrite on the already-zero budget counters.
+		if l.budget != nil && (cfg.RecoveryState.ConsumedTokens > 0 || cfg.RecoveryState.ConsumedCostUSD > 0) {
+			l.budget.SeedConsumed(
+				cfg.RecoveryState.Iteration,
+				cfg.RecoveryState.ConsumedTokens,
+				cfg.RecoveryState.ConsumedCostUSD,
+			)
+		}
 	}
 
 	return l, nil

@@ -41,6 +41,12 @@ type RecoveryState struct {
 	CTOState      *CTORecoveredState
 	SpawnerState  *SpawnerRecoveredState
 	ReviewerState *ReviewerRecoveredState
+
+	// ConsumedTokens and ConsumedCostUSD hold the last-known resource
+	// consumption from a heartbeat or checkpoint thought. Used to seed
+	// the Budget on restart so agents don't get a full fresh budget.
+	ConsumedTokens  int
+	ConsumedCostUSD float64
 }
 
 // RecoverAll orchestrates the two-tier recovery for the given set of agent roles.
@@ -96,13 +102,25 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 			rs.Intent = parsed.Intent
 			rs.CurrentTaskID = extractTaskID(parsed.Task)
 
+			// Seed consumed budget from the thought's snapshot.
+			rs.ConsumedTokens = parsed.TokensUsed
+			rs.ConsumedCostUSD = parsed.CostUSD
+
 			// Tier 2b: query chain for a heartbeat newer than the thought to refine
-			// the iteration count.
+			// iteration count and budget consumed values.
 			hb, err := QueryLatestHeartbeat(s, role, thought.CapturedAt)
 			if err != nil {
 				log.Printf("checkpoint: recover: heartbeat query error for %q: %v — using thought iteration", role, err)
-			} else if hb != nil && hb.Iteration > rs.Iteration {
-				rs.Iteration = hb.Iteration
+			} else if hb != nil {
+				if hb.Iteration > rs.Iteration {
+					rs.Iteration = hb.Iteration
+				}
+				if hb.TokensUsed > rs.ConsumedTokens {
+					rs.ConsumedTokens = hb.TokensUsed
+				}
+				if hb.CostUSD > rs.ConsumedCostUSD {
+					rs.ConsumedCostUSD = hb.CostUSD
+				}
 			}
 		}
 	}

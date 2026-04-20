@@ -439,3 +439,68 @@ func TestBudgetConcurrentRecordUsage(t *testing.T) {
 		t.Errorf("Iterations = %d, want 100", snap.Iterations)
 	}
 }
+
+// TestBudgetSeedConsumed verifies that a restarted agent cannot sidestep the
+// BUDGET invariant by re-acquiring a fresh budget: SeedConsumed puts the
+// counters where the previous run left them, and any further Record pushes
+// over the limit, as expected.
+func TestBudgetSeedConsumed(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		MaxTokens:     1000,
+		MaxCostUSD:    5.0,
+		MaxIterations: 10,
+	})
+
+	b.SeedConsumed(7, 800, 3.50)
+
+	snap := b.Snapshot()
+	if snap.Iterations != 7 {
+		t.Errorf("Iterations = %d, want 7", snap.Iterations)
+	}
+	if snap.TokensUsed != 800 {
+		t.Errorf("TokensUsed = %d, want 800", snap.TokensUsed)
+	}
+	if snap.CostUSD != 3.50 {
+		t.Errorf("CostUSD = %v, want 3.50", snap.CostUSD)
+	}
+
+	// Still within budget after seeding.
+	if err := b.Check(); err != nil {
+		t.Fatalf("unexpected budget error after seed: %v", err)
+	}
+
+	// Additional consumption on top of the seed tips over the token cap.
+	b.Record(300, 0.1)
+	err := b.Check()
+	if err == nil {
+		t.Fatal("expected budget exceeded after Record past seeded total")
+	}
+	var budgetErr *BudgetExceededError
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("expected BudgetExceededError, got %T", err)
+	}
+	if budgetErr.Resource != ResourceTokens {
+		t.Errorf("resource = %q, want %q", budgetErr.Resource, ResourceTokens)
+	}
+}
+
+// TestBudgetSeedConsumed_Overwrites verifies SeedConsumed replaces (rather than
+// adds to) existing counters — restart recovery is idempotent even if called
+// after some consumption has already been recorded.
+func TestBudgetSeedConsumed_Overwrites(t *testing.T) {
+	b := NewBudget(BudgetConfig{MaxTokens: 1000, MaxCostUSD: 5.0, MaxIterations: 10})
+
+	b.Record(100, 0.5)
+	b.SeedConsumed(3, 200, 1.0)
+
+	snap := b.Snapshot()
+	if snap.TokensUsed != 200 {
+		t.Errorf("TokensUsed = %d, want 200 (seed should overwrite, not add)", snap.TokensUsed)
+	}
+	if snap.Iterations != 3 {
+		t.Errorf("Iterations = %d, want 3", snap.Iterations)
+	}
+	if snap.CostUSD != 1.0 {
+		t.Errorf("CostUSD = %v, want 1.0", snap.CostUSD)
+	}
+}

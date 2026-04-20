@@ -17,6 +17,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/lovyou-ai/agent"
+	"github.com/lovyou-ai/hive/pkg/checkpoint"
 	"github.com/lovyou-ai/hive/pkg/resources"
 )
 
@@ -478,4 +479,83 @@ type testSigner struct{}
 
 func (s *testSigner) Sign(data []byte) (types.Signature, error) {
 	return types.NewSignature(make([]byte, 64))
+}
+
+// TestNew_SeedsBudgetFromRecoveryState verifies that when New is given a
+// RecoveryState with non-zero consumed counters, it calls SeedConsumed on the
+// supplied BudgetInstance so a restarted agent honours the BUDGET invariant.
+func TestNew_SeedsBudgetFromRecoveryState(t *testing.T) {
+	provider := newMockProvider("noop")
+	agent := testAgent(t, provider)
+
+	b := resources.NewBudget(resources.BudgetConfig{
+		MaxTokens:     10000,
+		MaxCostUSD:    10.0,
+		MaxIterations: 100,
+	})
+
+	rs := &checkpoint.RecoveryState{
+		Mode:            checkpoint.ModeWarm,
+		Iteration:       7,
+		ConsumedTokens:  4200,
+		ConsumedCostUSD: 0.63,
+	}
+
+	_, err := New(Config{
+		Agent:          agent,
+		HumanID:        humanID(),
+		BudgetInstance: b,
+		RecoveryState:  rs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	snap := b.Snapshot()
+	if snap.TokensUsed != 4200 {
+		t.Errorf("TokensUsed = %d, want 4200", snap.TokensUsed)
+	}
+	if snap.CostUSD != 0.63 {
+		t.Errorf("CostUSD = %v, want 0.63", snap.CostUSD)
+	}
+	if snap.Iterations != 7 {
+		t.Errorf("Iterations = %d, want 7", snap.Iterations)
+	}
+}
+
+// TestNew_DoesNotSeedBudgetOnColdStart verifies that a cold-start RecoveryState
+// (zero consumed counters) does not overwrite the budget with zeros unnecessarily.
+// A freshly created budget already has zeros, so the observable behavior is the
+// same either way — the test asserts the cold path does not accidentally seed
+// from other fields (e.g., Iteration) when there is no consumption to restore.
+func TestNew_DoesNotSeedBudgetOnColdStart(t *testing.T) {
+	provider := newMockProvider("noop")
+	agent := testAgent(t, provider)
+
+	b := resources.NewBudget(resources.BudgetConfig{MaxIterations: 100})
+	// Simulate a few pre-New recordings to detect unwanted overwrite.
+	b.Record(50, 0.01)
+
+	rs := &checkpoint.RecoveryState{
+		Mode:      checkpoint.ModeCold,
+		Iteration: 3,
+	}
+
+	_, err := New(Config{
+		Agent:          agent,
+		HumanID:        humanID(),
+		BudgetInstance: b,
+		RecoveryState:  rs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	snap := b.Snapshot()
+	if snap.TokensUsed != 50 {
+		t.Errorf("TokensUsed = %d, want 50 (cold start should not overwrite)", snap.TokensUsed)
+	}
+	if snap.Iterations != 1 {
+		t.Errorf("Iterations = %d, want 1 (cold start should not overwrite)", snap.Iterations)
+	}
 }
