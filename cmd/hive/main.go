@@ -413,6 +413,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 	if err != nil {
 		return fmt.Errorf("provider: %w", err)
 	}
+	log.Printf("[%s] provider=%s model=%s", role, providerCfg.Provider, providerCfg.Model)
 
 	// Create API client.
 	client := api.New(apiBase, apiKey)
@@ -586,6 +587,7 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		if err != nil {
 			return nil, fmt.Errorf("provider for %s: %w", role, err)
 		}
+		log.Printf("[%s] provider=%s model=%s", role, providerCfg.Provider, providerCfg.Model)
 
 		return runner.New(runner.Config{
 			Role:       role,

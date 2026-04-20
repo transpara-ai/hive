@@ -483,12 +483,12 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s [%s]\n",
-		def.Name, def.Role, def.Model, agent.ID().Value())
+	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s]\n",
+		def.Name, def.Role, providerName, model, agent.ID().Value())
 	r.emit(EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    def.Name,
 		Role:    def.Role,
-		Model:   def.Model,
+		Model:   model,
 		ActorID: agent.ID().Value(),
 	})
 
