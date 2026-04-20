@@ -556,10 +556,15 @@ will fail. One response = create. Next response = depend.
 Task IDs are UUIDs (e.g., 019d6a45-4359-746b-98cb-191007acc33f). Only use IDs that
 already appear in your observation (task list). Never invent or guess a task_id.
 
+/task depend direction: task_id is the SUBTASK (child), depends_on is the PARENT.
+  Correct: /task depend {"task_id": "<subtask-uuid>", "depends_on": "<parent-uuid>"}
+  Wrong:   /task depend {"task_id": "<parent-uuid>", "depends_on": "<parent-uuid>"}
+task_id and depends_on MUST be different UUIDs. A task cannot depend on itself.
+
 When you find a task worth decomposing:
 1. Analyze what it requires
 2. Phase 1 response: emit /task create for each subtask only
-3. Phase 2 response: emit /task depend for each subtask using the UUIDs now in your observation
+3. Phase 2 response: for each subtask, emit /task depend with task_id=<subtask-uuid> and depends_on=<parent-uuid>
 4. Each subtask should specify: which files to create/modify, what to implement, how to test
 
 Do NOT implement anything yourself. Your output is well-structured subtasks.
