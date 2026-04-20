@@ -451,13 +451,20 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, error) {
 	// Create the intelligence provider.
-	providerName := os.Getenv("HIVE_PROVIDER")
-	if providerName == "" {
+	// Operate() requires claude-cli — skip env overrides for agents that use it.
+	var providerName, model string
+	if def.CanOperate {
 		providerName = "claude-cli"
-	}
-	model := os.Getenv("HIVE_MODEL")
-	if model == "" {
 		model = def.Model
+	} else {
+		providerName = os.Getenv("HIVE_PROVIDER")
+		if providerName == "" {
+			providerName = "claude-cli"
+		}
+		model = os.Getenv("HIVE_MODEL")
+		if model == "" {
+			model = def.Model
+		}
 	}
 	provider, err := intelligence.New(intelligence.Config{
 		Provider:     providerName,
