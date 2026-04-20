@@ -64,6 +64,14 @@ func TestRecoverAll_WarmStart(t *testing.T) {
 	if rs.CurrentTaskID != "task-42" {
 		t.Errorf("CurrentTaskID: got %q, want %q", rs.CurrentTaskID, "task-42")
 	}
+	// captureCheckpointFor snapshots TokensUsed=1000, CostUSD=0.15 — the
+	// recovery path must propagate these so the Budget can be reseeded.
+	if rs.ConsumedTokens != 1000 {
+		t.Errorf("ConsumedTokens: got %d, want 1000", rs.ConsumedTokens)
+	}
+	if rs.ConsumedCostUSD != 0.15 {
+		t.Errorf("ConsumedCostUSD: got %v, want 0.15", rs.ConsumedCostUSD)
+	}
 }
 
 // TestRecoverAll_ColdStart_NoThoughts verifies that all agents are ModeCold when
