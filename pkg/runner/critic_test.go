@@ -112,6 +112,38 @@ func TestBuildReviewPromptWithArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildCriticInstruction_WithAPIKey(t *testing.T) {
+	instr := buildCriticInstruction("+ foo bar", "mykey", "https://api.example.com", "hive", "")
+
+	if !contains(instr, "Authorization: Bearer mykey") {
+		t.Error("instruction missing Bearer token when API key is set")
+	}
+	if !contains(instr, "https://api.example.com/app/hive/op") {
+		t.Error("instruction missing API endpoint")
+	}
+	if contains(instr, "pipeline will create the fix task automatically") {
+		t.Error("instruction should not include pipeline fallback message when API key is set")
+	}
+}
+
+func TestBuildCriticInstruction_EmptyAPIKey(t *testing.T) {
+	instr := buildCriticInstruction("+ foo bar", "", "https://api.example.com", "hive", "")
+
+	if contains(instr, "Authorization: Bearer") {
+		t.Error("instruction must not include curl with Bearer token when API key is empty")
+	}
+	if !contains(instr, "pipeline will create the fix task automatically") {
+		t.Error("instruction missing pipeline fallback message when API key is empty")
+	}
+	// Common structure present regardless of key.
+	if !contains(instr, "Scout gap cross-reference") {
+		t.Error("instruction missing Scout gap cross-reference check")
+	}
+	if !contains(instr, "VERDICT: PASS") {
+		t.Error("instruction missing verdict options")
+	}
+}
+
 func TestIsDegenerateIteration(t *testing.T) {
 	tests := []struct {
 		name   string
