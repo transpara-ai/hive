@@ -24,11 +24,24 @@ CREATE TABLE IF NOT EXISTS reconciliation_state (
 );
 `
 
-// EnsureTables creates the reconciliation_state table. Idempotent — safe to
-// call on every startup.
+// siteOpReceivedRefIndex indexes the JSONB path that hasSiteOpReceived
+// extracts. Partial index scoped to event_type = 'site.op.received' keeps
+// it small. Expression must match the query in watermark.go exactly for
+// the planner to pick it up.
+const siteOpReceivedRefIndex = `
+CREATE INDEX IF NOT EXISTS idx_events_site_op_received_ref
+    ON events((content_json->'external_ref'->>'id'))
+    WHERE event_type = 'site.op.received';
+`
+
+// EnsureTables creates the reconciliation_state table and the index
+// backing hasSiteOpReceived. Idempotent — safe to call on every startup.
 func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		return fmt.Errorf("reconciliation schema: %w", err)
+	}
+	if _, err := pool.Exec(ctx, siteOpReceivedRefIndex); err != nil {
+		return fmt.Errorf("reconciliation site.op.received index: %w", err)
 	}
 	return nil
 }
