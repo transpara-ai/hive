@@ -128,6 +128,52 @@ func TestRoundTrip_CompleteTask(t *testing.T) {
 	}
 }
 
+func TestRoundTrip_OpenTask(t *testing.T) {
+	ts := testServer(t)
+	defer ts.Close()
+
+	// Create and complete a task.
+	resp := doReq(t, "POST", ts.URL+"/app/hive/op",
+		`{"op":"intend","title":"reopenable task"}`)
+	result := readJSON(t, resp)
+	node := result["node"].(map[string]any)
+	nodeID := node["id"].(string)
+
+	resp = doReq(t, "POST", ts.URL+"/app/hive/op",
+		fmt.Sprintf(`{"op":"complete","node_id":"%s"}`, nodeID))
+	resp.Body.Close()
+
+	// Board should be empty.
+	resp = doReq(t, "GET", ts.URL+"/app/hive/board", "")
+	board := readJSON(t, resp)
+	if len(board["nodes"].([]any)) != 0 {
+		t.Fatal("expected empty board after complete")
+	}
+
+	// Reopen the task.
+	resp = doReq(t, "POST", ts.URL+"/app/hive/op",
+		fmt.Sprintf(`{"op":"open","node_id":"%s"}`, nodeID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open: got status %d, want 200", resp.StatusCode)
+	}
+	oResult := readJSON(t, resp)
+	if oResult["status"] != "ok" {
+		t.Fatalf("expected status=ok, got %v", oResult["status"])
+	}
+
+	// Board should show the task again.
+	resp = doReq(t, "GET", ts.URL+"/app/hive/board", "")
+	board = readJSON(t, resp)
+	nodes := board["nodes"].([]any)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node on board after reopen, got %d", len(nodes))
+	}
+	first := nodes[0].(map[string]any)
+	if first["title"] != "reopenable task" {
+		t.Fatalf("board node title mismatch: got %v", first["title"])
+	}
+}
+
 func TestRoundTrip_NodeExists(t *testing.T) {
 	ts := testServer(t)
 	defer ts.Close()

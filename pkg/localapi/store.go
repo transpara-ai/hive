@@ -209,6 +209,11 @@ func (s *Store) CompleteNode(id string) error {
 	return s.UpdateNodeState(id, "done")
 }
 
+// OpenNode sets a node's state to "open", reopening a completed task.
+func (s *Store) OpenNode(id string) error {
+	return s.UpdateNodeState(id, "open")
+}
+
 // ChildCounts returns (total, done) child counts for a parent node.
 func (s *Store) ChildCounts(parentID string) (int, int) {
 	var total, done int

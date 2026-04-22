@@ -129,6 +129,14 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"op": "complete", "status": "ok"})
 
+	case "open":
+		nodeID := stringField(m, "node_id", "")
+		if err := s.store.OpenNode(nodeID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"op": "open", "status": "ok"})
+
 	case "edit":
 		nodeID := stringField(m, "node_id", "")
 		state := stringField(m, "state", "")
