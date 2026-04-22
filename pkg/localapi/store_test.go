@@ -168,3 +168,42 @@ func TestNilIfEmpty(t *testing.T) {
 		t.Errorf("nilIfEmpty(\"x\"): got %v, want pointer to \"x\"", got)
 	}
 }
+
+func TestOpenNode(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+
+	// Create and complete a task.
+	created, err := store.CreateNode("hive", Node{Title: "test task"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	nodeID := created.ID
+
+	if err := store.CompleteNode(nodeID); err != nil {
+		t.Fatalf("CompleteNode: %v", err)
+	}
+
+	// Verify task is done.
+	done, err := store.GetNode(nodeID)
+	if err != nil {
+		t.Fatalf("GetNode after complete: %v", err)
+	}
+	if done.State != "done" {
+		t.Fatalf("state after complete: got %q, want %q", done.State, "done")
+	}
+
+	// Reopen the task.
+	if err := store.OpenNode(nodeID); err != nil {
+		t.Fatalf("OpenNode: %v", err)
+	}
+
+	// Verify task is open again.
+	reopened, err := store.GetNode(nodeID)
+	if err != nil {
+		t.Fatalf("GetNode after open: %v", err)
+	}
+	if reopened.State != "open" {
+		t.Fatalf("state after open: got %q, want %q", reopened.State, "open")
+	}
+}

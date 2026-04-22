@@ -1,45 +1,33 @@
-# Build: Auth: ship email magic link for Workspace-blocked users
+# Build: task open (fix)
 
-- **Commit:** 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-- **Subject:** [hive:builder] Auth: ship email magic link for Workspace-blocked users
-- **Cost:** $0.6489
-- **Timestamp:** 2026-03-29T14:53:18Z
+- **Branch:** feat/20260422-task-open
+- **Timestamp:** 2026-04-22
 
-## Task
+## What Was Fixed
 
-Corporate Google Workspace users (e.g. transpara.com) cannot log in because their admin blocks OAuth app approvals. Email magic link is the fallback. This is user-blocking.
+The previous builder's commit (`9e33ff3`) only touched `budget.txt` — the `TestOpenNode` store test was written but never committed. The implementation itself was already correct in `5bef18f`.
 
-**Target repo:** site
+This iteration confirms and commits the missing test:
 
-**TASK 1 � Magic link request handler**
-Add `POST /auth/magic-link` in `site/handlers/auth.go` (or ne...
+- **`pkg/localapi/store_test.go`**: Added `TestOpenNode` — creates a task, completes it, reopens it via `store.OpenNode()`, and asserts state transitions open→done→open.
 
-## What Was Built
+## Verification
 
-Build and tests pass. Here's what was done:
+```
+go build -buildvcs=false ./...   → PASS (no errors)
+go test -buildvcs=false ./...    → PASS (all packages)
+pkg/localapi: 15/15 tests pass
+  TestOpenNode                   ✅ new
+  TestRoundTrip_OpenTask         ✅ existing
+  TestRoundTrip_CreateAndListTasks ✅
+  TestRoundTrip_CompleteTask     ✅
+  TestRoundTrip_NodeExists       ✅
+  TestHealth                     ✅
+  TestUnauthorized               ✅
+  TestUnknownOp                  ✅
+  + 7 store unit tests           ✅
+```
 
-**Already implemented (prior iteration):**
-- `magic_link_tokens` DB table in `migrate()`
-- `POST /auth/magic-link/request` — generates token, stores hash, logs link
-- `GET /auth/magic-link/verify` — validates token, creates session, redirects to `/app`
-- Full test suite (happy path, expired, used, invalid, idempotent)
-
-**Added this iteration (`auth/auth.go`):**
-- `GET /auth/google` — new route for the OAuth redirect (renamed from `handleLogin` to `handleGoogleOAuth`)
-- `GET /auth/login` — new login page with Google button + collapsible "Use email instead" section; email form posts to `/auth/magic-link/request` with a JS-enhanced inline confirmation ("Check your email") on success
+No regressions across the full suite.
 
 ACTION: DONE
-
-## Diff Stat
-
-```
-commit 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-Author: Matt Searles <matt.s.searles@gmail.com>
-Date:   Mon Mar 30 01:53:18 2026 +1100
-
-    [hive:builder] Auth: ship email magic link for Workspace-blocked users
-
- auth/auth.go  | 93 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
- loop/build.md | 40 +++++++++++++++++--------
- 2 files changed, 120 insertions(+), 13 deletions(-)
-```
