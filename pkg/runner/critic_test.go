@@ -135,6 +135,11 @@ func TestBuildCriticInstruction_EmptyAPIKey(t *testing.T) {
 	if !contains(instr, "pipeline will create the fix task automatically") {
 		t.Error("instruction missing pipeline fallback message when API key is empty")
 	}
+	// Must explicitly prohibit tool-based task creation to prevent the LLM from
+	// attempting curl in Operate mode and reporting a 401 Unauthorized failure.
+	if !contains(instr, "Do NOT attempt to create a task via curl") {
+		t.Error("instruction missing explicit tool prohibition when API key is empty")
+	}
 	// Common structure present regardless of key.
 	if !contains(instr, "Scout gap cross-reference") {
 		t.Error("instruction missing Scout gap cross-reference check")
@@ -359,6 +364,9 @@ func TestReviewCommitFixTaskHasCauses(t *testing.T) {
 	}
 	hash := strings.TrimSpace(string(hashOut))
 
+	// Guard in reviewCommit checks LOVYOU_API_KEY env var before calling CreateTask.
+	t.Setenv("LOVYOU_API_KEY", "test-key")
+
 	hiveDir := makeHiveDir(t, "# State\n", nil)
 
 	r := New(Config{
@@ -393,6 +401,78 @@ func TestReviewCommitFixTaskHasCauses(t *testing.T) {
 	}
 	if causes[0] != "claim-99" {
 		t.Errorf("fix task causes[0] = %v, want %q (critique claim ID)", causes[0], "claim-99")
+	}
+}
+
+// TestReviewCommit_NoAPIKey_SkipsCreateTask verifies that when LOVYOU_API_KEY is
+// not set, a REVISE verdict does not attempt to call CreateTask on the API client.
+// This prevents the 401 Unauthorized failures that otherwise appear in critique output.
+func TestReviewCommit_NoAPIKey_SkipsCreateTask(t *testing.T) {
+	var createTaskCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err == nil {
+			if op, _ := m["op"].(string); op == "intend" {
+				createTaskCalled = true
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer srv.Close()
+
+	// Set up a minimal git repo.
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "init.txt"), []byte("init"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "[hive:builder] Add feature")
+
+	hashCmd := exec.Command("git", "log", "--format=%H", "-1")
+	hashCmd.Dir = repoDir
+	hashOut, err := hashCmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	hash := strings.TrimSpace(string(hashOut))
+
+	// Ensure no API key is set.
+	t.Setenv("LOVYOU_API_KEY", "")
+
+	hiveDir := makeHiveDir(t, "# State\n", nil)
+
+	r := New(Config{
+		HiveDir:   hiveDir,
+		RepoPath:  repoDir,
+		SpaceSlug: "hive",
+		// Pass a client pointed at our mock — it should never be called for task creation.
+		APIClient: api.New(srv.URL, ""),
+		Provider:  &mockProvider{response: "Issues found.\n\nVERDICT: REVISE"},
+	})
+
+	r.reviewCommit(t.Context(), commit{hash: hash, subject: "[hive:builder] Add feature"})
+
+	if createTaskCalled {
+		t.Error("CreateTask was called despite no LOVYOU_API_KEY — should be skipped")
 	}
 }
 

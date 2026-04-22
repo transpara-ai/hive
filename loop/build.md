@@ -1,49 +1,42 @@
-# Build: Fix: task open
+# Build: Fix: test task
 
-- **Commit:** 358f3183c91ddc9f50055ad79d7c6483ec59faee
-- **Subject:** [hive:builder] task open
-- **Cost:** $1.5800
-- **Timestamp:** 2026-04-22T14:06:32Z
+- **Commit:** (pending)
+- **Subject:** [hive:builder] fix: skip fix task creation when no API key
+- **Cost:** (pending)
+- **Timestamp:** 2026-04-22T14:24:00Z
 
 ## Task
 
-Critic review of commit 0fa5d3f0c9d3 found issues:
+Critic review of commit 450678dad5c5 found issues:
 
-Fix task creation returned `unauthorized` (expected in this environment — no API key configured for the Critic context). The verdict stands regardless.
+Fix task creation returned `unauthorized` (no API key in this environment — expected). The verdict stands regardless.
 
 ## What Was Built
 
-Build is clean. Here's a summary of what was done:
+**Root cause:** Two related failures caused the Critic to report "Fix task creation returned `unauthorized`":
 
-**Root cause:** The Critic's `Operate()` instruction told the LLM to create a fix task via `curl` using `LOVYOU_API_KEY`. When that env var is unset, the curl sends `Authorization: Bearer ` (empty token), the server returns `401`, and the LLM reports *that curl failure* as the code issue — producing the misleading "Fix task creation returned `unauthorized`" REVISE description on every review cycle.
+1. **LLM path:** When `LOVYOU_API_KEY == ""`, the LLM in Operate mode still had tool access (Bash/curl). The instruction said "the pipeline will create the fix task automatically" but didn't prohibit tool-based attempts. The LLM would try curl anyway and get 401, then report it in its output — which ended up in `loop/critique.md`.
+
+2. **Go path:** In `reviewCommit()`, the REVISE branch called `r.cfg.APIClient.CreateTask()` unconditionally. When the APIClient was initialized with an empty key, this always returned 401 Unauthorized.
 
 **Fix (`pkg/runner/critic.go`):**
-- Extracted the inline prompt into `buildCriticInstruction(diff, apiKey, apiBase, spaceSlug, causesSuffix)`
-- When `apiKey == ""`: LLM is told to describe issues only; `APIClient.CreateTask` (already present) handles fix task creation
-- When `apiKey != ""`: curl included as before
+- Moved `apiKey := os.Getenv("LOVYOU_API_KEY")` to function scope (before the `canOperate` block) so both paths share the same key-presence check
+- Updated `buildCriticInstruction()` when `apiKey == ""` to explicitly prohibit tool-based task creation: "Do NOT attempt to create a task via curl, Bash, or any other tool — there is no API key in this environment and any such call will return 401 Unauthorized"
+- Added guard in the REVISE switch case: `if apiKey == "" { log.Printf(...skip...); return }` — prevents the 401 error when no API key is configured
 
 **Tests (`pkg/runner/critic_test.go`):**
-- `TestBuildCriticInstruction_EmptyAPIKey` — verifies no curl/Bearer when key is absent
-- `TestBuildCriticInstruction_WithAPIKey` — verifies correct curl when key is set
+- `TestBuildCriticInstruction_EmptyAPIKey` — updated to verify the explicit `"Do NOT attempt to create a task via curl"` prohibition is present in the instruction
+- `TestReviewCommitFixTaskHasCauses` — added `t.Setenv("LOVYOU_API_KEY", "test-key")` so the apiKey guard doesn't skip task creation in the with-key test path
+- `TestReviewCommit_NoAPIKey_SkipsCreateTask` — new test: verifies REVISE verdict does NOT call CreateTask when LOVYOU_API_KEY is empty
 
-**`loop/build.md`** references the Scout's open gap (the `assertClaim` validation) and notes it was already implemented in `cmd/post/main.go:597` — the Scout report was stale, which was causing the Critic's required cross-reference check to fire against a ghost gap.
+**Scout gap cross-reference:** `loop/scout.md` describes the `assertClaim` validation gap in `cmd/post/main.go`. Per `loop/state.md` (DONE item 8), this was already implemented in iter 408. The current fix addresses the Critic's task-creation loop — a separate infrastructure gap identified by this iteration.
 
 ACTION: DONE
 
 ## Diff Stat
 
 ```
-commit 358f3183c91ddc9f50055ad79d7c6483ec59faee
-Author: ai-agent <ai-agent@transpara.com>
-Date:   Wed Apr 22 14:06:32 2026 +0000
-
-    [hive:builder] task open
-
- loop/budget-20260422.txt  |  3 ++
- loop/build.md             | 48 +++++++++++++++++--------------
- loop/critique.md          |  2 +-
- loop/test-report.md       | 47 ++++++++++++++++++++++++------
- pkg/runner/critic.go      | 73 +++++++++++++++++++++++++++++------------------
- pkg/runner/critic_test.go | 32 +++++++++++++++++++++
- 6 files changed, 145 insertions(+), 60 deletions(-)
+pkg/runner/critic.go      | 10 +++++++---
+pkg/runner/critic_test.go | 70 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2 files changed, 77 insertions(+), 3 deletions(-)
 ```

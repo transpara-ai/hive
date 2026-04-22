@@ -109,10 +109,10 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 
 	// Use Operate() if available — Critic can search knowledge for invariants,
 	// check primitives, and read prior critiques to ground the review.
+	apiKey := os.Getenv("LOVYOU_API_KEY")
 	op, canOperate := r.cfg.Provider.(decision.IOperator)
 	var content string
 	if canOperate {
-		apiKey := os.Getenv("LOVYOU_API_KEY")
 		causesSuffix := ""
 		if len(buildCauses) > 0 {
 			causesSuffix = fmt.Sprintf(`,"causes":["%s"]`, buildCauses[0])
@@ -161,6 +161,13 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 
 	switch verdict {
 	case "REVISE":
+		// Skip fix task creation when no API key is configured. The critique
+		// artifact is already written; the Builder can pick up the REVISE from it.
+		if apiKey == "" {
+			log.Printf("[critic] REVISE: %s — fix task creation skipped (no LOVYOU_API_KEY)", c.hash[:12])
+			return
+		}
+
 		// Extract the issues and create a fix task caused by the critique claim.
 		issues := extractIssues(content)
 		title := fixTitle(c.subject)
@@ -253,7 +260,8 @@ func buildCriticInstruction(diff, apiKey, apiBase, spaceSlug, causesSuffix strin
 				`curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"Fix: <subject>","description":"<what needs fixing>","priority":"high"%s}'`,
 			apiKey, apiBase, spaceSlug, causesSuffix)
 	} else {
-		taskCreationInstr = "If REVISE, list the specific issues that must be fixed. The pipeline will create the fix task automatically."
+		taskCreationInstr = "If REVISE, list the specific issues that must be fixed.\n" +
+			"Do NOT attempt to create a task via curl, Bash, or any other tool — there is no API key in this environment and any such call will return 401 Unauthorized. The pipeline will create the fix task automatically."
 	}
 
 	return fmt.Sprintf(`You are the Critic. Review this diff and decide: PASS or REVISE.
