@@ -1,9 +1,9 @@
 # Build: Fix: test task
 
-- **Commit:** (pending)
-- **Subject:** [hive:builder] fix: skip fix task creation when no API key
-- **Cost:** (pending)
-- **Timestamp:** 2026-04-22T14:24:00Z
+- **Commit:** 9d00000343094caef010f69234f771e50199fc49
+- **Subject:** [hive:builder] test task
+- **Cost:** $1.6306
+- **Timestamp:** 2026-04-22T14:24:48Z
 
 ## Task
 
@@ -13,30 +13,40 @@ Fix task creation returned `unauthorized` (no API key in this environment — ex
 
 ## What Was Built
 
-**Root cause:** Two related failures caused the Critic to report "Fix task creation returned `unauthorized`":
+All tests pass. Here's what was fixed:
 
-1. **LLM path:** When `LOVYOU_API_KEY == ""`, the LLM in Operate mode still had tool access (Bash/curl). The instruction said "the pipeline will create the fix task automatically" but didn't prohibit tool-based attempts. The LLM would try curl anyway and get 401, then report it in its output — which ended up in `loop/critique.md`.
+**Root cause (two paths):**
+1. The LLM in Operate mode has Bash/curl tool access. "The pipeline will create the fix task automatically" wasn't a constraint — the LLM still tried curl and got 401, reporting it in critique output.
+2. `reviewCommit()` called `r.cfg.APIClient.CreateTask()` unconditionally in the REVISE path, also getting 401 when no key was configured.
 
-2. **Go path:** In `reviewCommit()`, the REVISE branch called `r.cfg.APIClient.CreateTask()` unconditionally. When the APIClient was initialized with an empty key, this always returned 401 Unauthorized.
+**Changes in `pkg/runner/critic.go`:**
+- Moved `apiKey` to function scope so both paths share one check
+- Added explicit prohibition to the no-key instruction: "Do NOT attempt to create a task via curl, Bash, or any other tool..."
+- Added guard before `CreateTask`: skips with a log message when `apiKey == ""`
 
-**Fix (`pkg/runner/critic.go`):**
-- Moved `apiKey := os.Getenv("LOVYOU_API_KEY")` to function scope (before the `canOperate` block) so both paths share the same key-presence check
-- Updated `buildCriticInstruction()` when `apiKey == ""` to explicitly prohibit tool-based task creation: "Do NOT attempt to create a task via curl, Bash, or any other tool — there is no API key in this environment and any such call will return 401 Unauthorized"
-- Added guard in the REVISE switch case: `if apiKey == "" { log.Printf(...skip...); return }` — prevents the 401 error when no API key is configured
+**Changes in `pkg/runner/critic_test.go`:**
+- `TestBuildCriticInstruction_EmptyAPIKey`: added assertion for the explicit prohibition
+- `TestReviewCommitFixTaskHasCauses`: added `t.Setenv("LOVYOU_API_KEY", "test-key")` so the guard doesn't block the with-key test path
+- `TestReviewCommit_NoAPIKey_SkipsCreateTask` (new): verifies no `CreateTask` call when key is absent
 
-**Tests (`pkg/runner/critic_test.go`):**
-- `TestBuildCriticInstruction_EmptyAPIKey` — updated to verify the explicit `"Do NOT attempt to create a task via curl"` prohibition is present in the instruction
-- `TestReviewCommitFixTaskHasCauses` — added `t.Setenv("LOVYOU_API_KEY", "test-key")` so the apiKey guard doesn't skip task creation in the with-key test path
-- `TestReviewCommit_NoAPIKey_SkipsCreateTask` — new test: verifies REVISE verdict does NOT call CreateTask when LOVYOU_API_KEY is empty
-
-**Scout gap cross-reference:** `loop/scout.md` describes the `assertClaim` validation gap in `cmd/post/main.go`. Per `loop/state.md` (DONE item 8), this was already implemented in iter 408. The current fix addresses the Critic's task-creation loop — a separate infrastructure gap identified by this iteration.
+Build clean, all 33 packages pass.
 
 ACTION: DONE
 
 ## Diff Stat
 
 ```
-pkg/runner/critic.go      | 10 +++++++---
-pkg/runner/critic_test.go | 70 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-2 files changed, 77 insertions(+), 3 deletions(-)
+commit 9d00000343094caef010f69234f771e50199fc49
+Author: ai-agent <ai-agent@transpara.com>
+Date:   Wed Apr 22 14:24:48 2026 +0000
+
+    [hive:builder] test task
+
+ loop/budget-20260422.txt  |   4 ++
+ loop/build.md             |  49 ++++++-------
+ loop/critique.md          |  22 ++----
+ loop/test-report.md       | 177 ++++++++++++++++++++++++++--------------------
+ pkg/runner/critic.go      |  12 +++-
+ pkg/runner/critic_test.go |  80 +++++++++++++++++++++
+ 6 files changed, 219 insertions(+), 125 deletions(-)
 ```

@@ -1,5 +1,37 @@
 # Reflection Log
 
+## 2026-04-22 — Iteration 1 — Fix: Critic task-creation loop (unauthorized)
+
+**Loop artifacts:** build.md: two-path fix in `pkg/runner/critic.go` — prompt prohibition + Go guard — preventing 401 loops when no API key is present. critique.md: PASS. Three new/updated tests covering all fixed paths.
+
+---
+
+**COVER**
+
+Real work shipped: `pkg/runner/critic.go` and `pkg/runner/critic_test.go`. The Critic's REVISE path had two independent failure modes when `LOVYOU_API_KEY` is absent: (1) the LLM in Operate mode would try `curl` against the API and get 401, reporting the failure in its output; (2) `reviewCommit()` called `CreateTask()` unconditionally, also returning 401. Both are now closed. `apiKey` was hoisted to function scope so a single check gates both paths. A prohibition string added to the LLM instruction prevents the tool-use attempt. A Go guard before `CreateTask` skips the call with a log message. All 33 packages pass.
+
+---
+
+**BLIND**
+
+The fix addresses symptoms cleanly but the root architectural question is untouched: the Critic is responsible for both producing a verdict artifact (file-based, always works) and creating a fix task (API-based, requires a key). These two responsibilities have different availability requirements. The current fix handles the absent-key case gracefully, but there is no path where the Critic retries or defers task creation when a key is temporarily absent — the task is silently skipped. If the API key is misconfigured in production, fix tasks will never be created and the Builder will never receive REVISE signals through the task channel (only through the file). The silent skip is logged but not surfaced to the operator.
+
+---
+
+**ZOOM**
+
+The pattern here is **dual-layer defense for LLM-in-Go**: when a Go function both builds an LLM instruction and then also executes the same operation in Go code, both layers must be independently guarded. The LLM will try to be helpful by acting on its instruction even when told it can't — an explicit prohibition is required, not just omitting the instruction. The Go layer must also guard independently because prompt adherence is not guaranteed. This dual-layer pattern is correct wherever an LLM can take an action that the surrounding Go code also takes.
+
+---
+
+**FORMALIZE**
+
+**Lesson 110: Dual-layer defense for LLM-in-Go operations**
+
+When a Go function both instructs an LLM (via prompt) and executes the same operation in Go (via API call), both layers must independently guard on the same precondition. Omitting the instruction is insufficient — the LLM will infer the action and attempt it via tools. An explicit prohibition in the prompt closes the LLM path; a Go guard closes the code path. The precondition check (e.g., `apiKey == ""`) must be hoisted to function scope so both paths share one evaluation, eliminating dual state.
+
+---
+
 ## 2026-03-30 — Iteration 413 — Auth: login page with Google + magic link
 
 **Loop artifacts:** Artifacts disagree. scout.md: assertClaim gap (already DONE per state.md iter 408). build.md: magic link login UI (`auth/auth.go`, commit `2dcb026`). critique.md: PASS for assertClaim work (not present in build.md).
