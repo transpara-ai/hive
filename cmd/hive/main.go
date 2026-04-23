@@ -40,21 +40,21 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
-	"github.com/lovyou-ai/eventgraph/go/pkg/actor/pgactor"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/intelligence"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store/pgstore"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor/pgactor"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/hive/pkg/api"
-	"github.com/lovyou-ai/hive/pkg/hive"
-	"github.com/lovyou-ai/hive/pkg/reconciliation"
-	"github.com/lovyou-ai/hive/pkg/registry"
-	"github.com/lovyou-ai/hive/pkg/runner"
-	"github.com/lovyou-ai/hive/pkg/telemetry"
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/reconciliation"
+	"github.com/transpara-ai/hive/pkg/registry"
+	"github.com/transpara-ai/hive/pkg/runner"
+	"github.com/transpara-ai/hive/pkg/telemetry"
+	"github.com/transpara-ai/work"
 )
 
 func main() {

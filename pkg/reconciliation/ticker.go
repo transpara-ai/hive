@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/runner"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/runner"
 )
 
 // defaultInterval is the reconciliation cycle cadence. Tuned to 60s so the

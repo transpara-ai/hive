@@ -26,10 +26,10 @@ complete and verify before moving to the next. Do not skip ahead. Do not combine
 
 ## Prerequisites
 
-- Design spec `docs/designs/allocator-design.md` (v1.1.0) is committed to `lovyou-ai-hive`
+- Design spec `docs/designs/allocator-design.md` (v1.1.0) is committed to `hive`
 - SysMon is graduated and running (health.report events flowing)
-- You are in the `lovyou-ai-hive` repo root
-- You have access to `lovyou-ai-eventgraph` (as a sibling directory or Go module)
+- You are in the `hive` repo root
+- You have access to `eventgraph` (as a sibling directory or Go module)
 
 ---
 
@@ -152,7 +152,7 @@ PART 2: BudgetRegistry
 
 PART 3: agent.budget.adjusted Event Type
 
-4. In lovyou-ai-eventgraph, create the event type:
+4. In eventgraph, create the event type:
 
    a. Register event type "agent.budget.adjusted"
    b. Create content struct (following AgentBudgetAllocatedContent pattern):

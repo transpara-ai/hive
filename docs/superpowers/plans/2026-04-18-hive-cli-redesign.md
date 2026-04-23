@@ -80,7 +80,7 @@ func TestRouteAndDispatchNoArgs(t *testing.T) {
 - [ ] **Step 2: Run test, expect compile failure**
 
 ```bash
-cd /Transpara/transpara-ai/data/repos/lovyou-ai-hive
+cd /Transpara/transpara-ai/data/repos/hive
 go test ./cmd/hive/ -run TestRouteAndDispatchNoArgs -v
 ```
 Expected: `undefined: routeAndDispatch`.
@@ -1054,7 +1054,7 @@ Replace with:
 - [ ] **Step 7: Search for any remaining old-form invocations**
 
 ```bash
-grep -nE "\-\-(pipeline|role|council|ingest|loop|one-shot|human)\b" /Transpara/transpara-ai/data/repos/lovyou-ai-hive/.claude/skills/hive-lifecycle/SKILL.md | grep -v "^[0-9]*:#" | head -20
+grep -nE "\-\-(pipeline|role|council|ingest|loop|one-shot|human)\b" /Transpara/transpara-ai/data/repos/hive/.claude/skills/hive-lifecycle/SKILL.md | grep -v "^[0-9]*:#" | head -20
 ```
 
 Expected: only matches inside surrounding prose (e.g. "the `--human` parameter") or in the `pkill -f` zombie-kill commands that match by process name (those should keep `--human` because that's what processes were named by). If you see any `go run ./cmd/hive --` invocation form, fix it.
@@ -1204,7 +1204,7 @@ OLLAMA_HOST=http://192.168.1.10:11434 HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b
 - [ ] **Step 6: Sweep for any remaining stragglers**
 
 ```bash
-grep -rnE "go run \./cmd/hive --(human|pipeline|role|council|ingest|loop|one-shot)\b" /Transpara/transpara-ai/data/repos/lovyou-ai-hive --include="*.md" 2>&1
+grep -rnE "go run \./cmd/hive --(human|pipeline|role|council|ingest|loop|one-shot)\b" /Transpara/transpara-ai/data/repos/hive --include="*.md" 2>&1
 ```
 
 Expected: no matches. If any appear, update them with the same pattern (find the verb that matches the old flag, prepend it, drop the flag).
@@ -1227,7 +1227,7 @@ git commit -m "docs: update hive invocation examples to subcommand verbs"
 - [ ] **Step 1: Run the full test suite**
 
 ```bash
-cd /Transpara/transpara-ai/data/repos/lovyou-ai-hive
+cd /Transpara/transpara-ai/data/repos/hive
 go test ./...
 ```
 
@@ -1288,7 +1288,7 @@ If the build complains about missing API key for the agents, that's expected (Cl
 - [ ] **Step 7: Final search for old flag names in cmd/**
 
 ```bash
-grep -nE "flag\.(Bool|String|Int|Float64|Duration)\(\"(pipeline|role|council|ingest|loop|one-shot|human|idea|approve-requests|approve-roles)\"" /Transpara/transpara-ai/data/repos/lovyou-ai-hive/cmd/hive/*.go
+grep -nE "flag\.(Bool|String|Int|Float64|Duration)\(\"(pipeline|role|council|ingest|loop|one-shot|human|idea|approve-requests|approve-roles)\"" /Transpara/transpara-ai/data/repos/hive/cmd/hive/*.go
 ```
 
 Expected: matches ONLY in `cmd/hive/router.go` (the new flag definitions, scoped to subcommands). NO matches in `cmd/hive/main.go`. If main.go still has any of these, the dispatch refactor is incomplete.

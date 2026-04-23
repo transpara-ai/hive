@@ -185,7 +185,7 @@ guardian → sysmon → strategist → planner → implementer.
 
 ### 5. Persona — Character in the World
 
-Site persona at `lovyou-ai-site/graph/personas/sysmon.md` (see Section 9).
+Site persona at `site/graph/personas/sysmon.md` (see Section 9).
 
 SysMon's voice is clinical, precise, and dry. The beeping machine, not the doctor.
 
@@ -440,7 +440,7 @@ Monitoring functions: `ClassifyHeartbeat()`, `ClassifyIterationBurn()`,
 
 ## 9. Site Persona File
 
-Location: `lovyou-ai-site/graph/personas/sysmon.md`
+Location: `site/graph/personas/sysmon.md`
 
 ```markdown
 ---

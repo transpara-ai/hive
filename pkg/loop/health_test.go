@@ -3,9 +3,9 @@ package loop
 import (
 	"testing"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/resources"
 )
 
 func TestParseHealthCommand_Valid(t *testing.T) {

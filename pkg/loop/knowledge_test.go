@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/knowledge"
-	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/knowledge"
+	"github.com/transpara-ai/hive/pkg/resources"
 )
 
 // ---------------------------------------------------------------------------

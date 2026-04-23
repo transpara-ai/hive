@@ -3,7 +3,7 @@ package loop
 import (
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/resources"
 )
 
 // ════════════════════════════════════════════════════════════════════════

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/work"
 )
 
 // TaskCommand represents a parsed /task command from an agent's response.

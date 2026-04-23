@@ -279,7 +279,7 @@ ensures Allocator never acts on zero data.
 
 ### 5. Persona — Character in the World
 
-Site persona at `lovyou-ai-site/graph/personas/allocator.md` (see Section 9).
+Site persona at `site/graph/personas/allocator.md` (see Section 9).
 
 Allocator's voice is measured, pragmatic, and dry. The accountant who sees the whole
 ledger. Not warm, not cold — precise about numbers and clear about trade-offs.
@@ -604,7 +604,7 @@ genuinely too small.
 
 ## 9. Site Persona File
 
-Location: `lovyou-ai-site/graph/personas/allocator.md`
+Location: `site/graph/personas/allocator.md`
 
 ```markdown
 ---

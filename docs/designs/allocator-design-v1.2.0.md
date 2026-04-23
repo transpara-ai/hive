@@ -589,7 +589,7 @@ genuinely too small.
 
 ## 10. Site Persona File
 
-Location: `lovyou-ai-site/graph/personas/allocator.md`
+Location: `site/graph/personas/allocator.md`
 
 **Note:** SysMon validation confirmed that persona files do NOT use YAML
 frontmatter. They use plain markdown matching the format of existing personas

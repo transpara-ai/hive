@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 )
 
 func TestBudgetWithinLimits(t *testing.T) {

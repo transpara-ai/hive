@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 // Phase is a single pipeline phase that can succeed or fail.

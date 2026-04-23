@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/budget"
-	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/budget"
+	"github.com/transpara-ai/hive/pkg/resources"
 )
 
 // --- parseBudgetCommand ---

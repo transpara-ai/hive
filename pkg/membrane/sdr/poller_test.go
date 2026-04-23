@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 type mockClient struct {

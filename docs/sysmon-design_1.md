@@ -99,7 +99,7 @@ event, but this should be rare.
 ### 4. Role — Function in the Civilization
 
 ```go
-// In StarterAgents() — lovyou-ai-hive/pkg/hive/agentdef.go
+// In StarterAgents() — hive/pkg/hive/agentdef.go
 
 {
     Role:          "sysmon",
@@ -135,7 +135,7 @@ detect task queue stalls), they can be added. Start narrow, expand with evidence
 ### 5. Persona — Character in the World
 
 ```yaml
-# Site persona definition — lovyou-ai-site/graph/personas/sysmon.md
+# Site persona definition — site/graph/personas/sysmon.md
 
 name: sysmon
 display: SysMon
@@ -159,7 +159,7 @@ civilization's vital signs monitor — the beeping machine, not the doctor.
 
 ## 6. Prompt File: `agents/sysmon.md`
 
-This is the complete prompt file to be placed at `lovyou-ai-hive/agents/sysmon.md`.
+This is the complete prompt file to be placed at `hive/agents/sysmon.md`.
 
 ```markdown
 # SysMon — System Health Monitor
@@ -362,7 +362,7 @@ No new event type registration needed for the basic health report.
 ### Content Type Definition
 
 ```go
-// In lovyou-ai-hive or lovyou-ai-eventgraph (depending on where health content types live)
+// In hive or eventgraph (depending on where health content types live)
 
 // HealthReportContent is the structured content for health.report events.
 type HealthReportContent struct {
@@ -477,7 +477,7 @@ ev, err := factory.Create(
 ### StarterAgents Addition
 
 ```go
-// In lovyou-ai-hive/pkg/hive/agentdef.go — add to StarterAgents()
+// In hive/pkg/hive/agentdef.go — add to StarterAgents()
 
 {
     Role: "sysmon",
@@ -521,7 +521,7 @@ Boot order:
 
 ## 9. Site Persona File
 
-### `lovyou-ai-site/graph/personas/sysmon.md`
+### `site/graph/personas/sysmon.md`
 
 ```markdown
 ---
@@ -780,26 +780,26 @@ func TestSysMonCausalChain(t *testing.T) {
 
 | File | Repository | Purpose |
 |------|-----------|---------|
-| `agents/sysmon.md` | lovyou-ai-hive | Agent prompt file |
-| `graph/personas/sysmon.md` | lovyou-ai-site | Site persona definition |
+| `agents/sysmon.md` | hive | Agent prompt file |
+| `graph/personas/sysmon.md` | site | Site persona definition |
 
 ### Files to Modify
 
 | File | Repository | Change |
 |------|-----------|--------|
-| `pkg/hive/agentdef.go` | lovyou-ai-hive | Add SysMon to `StarterAgents()` |
-| `pkg/hive/agentdef.go` | lovyou-ai-hive | Ensure boot order: Guardian → SysMon → others |
-| `agents/guardian.md` | lovyou-ai-hive | Add SysMon-absence awareness section |
+| `pkg/hive/agentdef.go` | hive | Add SysMon to `StarterAgents()` |
+| `pkg/hive/agentdef.go` | hive | Ensure boot order: Guardian → SysMon → others |
+| `agents/guardian.md` | hive | Add SysMon-absence awareness section |
 
 ### Files to Create (New Code)
 
 | File | Repository | Purpose |
 |------|-----------|---------|
-| `pkg/health/types.go` | lovyou-ai-hive | `HealthReportContent` and related types |
-| `pkg/health/monitor.go` | lovyou-ai-hive | Core monitoring logic (heartbeat, budget, throughput checks) |
-| `pkg/health/thresholds.go` | lovyou-ai-hive | Configurable thresholds from env vars |
-| `pkg/health/monitor_test.go` | lovyou-ai-hive | Unit tests for monitoring logic |
-| `pkg/health/integration_test.go` | lovyou-ai-hive | Integration tests with event store |
+| `pkg/health/types.go` | hive | `HealthReportContent` and related types |
+| `pkg/health/monitor.go` | hive | Core monitoring logic (heartbeat, budget, throughput checks) |
+| `pkg/health/thresholds.go` | hive | Configurable thresholds from env vars |
+| `pkg/health/monitor_test.go` | hive | Unit tests for monitoring logic |
+| `pkg/health/integration_test.go` | hive | Integration tests with event store |
 
 ### Event Type Verification
 

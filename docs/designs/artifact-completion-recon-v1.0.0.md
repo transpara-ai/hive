@@ -8,7 +8,7 @@ Recon for adding a structured `ArtifactRef` field to `TaskCompletedContent` so c
 
 ## Key Finding: Artifact Gate Already Exists
 
-`TaskStore.Complete()` in `lovyou-ai-work/store.go:279-291` already enforces that a `work.task.artifact` or `work.task.artifact.waived` event must exist before a task can be marked complete. The `hasEventForTask()` helper scans for these events but does **not** return the artifact event ID — it only returns a boolean.
+`TaskStore.Complete()` in `work/store.go:279-291` already enforces that a `work.task.artifact` or `work.task.artifact.waived` event must exist before a task can be marked complete. The `hasEventForTask()` helper scans for these events but does **not** return the artifact event ID — it only returns a boolean.
 
 This means the infrastructure is 80% built. The remaining work is:
 1. Make `Complete()` capture and embed the artifact event ID
@@ -17,7 +17,7 @@ This means the infrastructure is 80% built. The remaining work is:
 
 ## Change Surface by Repo
 
-### lovyou-ai-work (2 files)
+### work (2 files)
 
 | File | Line | What | Change needed |
 |------|------|------|---------------|
@@ -25,15 +25,15 @@ This means the infrastructure is 80% built. The remaining work is:
 | `store.go` | 271 | `Complete()` method | Auto-populate ArtifactRef from gate query |
 | `store.go` | 853 | `hasEventForTask()` | Return event ID, not just bool |
 
-### lovyou-ai-eventgraph (0 files)
+### eventgraph (0 files)
 
 No changes. `OperateResult` only carries `Summary` and `Usage`. The artifact is a separate event on the graph, not part of the Operate return path.
 
-### lovyou-ai-agent (0 files)
+### agent (0 files)
 
 No changes. `Agent.Operate()` is a pass-through for `OperateResult`.
 
-### lovyou-ai-hive (3 files)
+### hive (3 files)
 
 | File | Line | What | Change needed |
 |------|------|------|---------------|

@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/work"
 )
 
 // TitleFromFilename derives a human-readable title from a file path.

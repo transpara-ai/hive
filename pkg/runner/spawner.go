@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 )
 
 // InvokeAgent runs any agent by name. Reads persona from the graph first
