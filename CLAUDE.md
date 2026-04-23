@@ -1,6 +1,6 @@
 # Hive
 
-A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/lovyou-ai/eventgraph). Hosted at [lovyou.ai](https://lovyou.ai).
+A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/transpara-ai/eventgraph). Hosted at [lovyou.ai](https://lovyou.ai).
 
 ## Soul
 
@@ -22,7 +22,7 @@ The end state is an economy — every transaction, decision, and relationship on
 
 ## The Thirteen Products
 
-Each product layer from EventGraph ([product-layers.md](https://github.com/lovyou-ai/eventgraph/blob/main/docs/product-layers.md)) becomes a deployable product on lovyou.ai. Layer 0 is the foundation — layers 1-13 are products:
+Each product layer from EventGraph ([product-layers.md](https://github.com/transpara-ai/eventgraph/blob/main/docs/product-layers.md)) becomes a deployable product on lovyou.ai. Layer 0 is the foundation — layers 1-13 are products:
 
 | Layer | Graph | Composition Grammar | What It Solves |
 |-------|-------|---------------------|---------------|
@@ -44,7 +44,7 @@ Revenue model: charge corporations, free for individuals. Hosted persistence for
 
 **Resource transparency is a core principle.** Every resource — money, tokens, compute time, human hours, agent cycles — is an event on the graph with causal links. Anyone can trace any resource from source to impact. The hive's goal grows with its revenue — from software products to research, charity, housing, whatever humans need most.
 
-Build order: Work Graph first (the hive needs it), then Market, Social, Knowledge, Alignment. Each product is derived using the [derivation method](https://github.com/lovyou-ai/eventgraph/blob/main/docs/derivation-method.md).
+Build order: Work Graph first (the hive needs it), then Market, Social, Knowledge, Alignment. Each product is derived using the [derivation method](https://github.com/transpara-ai/eventgraph/blob/main/docs/derivation-method.md).
 
 ## Architecture
 
@@ -66,7 +66,7 @@ eventgraph (foundation)  →  agent (abstraction)  →  hive (application)
 ```
 
 - **eventgraph** — event graph, stores, types, intelligence, pgstore
-- **agent** — unified Agent type (role-agnostic, wraps AgentRuntime). Separate repo: `github.com/lovyou-ai/agent`
+- **agent** — unified Agent type (role-agnostic, wraps AgentRuntime). Separate repo: `github.com/transpara-ai/agent`
 - **hive** — runtime, agent definitions, loop, work tasks, workspace
 
 ### Adding a New Agent
@@ -199,8 +199,8 @@ Can also set `DATABASE_URL` env var instead of `--store`.
 - `cmd/hive/` — CLI entry point
 
 Separate repos (imported via `replace` directives for local dev):
-- `github.com/lovyou-ai/agent` — unified Agent type (imported as `hiveagent`)
-- `github.com/lovyou-ai/work` — Work Graph (Layer 1): task primitives, CLI, REST server
+- `github.com/transpara-ai/agent` — unified Agent type (imported as `hiveagent`)
+- `github.com/transpara-ai/work` — Work Graph (Layer 1): task primitives, CLI, REST server
 
 ## Agent Coordination
 
@@ -331,9 +331,9 @@ See `eventgraph/docs/generator-function.md` and `eventgraph/docs/generator-funct
 
 ## Dependencies
 
-- `github.com/lovyou-ai/eventgraph/go` — event graph, agent runtime, intelligence, pgstore
-- `github.com/lovyou-ai/agent` — unified Agent type (role-agnostic, wraps AgentRuntime)
-- `github.com/lovyou-ai/work` — Work Graph (Layer 1): task store, events, CLIs
+- `github.com/transpara-ai/eventgraph/go` — event graph, agent runtime, intelligence, pgstore
+- `github.com/transpara-ai/agent` — unified Agent type (role-agnostic, wraps AgentRuntime)
+- `github.com/transpara-ai/work` — Work Graph (Layer 1): task store, events, CLIs
 - Claude CLI — intelligence backend (flat rate via Max plan, no API key needed)
 
 All three deps use `replace` directives in go.mod for local dev (`../eventgraph/go`, `../agent`, `../work`).

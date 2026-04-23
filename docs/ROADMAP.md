@@ -53,7 +53,7 @@ Roughly in dependency order, but the core loop decides actual priority:
 
 ## Key Decisions
 
-1. **Self-modification: yes.** PRs to lovyou-ai/*, reviewed by human.
+1. **Self-modification: yes.** PRs to transpara-ai/*, reviewed by human.
 2. **One service.** lovyou.ai does everything. Web first.
 3. **High scrutiny initially.** Everything starts as Required authority.
 4. **Core loop over milestones.** The loop decides what to build, not a checklist.

@@ -19,15 +19,15 @@ jobs:
       # Checkout sibling repos (go.mod replace directives point to ../agent, ../work, ../eventgraph/go)
       - uses: actions/checkout@v4
         with:
-          repository: lovyou-ai/eventgraph
+          repository: transpara-ai/eventgraph
           path: eventgraph
       - uses: actions/checkout@v4
         with:
-          repository: lovyou-ai/agent
+          repository: transpara-ai/agent
           path: agent
       - uses: actions/checkout@v4
         with:
-          repository: lovyou-ai/work
+          repository: transpara-ai/work
           path: work
 
       - uses: actions/setup-go@v5

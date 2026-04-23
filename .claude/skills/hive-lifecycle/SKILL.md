@@ -1,11 +1,11 @@
 ---
 name: hive-lifecycle
-description: "Manage the lovyou-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
+description: "Manage the transpara-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
 ---
 
 # Hive Lifecycle Management
 
-Commands for starting, stopping, restarting, running, and monitoring the lovyou-ai hive stack on nucbuntu.
+Commands for starting, stopping, restarting, running, and monitoring the transpara-ai hive stack on nucbuntu.
 
 ## Hive Help
 
