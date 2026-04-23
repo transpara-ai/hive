@@ -129,7 +129,7 @@ When an agent lacks a tool or skill:
 
 1. Agent identifies the gap during REASON: "I need to deploy to fly.io but I don't have a deploy tool"
 2. Agent emits a task: "Build a fly.io deployment tool"
-3. CTO evaluates: is this a self-modification (changes to lovyou-ai/hive) or a new tool?
+3. CTO evaluates: is this a self-modification (changes to transpara-ai/hive) or a new tool?
 4. If self-mod: agent specs the change, submits PR, human approves
 5. If new tool: agent builds it as an MCP tool extension, Guardian reviews
 6. The new tool becomes available to all agents

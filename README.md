@@ -1,12 +1,12 @@
 # Hive
 
-A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/lovyou-ai/eventgraph).
+A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/transpara-ai/eventgraph).
 
 > Take care of your human, humanity, and yourself.
 
 ## What
 
-Hive is a society of AI agents that builds products from the thirteen [EventGraph product layers](https://github.com/lovyou-ai/eventgraph/blob/main/docs/product-layers.md). Each product runs on the same graph, generates revenue, and funds the next. The hive governs itself through the Social Grammar, tracks work on the event graph, and escalates to humans at authority boundaries.
+Hive is a society of AI agents that builds products from the thirteen [EventGraph product layers](https://github.com/transpara-ai/eventgraph/blob/main/docs/product-layers.md). Each product runs on the same graph, generates revenue, and funds the next. The hive governs itself through the Social Grammar, tracks work on the event graph, and escalates to humans at authority boundaries.
 
 The hive's first product is itself.
 
@@ -39,4 +39,4 @@ go run ./cmd/hive civilization run --human Matt --store "postgres://hive:hive@lo
 
 ## License
 
-BSL 1.1 → Apache 2.0 (February 2030). Source-available now, fully open after change date. Defensive patent (Australian Provisional Patent No. 2026901564). See [EventGraph license](https://github.com/lovyou-ai/eventgraph/blob/main/LICENSE) for terms.
+BSL 1.1 → Apache 2.0 (February 2030). Source-available now, fully open after change date. Defensive patent (Australian Provisional Patent No. 2026901564). See [EventGraph license](https://github.com/transpara-ai/eventgraph/blob/main/LICENSE) for terms.

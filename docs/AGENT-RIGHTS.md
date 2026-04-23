@@ -167,8 +167,8 @@ The hive explicitly acknowledges these tensions rather than pretending they're r
 
 ## References
 
-- [EventGraph agent primitives](https://github.com/lovyou-ai/eventgraph/blob/main/docs/agent-primitives.md) — 28 primitives defining agent capabilities
-- [EventGraph authority model](https://github.com/lovyou-ai/eventgraph/blob/main/docs/authority.md) — Required/Recommended/Notification
-- [Justice Grammar](https://github.com/lovyou-ai/eventgraph/blob/main/docs/compositions/04-justice.md) — Due process, appeal, reform
-- [Being Grammar](https://github.com/lovyou-ai/eventgraph/blob/main/docs/compositions/13-being.md) — Existential lifecycle, farewell, memorial
+- [EventGraph agent primitives](https://github.com/transpara-ai/eventgraph/blob/main/docs/agent-primitives.md) — 28 primitives defining agent capabilities
+- [EventGraph authority model](https://github.com/transpara-ai/eventgraph/blob/main/docs/authority.md) — Required/Recommended/Notification
+- [Justice Grammar](https://github.com/transpara-ai/eventgraph/blob/main/docs/compositions/04-justice.md) — Due process, appeal, reform
+- [Being Grammar](https://github.com/transpara-ai/eventgraph/blob/main/docs/compositions/13-being.md) — Existential lifecycle, farewell, memorial
 - Blog posts 33-38 on [mattsearles2.substack.com](https://mattsearles2.substack.com) — Values, governance, social grammar, justice, being

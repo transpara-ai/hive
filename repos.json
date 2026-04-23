@@ -2,7 +2,7 @@
   "repos": [
     {
       "name": "site",
-      "url": "https://github.com/lovyou-ai/site",
+      "url": "https://github.com/transpara-ai/site",
       "local_path": "../site",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",
@@ -11,7 +11,7 @@
     },
     {
       "name": "hive",
-      "url": "https://github.com/lovyou-ai/hive",
+      "url": "https://github.com/transpara-ai/hive",
       "local_path": ".",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",
@@ -19,7 +19,7 @@
     },
     {
       "name": "eventgraph",
-      "url": "https://github.com/lovyou-ai/eventgraph",
+      "url": "https://github.com/transpara-ai/eventgraph",
       "local_path": "../eventgraph",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./go/...",
@@ -27,7 +27,7 @@
     },
     {
       "name": "agent",
-      "url": "https://github.com/lovyou-ai/agent",
+      "url": "https://github.com/transpara-ai/agent",
       "local_path": "../agent",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",
@@ -35,7 +35,7 @@
     },
     {
       "name": "work",
-      "url": "https://github.com/lovyou-ai/work",
+      "url": "https://github.com/transpara-ai/work",
       "local_path": "../work",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",

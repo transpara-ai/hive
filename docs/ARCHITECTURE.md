@@ -52,7 +52,7 @@ The agent society built on EventGraph + Agent.
 
 ### lovyou.ai (surface)
 
-Separate repo (lovyou-ai/site). Go + templ + HTMX + Tailwind.
+Separate repo (transpara-ai/site). Go + templ + HTMX + Tailwind.
 
 - **Blog** — markdown posts rendered to HTML
 - **Reference** — 201 primitives, 14 layers, grammars (cognitive, graph, layer), agent primitives
