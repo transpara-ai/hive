@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/hive/pkg/knowledge"
-	"github.com/lovyou-ai/hive/pkg/resources"
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/hive/pkg/knowledge"
+	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/work"
 )
 
 // ════════════════════════════════════════════════════════════════════════

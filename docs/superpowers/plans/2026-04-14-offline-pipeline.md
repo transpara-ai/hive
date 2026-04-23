@@ -137,7 +137,7 @@ func TestListNodes_FilterByKindAndState(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go test ./pkg/localapi/ -run TestCreate -v`
+Run: `cd ~/transpara-ai/repos/hive && go test ./pkg/localapi/ -run TestCreate -v`
 Expected: FAIL — package doesn't exist yet.
 
 - [ ] **Step 3: Write the schema migration**
@@ -542,7 +542,7 @@ func filterByAssignee(nodes []Node, id string) []Node {
 
 - [ ] **Step 5: Run the tests**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go test ./pkg/localapi/ -v -count=1`
+Run: `cd ~/transpara-ai/repos/hive && go test ./pkg/localapi/ -v -count=1`
 Expected: PASS — both tests green. (Requires local postgres running.)
 
 - [ ] **Step 6: Commit**
@@ -692,7 +692,7 @@ func TestRoundTrip_NodeExists(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go test ./pkg/localapi/ -run TestRoundTrip -v`
+Run: `cd ~/transpara-ai/repos/hive && go test ./pkg/localapi/ -run TestRoundTrip -v`
 Expected: FAIL — `NewServer` not defined.
 
 - [ ] **Step 3: Write the server implementation**
@@ -1033,7 +1033,7 @@ func slugFromPath(path string) string {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go test ./pkg/localapi/ -run TestRoundTrip -v -count=1`
+Run: `cd ~/transpara-ai/repos/hive && go test ./pkg/localapi/ -run TestRoundTrip -v -count=1`
 Expected: PASS — all three round-trip tests green.
 
 - [ ] **Step 5: Commit**
@@ -1107,10 +1107,10 @@ func main() {
 
 - [ ] **Step 2: Verify it compiles and starts**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go build ./cmd/localapi/`
+Run: `cd ~/transpara-ai/repos/hive && go build ./cmd/localapi/`
 Expected: Binary builds without error.
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && timeout 3 go run ./cmd/localapi/ 2>&1 || true`
+Run: `cd ~/transpara-ai/repos/hive && timeout 3 go run ./cmd/localapi/ 2>&1 || true`
 Expected: Output includes `localapi listening on :8082`.
 
 - [ ] **Step 3: Smoke test against the running server**
@@ -1217,7 +1217,7 @@ Expected: Zero matches.
 
 - [ ] **Step 10: Verify compilation**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go build ./...`
+Run: `cd ~/transpara-ai/repos/hive && go build ./...`
 Expected: No errors.
 
 - [ ] **Step 11: Commit**
@@ -1285,7 +1285,7 @@ Check the import block in `cmd/hive/main.go` — add `"strings"` if missing.
 
 - [ ] **Step 4: Verify compilation and that --help still works**
 
-Run: `cd ~/transpara-ai/repos/lovyou-ai-hive && go build ./cmd/hive/ && ./hive --help`
+Run: `cd ~/transpara-ai/repos/hive && go build ./cmd/hive/ && ./hive --help`
 Expected: Builds and shows help with `--api` flag.
 
 - [ ] **Step 5: Commit**
@@ -1348,7 +1348,7 @@ No `LOVYOU_API_KEY` needed — defaults to "dev" for localhost.
 
 Add row:
 ```
-| **localapi** | Go binary (background) | lovyou-ai-hive | `go run ./cmd/localapi` |
+| **localapi** | Go binary (background) | hive | `go run ./cmd/localapi` |
 ```
 
 - [ ] **Step 3: Add localapi to Hive Status check**
@@ -1384,7 +1384,7 @@ docker compose up -d postgres
 - [ ] **Step 2: Start localapi**
 
 ```bash
-cd ~/transpara-ai/repos/lovyou-ai-hive
+cd ~/transpara-ai/repos/hive
 go run ./cmd/localapi/ &
 sleep 2
 curl -s http://localhost:8082/health  # → "ok"
@@ -1422,7 +1422,7 @@ curl -s http://localhost:8082/app/hive/board?format=json | jq '.nodes | length'
 - [ ] **Step 6: Check diagnostics were recorded**
 
 ```bash
-docker exec lovyou-ai-hive-postgres-1 psql -U hive -d hive -t -c "SELECT COUNT(*) FROM local_diagnostics"
+docker exec hive-postgres-1 psql -U hive -d hive -t -c "SELECT COUNT(*) FROM local_diagnostics"
 ```
 
 - [ ] **Step 7: Kill localapi**

@@ -460,7 +460,7 @@ git commit -m "feat: emit telemetry snapshots from pipeline phases"
 ```bash
 pkill -9 -f "cmd/localapi" 2>/dev/null
 sleep 2
-cd /home/transpara/transpara-ai/repos/lovyou-ai-hive
+cd /home/transpara/transpara-ai/repos/hive
 nohup go run ./cmd/localapi/ --site-db > /tmp/localapi.log 2>&1 &
 sleep 4
 curl -s http://localhost:8082/health
@@ -479,7 +479,7 @@ Expected: returns the same tasks visible on the board UI (Mutex test task, etc.)
 ```bash
 pkill -9 -f "cmd/hive.*pipeline" 2>/dev/null
 sleep 2
-cd /home/transpara/transpara-ai/repos/lovyou-ai-hive
+cd /home/transpara/transpara-ai/repos/hive
 nohup go run ./cmd/hive \
     --pipeline \
     --api http://localhost:8082 \
@@ -508,7 +508,7 @@ Expected: task states reflect pipeline activity.
 - [ ] **Step 5: Verify telemetry**
 
 ```bash
-docker exec lovyou-ai-hive-postgres-1 psql -U hive -d hive -c \
+docker exec hive-postgres-1 psql -U hive -d hive -c \
     "SELECT agent_role, state, recorded_at FROM telemetry_agent_snapshots ORDER BY recorded_at DESC LIMIT 5;"
 ```
 

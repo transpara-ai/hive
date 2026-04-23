@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/hive/pkg/budget"
+	"github.com/transpara-ai/hive/pkg/budget"
 )
 
 // BudgetCommand represents the parsed /budget command from LLM output.

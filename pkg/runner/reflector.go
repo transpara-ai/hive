@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 // markerCandidates returns all format variants the LLM might use for a section key.

@@ -3,7 +3,7 @@ package sdr
 import (
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 // NewSDRConfig returns the SDR membrane instance configuration.

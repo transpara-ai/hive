@@ -26,9 +26,9 @@ complete and verify before moving to the next. Do not skip ahead. Do not combine
 
 ## Prerequisites
 
-- Design spec `docs/designs/sysmon-design.md` (v1.2.0) is committed to `lovyou-ai-hive`
-- You are in the `lovyou-ai-hive` repo root
-- You have access to `lovyou-ai-eventgraph` (as a sibling directory or Go module)
+- Design spec `docs/designs/sysmon-design.md` (v1.2.0) is committed to `hive`
+- You are in the `hive` repo root
+- You have access to `eventgraph` (as a sibling directory or Go module)
 
 ---
 

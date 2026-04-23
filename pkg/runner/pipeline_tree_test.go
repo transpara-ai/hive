@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 type stubFixTasker struct {

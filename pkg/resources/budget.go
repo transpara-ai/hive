@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 )
 
 // Budget tracks resource consumption for an agent loop.

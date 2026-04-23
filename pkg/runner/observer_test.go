@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 func TestBuildPart2Instruction(t *testing.T) {

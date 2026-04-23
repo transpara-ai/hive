@@ -12,16 +12,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/graph"
-	"github.com/lovyou-ai/eventgraph/go/pkg/intelligence"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	hiveagent "github.com/lovyou-ai/agent"
-	"github.com/lovyou-ai/hive/pkg/api"
-	"github.com/lovyou-ai/work"
+	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/hive/pkg/api"
+	"github.com/transpara-ai/work"
 )
 
 // agentWithGraph creates an agent and returns it with its graph, so tests can

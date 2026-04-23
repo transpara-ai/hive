@@ -114,7 +114,7 @@ BUDGET: 34/50 iterations, 142k tokens, $0.83
 TASK: task-77 -- Add error handling to REST API -- in-progress
 INTENT: Implementing retry logic for database connections. Tests passing for happy path, working on timeout scenarios.
 NEXT: Write timeout test cases, then mark task complete.
-CONTEXT: Operating on /home/transpara/repos/lovyou-ai-work. Made 2 commits so far on feat/api-errors branch.
+CONTEXT: Operating on /home/transpara/repos/work. Made 2 commits so far on feat/api-errors branch.
 ```
 
 **Example — Reviewer:**

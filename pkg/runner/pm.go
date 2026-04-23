@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 )
 
 // runPM reads the board, finds the pinned goal, and creates ONE milestone

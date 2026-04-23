@@ -9,7 +9,7 @@ import (
 	"os"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/lovyou-ai/hive/pkg/localapi"
+	"github.com/transpara-ai/hive/pkg/localapi"
 )
 
 func main() {

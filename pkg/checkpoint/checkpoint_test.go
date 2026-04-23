@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/checkpoint"
+	"github.com/transpara-ai/hive/pkg/checkpoint"
 )
 
 // TestHiveSummary_PersistsSurvivesRestart simulates two runtime lifecycles sharing

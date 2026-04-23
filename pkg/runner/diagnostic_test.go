@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 func TestAppendDiagnosticCreatesFile(t *testing.T) {

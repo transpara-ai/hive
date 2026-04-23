@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 // mockCostProvider is a test double that returns a configurable TokenUsage.

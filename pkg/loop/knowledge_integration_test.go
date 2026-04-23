@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
-	"github.com/lovyou-ai/hive/pkg/knowledge"
-	"github.com/lovyou-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/knowledge"
+	"github.com/transpara-ai/hive/pkg/resources"
 )
 
 // TestKnowledgeCompoundLoop validates the end-to-end pipeline:

@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 // trackingOperator records whether Operate was called.

@@ -1,4 +1,4 @@
-module github.com/lovyou-ai/hive
+module github.com/transpara-ai/hive
 
 go 1.25.0
 
@@ -6,18 +6,18 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.26.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/lovyou-ai/agent v0.0.0
-	github.com/lovyou-ai/eventgraph/go v0.0.0-20260309152918-5602caa542f2
-	github.com/lovyou-ai/work v0.0.0
+	github.com/transpara-ai/agent v0.0.0
+	github.com/transpara-ai/eventgraph/go v0.0.0-20260309152918-5602caa542f2
+	github.com/transpara-ai/work v0.0.0
 	github.com/stretchr/testify v1.11.1
 	k8s.io/client-go v0.35.3
 	k8s.io/metrics v0.35.3
 )
 
 replace (
-	github.com/lovyou-ai/agent => ../agent
-	github.com/lovyou-ai/eventgraph/go => ../eventgraph/go
-	github.com/lovyou-ai/work => ../work
+	github.com/transpara-ai/agent => ../agent
+	github.com/transpara-ai/eventgraph/go => ../eventgraph/go
+	github.com/transpara-ai/work => ../work
 )
 
 require (

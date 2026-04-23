@@ -12,13 +12,13 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/lovyou-ai/eventgraph/go/pkg/actor"
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/graph"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store/pgstore"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/hive"
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/work"
 )
 
 func main() {

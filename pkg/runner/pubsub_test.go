@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
 // fakeDispatcher records AnchorSiteOp and EmitSiteOp calls. The anchor

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 // TestEndToEndSmokeTest proves the full membrane loop:

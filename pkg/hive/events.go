@@ -1,10 +1,10 @@
 package hive
 
 import (
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/checkpoint"
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/checkpoint"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 // Hive event types — runtime lifecycle and agent coordination.

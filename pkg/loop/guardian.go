@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 )
 
 // ApproveCommand represents the parsed /approve command from Guardian LLM output.
