@@ -3,6 +3,8 @@ package hive
 import (
 	"fmt"
 	"time"
+
+	"github.com/lovyou-ai/hive/pkg/modelconfig"
 )
 
 // Model constants for LLM provider selection.
@@ -52,6 +54,14 @@ type AgentDef struct {
 	// Tier classifies the agent in the role taxonomy (A/B/C/D).
 	// Empty defaults to TierA for bootstrap agents.
 	Tier string
+
+	// ModelPolicy declares model/provider preferences for resolution.
+	// Optional. When nil, resolution uses Model field + role defaults.
+	ModelPolicy *modelconfig.RoleModelPolicy
+
+	// RoleDefinition is the template this instance derives from.
+	// Nil for legacy AgentDefs that predate the template system.
+	RoleDefinition *modelconfig.RoleDefinition
 }
 
 // Validate checks that the AgentDef has all required fields.

@@ -23,6 +23,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/lovyou-ai/agent"
+	"github.com/lovyou-ai/hive/pkg/modelconfig"
 	"github.com/lovyou-ai/hive/pkg/resources"
 )
 
@@ -104,8 +105,12 @@ func TestSpawnCommandToEvent(t *testing.T) {
 	if content.Name != cmd.Name {
 		t.Errorf("Name = %q, want %q", content.Name, cmd.Name)
 	}
-	if content.Model != resolveModel(cmd.Model) {
-		t.Errorf("Model = %q, want %q", content.Model, resolveModel(cmd.Model))
+	wantModel := cmd.Model
+	if entry, ok := modelconfig.DefaultCatalog().Lookup(cmd.Model); ok {
+		wantModel = entry.ID
+	}
+	if content.Model != wantModel {
+		t.Errorf("Model = %q, want %q", content.Model, wantModel)
 	}
 	if len(content.WatchPatterns) != len(cmd.WatchPatterns) {
 		t.Errorf("WatchPatterns len = %d, want %d", len(content.WatchPatterns), len(cmd.WatchPatterns))

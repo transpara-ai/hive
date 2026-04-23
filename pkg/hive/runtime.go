@@ -26,6 +26,7 @@ import (
 
 	hiveagent "github.com/lovyou-ai/agent"
 	"github.com/lovyou-ai/hive/pkg/checkpoint"
+	"github.com/lovyou-ai/hive/pkg/modelconfig"
 	"github.com/lovyou-ai/hive/pkg/knowledge"
 	"github.com/lovyou-ai/hive/pkg/loop"
 	"github.com/lovyou-ai/hive/pkg/membrane"
@@ -63,6 +64,9 @@ type Runtime struct {
 
 	// Knowledge store for distilled insights (survives reboot via chain replay).
 	knowledgeStore knowledge.KnowledgeStore
+
+	// Model resolver for agent provider/model selection.
+	resolver *modelconfig.Resolver
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -207,6 +211,9 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	// Create the dynamic agent tracker (manages post-boot spawned agents).
 	r.dynamic = newDynamicAgentTracker()
+
+	// Initialize model resolver for agent spawning.
+	r.resolver = modelconfig.DefaultResolver()
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
@@ -450,27 +457,19 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, error) {
-	// Create the intelligence provider.
-	// Operate() requires claude-cli — skip env overrides for agents that use it.
-	var providerName, model string
-	if def.CanOperate {
-		providerName = "claude-cli"
-		model = def.Model
-	} else {
-		providerName = os.Getenv("HIVE_PROVIDER")
-		if providerName == "" {
-			providerName = "claude-cli"
-		}
-		model = os.Getenv("HIVE_MODEL")
-		if model == "" {
-			model = def.Model
-		}
+	// Resolve model/provider through the precedence chain.
+	input := modelconfig.ResolutionInput{
+		Role:          def.Role,
+		AgentDefModel: def.Model,
+		Policy:        def.ModelPolicy,
+		CanOperate:    def.CanOperate,
 	}
-	provider, err := intelligence.New(intelligence.Config{
-		Provider:     providerName,
-		Model:        model,
-		SystemPrompt: def.SystemPrompt,
-	})
+	resolved, err := r.resolver.Resolve(input)
+	if err != nil {
+		return nil, fmt.Errorf("resolve model for %s: %w", def.Name, err)
+	}
+	cfg := modelconfig.ToIntelligenceConfig(resolved, def.SystemPrompt)
+	provider, err := intelligence.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("provider: %w", err)
 	}
@@ -490,12 +489,12 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s]\n",
-		def.Name, def.Role, providerName, model, agent.ID().Value())
+	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s] [%s]\n",
+		def.Name, def.Role, resolved.Provider, resolved.Model, resolved.AuthMode, agent.ID().Value())
 	r.emit(EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    def.Name,
 		Role:    def.Role,
-		Model:   model,
+		Model:   resolved.Model,
 		ActorID: agent.ID().Value(),
 	})
 

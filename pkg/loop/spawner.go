@@ -10,6 +10,7 @@ import (
 	"github.com/lovyou-ai/eventgraph/go/pkg/event"
 	"github.com/lovyou-ai/eventgraph/go/pkg/types"
 	"github.com/lovyou-ai/hive/pkg/checkpoint"
+	"github.com/lovyou-ai/hive/pkg/modelconfig"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -129,30 +130,6 @@ func (ctx *SpawnContext) RecentlyRejected(name string, window int) bool {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Model constants (mirror pkg/hive/agentdef.go — no import to avoid cycle)
-// ────────────────────────────────────────────────────────────────────
-
-const (
-	spawnModelHaiku  = "claude-haiku-4-5-20251001"
-	spawnModelSonnet = "claude-sonnet-4-6"
-	spawnModelOpus   = "claude-opus-4-6"
-)
-
-// resolveModel maps the human-readable tier name ("haiku", "sonnet", "opus")
-// to the actual model identifier string used in AgentDef.Model.
-func resolveModel(name string) string {
-	switch name {
-	case "haiku":
-		return spawnModelHaiku
-	case "sonnet":
-		return spawnModelSonnet
-	case "opus":
-		return spawnModelOpus
-	}
-	return ""
-}
-
-// ────────────────────────────────────────────────────────────────────
 // Reserved names — bootstrap agents that cannot be overwritten
 // ────────────────────────────────────────────────────────────────────
 
@@ -248,8 +225,8 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 	}
 
 	// 4. Model validation.
-	if resolveModel(cmd.Model) == "" {
-		return fmt.Errorf("invalid model %q: must be haiku, sonnet, or opus", cmd.Model)
+	if _, ok := modelconfig.DefaultCatalog().Lookup(cmd.Model); !ok {
+		return fmt.Errorf("invalid model %q: not found in model catalog", cmd.Model)
 	}
 
 	// 5. MaxIterations bounds.
@@ -294,9 +271,14 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 // The model tier name ("haiku", "sonnet", "opus") is resolved to the actual
 // model identifier string before emission.
 func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
+	// Resolve model name via catalog — maps aliases like "sonnet" to full IDs.
+	resolvedModel := cmd.Model
+	if entry, ok := modelconfig.DefaultCatalog().Lookup(cmd.Model); ok {
+		resolvedModel = entry.ID
+	}
 	content := event.RoleProposedContent{
 		Name:          cmd.Name,
-		Model:         resolveModel(cmd.Model),
+		Model:         resolvedModel,
 		WatchPatterns: cmd.WatchPatterns,
 		CanOperate:    cmd.CanOperate,
 		MaxIterations: cmd.MaxIterations,

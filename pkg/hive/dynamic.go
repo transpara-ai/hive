@@ -3,6 +3,8 @@ package hive
 import (
 	"context"
 	"sync"
+
+	"github.com/lovyou-ai/hive/pkg/modelconfig"
 )
 
 // dynamicAgentTracker manages the lifecycle of agents spawned after boot.
@@ -50,14 +52,10 @@ func (d *dynamicAgentTracker) Wait() {
 // RoleProposedContent.Model stores the resolved full string).
 // Defaults to ModelSonnet for unrecognised inputs.
 func mapModelName(name string) string {
-	switch name {
-	case "haiku", ModelHaiku:
-		return ModelHaiku
-	case "sonnet", ModelSonnet:
-		return ModelSonnet
-	case "opus", ModelOpus:
-		return ModelOpus
-	default:
-		return ModelSonnet
+	cat := modelconfig.DefaultCatalog()
+	entry, ok := cat.Lookup(name)
+	if ok {
+		return entry.ID
 	}
+	return ModelSonnet
 }
