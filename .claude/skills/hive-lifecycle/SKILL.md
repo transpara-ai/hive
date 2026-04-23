@@ -361,7 +361,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "SELECT COUNT(*) as events F
 
 echo ""
 echo "=== Telemetry API ==="
-curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:8080/telemetry/health 2>/dev/null || echo "Not responding"
+curl -s -o /dev/null -w "HTTP %{http_code}" -H "Authorization: Bearer dev" http://localhost:8080/telemetry/health 2>/dev/null || echo "Not responding"
 
 echo ""
 echo "=== Agent Count ==="
