@@ -9,8 +9,10 @@ import (
 )
 
 // NewServer creates an http.Handler that mirrors the lovyou.ai REST API
-// surface, backed by a local Store. The apiKey is checked on every request
-// via Bearer token in the Authorization header.
+// surface, backed by a local Store. If apiKey is non-empty, every request
+// is checked for a Bearer token in the Authorization header that matches
+// apiKey. Passing an empty apiKey disables authentication entirely; this
+// is intended only for development against a private loopback bind.
 func NewServer(store *Store, apiKey string) http.Handler {
 	s := &server{store: store, apiKey: apiKey}
 
@@ -187,6 +189,10 @@ func (s *server) handleOp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		assignee := stringField(m, "assignee", "")
+		if assignee == "" {
+			http.Error(w, `missing "assignee" field`, http.StatusBadRequest)
+			return
+		}
 		if err := s.store.ClaimNode(spaceID, nodeID, assignee); err != nil {
 			s.writeStoreErr(w, err)
 			return

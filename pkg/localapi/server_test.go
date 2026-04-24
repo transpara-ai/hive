@@ -244,6 +244,23 @@ func TestOp_OpenAlreadyOpen(t *testing.T) {
 	}
 }
 
+func TestOp_AssignMissingAssignee(t *testing.T) {
+	ts := testServer(t)
+	defer ts.Close()
+
+	resp := doReq(t, "POST", ts.URL+"/app/hive/op",
+		`{"op":"intend","title":"to assign"}`)
+	result := readJSON(t, resp)
+	nodeID := result["node"].(map[string]any)["id"].(string)
+
+	resp = doReq(t, "POST", ts.URL+"/app/hive/op",
+		fmt.Sprintf(`{"op":"assign","node_id":%q}`, nodeID))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("assign missing assignee: got status %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestRoundTrip_NodeExists(t *testing.T) {
 	ts := testServer(t)
 	defer ts.Close()
