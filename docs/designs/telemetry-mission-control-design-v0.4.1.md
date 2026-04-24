@@ -437,7 +437,7 @@ Already handled by work-server middleware (`Access-Control-Allow-Origin: *`).
 
 ### Repository
 
-`github.com/transpara-ai/summary` — the same repo that hosts the static architecture poster (`lovyou_ai_complete_dependency_hierarchy.html`). The dashboard is a new file alongside it.
+_Hosting TBD — the previously-planned `summary` repo is retired._
 
 ### Serving
 
