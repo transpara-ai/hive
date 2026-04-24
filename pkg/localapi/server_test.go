@@ -161,6 +161,16 @@ func TestRoundTrip_OpenTask(t *testing.T) {
 		t.Fatalf("expected status=ok, got %v", oResult["status"])
 	}
 
+	// Direct state check: GET the node and confirm state == "open".
+	resp = doReq(t, "GET", ts.URL+"/app/hive/node/"+nodeID, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get reopened node: got status %d, want 200", resp.StatusCode)
+	}
+	got := readJSON(t, resp)
+	if got["state"] != NodeStateOpen {
+		t.Fatalf("state after reopen: got %v, want %q", got["state"], NodeStateOpen)
+	}
+
 	// Board should show the task again.
 	resp = doReq(t, "GET", ts.URL+"/app/hive/board", "")
 	board = readJSON(t, resp)
@@ -171,6 +181,66 @@ func TestRoundTrip_OpenTask(t *testing.T) {
 	first := nodes[0].(map[string]any)
 	if first["title"] != "reopenable task" {
 		t.Fatalf("board node title mismatch: got %v", first["title"])
+	}
+}
+
+func TestOp_MissingNodeID(t *testing.T) {
+	ts := testServer(t)
+	defer ts.Close()
+
+	for _, op := range []string{"complete", "open", "edit", "claim", "assign"} {
+		t.Run(op, func(t *testing.T) {
+			body := fmt.Sprintf(`{"op":%q}`, op)
+			resp := doReq(t, "POST", ts.URL+"/app/hive/op", body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("%s missing node_id: got status %d, want 400", op, resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestOp_NonexistentNodeID(t *testing.T) {
+	ts := testServer(t)
+	defer ts.Close()
+
+	missing := "00000000-0000-0000-0000-000000000000"
+	cases := []struct {
+		op   string
+		body string
+	}{
+		{"complete", fmt.Sprintf(`{"op":"complete","node_id":%q}`, missing)},
+		{"open", fmt.Sprintf(`{"op":"open","node_id":%q}`, missing)},
+		{"edit", fmt.Sprintf(`{"op":"edit","node_id":%q,"state":"escalated"}`, missing)},
+		{"claim", fmt.Sprintf(`{"op":"claim","node_id":%q}`, missing)},
+		{"assign", fmt.Sprintf(`{"op":"assign","node_id":%q,"assignee":"alice"}`, missing)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.op, func(t *testing.T) {
+			resp := doReq(t, "POST", ts.URL+"/app/hive/op", c.body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("%s missing node: got status %d, want 404", c.op, resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestOp_OpenAlreadyOpen(t *testing.T) {
+	ts := testServer(t)
+	defer ts.Close()
+
+	resp := doReq(t, "POST", ts.URL+"/app/hive/op",
+		`{"op":"intend","title":"never completed"}`)
+	result := readJSON(t, resp)
+	nodeID := result["node"].(map[string]any)["id"].(string)
+
+	resp = doReq(t, "POST", ts.URL+"/app/hive/op",
+		fmt.Sprintf(`{"op":"open","node_id":%q}`, nodeID))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("open already-open: got status %d, want 409", resp.StatusCode)
 	}
 }
 

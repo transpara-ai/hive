@@ -2,6 +2,7 @@ package localapi
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 
@@ -166,5 +167,112 @@ func TestNilIfEmpty(t *testing.T) {
 	got := nilIfEmpty("x")
 	if got == nil || *got != "x" {
 		t.Errorf("nilIfEmpty(\"x\"): got %v, want pointer to \"x\"", got)
+	}
+}
+
+func TestOpenNode_RoundTrip(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+
+	created, err := store.CreateNode("hive", Node{Title: "test task"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	nodeID := created.ID
+
+	if err := store.CompleteNode("hive", nodeID); err != nil {
+		t.Fatalf("CompleteNode: %v", err)
+	}
+	done, err := store.GetNode(nodeID)
+	if err != nil {
+		t.Fatalf("GetNode after complete: %v", err)
+	}
+	if done.State != NodeStateDone {
+		t.Fatalf("state after complete: got %q, want %q", done.State, NodeStateDone)
+	}
+
+	if err := store.OpenNode("hive", nodeID); err != nil {
+		t.Fatalf("OpenNode: %v", err)
+	}
+	reopened, err := store.GetNode(nodeID)
+	if err != nil {
+		t.Fatalf("GetNode after open: %v", err)
+	}
+	if reopened.State != NodeStateOpen {
+		t.Fatalf("state after open: got %q, want %q", reopened.State, NodeStateOpen)
+	}
+}
+
+func TestMutations_NotFound(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+
+	missing := "00000000-0000-0000-0000-000000000000"
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"CompleteNode", func() error { return store.CompleteNode("hive", missing) }},
+		{"OpenNode", func() error { return store.OpenNode("hive", missing) }},
+		{"ClaimNode", func() error { return store.ClaimNode("hive", missing, "alice") }},
+		{"UpdateNodeStateInSpace", func() error { return store.UpdateNodeStateInSpace("hive", missing, NodeStateEscalated) }},
+		{"UpdateNodeState", func() error { return store.UpdateNodeState(missing, NodeStateEscalated) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn()
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("got %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestMutations_CrossSpaceMismatch(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+
+	created, err := store.CreateNode("hive", Node{Title: "owned by hive"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	// Same node id, different space → ErrNotFound (existence is hidden across spaces).
+	if err := store.CompleteNode("other", created.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CompleteNode cross-space: got %v, want ErrNotFound", err)
+	}
+	if err := store.ClaimNode("other", created.ID, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ClaimNode cross-space: got %v, want ErrNotFound", err)
+	}
+	if err := store.UpdateNodeStateInSpace("other", created.ID, NodeStateDone); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateNodeStateInSpace cross-space: got %v, want ErrNotFound", err)
+	}
+
+	got, err := store.GetNode(created.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if got.State != NodeStateOpen {
+		t.Fatalf("state mutated by cross-space call: got %q, want %q", got.State, NodeStateOpen)
+	}
+	if got.Assignee != "" {
+		t.Fatalf("assignee mutated by cross-space call: got %q, want empty", got.Assignee)
+	}
+}
+
+func TestOpenNode_AlreadyOpen(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+
+	created, err := store.CreateNode("hive", Node{Title: "born open"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	err = store.OpenNode("hive", created.ID)
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("OpenNode on already-open node: got %v, want ErrInvalidState", err)
 	}
 }
