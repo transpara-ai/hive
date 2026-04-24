@@ -1,11 +1,11 @@
 ---
 name: hive-lifecycle
-description: "Manage the lovyou-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
+description: "Manage the transpara-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
 ---
 
 # Hive Lifecycle Management
 
-Commands for starting, stopping, restarting, running, and monitoring the lovyou-ai hive stack on nucbuntu.
+Commands for starting, stopping, restarting, running, and monitoring the transpara-ai hive stack on nucbuntu.
 
 ## Hive Help
 
@@ -52,17 +52,17 @@ Environment (not CLI flags):
 |-----------|---------|------|-------------|
 | **postgres** | Docker container `hive-postgres-1` | docker-compose.yml | `docker compose up -d postgres` |
 | **pgadmin** | Docker container | docker-compose.yml | `docker compose up -d pgadmin` |
-| **hive** | Go binary (foreground or background) | lovyou-ai-hive | `go run ./cmd/hive` |
-| **work-server** | Go binary (foreground or background) | lovyou-ai-work | `go run ./cmd/work-server` |
-| **localapi** | Go binary (background) | lovyou-ai-hive | `go run ./cmd/localapi` |
-| **dashboard** | Static HTML (no process) | lovyou-ai-summary | Served via GitHub Pages or file server |
+| **hive** | Go binary (foreground or background) | hive | `go run ./cmd/hive` |
+| **work-server** | Go binary (foreground or background) | work | `go run ./cmd/work-server` |
+| **localapi** | Go binary (background) | hive | `go run ./cmd/localapi` |
+| **dashboard** | Static HTML (no process) | summary | Served via GitHub Pages or file server |
 
 ## Paths
 
 ```
-HIVE_REPO=~/transpara-ai/repos/lovyou-ai-hive
-WORK_REPO=~/transpara-ai/repos/lovyou-ai-work
-COMPOSE_DIR=~/transpara-ai/repos/lovyou-ai-hive   # or wherever docker-compose.yml lives
+HIVE_REPO=~/transpara-ai/repos/hive
+WORK_REPO=~/transpara-ai/repos/work
+COMPOSE_DIR=~/transpara-ai/repos/hive   # or wherever docker-compose.yml lives
 ```
 
 Verify these paths before running commands. If they differ, adjust accordingly.
@@ -564,7 +564,7 @@ The watcher polls every 5 seconds — the new agent spawns on the next poll cycl
 To check pending proposals:
 
 ```bash
-docker exec lovyou-ai-hive-postgres-1 psql -U hive -d hive -t -c \
+docker exec hive-postgres-1 psql -U hive -d hive -t -c \
     "SELECT content_json->>'name' as role, content_json->>'reason' as reason
      FROM events WHERE event_type = 'hive.role.proposed'
      AND content_json->>'name' NOT IN (

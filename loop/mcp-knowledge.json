@@ -4,11 +4,11 @@
       "args": [
         "run",
         "-buildvcs=false",
-        "/home/transpara/transpara-ai/repos/lovyou-ai-hive/cmd/mcp-knowledge"
+        "/home/transpara/transpara-ai/repos/hive/cmd/mcp-knowledge"
       ],
       "command": "/snap/go/11127/bin/go",
       "env": {
-        "HIVE_DIR": "/home/transpara/transpara-ai/repos/lovyou-ai-hive",
+        "HIVE_DIR": "/home/transpara/transpara-ai/repos/hive",
         "SITE_DIR": "/home/transpara/transpara-ai/repos/site",
         "WORKSPACE": "/home/transpara/transpara-ai/repos"
       }

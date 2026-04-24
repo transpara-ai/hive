@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
 // Dispatcher translates site webhook ops into eventgraph bus events.

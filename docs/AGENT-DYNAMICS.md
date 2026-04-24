@@ -148,7 +148,7 @@ This is how the first hive grew from a handful of roles to 74, completing 3,653 
 | Learning | Self-Modification |
 |----------|------------------|
 | Within a lifetime | Changes the codebase |
-| Decision trees, memory, introspection | PRs to lovyou-ai/hive |
+| Decision trees, memory, introspection | PRs to transpara-ai/hive |
 | No authority required | Always Required (human approval) |
 | Agent-specific | Affects all agents |
 | Continuous | Discrete (PR merge events) |
@@ -159,7 +159,7 @@ Both are important. Learning makes individual agents better. Self-modification m
 
 When the hive builds a new product (Tier 5+), it follows the derivation method applied to the product's composition grammar:
 
-1. **Read the composition grammar** — e.g., [work.md](https://github.com/lovyou-ai/eventgraph/blob/main/docs/compositions/01-work.md) defines 12 operations, 3 modifiers, 6 named functions
+1. **Read the composition grammar** — e.g., [work.md](https://github.com/transpara-ai/eventgraph/blob/main/docs/compositions/01-work.md) defines 12 operations, 3 modifiers, 6 named functions
 2. **Derive the UI** — each operation becomes an action the user can take; each named function becomes a workflow
 3. **Derive the API** — each operation becomes an endpoint; each modifier becomes a parameter
 4. **Derive the data model** — from the event types the grammar emits
@@ -169,7 +169,7 @@ The pattern is the same for all 13 products. The grammar is the spec. The deriva
 
 ## References
 
-- [EventGraph agent primitives](https://github.com/lovyou-ai/eventgraph/blob/main/docs/agent-primitives.md) — 28 primitives (Delegate, Consent, Channel, Composition, etc.)
-- [EventGraph derivation method](https://github.com/lovyou-ai/eventgraph/blob/main/docs/derivation-method.md) — 8-step systematic derivation
+- [EventGraph agent primitives](https://github.com/transpara-ai/eventgraph/blob/main/docs/agent-primitives.md) — 28 primitives (Delegate, Consent, Channel, Composition, etc.)
+- [EventGraph derivation method](https://github.com/transpara-ai/eventgraph/blob/main/docs/derivation-method.md) — 8-step systematic derivation
 - [TRUST.md](TRUST.md) — Concrete trust mechanics (numbers, rates, formulas)
 - [EVENT-TYPES.md](EVENT-TYPES.md) — Full event type catalog

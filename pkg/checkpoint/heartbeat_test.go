@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/checkpoint"
+	"github.com/transpara-ai/hive/pkg/checkpoint"
 )
 
 // TestHeartbeatContent_Fields verifies that HeartbeatContent carries the

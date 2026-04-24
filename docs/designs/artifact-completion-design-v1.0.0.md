@@ -23,13 +23,13 @@ Feature C builds on both: the artifact event provides a reliable, structured ref
 
 ## Architecture
 
-The artifact gate infrastructure already exists in `lovyou-ai-work`. The `TaskStore.Complete()` method at `store.go:271` enforces that a `work.task.artifact` or `work.task.artifact.waived` event must exist before a task can be marked complete. The gate uses `hasEventForTask()` which returns a boolean — it finds the artifact but throws away the event ID.
+The artifact gate infrastructure already exists in `work`. The `TaskStore.Complete()` method at `store.go:271` enforces that a `work.task.artifact` or `work.task.artifact.waived` event must exist before a task can be marked complete. The gate uses `hasEventForTask()` which returns a boolean — it finds the artifact but throws away the event ID.
 
 Feature C captures that ID and embeds it in the completion event.
 
 ## Change Surface
 
-### Repo: lovyou-ai-work (2 files)
+### Repo: work (2 files)
 
 #### 1. `events.go` — Add ArtifactRef to TaskCompletedContent
 
@@ -126,7 +126,7 @@ func (ts *TaskStore) Complete(
 
 **Update `HasWaiver()` and any callers of `hasEventForTask`** to use the new 3-return signature.
 
-### Repo: lovyou-ai-hive (2 files)
+### Repo: hive (2 files)
 
 #### 3. `pkg/loop/loop.go` — Wire AddArtifact() in the Operate path
 
@@ -215,8 +215,8 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 
 ### Repos NOT Changed
 
-- **lovyou-ai-eventgraph**: `OperateResult` stays `{Summary, Usage}`. The artifact is a separate graph event, not part of the Operate return path.
-- **lovyou-ai-agent**: `Agent.Operate()` is a pass-through. No changes.
+- **eventgraph**: `OperateResult` stays `{Summary, Usage}`. The artifact is a separate graph event, not part of the Operate return path.
+- **agent**: `Agent.Operate()` is a pass-through. No changes.
 
 ## Backward Compatibility
 
@@ -229,26 +229,26 @@ func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bo
 
 | Step | Repo | What | Depends on |
 |------|------|------|-----------|
-| 1 | lovyou-ai-work | `findEventForTask()` + `ArtifactRef` field + auto-populate in `Complete()` | Nothing |
-| 2 | lovyou-ai-hive | `attachOperateArtifact()` + `buildOperateArtifactBody()` + wire in Operate path | Step 1 merged |
-| 3 | lovyou-ai-hive | Reviewer Strategy 0 using `ArtifactRef` | Step 2 merged |
+| 1 | work | `findEventForTask()` + `ArtifactRef` field + auto-populate in `Complete()` | Nothing |
+| 2 | hive | `attachOperateArtifact()` + `buildOperateArtifactBody()` + wire in Operate path | Step 1 merged |
+| 3 | hive | Reviewer Strategy 0 using `ArtifactRef` | Step 2 merged |
 
 Steps 1 and 2 can be developed in parallel. Step 2 needs Step 1 merged before final testing (go.sum will pick up the new field).
 
 ## Test Plan
 
-### Step 1 (lovyou-ai-work):
+### Step 1 (work):
 - Extend `store_artifact_test.go`: after `AddArtifact()` + `Complete()`, verify `ArtifactRef` on the completed event matches the artifact event ID
 - Extend `store_artifact_test.go`: after `WaiveArtifact()` + `Complete()`, verify `ArtifactRef` matches the waiver event ID
 - Verify backward compat: `Complete()` with a pre-existing artifact (from old code without ArtifactRef) still works
 - Verify `HasWaiver()` still returns correct boolean after signature change
 
-### Step 2 (lovyou-ai-hive):
+### Step 2 (hive):
 - New test: mock Operate path → verify `work.task.artifact` event appears on chain before `work.task.completed`
 - New test: verify artifact body contains commit hash and file stat
 - Integration: run hive with implementer, verify completed tasks have non-zero `ArtifactRef`
 
-### Step 3 (lovyou-ai-hive):
+### Step 3 (hive):
 - New test: `resolveCommitForTask()` with `ArtifactRef` set → verify Strategy 0 fires and returns correct hash
 - Verify fallback: `ArtifactRef` empty → Strategy 1 still works
 

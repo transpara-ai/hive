@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lovyou-ai/hive/pkg/inject"
+	"github.com/transpara-ai/hive/pkg/inject"
 )
 
 func defaultActor() string {

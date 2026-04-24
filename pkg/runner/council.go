@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 )
 
 // councilMember represents one agent's voice in the council.

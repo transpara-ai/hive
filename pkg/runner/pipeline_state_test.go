@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/api"
 )
 
 // TestPipelineTransitionValid verifies that valid (state, event) pairs produce

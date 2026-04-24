@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 )
 
 // RecoveryMode indicates whether an agent started fresh or resumed from a checkpoint.

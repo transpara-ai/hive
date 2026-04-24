@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
-	"github.com/lovyou-ai/hive/pkg/loop"
-	"github.com/lovyou-ai/hive/pkg/resources"
-	"github.com/lovyou-ai/hive/pkg/telemetry"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/loop"
+	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/telemetry"
 )
 
 const watchPollInterval = 5 * time.Second

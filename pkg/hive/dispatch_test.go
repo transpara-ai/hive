@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lovyou-ai/work"
+	"github.com/transpara-ai/work"
 )
 
 func TestParseIntendPayload(t *testing.T) {

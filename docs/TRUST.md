@@ -167,6 +167,6 @@ When hive instances communicate via EGIP protocol:
 
 ## References
 
-- [EventGraph trust spec](https://github.com/lovyou-ai/eventgraph/blob/main/docs/trust.md) — Full specification
-- [EventGraph authority spec](https://github.com/lovyou-ai/eventgraph/blob/main/docs/authority.md) — Authority system
+- [EventGraph trust spec](https://github.com/transpara-ai/eventgraph/blob/main/docs/trust.md) — Full specification
+- [EventGraph authority spec](https://github.com/transpara-ai/eventgraph/blob/main/docs/authority.md) — Authority system
 - `eventgraph/go/pkg/trust/model.go` — DefaultTrustModel implementation

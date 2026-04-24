@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 // Dispatcher translates human decisions from the bridge into ai-sdr API calls.

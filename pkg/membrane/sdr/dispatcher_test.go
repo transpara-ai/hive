@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 func TestDispatchApproval(t *testing.T) {

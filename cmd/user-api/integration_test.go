@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lovyou-ai/hive/pkg/userapi"
+	"github.com/transpara-ai/hive/pkg/userapi"
 )
 
 // newTestServer creates the full handler stack (mux + middleware) backed by

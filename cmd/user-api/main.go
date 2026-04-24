@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/userapi"
+	"github.com/transpara-ai/hive/pkg/userapi"
 )
 
 func main() {

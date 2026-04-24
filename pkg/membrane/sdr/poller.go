@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/lovyou-ai/hive/pkg/membrane"
+	"github.com/transpara-ai/hive/pkg/membrane"
 )
 
 // Poller checks the ai-sdr API for drafts needing approval and lead state changes.

@@ -14,7 +14,7 @@ import (
 // Workspace manages directories and files for hive-generated products.
 type Workspace struct {
 	root string // Root directory for all product repos
-	org  string // GitHub org for created repos (e.g., "lovyou-ai")
+	org  string // GitHub org for created repos (e.g., "transpara-ai")
 }
 
 // New creates a workspace rooted at the given directory.
@@ -28,7 +28,7 @@ func New(root string) (*Workspace, error) {
 		return nil, fmt.Errorf("create root: %w", err)
 	}
 
-	return &Workspace{root: abs, org: "lovyou-ai"}, nil
+	return &Workspace{root: abs, org: "transpara-ai"}, nil
 }
 
 // Root returns the workspace root directory.
@@ -45,7 +45,7 @@ func (w *Workspace) SetOrg(org string) {
 type Product struct {
 	Name string
 	Dir  string
-	Repo string // GitHub repo (e.g., "lovyou-ai/my-product")
+	Repo string // GitHub repo (e.g., "transpara-ai/my-product")
 }
 
 // InitProduct creates a new product with its own git repo.
@@ -71,7 +71,7 @@ func (w *Workspace) InitProduct(name string) (*Product, error) {
 
 		// Try to create the GitHub repo (may already exist)
 		_ = p.gh("repo", "create", repo, "--public",
-			"--description", "Built by hive — lovyou-ai/hive")
+			"--description", "Built by hive — transpara-ai/hive")
 
 		// Set remote
 		_ = p.git("remote", "add", "origin",

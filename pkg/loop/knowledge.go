@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lovyou-ai/hive/pkg/knowledge"
+	"github.com/transpara-ai/hive/pkg/knowledge"
 )
 
 // enrichKnowledgeObservation appends distilled institutional knowledge to the
