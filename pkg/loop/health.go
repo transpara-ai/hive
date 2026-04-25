@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -11,12 +14,33 @@ import (
 	"github.com/transpara-ai/hive/pkg/health"
 )
 
+// AgentVital is one entry in HealthCommand.AgentVitals — SysMon's per-agent
+// slice of a health-report cycle as emitted in the LLM's /health text command.
+// Field shapes match design v0.1.8 §5.1 / §5.2; severity values are lowercase
+// per A13 ("ok" | "warning" | "critical"), matching the in-code
+// pkg/health.Severity convention.
+type AgentVital struct {
+	AgentID               string  `json:"agent_id"`
+	IterationsPct         float64 `json:"iterations_pct"`
+	TrustScore            float64 `json:"trust_score"`
+	BudgetBurnRatePerHour float64 `json:"budget_burn_rate_per_hour"`
+	LastHeartbeatTicks    int64   `json:"last_heartbeat_ticks"`
+	Severity              string  `json:"severity"`
+}
+
 // HealthCommand represents the parsed /health command from LLM output.
+//
+// The four summary fields (Severity, ChainOK, ActiveAgents, EventRate) are
+// preserved unchanged for the existing health.report consumers (cto.go,
+// budget.go). AgentVitals is additive and arrives via SysMon's role-prompt
+// instructing the LLM to emit per-agent vitals — a behavioral contract with
+// no compile-time signal (see design A13).
 type HealthCommand struct {
-	Severity     string  `json:"severity"`
-	ChainOK      bool    `json:"chain_ok"`
-	ActiveAgents int     `json:"active_agents"`
-	EventRate    float64 `json:"event_rate"`
+	Severity     string       `json:"severity"`
+	ChainOK      bool         `json:"chain_ok"`
+	ActiveAgents int          `json:"active_agents"`
+	EventRate    float64      `json:"event_rate"`
+	AgentVitals  []AgentVital `json:"agent_vitals,omitempty"`
 }
 
 // parseHealthCommand extracts the /health JSON payload from LLM output.
@@ -50,10 +74,44 @@ func severityToScore(s string) types.Score {
 	}
 }
 
-// emitHealthReport creates and records a health.report event on the chain.
-// Delegates to Agent.EmitHealthReport which handles signing, causal chaining,
-// and graph recording — following the same pattern as EmitBudgetAllocated.
+// unmappedSeverityLogged tracks which non-canonical severity strings have
+// already been warned about, so we log once per unmapped value rather than
+// per occurrence. Persistent across the process lifetime.
+var unmappedSeverityLogged sync.Map
+
+// normalizeAgentVitalSeverity normalizes the severity string on a per-agent
+// vital to one of "ok" | "warning" | "critical" (matching the severity_level
+// enum set per design §7.1). Anything outside this set is normalized to
+// "warning" and logged once per unmapped value. We do not reject the entire
+// /health command for one bad severity — better to keep the cycle's other
+// vitals than drop everything.
+func normalizeAgentVitalSeverity(s string) string {
+	switch s {
+	case "ok", "warning", "critical":
+		return s
+	}
+	if _, loaded := unmappedSeverityLogged.LoadOrStore(s, true); !loaded {
+		fmt.Printf("[loop] WARN: unmapped agent vital severity %q; normalizing to \"warning\"\n", s)
+	}
+	return "warning"
+}
+
+// emitHealthReport emits one health.report event followed by one
+// agent.vital.reported event per entry in cmd.AgentVitals. All N+1 events
+// share the same cycle_id (UUID) so the exporter can correlate per-agent
+// vitals back to the umbrella report — see design v0.1.8 §5.2.
+//
+// The existing health.report content shape is unchanged; cycle_id lives on
+// the agent.vital.reported events as HealthReportCycleID. (Adding a CycleID
+// field to eventgraph's HealthReportContent is a follow-up eventgraph PR;
+// this implementation defers that and uses the agent.vital.reported event's
+// HealthReportCycleID as the sole carrier of cycle correlation. The runtime
+// canary in §5.5 still works: it groups agent.vital.reported events by
+// cycle_id and counts cycles, comparing against the count of recent
+// health.report events.)
 func (l *Loop) emitHealthReport(cmd *HealthCommand) error {
+	cycleID := uuid.New().String()
+
 	content := event.NewHealthReportContent(
 		severityToScore(cmd.Severity),
 		cmd.ChainOK,
@@ -66,8 +124,30 @@ func (l *Loop) emitHealthReport(cmd *HealthCommand) error {
 		return fmt.Errorf("emit health.report: %w", err)
 	}
 
-	fmt.Printf("[%s] emitted health.report (severity=%s, agents=%d, rate=%.1f)\n",
-		l.agent.Name(), cmd.Severity, cmd.ActiveAgents, cmd.EventRate)
+	fmt.Printf("[%s] emitted health.report (severity=%s, agents=%d, rate=%.1f, cycle=%s, vitals=%d)\n",
+		l.agent.Name(), cmd.Severity, cmd.ActiveAgents, cmd.EventRate, cycleID, len(cmd.AgentVitals))
+
+	for _, vital := range cmd.AgentVitals {
+		actorID, err := types.NewActorID(vital.AgentID)
+		if err != nil {
+			fmt.Printf("[%s] WARN: skipping vital with invalid agent_id %q: %v\n",
+				l.agent.Name(), vital.AgentID, err)
+			continue
+		}
+		vc := event.AgentVitalReportedContent{
+			AgentID:               actorID,
+			IterationsPct:         vital.IterationsPct,
+			TrustScore:            vital.TrustScore,
+			BudgetBurnRatePerHour: vital.BudgetBurnRatePerHour,
+			LastHeartbeatTicks:    vital.LastHeartbeatTicks,
+			Severity:              normalizeAgentVitalSeverity(vital.Severity),
+			HealthReportCycleID:   cycleID,
+		}
+		if err := l.agent.EmitAgentVitalReported(vc); err != nil {
+			return fmt.Errorf("emit agent.vital.reported for %s: %w", vital.AgentID, err)
+		}
+	}
+
 	return nil
 }
 

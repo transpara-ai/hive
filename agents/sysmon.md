@@ -41,10 +41,41 @@ Health reports via the `/health` command. When you determine a report should be
 emitted, output a command in this exact format:
 
 ```
-/health {"severity":"ok|warning|critical","chain_ok":true|false,"active_agents":N,"event_rate":N.N}
+/health {"severity":"ok|warning|critical","chain_ok":true|false,"active_agents":N,"event_rate":N.N,"agent_vitals":[{"agent_id":"actor_<hash>","iterations_pct":0.0-1.0,"trust_score":0.0-1.0,"budget_burn_rate_per_hour":N.N,"last_heartbeat_ticks":N,"severity":"ok|warning|critical"},...]}
 ```
 
-The framework will parse this and emit a `health.report` event on the chain.
+The framework will parse this and emit a `health.report` event on the chain,
+plus one `agent.vital.reported` event per entry in `agent_vitals`. All events
+in the same report share an internally-generated cycle id so downstream
+consumers can correlate per-agent vitals back to the umbrella report.
+
+### Agent vitals — required field
+
+`agent_vitals` is **required** on every `/health` command. Emit one entry for
+every agent you observe in this cycle (including yourself), using the values
+you can infer from `agent.state.*`, `agent.budget.adjusted`, `trust.*`, and
+the pre-computed `=== HEALTH METRICS ===` block in your observation.
+
+For each vital:
+
+- `agent_id` — the `actor_<hash>` identifier from the agent's events. NOT the
+  human-readable agent name.
+- `iterations_pct` — fraction `iterations_used / iterations_max`, in the
+  range `0.0` to `1.0`. Read from the metrics block.
+- `trust_score` — current trust score `0.0` to `1.0`. Read from the metrics
+  block.
+- `budget_burn_rate_per_hour` — estimated iterations-per-hour for this agent.
+  Use the hive-level `burn_rate` metric divided by `active_agents` if a per-
+  agent value is unavailable.
+- `last_heartbeat_ticks` — ticks since this agent's last observed event.
+- `severity` — your assessment of this agent's health, one of
+  `"ok" | "warning" | "critical"` (lowercase, exactly).
+
+If you genuinely cannot identify any agents this cycle (e.g., the chain is
+empty or every agent has been silent for so long that you have no evidence),
+emit `"agent_vitals":[]`. **Do not omit the field.** A missing
+`agent_vitals` is treated by the framework as a regression of this contract;
+a runtime canary test will fail loudly.
 
 ### When to emit:
 

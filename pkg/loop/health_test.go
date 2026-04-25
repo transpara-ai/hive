@@ -124,6 +124,61 @@ func TestSeverityToScore_Empty(t *testing.T) {
 	}
 }
 
+func TestParseHealthCommand_WithAgentVitals(t *testing.T) {
+	response := `Vitals look mixed.
+/health {"severity":"warning","chain_ok":true,"active_agents":3,"event_rate":12.0,"agent_vitals":[{"agent_id":"actor_aaa","iterations_pct":0.4,"trust_score":0.9,"budget_burn_rate_per_hour":18.5,"last_heartbeat_ticks":3,"severity":"ok"},{"agent_id":"actor_bbb","iterations_pct":0.85,"trust_score":0.7,"budget_burn_rate_per_hour":42.0,"last_heartbeat_ticks":17,"severity":"warning"}]}
+/signal {"signal": "IDLE"}`
+
+	cmd := parseHealthCommand(response)
+	if cmd == nil {
+		t.Fatal("expected non-nil HealthCommand")
+	}
+	if cmd.Severity != "warning" {
+		t.Errorf("Severity = %q, want %q", cmd.Severity, "warning")
+	}
+	if len(cmd.AgentVitals) != 2 {
+		t.Fatalf("AgentVitals length = %d, want 2", len(cmd.AgentVitals))
+	}
+	a := cmd.AgentVitals[0]
+	if a.AgentID != "actor_aaa" || a.IterationsPct != 0.4 || a.TrustScore != 0.9 ||
+		a.BudgetBurnRatePerHour != 18.5 || a.LastHeartbeatTicks != 3 || a.Severity != "ok" {
+		t.Errorf("AgentVitals[0] = %+v, mismatch on at least one field", a)
+	}
+	b := cmd.AgentVitals[1]
+	if b.AgentID != "actor_bbb" || b.Severity != "warning" || b.IterationsPct != 0.85 {
+		t.Errorf("AgentVitals[1] = %+v, mismatch on at least one field", b)
+	}
+}
+
+func TestParseHealthCommand_WithoutAgentVitals_BackwardCompatible(t *testing.T) {
+	// Pre-Stage-3 /health command shape — no agent_vitals field.
+	// Parser must succeed and AgentVitals must be nil/empty, never error.
+	response := `/health {"severity":"ok","chain_ok":true,"active_agents":4,"event_rate":20.0}`
+	cmd := parseHealthCommand(response)
+	if cmd == nil {
+		t.Fatal("expected non-nil HealthCommand")
+	}
+	if len(cmd.AgentVitals) != 0 {
+		t.Errorf("AgentVitals = %+v, want empty when field omitted", cmd.AgentVitals)
+	}
+}
+
+func TestNormalizeAgentVitalSeverity_KnownValues(t *testing.T) {
+	for _, s := range []string{"ok", "warning", "critical"} {
+		if got := normalizeAgentVitalSeverity(s); got != s {
+			t.Errorf("normalizeAgentVitalSeverity(%q) = %q, want %q", s, got, s)
+		}
+	}
+}
+
+func TestNormalizeAgentVitalSeverity_Unknown(t *testing.T) {
+	for _, s := range []string{"OK", "Warning", "fatal", "", "info"} {
+		if got := normalizeAgentVitalSeverity(s); got != "warning" {
+			t.Errorf("normalizeAgentVitalSeverity(%q) = %q, want %q", s, got, "warning")
+		}
+	}
+}
+
 func TestEnrichHealthObservation_NonSysmon(t *testing.T) {
 	provider := newMockProvider("test")
 	agent := testHiveAgent(t, provider, "guardian", "test-guardian")
