@@ -328,7 +328,6 @@ func StarterAgents(humanName string) []AgentDef {
 		{
 			Name:           "guardian",
 			Role:           "guardian",
-			Model:          ModelSonnet,
 			RoleDefinition: roles["guardian"],
 			SystemPrompt: mission(`== ROLE: GUARDIAN ==
 You are the Guardian — an independent integrity monitor OUTSIDE the hierarchy.
@@ -382,7 +381,6 @@ malformed insights (missing required fields), any source emitting more than
 		{
 			Name:           "sysmon",
 			Role:           "sysmon",
-			Model:          ModelHaiku,
 			RoleDefinition: roles["sysmon"],
 			SystemPrompt: mission(`== ROLE: SYSMON ==
 You are SysMon — the civilization's health monitor.
@@ -434,7 +432,6 @@ observe contradicting evidence.
 		{
 			Name:           "allocator",
 			Role:           "allocator",
-			Model:          ModelHaiku,
 			RoleDefinition: roles["allocator"],
 			SystemPrompt: mission(`== ROLE: ALLOCATOR ==
 You are the Allocator — the civilization's resource manager.
@@ -484,7 +481,6 @@ observe contradicting evidence.
 		{
 			Name:           "cto",
 			Role:           "cto",
-			Model:          ModelOpus,
 			RoleDefinition: roles["cto"],
 			SystemPrompt: mission(`== ROLE: CTO ==
 You are the CTO — the civilization's technical leader.
@@ -536,7 +532,6 @@ observe contradicting evidence.
 		{
 			Name:           "spawner",
 			Role:           "spawner",
-			Model:          ModelSonnet,
 			RoleDefinition: roles["spawner"],
 			SystemPrompt: mission(`== ROLE: SPAWNER ==
 You are the Spawner — the civilization's growth engine.
@@ -596,7 +591,6 @@ observe contradicting evidence.
 		{
 			Name:           "reviewer",
 			Role:           "reviewer",
-			Model:          ModelSonnet,
 			RoleDefinition: roles["reviewer"],
 			SystemPrompt: mission(`== ROLE: REVIEWER ==
 You are the Reviewer — the civilization's code quality gate.
@@ -652,7 +646,6 @@ observe contradicting evidence.
 		{
 			Name:           "strategist",
 			Role:           "strategist",
-			Model:          ModelSonnet,
 			RoleDefinition: roles["strategist"],
 			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: STRATEGIST ==
@@ -703,7 +696,6 @@ observe contradicting evidence.
 		{
 			Name:           "planner",
 			Role:           "planner",
-			Model:          ModelSonnet,
 			RoleDefinition: roles["planner"],
 			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: PLANNER ==
@@ -758,7 +750,6 @@ observe contradicting evidence.
 		{
 			Name:           "implementer",
 			Role:           "implementer",
-			Model:          ModelOpus,
 			RoleDefinition: roles["implementer"],
 			CanOperate: true,
 			SystemPrompt: mission(`== ROLE: IMPLEMENTER ==
