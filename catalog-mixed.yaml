@@ -1,7 +1,9 @@
-# Mixed provider catalog: Claude + Codex + Ollama (gemma4)
+# Mixed provider catalog: Claude + Codex + Ollama + OpenRouter
 # Usage: go run ./cmd/hive civilization run --human Matt --catalog catalog-mixed.yaml --idea "..."
+# Env vars: OPENROUTER_API_KEY for OpenRouter models
 
 models:
+  # ── Ollama (local) ──
   - id: ollama-gemma4
     aliases: [gemma4]
     provider: ollama
@@ -15,6 +17,7 @@ models:
       input_per_million: 0
       output_per_million: 0
 
+  # ── Codex (subscription) ──
   - id: codex-o3
     aliases: [o3]
     provider: codex-cli
@@ -27,13 +30,38 @@ models:
       input_per_million: 2.00
       output_per_million: 8.00
 
+  # ── OpenRouter (API key) ──
+  - id: moonshotai/kimi-k2.6
+    aliases: [kimi-k2.6, kimi]
+    provider: openrouter
+    auth_mode: api-key
+    tier: execution
+    capabilities: [tools, reasoning, coding, large-context]
+    context_window: 256000
+    max_output_tokens: 16384
+    pricing:
+      input_per_million: 0.7448
+      output_per_million: 4.655
+
+  - id: deepseek/deepseek-v4-pro
+    aliases: [deepseek-v4-pro, deepseek]
+    provider: openrouter
+    auth_mode: api-key
+    tier: execution
+    capabilities: [tools, reasoning, coding, large-context]
+    context_window: 1048576
+    max_output_tokens: 16384
+    pricing:
+      input_per_million: 0.435
+      output_per_million: 0.87
+
 role_defaults:
   guardian: gemma4
   sysmon: gemma4
   allocator: gemma4
   spawner: gemma4
   cto: o3
-  reviewer: o3
-  strategist: sonnet      # Claude (built-in)
-  planner: sonnet         # Claude (built-in)
-  implementer: opus       # Claude (forced claude-cli by CanOperate)
+  reviewer: kimi-k2.6          # OpenRouter
+  strategist: deepseek-v4-pro  # OpenRouter
+  planner: sonnet              # Claude (built-in)
+  implementer: opus            # Claude (forced claude-cli by CanOperate)
