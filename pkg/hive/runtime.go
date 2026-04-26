@@ -84,6 +84,8 @@ type Runtime struct {
 	approveRoles    bool
 	repoPath        string
 	loop            bool
+	catalogPath     string
+	costSummary     string // pre-formatted model cost table for allocator
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -95,6 +97,7 @@ type Config struct {
 	ApproveRoles    bool   // --approve-roles: auto-approve role proposals
 	RepoPath        string // --repo: path to repo for Operate
 	Loop            bool   // --loop: agents block on bus instead of quiescing
+	CatalogPath     string // --catalog: custom YAML catalog file (merged with defaults)
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -150,6 +153,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		approveRoles:    cfg.ApproveRoles,
 		repoPath:        cfg.RepoPath,
 		loop:            cfg.Loop,
+		catalogPath:     cfg.CatalogPath,
 		telemetryWriter: cfg.TelemetryWriter,
 	}, nil
 }
@@ -213,7 +217,25 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	r.dynamic = newDynamicAgentTracker()
 
 	// Initialize model resolver for agent spawning.
-	r.resolver = modelconfig.DefaultResolver()
+	if r.catalogPath != "" {
+		var err error
+		r.resolver, err = modelconfig.ResolverFromCatalogFile(r.catalogPath)
+		if err != nil {
+			return fmt.Errorf("custom catalog: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Model catalog: %s (merged with defaults)\n", r.catalogPath)
+	} else {
+		r.resolver = modelconfig.DefaultResolver()
+	}
+
+	// Pre-compute model cost summary for the allocator's observation.
+	var agentRoles []string
+	for _, def := range r.defs {
+		agentRoles = append(agentRoles, def.Role)
+	}
+	// Estimate using 10k input + 2k output tokens (typical per-call).
+	costSummaries := modelconfig.EstimateAgentCosts(r.resolver, agentRoles, 10_000, 2_000)
+	r.costSummary = modelconfig.FormatCostSummary(costSummaries)
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
@@ -376,6 +398,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			RepoPath:       r.repoPath,
 			Keepalive:      r.loop,
 			KnowledgeStore: r.knowledgeStore,
+			CostSummary:    r.costSummary,
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)
 				if err != nil {
@@ -461,7 +484,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	input := modelconfig.ResolutionInput{
 		Role:          def.Role,
 		AgentDefModel: def.Model,
-		Policy:        def.ModelPolicy,
+		Policy:        def.EffectiveModelPolicy(),
 		CanOperate:    def.CanOperate,
 	}
 	resolved, err := r.resolver.Resolve(input)
@@ -497,6 +520,22 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		Model:   resolved.Model,
 		ActorID: agent.ID().Value(),
 	})
+
+	// Emit role definition as a first-class event (queryable, versionable).
+	if def.RoleDefinition != nil {
+		origin := "bootstrap"
+		if def.Tier == "" {
+			origin = "spawned" // dynamic agents have no explicit tier set
+		}
+		r.emit(EventTypeRoleDefinition, RoleDefinitionContent{
+			Name:        def.RoleDefinition.Name,
+			Description: def.RoleDefinition.Description,
+			Category:    def.RoleDefinition.Category,
+			Tier:        def.RoleDefinition.Tier,
+			CanOperate:  def.RoleDefinition.CanOperate,
+			Origin:      origin,
+		})
+	}
 
 	return agent, nil
 }

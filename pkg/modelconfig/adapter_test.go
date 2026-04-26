@@ -34,6 +34,35 @@ func TestToIntelligenceConfig(t *testing.T) {
 	assert.Equal(t, "You are a test agent.", ic.SystemPrompt)
 }
 
+func TestToIntelligenceConfig_ProviderOptions(t *testing.T) {
+	rc := ResolvedConfig{
+		Model:    "test-opus",
+		Provider: "claude-cli",
+		ProviderOptions: map[string]string{
+			OptMCPConfigPath: "/path/to/mcp.json",
+			OptSessionID:     "session-abc-123",
+		},
+	}
+
+	ic := ToIntelligenceConfig(rc, "prompt")
+
+	assert.Equal(t, "/path/to/mcp.json", ic.MCPConfigPath)
+	assert.Equal(t, "session-abc-123", ic.SessionID)
+}
+
+func TestToIntelligenceConfig_NilProviderOptions(t *testing.T) {
+	rc := ResolvedConfig{
+		Model:    "test-sonnet",
+		Provider: "claude-cli",
+		// ProviderOptions is nil
+	}
+
+	ic := ToIntelligenceConfig(rc, "")
+
+	assert.Empty(t, ic.MCPConfigPath)
+	assert.Empty(t, ic.SessionID)
+}
+
 func TestToIntelligenceConfig_ZeroValues(t *testing.T) {
 	rc := ResolvedConfig{
 		Model:    "test-sonnet",

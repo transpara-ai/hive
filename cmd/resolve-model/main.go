@@ -16,6 +16,7 @@ func main() {
 	model := flag.String("model", "", "Model ID or alias override")
 	provider := flag.String("provider", "", "Provider override")
 	profile := flag.String("profile", "", "Named profile to apply")
+	catalog := flag.String("catalog", "", "Custom YAML catalog file (merged with defaults)")
 	canOperate := flag.Bool("can-operate", false, "Force claude-cli provider")
 	estimateCost := flag.Bool("estimate-cost", false, "Compute and print cost estimate")
 	inputTokens := flag.Int("input-tokens", 0, "Input tokens for cost estimate")
@@ -42,7 +43,17 @@ func main() {
 		}
 	}
 
-	resolver := modelconfig.DefaultResolver()
+	var resolver *modelconfig.Resolver
+	if *catalog != "" {
+		var err error
+		resolver, err = modelconfig.ResolverFromCatalogFile(*catalog)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		resolver = modelconfig.DefaultResolver()
+	}
 	resolved, err := resolver.Resolve(input)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

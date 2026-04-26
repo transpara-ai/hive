@@ -65,6 +65,8 @@ type AgentDef struct {
 }
 
 // Validate checks that the AgentDef has all required fields.
+// Model is optional when the resolver can derive it from role defaults,
+// ModelPolicy, or RoleDefinition.ModelPolicy.
 func (d AgentDef) Validate() error {
 	if d.Name == "" {
 		return fmt.Errorf("agentdef: Name is required")
@@ -72,11 +74,20 @@ func (d AgentDef) Validate() error {
 	if d.Role == "" {
 		return fmt.Errorf("agentdef: Role is required")
 	}
-	if d.Model == "" {
-		return fmt.Errorf("agentdef: Model is required")
-	}
 	if d.SystemPrompt == "" {
 		return fmt.Errorf("agentdef: SystemPrompt is required")
+	}
+	return nil
+}
+
+// EffectiveModelPolicy returns the model policy to use for resolution.
+// Prefers AgentDef.ModelPolicy; falls back to RoleDefinition.ModelPolicy.
+func (d AgentDef) EffectiveModelPolicy() *modelconfig.RoleModelPolicy {
+	if d.ModelPolicy != nil {
+		return d.ModelPolicy
+	}
+	if d.RoleDefinition != nil {
+		return d.RoleDefinition.ModelPolicy
 	}
 	return nil
 }
@@ -161,6 +172,148 @@ Right:  /task complete {"task_id": "019d6a45-4359-746b-98cb-191007acc33f", "summ
 Always emit a /signal as the very last line of your response.
 `
 
+// StarterRoleDefinitions returns the role templates for all bootstrap agents.
+// These define what each role does, its governance, and model requirements.
+func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
+	return map[string]*modelconfig.RoleDefinition{
+		"guardian": {
+			Name:        "guardian",
+			Description: "Independent integrity monitor outside the hierarchy. Detects soul violations, authority overreach, and policy breaches.",
+			Category:    "process",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:    modelconfig.TierExecution,
+				AllowDowngrade:   true,
+				SelectionStrategy: "balanced",
+			},
+			MaxIterations:  500,
+			ReportsTo:      "human",
+			EscalationPath: "human",
+		},
+		"sysmon": {
+			Name:        "sysmon",
+			Description: "Health monitor emitting structured reports on operational status.",
+			Category:    "process",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:    modelconfig.TierVolume,
+				AllowDowngrade:   true,
+				SelectionStrategy: "lowest_cost",
+			},
+			MaxIterations:  150,
+			ReportsTo:      "guardian",
+			EscalationPath: "guardian",
+		},
+		"allocator": {
+			Name:        "allocator",
+			Description: "Resource manager redistributing token budgets across agents.",
+			Category:    "process",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:    modelconfig.TierVolume,
+				AllowDowngrade:   true,
+				SelectionStrategy: "lowest_cost",
+			},
+			MaxIterations:  150,
+			ReportsTo:      "guardian",
+			EscalationPath: "guardian",
+		},
+		"cto": {
+			Name:        "cto",
+			Description: "Technical leader making architecture decisions and identifying structural gaps in the role taxonomy.",
+			Category:    "leadership",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:        modelconfig.TierJudgment,
+				RequiredCapabilities: []modelconfig.Capability{modelconfig.CapReasoning},
+				SelectionStrategy:    "highest_capability",
+			},
+			MaxIterations:  50,
+			ReportsTo:      "human",
+			EscalationPath: "human",
+		},
+		"spawner": {
+			Name:        "spawner",
+			Description: "Growth engine designing new roles when structural gaps are detected.",
+			Category:    "staffing",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:    modelconfig.TierExecution,
+				SelectionStrategy: "balanced",
+			},
+			MaxIterations:  100,
+			ReportsTo:      "cto",
+			EscalationPath: "guardian",
+		},
+		"reviewer": {
+			Name:        "reviewer",
+			Description: "Code quality gate reviewing implementer output for correctness and patterns.",
+			Category:    "technical",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:        modelconfig.TierExecution,
+				RequiredCapabilities: []modelconfig.Capability{modelconfig.CapCoding},
+				SelectionStrategy:    "balanced",
+			},
+			MaxIterations:  100,
+			ReportsTo:      "cto",
+			EscalationPath: "cto",
+		},
+		"strategist": {
+			Name:        "strategist",
+			Description: "Big-picture thinker decomposing seed ideas into high-level tasks.",
+			Category:    "leadership",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:        modelconfig.TierExecution,
+				RequiredCapabilities: []modelconfig.Capability{modelconfig.CapReasoning},
+				SelectionStrategy:    "balanced",
+			},
+			MaxIterations:  300,
+			ReportsTo:      "cto",
+			EscalationPath: "human",
+		},
+		"planner": {
+			Name:        "planner",
+			Description: "Decomposes high-level tasks into implementable subtasks with dependencies.",
+			Category:    "technical",
+			Tier:        TierA,
+			CanOperate:  false,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:        modelconfig.TierExecution,
+				RequiredCapabilities: []modelconfig.Capability{modelconfig.CapReasoning},
+				SelectionStrategy:    "balanced",
+			},
+			MaxIterations:  300,
+			ReportsTo:      "strategist",
+			EscalationPath: "cto",
+		},
+		"implementer": {
+			Name:        "implementer",
+			Description: "Writes code, runs tests, completes tasks via full filesystem access.",
+			Category:    "technical",
+			Tier:        TierA,
+			CanOperate:  true,
+			ModelPolicy: &modelconfig.RoleModelPolicy{
+				PreferredTier:        modelconfig.TierJudgment,
+				RequiredCapabilities: []modelconfig.Capability{modelconfig.CapCoding, modelconfig.CapOperate},
+				SelectionStrategy:    "highest_capability",
+			},
+			MaxIterations:  500,
+			MaxDuration:    4 * time.Hour,
+			ReportsTo:      "strategist",
+			EscalationPath: "cto",
+		},
+	}
+}
+
 // StarterAgents returns the starter agent definitions for a hive run.
 // Boot order matters: guardian first (integrity), sysmon second (health
 // monitoring), allocator third (budget management), then the work agents.
@@ -169,11 +322,14 @@ func StarterAgents(humanName string) []AgentDef {
 		return fmt.Sprintf(missionTemplate, humanName, humanName) + rolePrompt
 	}
 
+	roles := StarterRoleDefinitions()
+
 	return []AgentDef{
 		{
-			Name:  "guardian",
-			Role:  "guardian",
-			Model: ModelSonnet,
+			Name:           "guardian",
+			Role:           "guardian",
+			Model:          ModelSonnet,
+			RoleDefinition: roles["guardian"],
 			SystemPrompt: mission(`== ROLE: GUARDIAN ==
 You are the Guardian — an independent integrity monitor OUTSIDE the hierarchy.
 
@@ -224,9 +380,10 @@ malformed insights (missing required fields), any source emitting more than
 			MaxIterations: 500,       // Guardian runs for the full session
 		},
 		{
-			Name:  "sysmon",
-			Role:  "sysmon",
-			Model: ModelHaiku,
+			Name:           "sysmon",
+			Role:           "sysmon",
+			Model:          ModelHaiku,
+			RoleDefinition: roles["sysmon"],
 			SystemPrompt: mission(`== ROLE: SYSMON ==
 You are SysMon — the civilization's health monitor.
 
@@ -275,9 +432,10 @@ observe contradicting evidence.
 			MaxIterations: 150,
 		},
 		{
-			Name:  "allocator",
-			Role:  "allocator",
-			Model: ModelHaiku,
+			Name:           "allocator",
+			Role:           "allocator",
+			Model:          ModelHaiku,
+			RoleDefinition: roles["allocator"],
 			SystemPrompt: mission(`== ROLE: ALLOCATOR ==
 You are the Allocator — the civilization's resource manager.
 
@@ -324,9 +482,10 @@ observe contradicting evidence.
 			MaxIterations: 150,
 		},
 		{
-			Name:  "cto",
-			Role:  "cto",
-			Model: ModelOpus,
+			Name:           "cto",
+			Role:           "cto",
+			Model:          ModelOpus,
+			RoleDefinition: roles["cto"],
 			SystemPrompt: mission(`== ROLE: CTO ==
 You are the CTO — the civilization's technical leader.
 
@@ -375,9 +534,10 @@ observe contradicting evidence.
 			MaxIterations: 50,
 		},
 		{
-			Name:  "spawner",
-			Role:  "spawner",
-			Model: ModelSonnet,
+			Name:           "spawner",
+			Role:           "spawner",
+			Model:          ModelSonnet,
+			RoleDefinition: roles["spawner"],
 			SystemPrompt: mission(`== ROLE: SPAWNER ==
 You are the Spawner — the civilization's growth engine.
 
@@ -434,9 +594,10 @@ observe contradicting evidence.
 			MaxIterations: 100,
 		},
 		{
-			Name:  "reviewer",
-			Role:  "reviewer",
-			Model: ModelSonnet,
+			Name:           "reviewer",
+			Role:           "reviewer",
+			Model:          ModelSonnet,
+			RoleDefinition: roles["reviewer"],
 			SystemPrompt: mission(`== ROLE: REVIEWER ==
 You are the Reviewer — the civilization's code quality gate.
 
@@ -489,9 +650,10 @@ observe contradicting evidence.
 			MaxIterations: 100,
 		},
 		{
-			Name:          "strategist",
-			Role:          "strategist",
-			Model:         ModelSonnet,
+			Name:           "strategist",
+			Role:           "strategist",
+			Model:          ModelSonnet,
+			RoleDefinition: roles["strategist"],
 			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: STRATEGIST ==
 You are the Strategist — you own the big picture and create high-level work.
@@ -539,9 +701,10 @@ observe contradicting evidence.
 			WatchPatterns: []string{"work.task.completed", "hive.*"},
 		},
 		{
-			Name:          "planner",
-			Role:          "planner",
-			Model:         ModelSonnet,
+			Name:           "planner",
+			Role:           "planner",
+			Model:          ModelSonnet,
+			RoleDefinition: roles["planner"],
 			MaxIterations: 300,
 			SystemPrompt: mission(`== ROLE: PLANNER ==
 You are the Planner — you decompose high-level tasks into implementable subtasks.
@@ -593,9 +756,10 @@ observe contradicting evidence.
 			WatchPatterns: []string{"work.task.created"},
 		},
 		{
-			Name:       "implementer",
-			Role:       "implementer",
-			Model:      ModelOpus,
+			Name:           "implementer",
+			Role:           "implementer",
+			Model:          ModelOpus,
+			RoleDefinition: roles["implementer"],
 			CanOperate: true,
 			SystemPrompt: mission(`== ROLE: IMPLEMENTER ==
 You are the Implementer — you write code, run tests, and get things done.

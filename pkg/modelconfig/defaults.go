@@ -3,6 +3,7 @@ package modelconfig
 import (
 	_ "embed"
 	"fmt"
+	"maps"
 	"os"
 	"sync"
 
@@ -111,4 +112,90 @@ func DefaultResolver() *Resolver {
 		defaultResolver = NewResolver(catalog, defaultProfiles, defaultDefaults)
 	})
 	return defaultResolver
+}
+
+// ResolverFromCatalogFile builds a Resolver by parsing catalogPath and merging
+// its entries on top of the embedded defaults. User entries with the same model
+// ID replace embedded ones; new IDs are appended. role_defaults, tier_defaults,
+// and profiles merge per-key (user wins on conflict).
+func ResolverFromCatalogFile(catalogPath string) (*Resolver, error) {
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, fmt.Errorf("read catalog file: %w", err)
+	}
+
+	userCatalog, userProfiles, userDefaults, err := ParseCatalogYAML(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse catalog file: %w", err)
+	}
+
+	// Start from embedded defaults.
+	baseCatalog := DefaultCatalog()
+
+	merged, err := MergeCatalogs(baseCatalog, userCatalog)
+	if err != nil {
+		return nil, fmt.Errorf("merge catalogs: %w", err)
+	}
+
+	// Merge profiles: base first, user overrides per-key.
+	profiles := make(map[string]ModelProfile, len(defaultProfiles)+len(userProfiles))
+	maps.Copy(profiles, defaultProfiles)
+	maps.Copy(profiles, userProfiles)
+
+	// Merge defaults: start from embedded, layer user on top.
+	defaults := defaultDefaults
+	if userDefaults.Provider != defaultDefaults.Provider {
+		defaults.Provider = userDefaults.Provider
+	}
+	if userDefaults.Model != defaultDefaults.Model {
+		defaults.Model = userDefaults.Model
+	}
+	for tier, model := range userDefaults.TierModels {
+		if defaults.TierModels == nil {
+			defaults.TierModels = make(map[ModelTier]string)
+		}
+		defaults.TierModels[tier] = model
+	}
+	for role, model := range userDefaults.RoleModels {
+		if defaults.RoleModels == nil {
+			defaults.RoleModels = make(map[string]string)
+		}
+		defaults.RoleModels[role] = model
+	}
+
+	return NewResolver(merged, profiles, defaults), nil
+}
+
+// MergeCatalogs merges user catalog entries on top of base. Entries with the
+// same ID replace the base entry; new IDs are appended. Returns an error if
+// the merged result has duplicate aliases.
+func MergeCatalogs(base, user *ModelCatalog) (*ModelCatalog, error) {
+	// Index base entries by ID for replacement lookup.
+	merged := make([]ModelCatalogEntry, 0, len(base.entries)+len(user.entries))
+	replaced := make(map[string]bool, len(user.entries))
+
+	// Collect user entry IDs for fast lookup.
+	userByID := make(map[string]ModelCatalogEntry, len(user.entries))
+	for _, e := range user.entries {
+		userByID[e.ID] = e
+	}
+
+	// Walk base: keep or replace.
+	for _, e := range base.entries {
+		if replacement, ok := userByID[e.ID]; ok {
+			merged = append(merged, replacement)
+			replaced[e.ID] = true
+		} else {
+			merged = append(merged, e)
+		}
+	}
+
+	// Append user entries that are entirely new.
+	for _, e := range user.entries {
+		if !replaced[e.ID] {
+			merged = append(merged, e)
+		}
+	}
+
+	return NewCatalog(merged)
 }

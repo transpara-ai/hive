@@ -15,6 +15,13 @@ type ResolvedConfig struct {
 	MaxBudgetUSD float64           `json:"max_budget_usd,omitempty"`
 	Entry        ModelCatalogEntry `json:"entry"`
 	Trace        []string          `json:"trace"`
+
+	// ProviderOptions carries provider-specific configuration that the
+	// generic resolver doesn't interpret. The adapter passes these through
+	// to intelligence.Config fields. Known keys:
+	//   "mcp_config_path" → Config.MCPConfigPath
+	//   "session_id"      → Config.SessionID
+	ProviderOptions map[string]string `json:"provider_options,omitempty"`
 }
 
 // ResolutionInput collects all the sources the resolver considers.

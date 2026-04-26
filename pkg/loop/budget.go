@@ -267,6 +267,11 @@ func (l *Loop) enrichBudgetObservation(obs string, iteration int) string {
 		}
 	}
 
+	// Model cost data (pre-computed from the catalog at boot time).
+	if l.config.CostSummary != "" {
+		sb.WriteString(l.config.CostSummary)
+	}
+
 	sb.WriteString("===\n")
 	return obs + sb.String()
 }

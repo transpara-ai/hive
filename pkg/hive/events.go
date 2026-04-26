@@ -9,18 +9,19 @@ import (
 
 // Hive event types — runtime lifecycle and agent coordination.
 var (
-	EventTypeRunStarted    = types.MustEventType("hive.run.started")
-	EventTypeRunCompleted  = types.MustEventType("hive.run.completed")
-	EventTypeAgentSpawned  = types.MustEventType("hive.agent.spawned")
-	EventTypeAgentStopped  = types.MustEventType("hive.agent.stopped")
-	EventTypeProgress      = types.MustEventType("hive.progress")
+	EventTypeRunStarted      = types.MustEventType("hive.run.started")
+	EventTypeRunCompleted    = types.MustEventType("hive.run.completed")
+	EventTypeAgentSpawned    = types.MustEventType("hive.agent.spawned")
+	EventTypeAgentStopped    = types.MustEventType("hive.agent.stopped")
+	EventTypeProgress        = types.MustEventType("hive.progress")
+	EventTypeRoleDefinition  = types.MustEventType("hive.role.definition")
 )
 
 func allHiveEventTypes() []types.EventType {
 	return []types.EventType{
 		EventTypeRunStarted, EventTypeRunCompleted,
 		EventTypeAgentSpawned, EventTypeAgentStopped,
-		EventTypeProgress,
+		EventTypeProgress, EventTypeRoleDefinition,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
@@ -85,6 +86,21 @@ type ProgressContent struct {
 
 func (c ProgressContent) EventTypeName() string { return "hive.progress" }
 
+// RoleDefinitionContent stores a full RoleDefinition as a first-class event
+// on the chain. Emitted at bootstrap for static agents and after approval for
+// dynamic agents. Makes role templates queryable and versionable.
+type RoleDefinitionContent struct {
+	hiveContent
+	Name        string `json:"Name"`
+	Description string `json:"Description"`
+	Category    string `json:"Category"`
+	Tier        string `json:"Tier"`
+	CanOperate  bool   `json:"CanOperate"`
+	Origin      string `json:"Origin"` // "bootstrap" or "spawned"
+}
+
+func (c RoleDefinitionContent) EventTypeName() string { return "hive.role.definition" }
+
 // RegisterEventTypes registers hive content unmarshalers for Postgres
 // deserialization. Call before querying hive events from the store.
 func RegisterEventTypes() {
@@ -93,6 +109,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.agent.spawned", event.Unmarshal[AgentSpawnedContent])
 	event.RegisterContentUnmarshaler("hive.agent.stopped", event.Unmarshal[AgentStoppedContent])
 	event.RegisterContentUnmarshaler("hive.progress", event.Unmarshal[ProgressContent])
+	event.RegisterContentUnmarshaler("hive.role.definition", event.Unmarshal[RoleDefinitionContent])
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }
 

@@ -1039,7 +1039,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath string, loop bool, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, catalogPath string, loop bool, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1126,6 +1126,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		ApproveRequests: approveRequests,
 		ApproveRoles:    approveRoles,
 		RepoPath:        repoPath,
+		CatalogPath:     catalogPath,
 		Loop:            loop,
 		TelemetryWriter: tw,
 	})
