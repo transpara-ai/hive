@@ -75,6 +75,7 @@ func (r *Resolver) Defaults() ResolverDefaults {
 func (r *Resolver) Resolve(input ResolutionInput) (ResolvedConfig, error) {
 	var rc ResolvedConfig
 	var modelName string
+	modelOverridden := false // tracks whether a prior layer set an explicit model
 
 	// Layer 1: System defaults
 	rc.Provider = r.defaults.Provider
@@ -85,23 +86,25 @@ func (r *Resolver) Resolve(input ResolutionInput) (ResolvedConfig, error) {
 	// Layer 2: Role defaults
 	if alias, ok := r.defaults.RoleModels[input.Role]; ok {
 		modelName = alias
+		modelOverridden = true
 		rc.Trace = append(rc.Trace, fmt.Sprintf("model: role default (%s→%s)", input.Role, alias))
 	}
 
 	// Layer 3: AgentDef.Model (legacy)
 	if input.AgentDefModel != "" {
 		modelName = input.AgentDefModel
+		modelOverridden = true
 		rc.Trace = append(rc.Trace, fmt.Sprintf("model: AgentDef.Model → %s", modelName))
 	}
 
 	// Layer 4+5: Policy (profile, then explicit fields)
 	if input.Policy != nil {
-		r.applyPolicy(&rc, &modelName, input.Policy, "policy")
+		r.applyPolicy(&rc, &modelName, &modelOverridden, input.Policy, "policy")
 	}
 
 	// Layer 6: Task override
 	if input.TaskOverride != nil {
-		r.applyPolicy(&rc, &modelName, input.TaskOverride, "task-override")
+		r.applyPolicy(&rc, &modelName, &modelOverridden, input.TaskOverride, "task-override")
 	}
 
 	// Resolve model name to catalog entry
@@ -165,12 +168,15 @@ func (r *Resolver) Resolve(input ResolutionInput) (ResolvedConfig, error) {
 }
 
 // applyPolicy merges a RoleModelPolicy into the in-progress resolution.
-func (r *Resolver) applyPolicy(rc *ResolvedConfig, modelName *string, policy *RoleModelPolicy, source string) {
+// modelOverridden tracks whether a prior layer (role default, AgentDef.Model)
+// already set an explicit model — PreferredTier won't override those.
+func (r *Resolver) applyPolicy(rc *ResolvedConfig, modelName *string, modelOverridden *bool, policy *RoleModelPolicy, source string) {
 	// Profile expansion first (lower precedence than explicit fields)
 	if policy.Profile != "" {
 		if profile, ok := r.profiles[policy.Profile]; ok {
 			if profile.Model != "" {
 				*modelName = profile.Model
+				*modelOverridden = true
 				rc.Trace = append(rc.Trace, fmt.Sprintf("model: %s profile %q → %s", source, policy.Profile, profile.Model))
 			}
 			if profile.Provider != "" {
@@ -195,6 +201,7 @@ func (r *Resolver) applyPolicy(rc *ResolvedConfig, modelName *string, policy *Ro
 	// Explicit policy fields override profile
 	if policy.Model != "" {
 		*modelName = policy.Model
+		*modelOverridden = true
 		rc.Trace = append(rc.Trace, fmt.Sprintf("model: %s explicit → %s", source, policy.Model))
 	}
 	if policy.Provider != "" {
@@ -202,10 +209,13 @@ func (r *Resolver) applyPolicy(rc *ResolvedConfig, modelName *string, policy *Ro
 		rc.Trace = append(rc.Trace, fmt.Sprintf("provider: %s explicit → %s", source, policy.Provider))
 	}
 
-	// Tier-based resolution: if PreferredTier is set and no explicit model, resolve tier
-	if policy.PreferredTier != "" && policy.Model == "" && policy.Profile == "" {
+	// Tier-based resolution: fallback hint when no prior layer or policy field
+	// set an explicit model. PreferredTier is a preference, not an override —
+	// it shouldn't clobber a role default or custom catalog assignment.
+	if policy.PreferredTier != "" && policy.Model == "" && policy.Profile == "" && !*modelOverridden {
 		if tierModel, ok := r.defaults.TierModels[policy.PreferredTier]; ok {
 			*modelName = tierModel
+			*modelOverridden = true
 			rc.Trace = append(rc.Trace, fmt.Sprintf("model: %s tier %s → %s", source, policy.PreferredTier, tierModel))
 		}
 	}
