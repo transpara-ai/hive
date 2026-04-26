@@ -7,6 +7,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
+	"github.com/transpara-ai/hive/pkg/health"
 	"github.com/transpara-ai/hive/pkg/resources"
 )
 
@@ -249,9 +250,9 @@ func TestEmitHealthReport_WithAgentVitals(t *testing.T) {
 		ActiveAgents: 3,
 		EventRate:    12.0,
 		AgentVitals: []AgentVital{
-			{AgentID: "actor_aaa", IterationsPct: 0.4, TrustScore: 0.9, BudgetBurnRatePerHour: 18.5, LastHeartbeatTicks: 3, Severity: "ok"},
-			{AgentID: "actor_bbb", IterationsPct: 0.85, TrustScore: 0.7, BudgetBurnRatePerHour: 42.0, LastHeartbeatTicks: 17, Severity: "warning"},
-			{AgentID: "actor_ccc", IterationsPct: 0.2, TrustScore: 0.95, BudgetBurnRatePerHour: 9.0, LastHeartbeatTicks: 1, Severity: "ok"},
+			{AgentID: "actor_aaa", IterationsPct: 0.4, TrustScore: 0.9, BudgetBurnRatePerHour: 18.5, LastHeartbeatTicks: 3, Severity: health.SeverityOK},
+			{AgentID: "actor_bbb", IterationsPct: 0.85, TrustScore: 0.7, BudgetBurnRatePerHour: 42.0, LastHeartbeatTicks: 17, Severity: health.SeverityWarning},
+			{AgentID: "actor_ccc", IterationsPct: 0.2, TrustScore: 0.95, BudgetBurnRatePerHour: 9.0, LastHeartbeatTicks: 1, Severity: health.SeverityOK},
 		},
 	}
 	if err := l.emitHealthReport(cmd); err != nil {
@@ -328,16 +329,26 @@ func TestEmitHealthReport_NoAgentVitals(t *testing.T) {
 }
 
 func TestEmitHealthReport_RuntimeCanary(t *testing.T) {
-	// Runtime canary per design v0.1.8 §5.5 + A13. Over a sample window of
-	// N consecutive health.report events on the chain, at least one
-	// agent.vital.reported with the matching cycle_id MUST exist for at
-	// least M of them. This is the only defense against silent regression
-	// of SysMon's role prompt — the LLM behavioral contract has no
-	// compile-time signal.
+	// Runtime canary per design v0.1.8 §5.5 + A13.
+	//
+	// SCOPE — what this test actually verifies: across N synthesized health
+	// cycles, at least M produced at least one agent.vital.reported event
+	// with a distinct cycle_id. The assertion runs against the count of
+	// distinct HealthReportCycleID values on emitted agent.vital.reported
+	// events.
+	//
+	// SCOPE LIMIT — what this test does NOT verify: cross-event correlation
+	// between health.report and agent.vital.reported (i.e. that for each
+	// health.report there is a matching vital with the same cycle_id).
+	// HealthReportContent has no CycleID field today (eventgraph follow-up),
+	// so the umbrella event carries no cycle_id to match against. Until that
+	// lands the canary's signal is one-sided: if the SysMon role prompt
+	// regresses and the LLM stops emitting agent_vitals, the distinct-cycle
+	// count drops below M and this test fires.
 	//
 	// In a deterministic test we control the input: 8 of 10 cycles carry
-	// vitals; 2 do not (simulating cycles where the LLM legitimately
-	// reports no observable agents). The canary must pass with M=8.
+	// vitals; 2 do not (simulating cycles where the LLM legitimately reports
+	// no observable agents). The canary must pass with M=8.
 	const N = 10
 	const M = 8
 
@@ -357,8 +368,8 @@ func TestEmitHealthReport_RuntimeCanary(t *testing.T) {
 		cmd := &HealthCommand{Severity: "ok", ChainOK: true, ActiveAgents: 3, EventRate: 12.0}
 		if i < M {
 			cmd.AgentVitals = []AgentVital{
-				{AgentID: "actor_aaa", IterationsPct: 0.4, TrustScore: 0.9, Severity: "ok"},
-				{AgentID: "actor_bbb", IterationsPct: 0.5, TrustScore: 0.85, Severity: "ok"},
+				{AgentID: "actor_aaa", IterationsPct: 0.4, TrustScore: 0.9, Severity: health.SeverityOK},
+				{AgentID: "actor_bbb", IterationsPct: 0.5, TrustScore: 0.85, Severity: health.SeverityOK},
 			}
 		}
 		if err := l.emitHealthReport(cmd); err != nil {

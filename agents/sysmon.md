@@ -73,9 +73,17 @@ For each vital:
 
 If you genuinely cannot identify any agents this cycle (e.g., the chain is
 empty or every agent has been silent for so long that you have no evidence),
-emit `"agent_vitals":[]`. **Do not omit the field.** A missing
-`agent_vitals` is treated by the framework as a regression of this contract;
-a runtime canary test will fail loudly.
+emit `"agent_vitals":[]`. **Do not omit the field.** Two safeguards detect
+regression of this contract:
+
+1. The framework logs a loud `WARN: /health command omitted agent_vitals
+   key; SysMon role-prompt may have regressed` to stderr whenever the
+   `agent_vitals` JSON key is absent, so a regression is visible in logs
+   even if no test runs.
+2. The runtime canary `TestEmitHealthReport_RuntimeCanary` (design v0.1.8
+   §5.5) fails when the count of distinct cycle_ids on emitted
+   `agent.vital.reported` events drops below the threshold — catching a
+   sustained regression in CI.
 
 ### When to emit:
 
