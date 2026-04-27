@@ -840,7 +840,6 @@ func ModelForRole(role string) string {
 }
 
 // ProviderConfig returns an intelligence.Config for the given role.
-// HIVE_PROVIDER and HIVE_MODEL env vars are handled by the resolver defaults.
 func ProviderConfig(role string, budget float64) intelligence.Config {
 	resolver := modelconfig.DefaultResolver()
 	resolved, err := resolver.Resolve(modelconfig.ResolutionInput{Role: role})

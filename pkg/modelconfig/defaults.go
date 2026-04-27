@@ -68,14 +68,6 @@ func ParseCatalogYAML(data []byte) (*ModelCatalog, map[string]ModelProfile, Reso
 		RoleModels: f.RoleDefaults,
 	}
 
-	// Apply env var overrides to defaults.
-	if p := os.Getenv("HIVE_PROVIDER"); p != "" {
-		defaults.Provider = p
-	}
-	if m := os.Getenv("HIVE_MODEL"); m != "" {
-		defaults.Model = m
-	}
-
 	return catalog, profiles, defaults, nil
 }
 
