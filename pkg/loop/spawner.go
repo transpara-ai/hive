@@ -21,7 +21,7 @@ import (
 // The Spawner outputs this when it has designed a new role to propose.
 type SpawnCommand struct {
 	Name          string   `json:"name"`
-	Model         string   `json:"model"`         // "haiku", "sonnet", or "opus"
+	Model         string   `json:"model"`         // model alias or catalog ID
 	WatchPatterns []string `json:"watch_patterns"`
 	CanOperate    bool     `json:"can_operate"`
 	MaxIterations int      `json:"max_iterations"`
