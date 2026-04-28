@@ -523,9 +523,9 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 
 	// Emit role definition as a first-class event (queryable, versionable).
 	if def.RoleDefinition != nil {
-		origin := "bootstrap"
-		if def.Tier == "" {
-			origin = "spawned" // dynamic agents have no explicit tier set
+		origin := "spawned"
+		if def.RoleDefinition.Tier != "" {
+			origin = "bootstrap" // bootstrap agents always have RoleDefinition.Tier set
 		}
 		r.emit(EventTypeRoleDefinition, RoleDefinitionContent{
 			Name:        def.RoleDefinition.Name,
