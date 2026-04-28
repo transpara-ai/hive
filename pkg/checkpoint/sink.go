@@ -10,7 +10,16 @@ import (
 // The loop checks for nil before calling — a nil sink means no checkpointing.
 type CheckpointSink interface {
 	OnBoundary(trigger BoundaryTrigger, snap LoopSnapshot)
+	OnBoundaryWithContext(trigger BoundaryTrigger, snap LoopSnapshot, ctx BoundaryContext)
 	OnHeartbeat(snap LoopSnapshot)
+}
+
+// BoundaryContext carries resumable reasoning context for an Open Brain
+// checkpoint. Empty fields are valid for purely mechanical checkpoints.
+type BoundaryContext struct {
+	Intent  string
+	Next    string
+	Context string
 }
 
 // HeartbeatEmitter is a function that writes a heartbeat event to the chain.
@@ -46,7 +55,13 @@ func (d *DefaultSink) SetHeartbeatEmitter(emitHB HeartbeatEmitter) {
 // is visible on the graph (not just periodic heartbeats).
 // On failure it logs a warning to stderr — it never blocks or panics.
 func (d *DefaultSink) OnBoundary(trigger BoundaryTrigger, snap LoopSnapshot) {
-	thought := FormatCheckpoint(trigger, snap, "", "", "")
+	d.OnBoundaryWithContext(trigger, snap, BoundaryContext{})
+}
+
+// OnBoundaryWithContext formats a checkpoint thought with resumable reasoning
+// context and captures it in Open Brain.
+func (d *DefaultSink) OnBoundaryWithContext(trigger BoundaryTrigger, snap LoopSnapshot, ctx BoundaryContext) {
+	thought := FormatCheckpoint(trigger, snap, ctx.Intent, ctx.Next, ctx.Context)
 	if err := d.thoughts.Capture(thought); err != nil {
 		fmt.Fprintf(os.Stderr, "[checkpoint] warning: failed to capture boundary thought for %s: %v\n", d.role, err)
 	}
@@ -73,5 +88,6 @@ func (d *DefaultSink) OnHeartbeat(snap LoopSnapshot) {
 // NopSink is a no-op CheckpointSink used when checkpointing is disabled.
 type NopSink struct{}
 
-func (NopSink) OnBoundary(BoundaryTrigger, LoopSnapshot) {}
-func (NopSink) OnHeartbeat(LoopSnapshot)                 {}
+func (NopSink) OnBoundary(BoundaryTrigger, LoopSnapshot)                             {}
+func (NopSink) OnBoundaryWithContext(BoundaryTrigger, LoopSnapshot, BoundaryContext) {}
+func (NopSink) OnHeartbeat(LoopSnapshot)                                             {}

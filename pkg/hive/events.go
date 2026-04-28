@@ -9,11 +9,11 @@ import (
 
 // Hive event types — runtime lifecycle and agent coordination.
 var (
-	EventTypeRunStarted    = types.MustEventType("hive.run.started")
-	EventTypeRunCompleted  = types.MustEventType("hive.run.completed")
-	EventTypeAgentSpawned  = types.MustEventType("hive.agent.spawned")
-	EventTypeAgentStopped  = types.MustEventType("hive.agent.stopped")
-	EventTypeProgress      = types.MustEventType("hive.progress")
+	EventTypeRunStarted   = types.MustEventType("hive.run.started")
+	EventTypeRunCompleted = types.MustEventType("hive.run.completed")
+	EventTypeAgentSpawned = types.MustEventType("hive.agent.spawned")
+	EventTypeAgentStopped = types.MustEventType("hive.agent.stopped")
+	EventTypeProgress     = types.MustEventType("hive.progress")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -25,7 +25,7 @@ func allHiveEventTypes() []types.EventType {
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
 		EventTypeSiteRespond, EventTypeSiteExpress,
-		EventTypeSiteAssert, EventTypeSiteProgress,
+		EventTypeSiteAssert, EventTypeSiteProgress, EventTypeSiteDelete,
 	}
 }
 

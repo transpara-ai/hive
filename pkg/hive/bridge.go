@@ -118,6 +118,42 @@ func (r *Runtime) bridgeEmitMirrored(content event.SiteOpMirroredContent) error 
 	return r.bridgeAgent.EmitSiteOpMirrored(content)
 }
 
+func (r *Runtime) bridgeEmitRefineryIntakeReceived(content event.RefineryIntakeReceivedContent) error {
+	if r.bridgeAgent == nil {
+		return fmt.Errorf("bridge agent not initialised")
+	}
+	r.bridgeMu.Lock()
+	defer r.bridgeMu.Unlock()
+	return r.bridgeAgent.EmitRefineryIntakeReceived(content)
+}
+
+func (r *Runtime) bridgeEmitRefineryArtifactAttached(content event.RefineryArtifactAttachedContent) error {
+	if r.bridgeAgent == nil {
+		return fmt.Errorf("bridge agent not initialised")
+	}
+	r.bridgeMu.Lock()
+	defer r.bridgeMu.Unlock()
+	return r.bridgeAgent.EmitRefineryArtifactAttached(content)
+}
+
+func (r *Runtime) bridgeEmitRefineryIntakeClassified(content event.RefineryIntakeClassifiedContent) error {
+	if r.bridgeAgent == nil {
+		return fmt.Errorf("bridge agent not initialised")
+	}
+	r.bridgeMu.Lock()
+	defer r.bridgeMu.Unlock()
+	return r.bridgeAgent.EmitRefineryIntakeClassified(content)
+}
+
+func (r *Runtime) bridgeEmitRefineryStateTransitioned(content event.RefineryStateTransitionedContent) error {
+	if r.bridgeAgent == nil {
+		return fmt.Errorf("bridge agent not initialised")
+	}
+	r.bridgeMu.Lock()
+	defer r.bridgeMu.Unlock()
+	return r.bridgeAgent.EmitRefineryStateTransitioned(content)
+}
+
 // sha256HexPrefixed returns "sha256:" + hex(SHA-256(b)). Empty input is
 // still hashed (produces the well-known empty-input digest) so every
 // anchor has a non-empty payload_hash.

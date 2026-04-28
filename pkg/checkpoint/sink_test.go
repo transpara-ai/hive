@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,6 +32,40 @@ func TestDefaultSink_OnBoundary_CallsCapture(t *testing.T) {
 
 	if len(stub.Thoughts) != 1 {
 		t.Fatalf("expected 1 captured thought, got %d", len(stub.Thoughts))
+	}
+}
+
+func TestDefaultSink_OnBoundaryWithContext_CapturesReasoning(t *testing.T) {
+	stub := NewStubThoughtStore()
+	sink := NewDefaultSink(stub, nil, "implementer")
+
+	snap := LoopSnapshot{
+		Role:          "implementer",
+		Iteration:     8,
+		MaxIterations: 20,
+		Signal:        SignalActive,
+		CurrentTaskID: "task-42",
+		CurrentTask:   "wire OpenBrain checkpoint context",
+		TaskStatus:    "in-progress",
+	}
+	sink.OnBoundaryWithContext(TaskCompleted, snap, BoundaryContext{
+		Intent:  "Preserve the implementation rationale for restart recovery.",
+		Next:    "Run focused checkpoint tests.",
+		Context: "Operate summary included code and tests.",
+	})
+
+	if len(stub.Thoughts) != 1 {
+		t.Fatalf("expected 1 captured thought, got %d", len(stub.Thoughts))
+	}
+	got := stub.Thoughts[0].Content
+	for _, want := range []string{
+		"INTENT: Preserve the implementation rationale for restart recovery.",
+		"NEXT: Run focused checkpoint tests.",
+		"CONTEXT: Operate summary included code and tests.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("captured thought missing %q:\n%s", want, got)
+		}
 	}
 }
 

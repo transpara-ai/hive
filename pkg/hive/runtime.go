@@ -37,10 +37,10 @@ import (
 // Runtime is the hive runtime. It manages agents, the shared graph,
 // the event bus, and the task store.
 type Runtime struct {
-	store   store.Store
-	actors  actor.IActorStore
-	graph   *graph.Graph
-	humanID types.ActorID
+	store        store.Store
+	actors       actor.IActorStore
+	graph        *graph.Graph
+	humanID      types.ActorID
 	defs         []AgentDef
 	membraneDefs []membrane.MembraneConfig
 
@@ -80,17 +80,19 @@ type Runtime struct {
 	approveRoles    bool
 	repoPath        string
 	loop            bool
+	siteAPIBase     string
 }
 
 // Config holds the configuration needed to create a Runtime.
 type Config struct {
-	Store       store.Store
-	Actors      actor.IActorStore
-	HumanID     types.ActorID
+	Store           store.Store
+	Actors          actor.IActorStore
+	HumanID         types.ActorID
 	ApproveRequests bool   // --approve-requests: auto-approve authority requests
 	ApproveRoles    bool   // --approve-roles: auto-approve role proposals
 	RepoPath        string // --repo: path to repo for Operate
 	Loop            bool   // --loop: agents block on bus instead of quiescing
+	SiteAPIBase     string // lovyou.ai/site API base for automation callbacks
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -146,6 +148,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		approveRoles:    cfg.ApproveRoles,
 		repoPath:        cfg.RepoPath,
 		loop:            cfg.Loop,
+		siteAPIBase:     cfg.SiteAPIBase,
 		telemetryWriter: cfg.TelemetryWriter,
 	}, nil
 }
@@ -236,6 +239,30 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			_ = r.knowledgeStore.Supersede(c.OldInsightID, c.NewInsightID)
 		case event.KnowledgeExpirationContent:
 			_ = r.knowledgeStore.Expire(c.InsightID)
+		}
+	})
+
+	// Mirror EventGraph task decomposition back to Site so operators can see
+	// investigation progress before the parent task completes.
+	progressPattern := types.MustSubscriptionPattern("work.task.dependency.added")
+	r.graph.Bus().Subscribe(progressPattern, func(ev event.Event) {
+		c, ok := ev.Content().(work.TaskDependencyContent)
+		if !ok {
+			return
+		}
+		siteNodeID, _, err := r.findSiteNodeForTask(c.DependsOnID)
+		if err != nil || siteNodeID == "" {
+			return
+		}
+		task, ok, err := r.findTaskCreated(c.TaskID)
+		if err != nil || !ok {
+			return
+		}
+		summary := fmt.Sprintf("Hive decomposed this investigation and added child task `%s`: %s\n\n%s", c.TaskID.Value(), task.Title, task.Description)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.mirrorTaskProgress(ctx, siteNodeID, c.TaskID.Value(), ev.ID().Value(), work.EventTypeTaskDependencyAdded.Value(), summary); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: mirror task progress: %v\n", err)
 		}
 	})
 
@@ -381,6 +408,11 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			RecoveryState:     recoveryStates[def.Name],
 			Sink:              buildCheckpointSink(thoughtStore, def.Name),
 			HeartbeatInterval: heartbeatInterval,
+			OnTaskCompleted: func(task work.Task, summary string) {
+				if err := r.mirrorTaskCompletion(ctx, task, summary); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: mirror task completion: %v\n", err)
+				}
+			},
 
 			OnIteration: func(iteration int, response string) {
 				fmt.Fprintf(os.Stderr, "[%s] iteration %d (%d chars)\n",

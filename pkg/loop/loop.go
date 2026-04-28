@@ -36,13 +36,13 @@ import (
 type StopReason string
 
 const (
-	StopQuiescence  StopReason = "quiescence"
-	StopEscalation  StopReason = "escalation"
-	StopHalt        StopReason = "halt"
-	StopBudget      StopReason = "budget"
-	StopError       StopReason = "error"
-	StopCancelled   StopReason = "cancelled"
-	StopTaskDone    StopReason = "task_done"
+	StopQuiescence StopReason = "quiescence"
+	StopEscalation StopReason = "escalation"
+	StopHalt       StopReason = "halt"
+	StopBudget     StopReason = "budget"
+	StopError      StopReason = "error"
+	StopCancelled  StopReason = "cancelled"
+	StopTaskDone   StopReason = "task_done"
 )
 
 // Result is the outcome of a loop run.
@@ -138,6 +138,9 @@ type Config struct {
 	// HeartbeatInterval is iterations between heartbeat emissions when no
 	// boundary trigger has fired. Default 10.
 	HeartbeatInterval int
+
+	// OnTaskCompleted is called after TaskStore.Complete succeeds. Optional.
+	OnTaskCompleted func(task work.Task, summary string)
 }
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
@@ -347,10 +350,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 
 			// Auto-complete the task after successful Operate.
 			l.completeTask(task, result.Summary)
-			if l.sink != nil {
-				l.sink.OnBoundary(checkpoint.TaskCompleted, l.currentSnapshot())
-				l.lastCheckpointIter = l.iteration
-			}
+			l.checkpointBoundary(checkpoint.TaskCompleted, response)
 		} else {
 			// Reason path: standard observe-reason loop.
 			prompt := l.buildPrompt(observation, iteration)
@@ -392,10 +392,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			} else if err := l.applyBudgetAdjustment(cmd, iteration); err != nil {
 				fmt.Printf("[%s] /budget failed: %v\n", l.agent.Name(), err)
 			} else {
-				if l.sink != nil {
-					l.sink.OnBoundary(checkpoint.BudgetAdjusted, l.currentSnapshot())
-					l.lastCheckpointIter = l.iteration
-				}
+				l.checkpointBoundary(checkpoint.BudgetAdjusted, response)
 			}
 		}
 
@@ -405,20 +402,14 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if err := l.validateAndEmitGap(cmd, iteration); err != nil {
 					fmt.Printf("warning: /gap rejected: %v\n", err)
 				} else {
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.GapEmitted, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
+					l.checkpointBoundary(checkpoint.GapEmitted, response)
 				}
 			}
 			if cmd := parseDirectiveCommand(response); cmd != nil {
 				if err := l.validateAndEmitDirective(cmd, iteration); err != nil {
 					fmt.Printf("warning: /directive rejected: %v\n", err)
 				} else {
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.DirectiveEmitted, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
+					l.checkpointBoundary(checkpoint.DirectiveEmitted, response)
 				}
 			}
 		}
@@ -432,10 +423,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 				} else if err := l.emitRoleProposed(cmd); err != nil {
 					fmt.Printf("[%s] /spawn emit failed: %v\n", l.agent.Name(), err)
 				} else {
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.RoleProposed, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
+					l.checkpointBoundary(checkpoint.RoleProposed, response)
 				}
 			}
 		}
@@ -457,10 +445,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 						// update() path never sees our own reviews.
 						l.reviewerState.recordReview(
 							cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
-						if l.sink != nil {
-							l.sink.OnBoundary(checkpoint.ReviewCompleted, l.currentSnapshot())
-							l.lastCheckpointIter = l.iteration
-						}
+						l.checkpointBoundary(checkpoint.ReviewCompleted, response)
 					}
 				}
 			}
@@ -472,10 +457,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if err := l.emitRoleApproved(cmd); err != nil {
 					fmt.Printf("[%s] /approve emit failed: %v\n", l.agent.Name(), err)
 				} else {
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.RoleDecided, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
+					l.checkpointBoundary(checkpoint.RoleDecided, response)
 				}
 			}
 			if cmd := parseRejectCommand(response); cmd != nil {
@@ -734,10 +716,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 
 	switch sig.Signal {
 	case SignalHalt:
-		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
-			l.lastCheckpointIter = l.iteration
-		}
+		l.checkpointBoundary(checkpoint.HaltSignal, response)
 		r := l.result(StopHalt, iteration, sig.Reason)
 		return &r
 	case SignalEscalate:
@@ -745,10 +724,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 			fmt.Sprintf("loop iteration %d: %s", iteration, sig.Reason)); err != nil {
 			fmt.Printf("warning: escalation event failed: %v\n", err)
 		}
-		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
-			l.lastCheckpointIter = l.iteration
-		}
+		l.checkpointBoundary(checkpoint.TaskBlocked, response)
 		r := l.result(StopEscalation, iteration, sig.Reason)
 		return &r
 	case SignalTaskDone:
@@ -770,18 +746,12 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 // checkResponseText is the text-based fallback for signal detection.
 func (l *Loop) checkResponseText(ctx context.Context, response string, iteration int) *Result {
 	if ContainsSignal(response, "HALT") {
-		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
-			l.lastCheckpointIter = l.iteration
-		}
+		l.checkpointBoundary(checkpoint.HaltSignal, response)
 		r := l.result(StopHalt, iteration, response)
 		return &r
 	}
 	if ContainsSignal(response, "ESCALATE") {
-		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
-			l.lastCheckpointIter = l.iteration
-		}
+		l.checkpointBoundary(checkpoint.TaskBlocked, response)
 		if err := l.agent.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, response)); err != nil {
 			fmt.Printf("warning: escalation event failed: %v\n", err)
@@ -956,15 +926,81 @@ func (l *Loop) autoAssignOpenTask() {
 				}
 				if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
 					fmt.Printf("  → auto-assigned: %s — %s\n", t.ID.Value(), t.Title)
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
+					l.checkpointBoundary(checkpoint.TaskAssigned, fmt.Sprintf("Assigned task %s: %s", t.ID.Value(), t.Title))
 				}
 				return
 			}
 		}
 	}
+}
+
+// checkpointBoundary captures both the mechanical snapshot and a bounded slice
+// of the agent response so Open Brain can warm-start with intent, not just state.
+func (l *Loop) checkpointBoundary(trigger checkpoint.BoundaryTrigger, response string) {
+	if l.sink == nil {
+		return
+	}
+	l.sink.OnBoundaryWithContext(trigger, l.currentSnapshot(), checkpointContextFromResponse(response))
+	l.lastCheckpointIter = l.iteration
+}
+
+func checkpointContextFromResponse(response string) checkpoint.BoundaryContext {
+	clean := cleanCheckpointResponse(response)
+	if clean == "" {
+		return checkpoint.BoundaryContext{}
+	}
+	return checkpoint.BoundaryContext{
+		Intent:  truncateCheckpointField(firstSignificantLine(clean), 280),
+		Next:    truncateCheckpointField(extractNextStep(clean), 280),
+		Context: truncateCheckpointField(clean, 1600),
+	}
+}
+
+func cleanCheckpointResponse(response string) string {
+	var lines []string
+	for _, raw := range strings.Split(response, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "/signal ") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func firstSignificantLine(text string) string {
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
+func extractNextStep(text string) string {
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "next:") || strings.HasPrefix(lower, "next step:") || strings.HasPrefix(lower, "next steps:") {
+			_, value, ok := strings.Cut(line, ":")
+			if ok {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
+}
+
+func truncateCheckpointField(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 // hasAssignedTask returns true if the agent has any assigned (non-completed) tasks.
@@ -1073,6 +1109,9 @@ func (l *Loop) completeTask(task work.Task, summary string) {
 		fmt.Printf("warning: task complete failed: %v\n", err)
 	} else {
 		fmt.Printf("  → task completed: %s — %s\n", task.ID.Value(), task.Title)
+		if l.config.OnTaskCompleted != nil {
+			l.config.OnTaskCompleted(task, summary)
+		}
 	}
 }
 
@@ -1140,4 +1179,3 @@ func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 	wg.Wait()
 	return results
 }
-

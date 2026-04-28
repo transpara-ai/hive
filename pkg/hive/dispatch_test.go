@@ -97,3 +97,30 @@ func TestParseIntendPayload_LargeBody(t *testing.T) {
 		t.Error("description prefix missing")
 	}
 }
+
+func TestIsSafeRefineryAutoTarget(t *testing.T) {
+	tests := []struct {
+		state string
+		want  bool
+	}{
+		{state: "requirement.clarifying", want: true},
+		{state: "requirement.investigating", want: true},
+		{state: "spec.draft", want: true},
+		{state: "needs_attention", want: true},
+		{state: "spec.review", want: false},
+		{state: "spec.normative", want: false},
+		{state: "build.ready", want: false},
+		{state: "shipped", want: false},
+		{state: "parked", want: false},
+		{state: "deleted", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := isSafeRefineryAutoTarget(tt.state)
+			if got != tt.want {
+				t.Fatalf("isSafeRefineryAutoTarget(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
