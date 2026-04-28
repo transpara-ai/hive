@@ -354,7 +354,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
-		agent, err := r.spawnAgent(ctx, def)
+		agent, resolvedModel, err := r.spawnAgent(ctx, def)
 		if err != nil {
 			return fmt.Errorf("spawn %s: %w", def.Name, err)
 		}
@@ -372,7 +372,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			r.telemetryWriter.RegisterAgent(telemetry.AgentRegistration{
 				Name:          def.Name,
 				Role:          def.Role,
-				Model:         def.Model,
+				Model:         resolvedModel,
 				Agent:         agent,
 				MaxIterations: def.EffectiveMaxIterations(),
 				WatchPatterns: def.WatchPatterns,
@@ -479,7 +479,8 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 }
 
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
-func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, error) {
+// It returns the agent and the resolved model name so callers can pass it to telemetry.
+func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, error) {
 	// Resolve model/provider through the precedence chain.
 	input := modelconfig.ResolutionInput{
 		Role:          def.Role,
@@ -489,12 +490,12 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	}
 	resolved, err := r.resolver.Resolve(input)
 	if err != nil {
-		return nil, fmt.Errorf("resolve model for %s: %w", def.Name, err)
+		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
 	}
 	cfg := modelconfig.ToIntelligenceConfig(resolved, def.SystemPrompt)
 	provider, err := intelligence.New(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("provider: %w", err)
+		return nil, "", fmt.Errorf("provider: %w", err)
 	}
 
 	// Wrap in tracking provider for token accounting.
@@ -509,7 +510,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		ConversationID: r.convID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create agent: %w", err)
+		return nil, "", fmt.Errorf("create agent: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s] [%s]\n",
@@ -537,7 +538,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		})
 	}
 
-	return agent, nil
+	return agent, resolved.Model, nil
 }
 
 // emit appends a hive event to the graph. Best-effort.

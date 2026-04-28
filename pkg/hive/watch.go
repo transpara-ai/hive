@@ -251,7 +251,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		},
 	}
 
-	agent, err := r.spawnAgent(ctx, def)
+	agent, resolvedModel, err := r.spawnAgent(ctx, def)
 	if err != nil {
 		return fmt.Errorf("spawn agent: %w", err)
 	}
@@ -269,7 +269,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		r.telemetryWriter.RegisterAgent(telemetry.AgentRegistration{
 			Name:          def.Name,
 			Role:          def.Role,
-			Model:         def.Model,
+			Model:         resolvedModel,
 			Agent:         agent,
 			MaxIterations: def.EffectiveMaxIterations(),
 			WatchPatterns: def.WatchPatterns,
