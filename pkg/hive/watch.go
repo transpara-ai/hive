@@ -234,10 +234,15 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 	// tells it to include this, but LLMs forget — enforce it structurally.
 	prompt := proposal.Prompt + nonOperateOutputConvention
 
+	modelID, err := mapModelName(proposal.Model, r.resolver.Catalog())
+	if err != nil {
+		return fmt.Errorf("resolve model for %s: %w", proposal.Name, err)
+	}
+
 	def := AgentDef{
 		Name:          proposal.Name,
 		Role:          proposal.Name, // name == role for dynamically spawned agents
-		Model:         mapModelName(proposal.Model, r.resolver.Catalog()),
+		Model:         modelID,
 		SystemPrompt:  prompt,
 		WatchPatterns: proposal.WatchPatterns,
 		CanOperate:    false, // trust must be earned; always false for spawned agents

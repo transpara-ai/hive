@@ -2,6 +2,7 @@ package hive
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/transpara-ai/hive/pkg/modelconfig"
@@ -46,18 +47,16 @@ func (d *dynamicAgentTracker) Wait() {
 	d.wg.Wait()
 }
 
-// mapModelName maps a model tier name ("haiku", "sonnet", "opus") or full model
-// identifier to the canonical model constant used in AgentDef.Model.
-// Accepts both the short tier name and the full identifier (since
-// RoleProposedContent.Model stores the resolved full string).
-// Defaults to ModelSonnet for unrecognised inputs.
-func mapModelName(name string, cat *modelconfig.ModelCatalog) string {
+// mapModelName resolves a model name (alias or full ID) to its canonical catalog ID.
+// Returns an error if the model is not found — validateSpawnCommand should have
+// rejected unknown models before this point, so a miss here indicates a bug.
+func mapModelName(name string, cat *modelconfig.ModelCatalog) (string, error) {
 	if cat == nil {
 		cat = modelconfig.DefaultCatalog()
 	}
 	entry, ok := cat.Lookup(name)
-	if ok {
-		return entry.ID
+	if !ok {
+		return "", fmt.Errorf("model %q not found in catalog (validation should have caught this)", name)
 	}
-	return ModelSonnet
+	return entry.ID, nil
 }

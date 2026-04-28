@@ -7,8 +7,6 @@ import (
 	"github.com/transpara-ai/hive/pkg/modelconfig"
 )
 
-// ModelSonnet is the fallback model for unrecognised inputs in dynamic agent spawning.
-const ModelSonnet = "claude-sonnet-4-6"
 
 // Tier constants for role classification.
 const (
