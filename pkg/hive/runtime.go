@@ -85,7 +85,6 @@ type Runtime struct {
 	repoPath        string
 	loop            bool
 	catalogPath     string
-	costSummary     string // pre-formatted model cost table for allocator
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -227,15 +226,6 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	} else {
 		r.resolver = modelconfig.DefaultResolver()
 	}
-
-	// Pre-compute model cost summary for the allocator's observation.
-	var agentRoles []string
-	for _, def := range r.defs {
-		agentRoles = append(agentRoles, def.Role)
-	}
-	// Estimate using 10k input + 2k output tokens (typical per-call).
-	costSummaries := modelconfig.EstimateAgentCosts(r.resolver, agentRoles, 10_000, 2_000)
-	r.costSummary = modelconfig.FormatCostSummary(costSummaries)
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
@@ -398,7 +388,15 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			RepoPath:       r.repoPath,
 			Keepalive:      r.loop,
 			KnowledgeStore: r.knowledgeStore,
-			CostSummary:    r.costSummary,
+			CostSummaryFunc: func() string {
+				entries := r.budgetRegistry.Snapshot()
+				roles := make([]string, 0, len(entries))
+				for _, e := range entries {
+					roles = append(roles, e.Name)
+				}
+				summaries := modelconfig.EstimateAgentCosts(r.resolver, roles, 10_000, 2_000)
+				return modelconfig.FormatCostSummary(summaries)
+			},
 			Catalog:        r.resolver.Catalog(),
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)

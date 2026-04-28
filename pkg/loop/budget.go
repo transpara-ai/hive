@@ -267,9 +267,11 @@ func (l *Loop) enrichBudgetObservation(obs string, iteration int) string {
 		}
 	}
 
-	// Model cost data (pre-computed from the catalog at boot time).
-	if l.config.CostSummary != "" {
-		sb.WriteString(l.config.CostSummary)
+	// Model cost data (recomputed each iteration to reflect dynamic agents).
+	if l.config.CostSummaryFunc != nil {
+		if cs := l.config.CostSummaryFunc(); cs != "" {
+			sb.WriteString(cs)
+		}
 	}
 
 	sb.WriteString("===\n")
