@@ -356,7 +356,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			MaxDuration:   def.EffectiveMaxDuration(),
 		}
 		agentBudget := resources.NewBudget(budgetCfg)
-		r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations())
+		r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations(), resolvedModel)
 
 		// Register agent with telemetry writer.
 		if r.telemetryWriter != nil {
@@ -391,11 +391,14 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			KnowledgeStore: r.knowledgeStore,
 			CostSummaryFunc: func() string {
 				entries := r.budgetRegistry.Snapshot()
-				roles := make([]string, 0, len(entries))
+				agents := make([]modelconfig.AgentModelEntry, 0, len(entries))
 				for _, e := range entries {
-					roles = append(roles, e.Name)
+					agents = append(agents, modelconfig.AgentModelEntry{
+						Agent: e.Name,
+						Model: e.ResolvedModel,
+					})
 				}
-				summaries := modelconfig.EstimateAgentCosts(r.resolver, roles, 10_000, 2_000)
+				summaries := modelconfig.EstimateAgentCostsByModel(r.resolver.Catalog(), agents, 10_000, 2_000)
 				return modelconfig.FormatCostSummary(summaries)
 			},
 			Catalog:        r.resolver.Catalog(),

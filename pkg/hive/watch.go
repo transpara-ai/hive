@@ -267,7 +267,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		MaxDuration:   def.EffectiveMaxDuration(),
 	}
 	agentBudget := resources.NewBudget(budgetCfg)
-	r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations())
+	r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations(), resolvedModel)
 
 	// Register with telemetry writer (if available).
 	if r.telemetryWriter != nil {

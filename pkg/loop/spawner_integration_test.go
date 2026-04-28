@@ -138,9 +138,9 @@ func TestSpawnCommandToEvent(t *testing.T) {
 func TestSpawnContextConstruction(t *testing.T) {
 	reg := resources.NewBudgetRegistry()
 	budgetCfg := resources.BudgetConfig{MaxIterations: 50}
-	reg.Register("guardian", resources.NewBudget(budgetCfg), 50)
-	reg.Register("sysmon", resources.NewBudget(budgetCfg), 30)
-	reg.Register("allocator", resources.NewBudget(budgetCfg), 30)
+	reg.Register("guardian", resources.NewBudget(budgetCfg), 50, "")
+	reg.Register("sysmon", resources.NewBudget(budgetCfg), 30, "")
+	reg.Register("allocator", resources.NewBudget(budgetCfg), 30, "")
 
 	spawnerAgent := testHiveAgent(t, newMockProvider(), "spawner", "spawner")
 	l := testLoopWithRegistry(t, spawnerAgent, reg)
@@ -192,7 +192,7 @@ func TestSpawnContextConstruction_NoPending(t *testing.T) {
 // the expected structured SPAWN CONTEXT block to the observation.
 func TestSpawnObservationEnrichmentFormat(t *testing.T) {
 	reg := resources.NewBudgetRegistry()
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50)
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50, "")
 
 	spawnerAgent := testHiveAgent(t, newMockProvider(), "spawner", "spawner")
 	l := testLoopWithRegistry(t, spawnerAgent, reg)

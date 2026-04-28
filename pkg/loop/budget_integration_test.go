@@ -56,8 +56,8 @@ func TestBudgetCommandToEvent(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200)
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -134,11 +134,11 @@ func TestBudgetObservationEnrichmentFormat(t *testing.T) {
 	reg := resources.NewBudgetRegistry()
 	b1 := resources.NewBudget(resources.BudgetConfig{MaxIterations: 200})
 	b1.Record(500, 0.10)
-	reg.Register("guardian", b1, 200)
+	reg.Register("guardian", b1, 200, "")
 
 	b2 := resources.NewBudget(resources.BudgetConfig{MaxIterations: 100})
 	b2.Record(300, 0.05)
-	reg.Register("implementer", b2, 100)
+	reg.Register("implementer", b2, 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -191,7 +191,7 @@ func TestBudgetObservationEnrichmentSkipsNonAllocator(t *testing.T) {
 			agent := testHiveAgent(t, provider, role, "test-"+role)
 
 			reg := resources.NewBudgetRegistry()
-			reg.Register("some-agent", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+			reg.Register("some-agent", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 			l, err := New(Config{
 				Agent:          agent,
@@ -221,7 +221,7 @@ func TestStabilizationWindowBlocks(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -258,7 +258,7 @@ func TestCooldownEnforcement(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -298,7 +298,7 @@ func TestBudgetFloorEnforced(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("planner", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50)
+	reg.Register("planner", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -337,8 +337,8 @@ func TestPoolConservation(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200)
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200, "")
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -401,7 +401,7 @@ func TestBudgetCommandInLoop(t *testing.T) {
 	agent := testHiveAgent(t, provider, "allocator", "test-allocator")
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,

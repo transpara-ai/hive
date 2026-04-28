@@ -7,9 +7,9 @@ import (
 
 func TestRegisterAndSnapshot(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("guardian", NewBudget(BudgetConfig{MaxIterations: 200}), 200)
-	reg.Register("sysmon", NewBudget(BudgetConfig{MaxIterations: 150}), 150)
-	reg.Register("implementer", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("guardian", NewBudget(BudgetConfig{MaxIterations: 200}), 200, "")
+	reg.Register("sysmon", NewBudget(BudgetConfig{MaxIterations: 150}), 150, "")
+	reg.Register("implementer", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
 
 	snap := reg.Snapshot()
 	if len(snap) != 3 {
@@ -29,7 +29,7 @@ func TestRegisterAndSnapshot(t *testing.T) {
 
 func TestAdjustMaxIterations_Increase(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
 
 	prev, newMax, err := reg.AdjustMaxIterations("impl", 50, 20, 500)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestAdjustMaxIterations_Increase(t *testing.T) {
 
 func TestAdjustMaxIterations_Decrease(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
 
 	prev, newMax, err := reg.AdjustMaxIterations("impl", -30, 20, 500)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestAdjustMaxIterations_Decrease(t *testing.T) {
 
 func TestAdjustMaxIterations_FloorClamp(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
 
 	prev, newMax, err := reg.AdjustMaxIterations("impl", -90, 20, 500)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestAdjustMaxIterations_FloorClamp(t *testing.T) {
 
 func TestAdjustMaxIterations_CeilingClamp(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("impl", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
 
 	prev, newMax, err := reg.AdjustMaxIterations("impl", 600, 20, 500)
 	if err != nil {
@@ -103,7 +103,7 @@ func TestAdjustMaxIterations_UnknownAgent(t *testing.T) {
 func TestAdjustMaxIterations_UpdatesBudget(t *testing.T) {
 	b := NewBudget(BudgetConfig{MaxIterations: 100})
 	reg := NewBudgetRegistry()
-	reg.Register("impl", b, 100)
+	reg.Register("impl", b, 100, "")
 
 	_, _, err := reg.AdjustMaxIterations("impl", 50, 20, 500)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestAdjustMaxIterations_UpdatesBudget(t *testing.T) {
 
 func TestSetAgentState(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("guardian", NewBudget(BudgetConfig{MaxIterations: 200}), 200)
+	reg.Register("guardian", NewBudget(BudgetConfig{MaxIterations: 200}), 200, "")
 
 	reg.SetAgentState("guardian", "Quiesced")
 
@@ -133,9 +133,9 @@ func TestSetAgentState(t *testing.T) {
 
 func TestTotalPool(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("a", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
-	reg.Register("b", NewBudget(BudgetConfig{MaxIterations: 150}), 150)
-	reg.Register("c", NewBudget(BudgetConfig{MaxIterations: 200}), 200)
+	reg.Register("a", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
+	reg.Register("b", NewBudget(BudgetConfig{MaxIterations: 150}), 150, "")
+	reg.Register("c", NewBudget(BudgetConfig{MaxIterations: 200}), 200, "")
 
 	if got := reg.TotalPool(); got != 450 {
 		t.Errorf("TotalPool = %d, want 450", got)
@@ -152,8 +152,8 @@ func TestTotalUsed(t *testing.T) {
 	b2 := NewBudget(BudgetConfig{MaxIterations: 150})
 	b2.Record(10, 0.1) // 1 iteration
 
-	reg.Register("a", b1, 100)
-	reg.Register("b", b2, 150)
+	reg.Register("a", b1, 100, "")
+	reg.Register("b", b2, 150, "")
 
 	if got := reg.TotalUsed(); got != 3 {
 		t.Errorf("TotalUsed = %d, want 3", got)
@@ -162,7 +162,7 @@ func TestTotalUsed(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 1000}), 1000)
+	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 1000}), 1000, "")
 
 	var wg sync.WaitGroup
 	// Concurrent readers.
@@ -206,8 +206,8 @@ func TestSetAgentState_NonexistentAgent(t *testing.T) {
 
 func TestRegisterOverwrite(t *testing.T) {
 	reg := NewBudgetRegistry()
-	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 100}), 100)
-	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 200}), 200)
+	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 100}), 100, "")
+	reg.Register("agent", NewBudget(BudgetConfig{MaxIterations: 200}), 200, "")
 
 	snap := reg.Snapshot()
 	if len(snap) != 1 {

@@ -58,6 +58,36 @@ func EstimateAgentCosts(resolver *Resolver, roles []string, avgInputTokens, avgO
 	return results
 }
 
+// AgentModelEntry pairs an agent name with its resolved model ID.
+// Used by EstimateAgentCostsByModel to avoid re-resolving through the
+// precedence chain (which misses per-agent overrides).
+type AgentModelEntry struct {
+	Agent string
+	Model string // canonical model ID from resolver
+}
+
+// EstimateAgentCostsByModel produces cost summaries using pre-resolved model IDs.
+// Unlike EstimateAgentCosts (which re-resolves by role name), this uses the
+// actual model each agent was spawned with — correct for per-agent overrides,
+// dynamic agents, and task-level model changes.
+func EstimateAgentCostsByModel(catalog *ModelCatalog, agents []AgentModelEntry, avgInputTokens, avgOutputTokens int) []AgentCostSummary {
+	var results []AgentCostSummary
+	for _, a := range agents {
+		entry, ok := catalog.Lookup(a.Model)
+		if !ok {
+			continue
+		}
+		cost := entry.Pricing.EstimateCost(avgInputTokens, avgOutputTokens)
+		results = append(results, AgentCostSummary{
+			Agent:          a.Agent,
+			Model:          entry.ID,
+			Tier:           string(entry.Tier),
+			CostPerCallUSD: cost,
+		})
+	}
+	return results
+}
+
 // FormatCostSummary produces a human-readable cost table for inclusion in
 // the allocator's observation.
 func FormatCostSummary(summaries []AgentCostSummary) string {

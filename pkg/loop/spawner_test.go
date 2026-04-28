@@ -461,7 +461,7 @@ func TestEnrichSpawnObservation_Format(t *testing.T) {
 	// Set up a BudgetRegistry with one entry.
 	reg := resources.NewBudgetRegistry()
 	budget := resources.NewBudget(resources.BudgetConfig{MaxIterations: 50})
-	reg.Register("guardian", budget, 50)
+	reg.Register("guardian", budget, 50, "")
 	l.config.BudgetRegistry = reg
 
 	enriched := l.enrichSpawnObservation("base observation\n")
@@ -523,8 +523,8 @@ func TestBuildSpawnContext(t *testing.T) {
 
 	// Register two agents in BudgetRegistry.
 	reg := resources.NewBudgetRegistry()
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200)
-	reg.Register("sysmon", resources.NewBudget(resources.BudgetConfig{MaxIterations: 150}), 150)
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200, "")
+	reg.Register("sysmon", resources.NewBudget(resources.BudgetConfig{MaxIterations: 150}), 150, "")
 	l.config.BudgetRegistry = reg
 
 	ctx := l.buildSpawnContext()
