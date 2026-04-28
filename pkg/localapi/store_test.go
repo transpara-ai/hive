@@ -11,8 +11,17 @@ import (
 
 // testDB opens a connection to the test Postgres, runs Migrate, and truncates
 // all local tables so each test starts clean.
+//
+// Skipped in -short mode (used by CI without a Postgres service) and when
+// the DB is unreachable, matching the convention in pkg/telemetry. To run
+// these tests locally start the docker-compose stack
+// (`docker compose up -d postgres`) and rerun without -short.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
+
+	if testing.Short() {
+		t.Skip("skipping localapi integration test in -short mode (no Postgres in CI)")
+	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -21,10 +30,10 @@ func testDB(t *testing.T) *sql.DB {
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		t.Fatalf("open db: %v", err)
+		t.Skipf("cannot open db (%s): %v", dsn, err)
 	}
 	if err := db.Ping(); err != nil {
-		t.Fatalf("ping db: %v", err)
+		t.Skipf("cannot reach Postgres at %s: %v", dsn, err)
 	}
 
 	if err := Migrate(db); err != nil {
