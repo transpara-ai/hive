@@ -40,3 +40,4 @@ go run ./cmd/hive civilization run --human Matt --store "postgres://hive:hive@lo
 ## License
 
 BSL 1.1 → Apache 2.0 (February 2030). Source-available now, fully open after change date. Defensive patent (Australian Provisional Patent No. 2026901564). See [EventGraph license](https://github.com/transpara-ai/eventgraph/blob/main/LICENSE) for terms.
+
