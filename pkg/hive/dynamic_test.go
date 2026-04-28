@@ -97,18 +97,21 @@ func TestMapModelName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"haiku", ModelHaiku},
-		{"sonnet", ModelSonnet},
-		{"opus", ModelOpus},
+		{"haiku", "claude-haiku-4-5-20251001"},
+		{"sonnet", "claude-sonnet-4-6"},
+		{"opus", "claude-opus-4-6"},
 		// Full model identifiers should also pass through correctly.
-		{ModelHaiku, ModelHaiku},
-		{ModelSonnet, ModelSonnet},
-		{ModelOpus, ModelOpus},
+		{"claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"},
+		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"claude-opus-4-6", "claude-opus-4-6"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := mapModelName(tt.input)
+			got, err := mapModelName(tt.input, nil)
+			if err != nil {
+				t.Fatalf("mapModelName(%q) unexpected error: %v", tt.input, err)
+			}
 			if got != tt.want {
 				t.Errorf("mapModelName(%q) = %q, want %q", tt.input, got, tt.want)
 			}
@@ -116,13 +119,13 @@ func TestMapModelName(t *testing.T) {
 	}
 }
 
-func TestMapModelName_Default(t *testing.T) {
+func TestMapModelName_UnknownReturnsError(t *testing.T) {
 	unknowns := []string{"gpt-4", "unknown", "", "SONNET", "Haiku"}
 	for _, name := range unknowns {
 		t.Run(name, func(t *testing.T) {
-			got := mapModelName(name)
-			if got != ModelSonnet {
-				t.Errorf("mapModelName(%q) = %q, want ModelSonnet (%q)", name, got, ModelSonnet)
+			_, err := mapModelName(name, nil)
+			if err == nil {
+				t.Errorf("mapModelName(%q) should return error for unknown model", name)
 			}
 		})
 	}

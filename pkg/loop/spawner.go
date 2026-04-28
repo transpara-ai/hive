@@ -10,6 +10,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ import (
 // The Spawner outputs this when it has designed a new role to propose.
 type SpawnCommand struct {
 	Name          string   `json:"name"`
-	Model         string   `json:"model"`         // "haiku", "sonnet", or "opus"
+	Model         string   `json:"model"`         // model alias or catalog ID
 	WatchPatterns []string `json:"watch_patterns"`
 	CanOperate    bool     `json:"can_operate"`
 	MaxIterations int      `json:"max_iterations"`
@@ -106,6 +107,7 @@ type SpawnContext struct {
 	HasPendingProposal bool
 	AgentRoster        []string       // agent names from BudgetRegistry.Snapshot()
 	RecentRejections   map[string]int // role name → iteration when rejected
+	Catalog            *modelconfig.ModelCatalog // model catalog for validation
 }
 
 // RosterContains returns true if name is already in the agent roster.
@@ -126,30 +128,6 @@ func (ctx *SpawnContext) RecentlyRejected(name string, window int) bool {
 		return false
 	}
 	return ctx.Iteration-rejectedAt < window
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Model constants (mirror pkg/hive/agentdef.go — no import to avoid cycle)
-// ────────────────────────────────────────────────────────────────────
-
-const (
-	spawnModelHaiku  = "claude-haiku-4-5-20251001"
-	spawnModelSonnet = "claude-sonnet-4-6"
-	spawnModelOpus   = "claude-opus-4-6"
-)
-
-// resolveModel maps the human-readable tier name ("haiku", "sonnet", "opus")
-// to the actual model identifier string used in AgentDef.Model.
-func resolveModel(name string) string {
-	switch name {
-	case "haiku":
-		return spawnModelHaiku
-	case "sonnet":
-		return spawnModelSonnet
-	case "opus":
-		return spawnModelOpus
-	}
-	return ""
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -222,7 +200,7 @@ func parseSpawnCommand(response string) *SpawnCommand {
 //  1. Stabilization window: first 20 iterations are observe-only
 //  2. Pending proposal: only one proposal in-flight at a time
 //  3. Name: valid kebab-case, no collision with existing roster
-//  4. Model: must be "haiku", "sonnet", or "opus"
+//  4. Model: must exist in the model catalog (alias or full ID)
 //  5. MaxIterations: 10–200
 //  6. Prompt: >= 100 characters
 //  7. WatchPatterns: non-empty, no bare wildcard ("*")
@@ -248,8 +226,12 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 	}
 
 	// 4. Model validation.
-	if resolveModel(cmd.Model) == "" {
-		return fmt.Errorf("invalid model %q: must be haiku, sonnet, or opus", cmd.Model)
+	cat := ctx.Catalog
+	if cat == nil {
+		cat = modelconfig.DefaultCatalog()
+	}
+	if _, ok := cat.Lookup(cmd.Model); !ok {
+		return fmt.Errorf("invalid model %q: not found in model catalog", cmd.Model)
 	}
 
 	// 5. MaxIterations bounds.
@@ -291,12 +273,20 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 
 // emitRoleProposed constructs a RoleProposedContent from the validated
 // SpawnCommand and records it on the event chain via agent.EmitRoleProposed.
-// The model tier name ("haiku", "sonnet", "opus") is resolved to the actual
-// model identifier string before emission.
+// Model aliases are resolved to canonical catalog IDs before emission.
 func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
+	// Resolve model name via catalog — maps aliases like "sonnet" to full IDs.
+	cat := l.config.Catalog
+	if cat == nil {
+		cat = modelconfig.DefaultCatalog()
+	}
+	resolvedModel := cmd.Model
+	if entry, ok := cat.Lookup(cmd.Model); ok {
+		resolvedModel = entry.ID
+	}
 	content := event.RoleProposedContent{
 		Name:          cmd.Name,
-		Model:         resolveModel(cmd.Model),
+		Model:         resolvedModel,
 		WatchPatterns: cmd.WatchPatterns,
 		CanOperate:    cmd.CanOperate,
 		MaxIterations: cmd.MaxIterations,
@@ -409,6 +399,7 @@ func (l *Loop) buildSpawnContext() *SpawnContext {
 		Iteration:          l.spawnerState.iteration,
 		HasPendingProposal: l.spawnerState.pendingProposal != "",
 		RecentRejections:   l.spawnerState.recentRejections,
+		Catalog:            l.config.Catalog,
 	}
 
 	if reg := l.config.BudgetRegistry; reg != nil {

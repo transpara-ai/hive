@@ -93,9 +93,9 @@ func makeLoopWithRegistry(t *testing.T, role string) *Loop {
 	agent := testHiveAgent(t, provider, role, "test-"+role)
 
 	reg := resources.NewBudgetRegistry()
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200)
-	reg.Register("sysmon", resources.NewBudget(resources.BudgetConfig{MaxIterations: 150}), 150)
-	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100)
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 200}), 200, "")
+	reg.Register("sysmon", resources.NewBudget(resources.BudgetConfig{MaxIterations: 150}), 150, "")
+	reg.Register("implementer", resources.NewBudget(resources.BudgetConfig{MaxIterations: 100}), 100, "")
 
 	l, err := New(Config{
 		Agent:          agent,
@@ -205,19 +205,19 @@ func TestValidateBudgetCommand_InsufficientPool(t *testing.T) {
 	for i := 0; i < 190; i++ {
 		b.Record(1, 0.01) // 190 iterations used
 	}
-	reg.Register("guardian", b, 200)
+	reg.Register("guardian", b, 200, "")
 
 	b2 := resources.NewBudget(resources.BudgetConfig{MaxIterations: 150})
 	for i := 0; i < 140; i++ {
 		b2.Record(1, 0.01) // 140 iterations used
 	}
-	reg.Register("sysmon", b2, 150)
+	reg.Register("sysmon", b2, 150, "")
 
 	b3 := resources.NewBudget(resources.BudgetConfig{MaxIterations: 100})
 	for i := 0; i < 95; i++ {
 		b3.Record(1, 0.01) // 95 iterations used
 	}
-	reg.Register("implementer", b3, 100)
+	reg.Register("implementer", b3, 100, "")
 
 	l.config.BudgetRegistry = reg
 

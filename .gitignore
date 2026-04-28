@@ -1,6 +1,7 @@
 .env
 .DS_Store
 .hive/
+.worktrees/
 products/
 *.exe
 *.stackdump

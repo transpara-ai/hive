@@ -1,0 +1,70 @@
+# Mixed provider catalog: Claude + Codex + Ollama + OpenRouter
+# This is a LOCAL DEV example — adjust base_url values for your environment.
+# Usage: go run ./cmd/hive civilization run --human Matt --catalog catalog-mixed.yaml --idea "..."
+# Env vars: OPENROUTER_API_KEY for OpenRouter models
+# Note: base_url is hardcoded per model entry — OLLAMA_HOST does not override it.
+# To use a remote Ollama, change the base_url in the model entry below.
+
+models:
+  # ── Ollama (local) ──
+  - id: gemma4
+    aliases: [ollama-gemma4]
+    provider: ollama
+    base_url: http://localhost:11434/v1
+    auth_mode: local
+    tier: volume
+    capabilities: [coding, fast-latency]
+    context_window: 8192
+    max_output_tokens: 4096
+    pricing:
+      input_per_million: 0
+      output_per_million: 0
+
+  # ── Codex (subscription) ──
+  - id: gpt-5.5
+    aliases: [gpt5.5]
+    provider: codex-cli
+    auth_mode: subscription
+    tier: judgment
+    capabilities: [tools, reasoning, coding, operate]
+    context_window: 200000
+    max_output_tokens: 16384
+    pricing:
+      input_per_million: 2.00
+      output_per_million: 8.00
+
+  # ── OpenRouter (API key) ──
+  - id: moonshotai/kimi-k2.6
+    aliases: [kimi-k2.6, kimi]
+    provider: openrouter
+    auth_mode: api-key
+    tier: execution
+    capabilities: [tools, reasoning, coding, large-context]
+    context_window: 256000
+    max_output_tokens: 16384
+    pricing:
+      input_per_million: 0.7448
+      output_per_million: 4.655
+
+  - id: deepseek/deepseek-v4-pro
+    aliases: [deepseek-v4-pro, deepseek]
+    provider: openrouter
+    auth_mode: api-key
+    tier: execution
+    capabilities: [tools, reasoning, coding, large-context]
+    context_window: 1048576
+    max_output_tokens: 16384
+    pricing:
+      input_per_million: 0.435
+      output_per_million: 0.87
+
+role_defaults:
+  guardian: gemma4
+  sysmon: gemma4
+  allocator: gemma4
+  spawner: gemma4
+  cto: gpt5.5                   # Codex CLI
+  reviewer: deepseek-v4-pro    # OpenRouter
+  strategist: deepseek-v4-pro  # OpenRouter
+  planner: sonnet              # Claude (built-in)
+  implementer: opus            # Claude (forced claude-cli by CanOperate)

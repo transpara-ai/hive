@@ -47,25 +47,7 @@ Yes. The Ollama model page confirms Gemma 4 has "native function-calling support
 
 All four `intelligence.New()` call sites hardcoded `"claude-cli"` or `"claude-sdk"`. Switching backends required a code change.
 
-**Fix:** Added `ProviderConfig()` to `hive/pkg/runner/runner.go`:
-
-```go
-func ProviderConfig(role string, budget float64) intelligence.Config {
-    provider := os.Getenv("HIVE_PROVIDER")
-    if provider == "" {
-        provider = "claude-cli"
-    }
-    model := os.Getenv("HIVE_MODEL")
-    if model == "" {
-        model = ModelForRole(role)
-    }
-    return intelligence.Config{
-        Provider:     provider,
-        Model:        model,
-        MaxBudgetUSD: budget,
-    }
-}
-```
+**Fix:** The `pkg/modelconfig` subsystem replaced all hardcoded model selection with a declarative YAML catalog and 7-layer precedence resolver. Per-agent provider/model is configured via `--catalog` flag with a custom YAML file. See `catalog-mixed.yaml` for an example using Claude, Codex, Ollama, and OpenRouter simultaneously.
 
 Call sites now use this helper and augment it with provider-specific fields where needed:
 
@@ -121,7 +103,7 @@ Practical consequences:
 
 **For Ollama specifically** this is harmless — there is no real cost for local inference.
 
-**For paid cloud providers** (Groq, Together, OpenAI, xAI) set via `HIVE_PROVIDER`, the `--budget` flag provides no cost protection and all cost reports will show $0.00 regardless of actual spend. Do not rely on `--budget` for cost control with these providers. Use `MaxIterations` and `MaxDuration` in `AgentDef` to bound runaway agents instead.
+**For paid cloud providers** (Groq, Together, OpenAI, xAI, OpenRouter), the `--budget` flag provides no cost protection and all cost reports will show $0.00 regardless of actual spend. Do not rely on `--budget` for cost control with these providers. Use `MaxIterations` and `MaxDuration` in `AgentDef` to bound runaway agents instead.
 
 This is a known limitation. A proper fix would require the `openaiProvider` to calculate cost client-side from token counts and a configurable per-model pricing table.
 
@@ -172,24 +154,41 @@ This rejects the dependency before any event is written to the graph. The loop l
 
 ```bash
 # Install and start Ollama, pull the model
-ollama pull gemma4:27b
+ollama pull gemma4
 
-# Run the hive with Ollama
-cd hive
-HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive civilization run --human Matt --idea "Build a task manager"
-
-# With a custom Ollama host
-OLLAMA_HOST=http://192.168.1.10:11434 HIVE_PROVIDER=ollama HIVE_MODEL=gemma4:27b go run ./cmd/hive civilization run --human Matt --idea "..."
+# Create a catalog YAML with Ollama models (see catalog-mixed.yaml for a full example)
+# Then run:
+go run ./cmd/hive civilization run --human Matt --catalog my-catalog.yaml --idea "Build a task manager"
 ```
 
-Default behaviour (no env vars) is unchanged — falls back to `claude-cli` and per-role model defaults.
+The `--catalog` flag merges your custom YAML on top of the built-in Claude catalog. Catalog entry IDs must match the Ollama model name exactly (e.g., `gemma4`, not `ollama-gemma4`), and `base_url` must include the `/v1` suffix:
+
+```yaml
+models:
+  - id: gemma4
+    provider: ollama
+    base_url: http://localhost:11434/v1
+    auth_mode: local
+    tier: volume
+    capabilities: [coding, fast-latency]
+    context_window: 8192
+    max_output_tokens: 4096
+    pricing:
+      input_per_million: 0
+      output_per_million: 0
+
+role_defaults:
+  guardian: gemma4
+  sysmon: gemma4
+```
+
+Default behaviour (no `--catalog`) is unchanged — falls back to `claude-cli` and per-role model defaults from the embedded catalog.
 
 ## Env vars reference
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `HIVE_PROVIDER` | `claude-cli` | Provider name: `ollama`, `openai`, `anthropic`, `groq`, etc. |
-| `HIVE_MODEL` | role default | Global model override — overrides per-role defaults from `ModelForRole()` |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server address (already supported, no new code) |
-| `AGENT_MODEL` | — | Per-role model override (existing, still works when `HIVE_MODEL` is not set) |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server address (used by the intelligence layer when no `base_url` in catalog) |
+| `OPENROUTER_API_KEY` | — | API key for OpenRouter models |
+| `DATABASE_URL` | — | Postgres DSN (alternative to `--store` flag) |
 

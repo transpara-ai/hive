@@ -11,6 +11,7 @@ type BudgetEntry struct {
 	Budget        *Budget
 	MaxIterations int
 	AgentState    string // "Active", "Quiesced", "Stopped"
+	ResolvedModel string // canonical model ID from resolver (for cost estimation)
 }
 
 // BudgetRegistry provides cross-agent budget visibility and mutation.
@@ -30,7 +31,8 @@ func NewBudgetRegistry() *BudgetRegistry {
 }
 
 // Register adds an agent's budget to the registry. Called during agent spawn.
-func (r *BudgetRegistry) Register(name string, budget *Budget, maxIter int) {
+// resolvedModel is the canonical model ID from the resolver (used for cost estimation).
+func (r *BudgetRegistry) Register(name string, budget *Budget, maxIter int, resolvedModel string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.entries[name] = &BudgetEntry{
@@ -38,6 +40,7 @@ func (r *BudgetRegistry) Register(name string, budget *Budget, maxIter int) {
 		Budget:        budget,
 		MaxIterations: maxIter,
 		AgentState:    "Active",
+		ResolvedModel: resolvedModel,
 	}
 }
 
@@ -53,6 +56,7 @@ func (r *BudgetRegistry) Snapshot() []BudgetEntry {
 			Budget:        e.Budget,
 			MaxIterations: e.MaxIterations,
 			AgentState:    e.AgentState,
+			ResolvedModel: e.ResolvedModel,
 		})
 	}
 	return result

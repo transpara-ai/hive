@@ -17,31 +17,10 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
 	"github.com/transpara-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/registry"
 )
 
-// modelPricing maps short model names to per-million-token costs.
-var modelPricing = map[string]struct{ Input, Output float64 }{
-	"haiku":  {0.80, 4.00},
-	"sonnet": {3.00, 15.00},
-	"opus":   {15.00, 75.00},
-}
-
-// roleModel maps agent roles to default model names.
-var roleModel = map[string]string{
-	"scout":     "haiku",
-	"architect": "sonnet",
-	"builder":   "sonnet",
-	"tester":    "haiku",
-	"critic":    "sonnet",
-	"reflector": "sonnet",
-	"ops":       "haiku",
-	"observer":  "sonnet",
-	"guardian":  "haiku",
-	"monitor":   "haiku",
-	"pm":        "sonnet",
-	"scribe":    "sonnet",
-}
 
 // Config holds everything a Runner needs.
 type Config struct {
@@ -846,35 +825,30 @@ func buildBranchName(cfg Config, title string) string {
 	return branchSlug(title, time.Now())
 }
 
-// ModelForRole returns the default model short name for a role.
+// ModelForRole returns the default model name for a role.
 // Override with AGENT_MODEL env var.
 func ModelForRole(role string) string {
 	if override := os.Getenv("AGENT_MODEL"); override != "" {
 		return override
 	}
-	if m, ok := roleModel[role]; ok {
-		return m
+	resolver := modelconfig.DefaultResolver()
+	resolved, err := resolver.Resolve(modelconfig.ResolutionInput{Role: role})
+	if err != nil {
+		return "haiku"
 	}
-	return "haiku"
+	return resolved.Model
 }
 
 // ProviderConfig returns an intelligence.Config for the given role.
-// HIVE_PROVIDER selects the provider (default: "claude-cli").
-// HIVE_MODEL selects the model globally, overriding per-role defaults.
 func ProviderConfig(role string, budget float64) intelligence.Config {
-	provider := os.Getenv("HIVE_PROVIDER")
-	if provider == "" {
-		provider = "claude-cli"
+	resolver := modelconfig.DefaultResolver()
+	resolved, err := resolver.Resolve(modelconfig.ResolutionInput{Role: role})
+	if err != nil {
+		return intelligence.Config{Provider: "claude-cli", Model: "haiku", MaxBudgetUSD: budget}
 	}
-	model := os.Getenv("HIVE_MODEL")
-	if model == "" {
-		model = ModelForRole(role)
-	}
-	return intelligence.Config{
-		Provider:     provider,
-		Model:        model,
-		MaxBudgetUSD: budget,
-	}
+	cfg := modelconfig.ToIntelligenceConfig(resolved, "")
+	cfg.MaxBudgetUSD = budget
+	return cfg
 }
 
 // maybeCreatePR creates a GitHub PR for a Critic-PASS commit when PRMode is enabled.

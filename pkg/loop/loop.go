@@ -28,6 +28,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/budget"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
@@ -125,6 +126,14 @@ type Config struct {
 	// KnowledgeStore provides access to distilled insights for context
 	// enrichment. Optional. When nil, agents run without knowledge injection.
 	KnowledgeStore knowledge.KnowledgeStore
+
+	// CostSummaryFunc returns a cost table for the allocator's observation.
+	// Called each iteration for the allocator role. Returns empty string to skip.
+	CostSummaryFunc func() string
+
+	// Catalog is the model catalog for spawn validation. Optional.
+	// When nil, falls back to modelconfig.DefaultCatalog().
+	Catalog *modelconfig.ModelCatalog
 
 	// RecoveryState holds recovered state from a prior run. When set and Mode
 	// is ModeWarm, the loop seeds iteration counter, skips stabilization, and

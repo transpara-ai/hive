@@ -9,6 +9,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/loop"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 )
@@ -233,18 +234,29 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 	// tells it to include this, but LLMs forget — enforce it structurally.
 	prompt := proposal.Prompt + nonOperateOutputConvention
 
+	modelID, err := mapModelName(proposal.Model, r.resolver.Catalog())
+	if err != nil {
+		return fmt.Errorf("resolve model for %s: %w", proposal.Name, err)
+	}
+
 	def := AgentDef{
 		Name:          proposal.Name,
 		Role:          proposal.Name, // name == role for dynamically spawned agents
-		Model:         mapModelName(proposal.Model),
+		Model:         modelID,
 		SystemPrompt:  prompt,
 		WatchPatterns: proposal.WatchPatterns,
 		CanOperate:    false, // trust must be earned; always false for spawned agents
 		MaxIterations: maxIter,
 		MaxDuration:   0,
+		RoleDefinition: &modelconfig.RoleDefinition{
+			Name:        proposal.Name,
+			Description: proposal.Reason,
+			Category:    "spawned",
+			CanOperate:  false,
+		},
 	}
 
-	agent, err := r.spawnAgent(ctx, def)
+	agent, resolvedModel, err := r.spawnAgent(ctx, def)
 	if err != nil {
 		return fmt.Errorf("spawn agent: %w", err)
 	}
@@ -255,14 +267,14 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		MaxDuration:   def.EffectiveMaxDuration(),
 	}
 	agentBudget := resources.NewBudget(budgetCfg)
-	r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations())
+	r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations(), resolvedModel)
 
 	// Register with telemetry writer (if available).
 	if r.telemetryWriter != nil {
 		r.telemetryWriter.RegisterAgent(telemetry.AgentRegistration{
 			Name:          def.Name,
 			Role:          def.Role,
-			Model:         def.Model,
+			Model:         resolvedModel,
 			Agent:         agent,
 			MaxIterations: def.EffectiveMaxIterations(),
 			WatchPatterns: def.WatchPatterns,
@@ -287,6 +299,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		RepoPath:       r.repoPath,
 		Keepalive:      r.loop,
 		KnowledgeStore: r.knowledgeStore,
+		Catalog:        r.resolver.Catalog(),
 		ActorResolver: func(id types.ActorID) string {
 			a, err := r.actors.Get(id)
 			if err != nil {

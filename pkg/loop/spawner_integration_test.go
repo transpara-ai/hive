@@ -23,6 +23,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 )
 
@@ -104,8 +105,12 @@ func TestSpawnCommandToEvent(t *testing.T) {
 	if content.Name != cmd.Name {
 		t.Errorf("Name = %q, want %q", content.Name, cmd.Name)
 	}
-	if content.Model != resolveModel(cmd.Model) {
-		t.Errorf("Model = %q, want %q", content.Model, resolveModel(cmd.Model))
+	wantModel := cmd.Model
+	if entry, ok := modelconfig.DefaultCatalog().Lookup(cmd.Model); ok {
+		wantModel = entry.ID
+	}
+	if content.Model != wantModel {
+		t.Errorf("Model = %q, want %q", content.Model, wantModel)
 	}
 	if len(content.WatchPatterns) != len(cmd.WatchPatterns) {
 		t.Errorf("WatchPatterns len = %d, want %d", len(content.WatchPatterns), len(cmd.WatchPatterns))
@@ -133,9 +138,9 @@ func TestSpawnCommandToEvent(t *testing.T) {
 func TestSpawnContextConstruction(t *testing.T) {
 	reg := resources.NewBudgetRegistry()
 	budgetCfg := resources.BudgetConfig{MaxIterations: 50}
-	reg.Register("guardian", resources.NewBudget(budgetCfg), 50)
-	reg.Register("sysmon", resources.NewBudget(budgetCfg), 30)
-	reg.Register("allocator", resources.NewBudget(budgetCfg), 30)
+	reg.Register("guardian", resources.NewBudget(budgetCfg), 50, "")
+	reg.Register("sysmon", resources.NewBudget(budgetCfg), 30, "")
+	reg.Register("allocator", resources.NewBudget(budgetCfg), 30, "")
 
 	spawnerAgent := testHiveAgent(t, newMockProvider(), "spawner", "spawner")
 	l := testLoopWithRegistry(t, spawnerAgent, reg)
@@ -187,7 +192,7 @@ func TestSpawnContextConstruction_NoPending(t *testing.T) {
 // the expected structured SPAWN CONTEXT block to the observation.
 func TestSpawnObservationEnrichmentFormat(t *testing.T) {
 	reg := resources.NewBudgetRegistry()
-	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50)
+	reg.Register("guardian", resources.NewBudget(resources.BudgetConfig{MaxIterations: 50}), 50, "")
 
 	spawnerAgent := testHiveAgent(t, newMockProvider(), "spawner", "spawner")
 	l := testLoopWithRegistry(t, spawnerAgent, reg)

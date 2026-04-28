@@ -26,6 +26,7 @@ import (
 
 	hiveagent "github.com/transpara-ai/agent"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
+	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/knowledge"
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/membrane"
@@ -64,6 +65,10 @@ type Runtime struct {
 	// Knowledge store for distilled insights (survives reboot via chain replay).
 	knowledgeStore knowledge.KnowledgeStore
 
+	// Model resolver for agent provider/model selection. Set once during Run()
+	// and never swapped — closures that capture it are safe without synchronization.
+	resolver *modelconfig.Resolver
+
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
 
@@ -80,6 +85,7 @@ type Runtime struct {
 	approveRoles    bool
 	repoPath        string
 	loop            bool
+	catalogPath     string
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -91,6 +97,7 @@ type Config struct {
 	ApproveRoles    bool   // --approve-roles: auto-approve role proposals
 	RepoPath        string // --repo: path to repo for Operate
 	Loop            bool   // --loop: agents block on bus instead of quiescing
+	CatalogPath     string // --catalog: custom YAML catalog file (merged with defaults)
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -146,6 +153,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		approveRoles:    cfg.ApproveRoles,
 		repoPath:        cfg.RepoPath,
 		loop:            cfg.Loop,
+		catalogPath:     cfg.CatalogPath,
 		telemetryWriter: cfg.TelemetryWriter,
 	}, nil
 }
@@ -207,6 +215,18 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	// Create the dynamic agent tracker (manages post-boot spawned agents).
 	r.dynamic = newDynamicAgentTracker()
+
+	// Initialize model resolver for agent spawning.
+	if r.catalogPath != "" {
+		var err error
+		r.resolver, err = modelconfig.ResolverFromCatalogFile(r.catalogPath)
+		if err != nil {
+			return fmt.Errorf("custom catalog: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Model catalog: %s (merged with defaults)\n", r.catalogPath)
+	} else {
+		r.resolver = modelconfig.DefaultResolver()
+	}
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
@@ -325,7 +345,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
 	for _, def := range r.defs {
-		agent, err := r.spawnAgent(ctx, def)
+		agent, resolvedModel, err := r.spawnAgent(ctx, def)
 		if err != nil {
 			return fmt.Errorf("spawn %s: %w", def.Name, err)
 		}
@@ -336,14 +356,14 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			MaxDuration:   def.EffectiveMaxDuration(),
 		}
 		agentBudget := resources.NewBudget(budgetCfg)
-		r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations())
+		r.budgetRegistry.Register(def.Name, agentBudget, def.EffectiveMaxIterations(), resolvedModel)
 
 		// Register agent with telemetry writer.
 		if r.telemetryWriter != nil {
 			r.telemetryWriter.RegisterAgent(telemetry.AgentRegistration{
 				Name:          def.Name,
 				Role:          def.Role,
-				Model:         def.Model,
+				Model:         resolvedModel,
 				Agent:         agent,
 				MaxIterations: def.EffectiveMaxIterations(),
 				WatchPatterns: def.WatchPatterns,
@@ -369,6 +389,19 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			RepoPath:       r.repoPath,
 			Keepalive:      r.loop,
 			KnowledgeStore: r.knowledgeStore,
+			CostSummaryFunc: func() string {
+				entries := r.budgetRegistry.Snapshot()
+				agents := make([]modelconfig.AgentModelEntry, 0, len(entries))
+				for _, e := range entries {
+					agents = append(agents, modelconfig.AgentModelEntry{
+						Agent: e.Name,
+						Model: e.ResolvedModel,
+					})
+				}
+				summaries := modelconfig.EstimateAgentCostsByModel(r.resolver.Catalog(), agents, 10_000, 2_000)
+				return modelconfig.FormatCostSummary(summaries)
+			},
+			Catalog:        r.resolver.Catalog(),
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)
 				if err != nil {
@@ -449,30 +482,23 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 }
 
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
-func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, error) {
-	// Create the intelligence provider.
-	// Operate() requires claude-cli — skip env overrides for agents that use it.
-	var providerName, model string
-	if def.CanOperate {
-		providerName = "claude-cli"
-		model = def.Model
-	} else {
-		providerName = os.Getenv("HIVE_PROVIDER")
-		if providerName == "" {
-			providerName = "claude-cli"
-		}
-		model = os.Getenv("HIVE_MODEL")
-		if model == "" {
-			model = def.Model
-		}
+// It returns the agent and the resolved model name so callers can pass it to telemetry.
+func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, error) {
+	// Resolve model/provider through the precedence chain.
+	input := modelconfig.ResolutionInput{
+		Role:          def.Role,
+		AgentDefModel: def.Model,
+		Policy:        def.EffectiveModelPolicy(),
+		CanOperate:    def.CanOperate,
 	}
-	provider, err := intelligence.New(intelligence.Config{
-		Provider:     providerName,
-		Model:        model,
-		SystemPrompt: def.SystemPrompt,
-	})
+	resolved, err := r.resolver.Resolve(input)
 	if err != nil {
-		return nil, fmt.Errorf("provider: %w", err)
+		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
+	}
+	cfg := modelconfig.ToIntelligenceConfig(resolved, def.SystemPrompt)
+	provider, err := intelligence.New(cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("provider: %w", err)
 	}
 
 	// Wrap in tracking provider for token accounting.
@@ -487,19 +513,35 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		ConversationID: r.convID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create agent: %w", err)
+		return nil, "", fmt.Errorf("create agent: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s]\n",
-		def.Name, def.Role, providerName, model, agent.ID().Value())
+	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s] [%s]\n",
+		def.Name, def.Role, resolved.Provider, resolved.Model, resolved.AuthMode, agent.ID().Value())
 	r.emit(EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    def.Name,
 		Role:    def.Role,
-		Model:   model,
+		Model:   resolved.Model,
 		ActorID: agent.ID().Value(),
 	})
 
-	return agent, nil
+	// Emit role definition as a first-class event (queryable, versionable).
+	if def.RoleDefinition != nil {
+		origin := "spawned"
+		if def.RoleDefinition.Tier != "" {
+			origin = "bootstrap" // bootstrap agents always have RoleDefinition.Tier set
+		}
+		r.emit(EventTypeRoleDefinition, RoleDefinitionContent{
+			Name:        def.RoleDefinition.Name,
+			Description: def.RoleDefinition.Description,
+			Category:    def.RoleDefinition.Category,
+			Tier:        def.RoleDefinition.Tier,
+			CanOperate:  def.RoleDefinition.CanOperate,
+			Origin:      origin,
+		})
+	}
+
+	return agent, resolved.Model, nil
 }
 
 // emit appends a hive event to the graph. Best-effort.

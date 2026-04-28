@@ -128,10 +128,10 @@ func TestModelForRole(t *testing.T) {
 		role  string
 		want  string
 	}{
-		{"builder", "sonnet"},
-		{"scout", "haiku"},
-		{"critic", "sonnet"},
-		{"unknown", "haiku"},
+		{"builder", "claude-sonnet-4-6"},
+		{"scout", "claude-haiku-4-5-20251001"},
+		{"critic", "claude-sonnet-4-6"},
+		{"unknown", "claude-sonnet-4-6"}, // resolver falls back to system default (sonnet)
 	}
 	for _, tt := range tests {
 		t.Run(tt.role, func(t *testing.T) {
