@@ -37,13 +37,13 @@ import (
 type StopReason string
 
 const (
-	StopQuiescence  StopReason = "quiescence"
-	StopEscalation  StopReason = "escalation"
-	StopHalt        StopReason = "halt"
-	StopBudget      StopReason = "budget"
-	StopError       StopReason = "error"
-	StopCancelled   StopReason = "cancelled"
-	StopTaskDone    StopReason = "task_done"
+	StopQuiescence StopReason = "quiescence"
+	StopEscalation StopReason = "escalation"
+	StopHalt       StopReason = "halt"
+	StopBudget     StopReason = "budget"
+	StopError      StopReason = "error"
+	StopCancelled  StopReason = "cancelled"
+	StopTaskDone   StopReason = "task_done"
 )
 
 // Result is the outcome of a loop run.
@@ -951,28 +951,38 @@ func (l *Loop) autoAssignOpenTask() {
 	if err != nil || len(open) == 0 {
 		return
 	}
-	// Find first task not assigned to anyone.
-	for _, t := range open {
-		summary, sErr := l.config.TaskStore.ListSummaries(100)
-		if sErr != nil {
+	summaries, sErr := l.config.TaskStore.ListSummaries(100)
+	if sErr != nil {
+		return
+	}
+	assignees := make(map[types.EventID]types.ActorID, len(summaries))
+	for _, s := range summaries {
+		assignees[s.ID] = s.Assignee
+	}
+
+	// ListOpen is store-order dependent. Walk from oldest to newest so the
+	// first canonical leaf task gets executed before newer duplicate chains.
+	for i := len(open) - 1; i >= 0; i-- {
+		t := open[i]
+		if assignees[t.ID] != (types.ActorID{}) {
 			continue
 		}
-		for _, s := range summary {
-			if s.ID == t.ID && s.Assignee == (types.ActorID{}) {
-				var causes []types.EventID
-				if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
-					causes = []types.EventID{lastEv}
-				}
-				if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
-					fmt.Printf("  → auto-assigned: %s — %s\n", t.ID.Value(), t.Title)
-					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
-						l.lastCheckpointIter = l.iteration
-					}
-				}
-				return
+		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
+		if childErr != nil || hasChildren {
+			continue
+		}
+		var causes []types.EventID
+		if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+			causes = []types.EventID{lastEv}
+		}
+		if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
+			fmt.Printf("  → auto-assigned canonical leaf: %s — %s\n", t.ID.Value(), t.Title)
+			if l.sink != nil {
+				l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
+				l.lastCheckpointIter = l.iteration
 			}
 		}
+		return
 	}
 }
 
@@ -1149,4 +1159,3 @@ func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 	wg.Wait()
 	return results
 }
-

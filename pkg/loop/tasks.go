@@ -256,6 +256,13 @@ func execTaskDepend(
 	if err := tasks.AddDependency(agentID, taskID, dependsOnID, causes, convID); err != nil {
 		return err
 	}
+	superseded, err := tasks.SupersedeDuplicateDirectChildren(dependsOnID, agentID, causes, convID)
+	if err != nil {
+		return fmt.Errorf("canonicalize child chain: %w", err)
+	}
+	for _, dup := range superseded {
+		fmt.Printf("  → task superseded: %s duplicates canonical %s\n", dup.TaskID.Value(), dup.CanonicalID.Value())
+	}
 	fmt.Printf("  → task dependency: %s depends on %s\n", p.TaskID, p.DependsOn)
 	return nil
 }
