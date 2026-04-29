@@ -745,12 +745,34 @@ func hiveRuntimeSummary(eventType string, content interface{}) string {
 type PipelineAgentSnapshot struct {
 	Role      string
 	Model     string
-	State     string  // e.g. "done", "error"
-	Iteration int     // phase sequence number within the cycle
+	State     string // e.g. "done", "error"
+	Iteration int    // phase sequence number within the cycle
 	CostUSD   float64
 	TokensIn  int
 	TokensOut int
 	Message   string // optional last message or summary
+}
+
+// PipelinePhaseSnapshot captures a completed pipeline phase with explicit
+// workflow metadata for dashboard queries and human status reports.
+type PipelinePhaseSnapshot struct {
+	CycleID       string  `json:"cycle_id"`
+	Phase         string  `json:"phase"`
+	WorkflowStage string  `json:"workflow_stage"`
+	Outcome       string  `json:"outcome"`
+	Repo          string  `json:"repo,omitempty"`
+	TaskID        string  `json:"task_id,omitempty"`
+	TaskTitle     string  `json:"task_title,omitempty"`
+	DurationSecs  float64 `json:"duration_secs,omitempty"`
+	CostUSD       float64 `json:"cost_usd"`
+	InputTokens   int     `json:"input_tokens"`
+	OutputTokens  int     `json:"output_tokens"`
+	BoardOpen     int     `json:"board_open"`
+	ReviseCount   int     `json:"revise_count"`
+	Summary       string  `json:"summary,omitempty"`
+	Error         string  `json:"error,omitempty"`
+	InputRef      string  `json:"input_ref,omitempty"`
+	OutputRef     string  `json:"output_ref,omitempty"`
 }
 
 // WritePipelineSnapshot inserts a single agent snapshot row from pipeline mode.
@@ -788,6 +810,70 @@ func (w *Writer) WritePipelineSnapshot(snap PipelineAgentSnapshot) {
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetry: pipeline snapshot %s: %v\n", snap.Role, err)
+	}
+}
+
+// WritePipelinePhase inserts one structured pipeline phase row and mirrors it
+// into telemetry_event_stream so existing SSE consumers see the transition.
+func (w *Writer) WritePipelinePhase(snap PipelinePhaseSnapshot) {
+	if w.pool == nil {
+		fmt.Fprintf(os.Stderr, "telemetry: WritePipelinePhase called with nil pool — skipping\n")
+		return
+	}
+
+	if snap.CycleID == "" {
+		snap.CycleID = "unknown"
+	}
+	if snap.WorkflowStage == "" {
+		snap.WorkflowStage = "unknown"
+	}
+	if snap.Outcome == "" {
+		snap.Outcome = "unknown"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: pipeline phase begin: %v\n", err)
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO telemetry_pipeline_phases
+			(cycle_id, phase, workflow_stage, outcome, repo, task_id, task_title,
+			 duration_secs, cost_usd, input_tokens, output_tokens, board_open,
+			 revise_count, summary, error, input_ref, output_ref)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		snap.CycleID, snap.Phase, snap.WorkflowStage, snap.Outcome,
+		snap.Repo, snap.TaskID, snap.TaskTitle, snap.DurationSecs, snap.CostUSD,
+		snap.InputTokens, snap.OutputTokens, snap.BoardOpen, snap.ReviseCount,
+		snap.Summary, snap.Error, snap.InputRef, snap.OutputRef,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: pipeline phase %s: %v\n", snap.Phase, err)
+		return
+	}
+
+	raw, _ := json.Marshal(snap)
+	summary := snap.Summary
+	if summary == "" {
+		summary = fmt.Sprintf("%s %s", snap.Phase, snap.Outcome)
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO telemetry_event_stream (event_type, actor_role, summary, raw_content)
+		 VALUES ($1, $2, $3, $4)`,
+		"pipeline.phase.completed", snap.Phase, summary, json.RawMessage(raw),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: pipeline phase event %s: %v\n", snap.Phase, err)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry: pipeline phase commit: %v\n", err)
 	}
 }
 

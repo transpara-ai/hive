@@ -108,20 +108,25 @@ func TestPhaseEventNewFieldsRoundTrip(t *testing.T) {
 	}
 
 	pe := PhaseEvent{
-		Phase:        "builder",
-		Outcome:      "task.done",
-		TaskID:       "task-abc",
-		TaskTitle:    "Add quorum logic",
-		Repo:         "hive",
-		GitHash:      "deadbeef",
-		FilesChanged: 3,
-		ReviseCount:  1,
-		BoardOpen:    4,
-		InputTokens:  200,
-		OutputTokens: 80,
-		DurationSecs: 12.5,
-		CostUSD:      0.005,
-		Timestamp:    "2026-03-28T00:00:00Z",
+		CycleID:       "cycle-20260428T190000Z",
+		Phase:         "builder",
+		WorkflowStage: "emission",
+		Outcome:       "task.done",
+		Summary:       "emission completed with outcome task.done; 4 tasks remain open",
+		TaskID:        "task-abc",
+		TaskTitle:     "Add quorum logic",
+		Repo:          "hive",
+		InputRef:      "work.board:active-task",
+		OutputRef:     "loop/build.md",
+		GitHash:       "deadbeef",
+		FilesChanged:  3,
+		ReviseCount:   1,
+		BoardOpen:     4,
+		InputTokens:   200,
+		OutputTokens:  80,
+		DurationSecs:  12.5,
+		CostUSD:       0.005,
+		Timestamp:     "2026-03-28T00:00:00Z",
 	}
 
 	if err := appendDiagnostic(dir, pe); err != nil {
@@ -142,11 +147,26 @@ func TestPhaseEventNewFieldsRoundTrip(t *testing.T) {
 	if got.TaskID != pe.TaskID {
 		t.Errorf("TaskID: got %q, want %q", got.TaskID, pe.TaskID)
 	}
+	if got.CycleID != pe.CycleID {
+		t.Errorf("CycleID: got %q, want %q", got.CycleID, pe.CycleID)
+	}
+	if got.WorkflowStage != pe.WorkflowStage {
+		t.Errorf("WorkflowStage: got %q, want %q", got.WorkflowStage, pe.WorkflowStage)
+	}
+	if got.Summary != pe.Summary {
+		t.Errorf("Summary: got %q, want %q", got.Summary, pe.Summary)
+	}
 	if got.TaskTitle != pe.TaskTitle {
 		t.Errorf("TaskTitle: got %q, want %q", got.TaskTitle, pe.TaskTitle)
 	}
 	if got.Repo != pe.Repo {
 		t.Errorf("Repo: got %q, want %q", got.Repo, pe.Repo)
+	}
+	if got.InputRef != pe.InputRef {
+		t.Errorf("InputRef: got %q, want %q", got.InputRef, pe.InputRef)
+	}
+	if got.OutputRef != pe.OutputRef {
+		t.Errorf("OutputRef: got %q, want %q", got.OutputRef, pe.OutputRef)
 	}
 	if got.GitHash != pe.GitHash {
 		t.Errorf("GitHash: got %q, want %q", got.GitHash, pe.GitHash)

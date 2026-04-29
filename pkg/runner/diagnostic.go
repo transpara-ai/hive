@@ -13,22 +13,27 @@ import (
 // The hive's nervous system — everything an agent needs to detect
 // inefficiency, stuck tasks, wrong-repo builds, and scope creep.
 type PhaseEvent struct {
+	CycleID       string  `json:"cycle_id,omitempty"` // stable id for one pipeline cycle
 	Phase         string  `json:"phase"`
+	WorkflowStage string  `json:"workflow_stage,omitempty"` // intake, discovery, design, emission, validation, review, reporting, audit
 	Outcome       string  `json:"outcome,omitempty"`        // "success", "failure", "revise", "skip"
 	Error         string  `json:"error,omitempty"`
+	Summary       string  `json:"summary,omitempty"` // human-readable one-line status
 	Preview       string  `json:"preview,omitempty"`
-	Model         string  `json:"model,omitempty"`           // which model was used
-	TaskID        string  `json:"task_id,omitempty"`         // which task was worked
-	TaskTitle     string  `json:"task_title,omitempty"`      // task title for pattern detection
-	Repo          string  `json:"repo,omitempty"`            // which repo was targeted
-	GitHash       string  `json:"git_hash,omitempty"`        // commit produced
-	FilesChanged  int     `json:"files_changed,omitempty"`   // scope indicator
-	ReviseCount   int     `json:"revise_count,omitempty"`    // REVISE loops this cycle
-	BoardOpen     int     `json:"board_open,omitempty"`      // open tasks at this point
+	Model         string  `json:"model,omitempty"`         // which model was used
+	TaskID        string  `json:"task_id,omitempty"`       // which task was worked
+	TaskTitle     string  `json:"task_title,omitempty"`    // task title for pattern detection
+	Repo          string  `json:"repo,omitempty"`          // which repo was targeted
+	InputRef      string  `json:"input_ref,omitempty"`     // stable reference to the phase input
+	OutputRef     string  `json:"output_ref,omitempty"`    // stable reference to the phase output
+	GitHash       string  `json:"git_hash,omitempty"`      // commit produced
+	FilesChanged  int     `json:"files_changed,omitempty"` // scope indicator
+	ReviseCount   int     `json:"revise_count,omitempty"`  // REVISE loops this cycle
+	BoardOpen     int     `json:"board_open,omitempty"`    // open tasks at this point
 	InputTokens   int     `json:"input_tokens,omitempty"`
 	OutputTokens  int     `json:"output_tokens,omitempty"`
-	DurationSecs  float64 `json:"duration_secs,omitempty"`   // wall clock time
-	CostUSD       float64 `json:"cost_usd,omitempty"`        // derived, kept for convenience
+	DurationSecs  float64 `json:"duration_secs,omitempty"` // wall clock time
+	CostUSD       float64 `json:"cost_usd,omitempty"`      // derived, kept for convenience
 	Timestamp     string  `json:"timestamp"`
 }
 

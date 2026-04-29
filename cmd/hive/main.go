@@ -78,12 +78,12 @@ func run() error {
 // ─── Ingest mode ─────────────────────────────────────────────────────
 
 const (
-	ingestTitlePrefix  = "[SPEC] "
-	ingestOp           = "intend"
-	ingestKind         = "task"
-	ingestTimeout      = 30 * time.Second
-	ingestDefaultOrg   = "transpara-ai"
-	ingestDefaultLang  = "go"
+	ingestTitlePrefix = "[SPEC] "
+	ingestOp          = "intend"
+	ingestKind        = "task"
+	ingestTimeout     = 30 * time.Second
+	ingestDefaultOrg  = "transpara-ai"
+	ingestDefaultLang = "go"
 )
 
 // runIngest reads a markdown spec file, creates a repo for it (if needed),
@@ -429,7 +429,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 		RepoPath:   absRepo,
 		HiveDir:    hiveDir,
 		APIClient:  client,
-		APIBase:   apiBase,
+		APIBase:    apiBase,
 		Provider:   provider,
 		RolePrompt: rolePrompt,
 		BudgetUSD:  budget,
@@ -477,7 +477,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 		RepoPath:     absRepo,
 		HiveDir:      hiveDir,
 		APIClient:    client,
-		APIBase:     apiBase,
+		APIBase:      apiBase,
 		Provider:     provider,
 		BudgetUSD:    budget,
 		CouncilTopic: topic,
@@ -590,18 +590,18 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		log.Printf("[%s] provider=%s model=%s", role, providerCfg.Provider, providerCfg.Model)
 
 		return runner.New(runner.Config{
-			Role:       role,
-			AgentID:    agentID,
-			SpaceSlug:  space,
-			RepoPath:   activeRepo,
-			HiveDir:    hiveDir,
-			APIClient:  client,
-		APIBase:   apiBase,
-			Provider:   provider,
-			RolePrompt: runner.LoadRolePrompt(hiveDir, role),
-			BudgetUSD:  budget,
-			OneShot:    true,
-			NoPush:     role == "builder",
+			Role:         role,
+			AgentID:      agentID,
+			SpaceSlug:    space,
+			RepoPath:     activeRepo,
+			HiveDir:      hiveDir,
+			APIClient:    client,
+			APIBase:      apiBase,
+			Provider:     provider,
+			RolePrompt:   runner.LoadRolePrompt(hiveDir, role),
+			BudgetUSD:    budget,
+			OneShot:      true,
+			NoPush:       role == "builder",
 			PRMode:       role == "builder" && prMode,
 			UseWorktrees: role == "builder" && useWorktrees,
 			RepoMap:      repoMap,
@@ -616,6 +616,8 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		return err
 	}
 	sm := runner.NewPipelineStateMachine(smRunner, makeRunner)
+	cycleID := "pipeline-" + time.Now().UTC().Format("20060102T150405Z")
+	sm.SetCycleID(cycleID)
 
 	// Create telemetry writer for pipeline snapshots.
 	var tw *telemetry.Writer
@@ -678,6 +680,30 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		} else {
 			log.Printf("[pipeline] persisted session for %s: %s", role, sid[:8])
 		}
+	})
+	sm.SetPhaseObserver(func(e runner.PhaseEvent) {
+		if tw == nil {
+			return
+		}
+		tw.WritePipelinePhase(telemetry.PipelinePhaseSnapshot{
+			CycleID:       e.CycleID,
+			Phase:         e.Phase,
+			WorkflowStage: e.WorkflowStage,
+			Outcome:       e.Outcome,
+			Repo:          e.Repo,
+			TaskID:        e.TaskID,
+			TaskTitle:     e.TaskTitle,
+			DurationSecs:  e.DurationSecs,
+			CostUSD:       e.CostUSD,
+			InputTokens:   e.InputTokens,
+			OutputTokens:  e.OutputTokens,
+			BoardOpen:     e.BoardOpen,
+			ReviseCount:   e.ReviseCount,
+			Summary:       e.Summary,
+			Error:         e.Error,
+			InputRef:      e.InputRef,
+			OutputRef:     e.OutputRef,
+		})
 	})
 
 	if err := sm.Run(ctx); err != nil {
