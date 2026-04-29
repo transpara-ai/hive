@@ -249,7 +249,7 @@ curl -s http://localhost:8082/health  # → "ok"
 
 # 2. Seed a task for the pipeline to work on
 curl -s -X POST http://localhost:8082/app/hive/op \
-  -H "Authorization: Bearer dev" \
+  -H "Authorization: Bearer ${WORK_API_KEY:-dev}" \
   -H "Content-Type: application/json" \
   -d '{"op":"intend","kind":"task","title":"Build a habit tracker CLI","description":"Go CLI: habit add, habit check, habit streak. SQLite storage. Include tests.","priority":"high"}'
 
@@ -361,7 +361,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "SELECT COUNT(*) as events F
 
 echo ""
 echo "=== Telemetry API ==="
-curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:8080/telemetry/health 2>/dev/null || echo "Not responding"
+curl -s -o /dev/null -w "HTTP %{http_code}" -H "Authorization: Bearer ${WORK_API_KEY:-dev}" http://localhost:8080/telemetry/health 2>/dev/null || echo "Not responding"
 
 echo ""
 echo "=== Agent Count ==="
