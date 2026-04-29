@@ -717,6 +717,12 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
+	if prMode {
+		log.Printf("[pipeline] --pr enabled; skipping final direct commit/push/deploy sweep")
+		log.Printf("[pipeline] ── cycle complete ──")
+		return nil
+	}
+
 	// Push ALL repos that have uncommitted changes — not just activeRepo.
 	// The Builder may have modified any repo via Operate().
 	log.Printf("[pipeline] ── pushing ──")
