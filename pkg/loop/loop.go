@@ -357,7 +357,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// Auto-complete the task after successful Operate.
 			l.completeTask(task, result.Summary)
 			if l.sink != nil {
-				l.sink.OnBoundary(checkpoint.TaskCompleted, l.currentSnapshot())
+				l.captureBoundary(checkpoint.TaskCompleted, response)
 				l.lastCheckpointIter = l.iteration
 			}
 		} else {
@@ -402,7 +402,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 				fmt.Printf("[%s] /budget failed: %v\n", l.agent.Name(), err)
 			} else {
 				if l.sink != nil {
-					l.sink.OnBoundary(checkpoint.BudgetAdjusted, l.currentSnapshot())
+					l.captureBoundary(checkpoint.BudgetAdjusted, response)
 					l.lastCheckpointIter = l.iteration
 				}
 			}
@@ -415,7 +415,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("warning: /gap rejected: %v\n", err)
 				} else {
 					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.GapEmitted, l.currentSnapshot())
+						l.captureBoundary(checkpoint.GapEmitted, response)
 						l.lastCheckpointIter = l.iteration
 					}
 				}
@@ -425,7 +425,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("warning: /directive rejected: %v\n", err)
 				} else {
 					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.DirectiveEmitted, l.currentSnapshot())
+						l.captureBoundary(checkpoint.DirectiveEmitted, response)
 						l.lastCheckpointIter = l.iteration
 					}
 				}
@@ -442,7 +442,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("[%s] /spawn emit failed: %v\n", l.agent.Name(), err)
 				} else {
 					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.RoleProposed, l.currentSnapshot())
+						l.captureBoundary(checkpoint.RoleProposed, response)
 						l.lastCheckpointIter = l.iteration
 					}
 				}
@@ -467,7 +467,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 						l.reviewerState.recordReview(
 							cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
 						if l.sink != nil {
-							l.sink.OnBoundary(checkpoint.ReviewCompleted, l.currentSnapshot())
+							l.captureBoundary(checkpoint.ReviewCompleted, response)
 							l.lastCheckpointIter = l.iteration
 						}
 					}
@@ -482,7 +482,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("[%s] /approve emit failed: %v\n", l.agent.Name(), err)
 				} else {
 					if l.sink != nil {
-						l.sink.OnBoundary(checkpoint.RoleDecided, l.currentSnapshot())
+						l.captureBoundary(checkpoint.RoleDecided, response)
 						l.lastCheckpointIter = l.iteration
 					}
 				}
@@ -744,7 +744,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 	switch sig.Signal {
 	case SignalHalt:
 		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
+			l.captureBoundary(checkpoint.HaltSignal, response)
 			l.lastCheckpointIter = l.iteration
 		}
 		r := l.result(StopHalt, iteration, sig.Reason)
@@ -755,7 +755,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 			fmt.Printf("warning: escalation event failed: %v\n", err)
 		}
 		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
+			l.captureBoundary(checkpoint.TaskBlocked, response)
 			l.lastCheckpointIter = l.iteration
 		}
 		r := l.result(StopEscalation, iteration, sig.Reason)
@@ -780,7 +780,7 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 func (l *Loop) checkResponseText(ctx context.Context, response string, iteration int) *Result {
 	if ContainsSignal(response, "HALT") {
 		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.HaltSignal, l.currentSnapshot())
+			l.captureBoundary(checkpoint.HaltSignal, response)
 			l.lastCheckpointIter = l.iteration
 		}
 		r := l.result(StopHalt, iteration, response)
@@ -788,7 +788,7 @@ func (l *Loop) checkResponseText(ctx context.Context, response string, iteration
 	}
 	if ContainsSignal(response, "ESCALATE") {
 		if l.sink != nil {
-			l.sink.OnBoundary(checkpoint.TaskBlocked, l.currentSnapshot())
+			l.captureBoundary(checkpoint.TaskBlocked, response)
 			l.lastCheckpointIter = l.iteration
 		}
 		if err := l.agent.Escalate(ctx, l.humanID,

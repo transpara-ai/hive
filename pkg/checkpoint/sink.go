@@ -13,6 +13,13 @@ type CheckpointSink interface {
 	OnHeartbeat(snap LoopSnapshot)
 }
 
+// ContextSink is implemented by sinks that can preserve the agent response
+// context that caused a boundary. CheckpointSink remains small for existing
+// test doubles and no-op implementations.
+type ContextSink interface {
+	OnBoundaryWithContext(trigger BoundaryTrigger, snap LoopSnapshot, intent, next, context string)
+}
+
 // HeartbeatEmitter is a function that writes a heartbeat event to the chain.
 // Provided by the loop, which has access to the agent's event factory and signer.
 type HeartbeatEmitter func(snap LoopSnapshot) error
@@ -46,7 +53,13 @@ func (d *DefaultSink) SetHeartbeatEmitter(emitHB HeartbeatEmitter) {
 // is visible on the graph (not just periodic heartbeats).
 // On failure it logs a warning to stderr — it never blocks or panics.
 func (d *DefaultSink) OnBoundary(trigger BoundaryTrigger, snap LoopSnapshot) {
-	thought := FormatCheckpoint(trigger, snap, "", "", "")
+	d.OnBoundaryWithContext(trigger, snap, "", "", "")
+}
+
+// OnBoundaryWithContext formats and captures a checkpoint thought with the
+// parsed response context that led to the boundary.
+func (d *DefaultSink) OnBoundaryWithContext(trigger BoundaryTrigger, snap LoopSnapshot, intent, next, context string) {
+	thought := FormatCheckpoint(trigger, snap, intent, next, context)
 	if err := d.thoughts.Capture(thought); err != nil {
 		fmt.Fprintf(os.Stderr, "[checkpoint] warning: failed to capture boundary thought for %s: %v\n", d.role, err)
 	}
