@@ -64,6 +64,31 @@ func TestPipelineTransitionInvalid(t *testing.T) {
 	}
 }
 
+func TestWorkflowStageMetadata(t *testing.T) {
+	tests := []struct {
+		agent     string
+		stage     string
+		inputRef  string
+		outputRef string
+	}{
+		{"pm", "intake", "work.board:pinned-goal", "work.task:milestone"},
+		{"architect", "design", "loop/scout.md", "work.task:subtasks"},
+		{"builder", "emission", "work.board:active-task", "loop/build.md"},
+		{"critic", "review", "loop/build.md", "loop/critique.md"},
+	}
+	for _, tt := range tests {
+		if got := workflowStageForAgent(tt.agent); got != tt.stage {
+			t.Errorf("workflowStageForAgent(%q) = %q, want %q", tt.agent, got, tt.stage)
+		}
+		if got := phaseInputRef(tt.agent); got != tt.inputRef {
+			t.Errorf("phaseInputRef(%q) = %q, want %q", tt.agent, got, tt.inputRef)
+		}
+		if got := phaseOutputRef(tt.agent, EventTaskDone); got != tt.outputRef {
+			t.Errorf("phaseOutputRef(%q) = %q, want %q", tt.agent, got, tt.outputRef)
+		}
+	}
+}
+
 // newTasksServer creates a test HTTP server that returns tasks in BoardResponse format.
 func newTasksServer(t *testing.T, tasks []api.Node) *httptest.Server {
 	t.Helper()

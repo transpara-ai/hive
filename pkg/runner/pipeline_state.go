@@ -19,8 +19,8 @@ const (
 	StateScouting   PipelineState = "scouting"   // Scout identifying gaps
 	StatePlanning   PipelineState = "planning"   // Architect decomposing
 	StateBuilding   PipelineState = "building"   // Builder working tasks
-	StateTesting    PipelineState = "testing"     // Tester verifying
-	StateReviewing  PipelineState = "reviewing"   // Critic reviewing
+	StateTesting    PipelineState = "testing"    // Tester verifying
+	StateReviewing  PipelineState = "reviewing"  // Critic reviewing
 	StateReflecting PipelineState = "reflecting" // Reflector recording
 	StateAuditing   PipelineState = "auditing"   // Observer checking integrity
 	StateEscalated  PipelineState = "escalated"  // blocked, waiting for human resolution
@@ -30,20 +30,20 @@ const (
 type PipelineEvent string
 
 const (
-	EventBoardClear      PipelineEvent = "board.clear"
-	EventMilestoneCreated PipelineEvent = "milestone.created"
-	EventReportPosted    PipelineEvent = "report.posted"
-	EventTasksCreated    PipelineEvent = "tasks.created"
-	EventTaskDone        PipelineEvent = "task.done"
-	EventTestsPass       PipelineEvent = "tests.pass"
-	EventCritiquePass    PipelineEvent = "critique.pass"
-	EventCritiqueRevise  PipelineEvent = "critique.revise"
-	EventReflectionDone  PipelineEvent = "reflection.done"
-	EventAuditDone       PipelineEvent = "audit.done"
-	EventWorkExists          PipelineEvent = "work.exists"
-	EventNoTasks             PipelineEvent = "no.tasks"
-	EventEscalation          PipelineEvent = "escalation"
-	EventEscalationResolved  PipelineEvent = "escalation.resolved"
+	EventBoardClear         PipelineEvent = "board.clear"
+	EventMilestoneCreated   PipelineEvent = "milestone.created"
+	EventReportPosted       PipelineEvent = "report.posted"
+	EventTasksCreated       PipelineEvent = "tasks.created"
+	EventTaskDone           PipelineEvent = "task.done"
+	EventTestsPass          PipelineEvent = "tests.pass"
+	EventCritiquePass       PipelineEvent = "critique.pass"
+	EventCritiqueRevise     PipelineEvent = "critique.revise"
+	EventReflectionDone     PipelineEvent = "reflection.done"
+	EventAuditDone          PipelineEvent = "audit.done"
+	EventWorkExists         PipelineEvent = "work.exists"
+	EventNoTasks            PipelineEvent = "no.tasks"
+	EventEscalation         PipelineEvent = "escalation"
+	EventEscalationResolved PipelineEvent = "escalation.resolved"
 )
 
 // Transition maps (state, event) → next state.
@@ -54,7 +54,7 @@ var pipelineTransitions = map[PipelineState]map[PipelineEvent]PipelineState{
 	StateDirecting: {
 		EventMilestoneCreated: StateScouting,
 		EventWorkExists:       StateBuilding, // existing work, skip scout/architect
-		EventNoTasks:          StateIdle,      // PM found nothing to do
+		EventNoTasks:          StateIdle,     // PM found nothing to do
 	},
 	StateScouting: {
 		EventReportPosted: StatePlanning,
@@ -109,14 +109,20 @@ type RunnerFactory func(role string) (*Runner, error)
 // metrics, etc.
 type PostPhaseFunc func(role string, provider interface{})
 
+// PhaseObserverFunc receives the structured diagnostic for each completed
+// phase after the next transition event has been inferred.
+type PhaseObserverFunc func(PhaseEvent)
+
 // and transitions invoke agents.
 type PipelineStateMachine struct {
-	state        PipelineState
-	runner       *Runner       // current runner (changes per role)
-	makeRunner   RunnerFactory // creates a fresh runner per role
-	reviseCount  int           // how many REVISE loops this cycle
-	postPhase    PostPhaseFunc // optional callback after each phase
-	worktree     *WorktreeContext // persists across phases for merge-after-PASS
+	state         PipelineState
+	runner        *Runner           // current runner (changes per role)
+	makeRunner    RunnerFactory     // creates a fresh runner per role
+	reviseCount   int               // how many REVISE loops this cycle
+	postPhase     PostPhaseFunc     // optional callback after each phase
+	phaseObserver PhaseObserverFunc // optional structured telemetry hook
+	cycleID       string            // stable id for one pipeline cycle
+	worktree      *WorktreeContext  // persists across phases for merge-after-PASS
 }
 
 // NewPipelineStateMachine creates a state machine with a runner factory.
@@ -130,6 +136,12 @@ func NewPipelineStateMachine(defaultRunner *Runner, factory RunnerFactory) *Pipe
 
 // SetPostPhase registers a callback that runs after each phase completes.
 func (sm *PipelineStateMachine) SetPostPhase(fn PostPhaseFunc) { sm.postPhase = fn }
+
+// SetPhaseObserver registers a callback for structured phase diagnostics.
+func (sm *PipelineStateMachine) SetPhaseObserver(fn PhaseObserverFunc) { sm.phaseObserver = fn }
+
+// SetCycleID tags every phase diagnostic emitted by this run.
+func (sm *PipelineStateMachine) SetCycleID(id string) { sm.cycleID = id }
 
 // CurrentRunner returns the runner for the phase that just completed.
 // Useful in PostPhase callbacks for reading cost or other phase metrics.
@@ -308,15 +320,26 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 				}
 			}
 		}
-		sm.runner.appendDiagnostic(PhaseEvent{
-			Phase:        agent,
-			Outcome:      string(event),
-			Repo:         filepath.Base(sm.runner.cfg.RepoPath),
-			BoardOpen:    boardOpen,
-			ReviseCount:  sm.reviseCount,
-			DurationSecs: phaseDuration.Seconds(),
-			CostUSD:      sm.runner.cost.TotalCostUSD,
-		})
+		diag := PhaseEvent{
+			CycleID:       sm.cycleID,
+			Phase:         agent,
+			WorkflowStage: workflowStageForAgent(agent),
+			Outcome:       string(event),
+			Summary:       phaseSummary(agent, event, boardOpen, sm.reviseCount),
+			Repo:          filepath.Base(sm.runner.cfg.RepoPath),
+			InputRef:      phaseInputRef(agent),
+			OutputRef:     phaseOutputRef(agent, event),
+			BoardOpen:     boardOpen,
+			ReviseCount:   sm.reviseCount,
+			DurationSecs:  phaseDuration.Seconds(),
+			InputTokens:   sm.runner.cost.InputTokens,
+			OutputTokens:  sm.runner.cost.OutputTokens,
+			CostUSD:       sm.runner.cost.TotalCostUSD,
+		}
+		sm.runner.appendDiagnostic(diag)
+		if sm.phaseObserver != nil {
+			sm.phaseObserver(diag)
+		}
 		if _, _, err := sm.Transition(event); err != nil {
 			log.Printf("[pipeline] transition error: %v — returning to idle", err)
 			sm.state = StateIdle
@@ -324,6 +347,94 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func workflowStageForAgent(agent string) string {
+	switch agent {
+	case "pm":
+		return "intake"
+	case "scout":
+		return "discovery"
+	case "architect":
+		return "design"
+	case "builder":
+		return "emission"
+	case "tester":
+		return "validation"
+	case "critic":
+		return "review"
+	case "reflector":
+		return "reporting"
+	case "observer":
+		return "audit"
+	default:
+		return "unknown"
+	}
+}
+
+func phaseInputRef(agent string) string {
+	switch agent {
+	case "pm":
+		return "work.board:pinned-goal"
+	case "scout":
+		return "work.board:milestone"
+	case "architect":
+		return "loop/scout.md"
+	case "builder":
+		return "work.board:active-task"
+	case "tester":
+		return "git.diff"
+	case "critic":
+		return "loop/build.md"
+	case "reflector":
+		return "loop/critique.md"
+	case "observer":
+		return "telemetry+graph"
+	default:
+		return ""
+	}
+}
+
+func phaseOutputRef(agent string, event PipelineEvent) string {
+	if event == EventEscalation {
+		return "work.task:escalated"
+	}
+	switch agent {
+	case "pm":
+		return "work.task:milestone"
+	case "scout":
+		return "loop/scout.md"
+	case "architect":
+		return "work.task:subtasks"
+	case "builder":
+		return "loop/build.md"
+	case "tester":
+		return "test.report"
+	case "critic":
+		return "loop/critique.md"
+	case "reflector":
+		return "loop/reflections.md"
+	case "observer":
+		return "loop/diagnostics.jsonl"
+	default:
+		return ""
+	}
+}
+
+func phaseSummary(agent string, event PipelineEvent, boardOpen, reviseCount int) string {
+	stage := workflowStageForAgent(agent)
+	switch event {
+	case EventNoTasks:
+		return fmt.Sprintf("%s found no actionable work", stage)
+	case EventEscalation:
+		return fmt.Sprintf("%s escalated; human input required", stage)
+	case EventCritiqueRevise:
+		return fmt.Sprintf("review requested revision #%d; %d tasks remain open", reviseCount, boardOpen)
+	case EventCritiquePass:
+		return fmt.Sprintf("review passed; %d tasks remain open", boardOpen)
+	default:
+		return fmt.Sprintf("%s completed with outcome %s; %d tasks remain open", stage, event, boardOpen)
+	}
 }
 
 // inferEvent determines what event just occurred based on the agent that ran.

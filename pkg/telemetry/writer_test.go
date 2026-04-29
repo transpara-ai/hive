@@ -290,6 +290,7 @@ func TestSchemaContainsNewTables(t *testing.T) {
 		"telemetry_role_definitions",
 		"telemetry_layers",
 		"telemetry_phase_agents",
+		"telemetry_pipeline_phases",
 	}
 	for _, table := range tables {
 		if !strings.Contains(schema, table) {
@@ -308,6 +309,9 @@ func TestSchemaContainsNewTables(t *testing.T) {
 	}
 	if !strings.Contains(schema, "CHECK (origin IN") {
 		t.Error("schema missing CHECK constraint on origin column")
+	}
+	if !strings.Contains(schema, "workflow_stage") {
+		t.Error("schema missing workflow_stage column on telemetry_pipeline_phases")
 	}
 }
 

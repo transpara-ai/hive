@@ -58,3 +58,27 @@ type EventStreamEntry struct {
 	Summary    string          `json:"summary"`
 	RawContent json.RawMessage `json:"raw_content"`
 }
+
+// PipelinePhase is one completed pipeline phase with dashboard-friendly
+// workflow metadata.
+type PipelinePhase struct {
+	ID            int64     `json:"id"`
+	RecordedAt    time.Time `json:"recorded_at"`
+	CycleID       string    `json:"cycle_id"`
+	Phase         string    `json:"phase"`
+	WorkflowStage string    `json:"workflow_stage"`
+	Outcome       string    `json:"outcome"`
+	Repo          string    `json:"repo,omitempty"`
+	TaskID        string    `json:"task_id,omitempty"`
+	TaskTitle     string    `json:"task_title,omitempty"`
+	DurationSecs  float64   `json:"duration_secs,omitempty"`
+	CostUSD       float64   `json:"cost_usd"`
+	InputTokens   int       `json:"input_tokens"`
+	OutputTokens  int       `json:"output_tokens"`
+	BoardOpen     int       `json:"board_open"`
+	ReviseCount   int       `json:"revise_count"`
+	Summary       string    `json:"summary,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	InputRef      string    `json:"input_ref,omitempty"`
+	OutputRef     string    `json:"output_ref,omitempty"`
+}

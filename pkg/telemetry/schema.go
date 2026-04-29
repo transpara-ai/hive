@@ -108,6 +108,34 @@ CREATE TABLE IF NOT EXISTS telemetry_event_stream (
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_stream_recent
     ON telemetry_event_stream (recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS telemetry_pipeline_phases (
+    id              BIGSERIAL PRIMARY KEY,
+    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cycle_id        TEXT NOT NULL,
+    phase           TEXT NOT NULL,
+    workflow_stage  TEXT NOT NULL,
+    outcome         TEXT NOT NULL,
+    repo            TEXT,
+    task_id         TEXT,
+    task_title      TEXT,
+    duration_secs   NUMERIC(10,3),
+    cost_usd        NUMERIC(10,6) NOT NULL DEFAULT 0,
+    input_tokens    INT NOT NULL DEFAULT 0,
+    output_tokens   INT NOT NULL DEFAULT 0,
+    board_open      INT NOT NULL DEFAULT 0,
+    revise_count    INT NOT NULL DEFAULT 0,
+    summary         TEXT,
+    error           TEXT,
+    input_ref       TEXT,
+    output_ref      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_pipeline_cycle
+    ON telemetry_pipeline_phases (cycle_id, recorded_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_pipeline_recent
+    ON telemetry_pipeline_phases (recorded_at DESC);
 `
 
 const seedPhases = `
@@ -288,12 +316,12 @@ ON CONFLICT (role) DO UPDATE SET
 // initial seeding. Each entry is idempotent: it only fires when the current
 // DB status matches the expected "before" value, so restarts are safe.
 var phaseUpdates = []struct {
-	phase  int
-	from   string
-	status string
-	startedAt string
+	phase       int
+	from        string
+	status      string
+	startedAt   string
 	completedAt string
-	notes  string
+	notes       string
 }{
 	{
 		phase:       2,
