@@ -94,6 +94,9 @@ type Config struct {
 	// ConvID is the conversation ID for task operations.
 	ConvID types.ConversationID
 
+	// OnTaskCompleted is called after TaskStore.Complete succeeds. Optional.
+	OnTaskCompleted func(ctx context.Context, task work.Task, summary string)
+
 	// CanOperate indicates this agent has filesystem access.
 	// When true and the agent has assigned tasks, the loop calls
 	// Operate() instead of Reason() for implementation work.
@@ -355,7 +358,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 
 			// Auto-complete the task after successful Operate.
-			l.completeTask(task, result.Summary)
+			l.completeTask(ctx, task, result.Summary)
 			if l.sink != nil {
 				l.captureBoundary(checkpoint.TaskCompleted, response)
 				l.lastCheckpointIter = l.iteration
@@ -1080,7 +1083,7 @@ func buildOperateArtifactBody(repoPath string) string {
 }
 
 // completeTask marks a task as completed in the task store. Best-effort.
-func (l *Loop) completeTask(task work.Task, summary string) {
+func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string) {
 	if l.config.TaskStore == nil {
 		return
 	}
@@ -1092,6 +1095,9 @@ func (l *Loop) completeTask(task work.Task, summary string) {
 		fmt.Printf("warning: task complete failed: %v\n", err)
 	} else {
 		fmt.Printf("  → task completed: %s — %s\n", task.ID.Value(), task.Title)
+		if l.config.OnTaskCompleted != nil {
+			l.config.OnTaskCompleted(ctx, task, summary)
+		}
 	}
 }
 
