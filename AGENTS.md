@@ -15,6 +15,7 @@ Hive runtime and orchestration layer: a trust-gated civilisation of agents built
 - Guardian or integrity-watch behavior must remain outside normal hierarchy suppression paths.
 - Agents coordinate through events and tasks; avoid hidden side channels.
 - Do not weaken trust, authority, identity, budget, or observability invariants without explicit approval.
+- Do not add application browser UI to Hive. Emit diagnostics, events, status, and projections for Site to render under `/ops/*`.
 - Do not push to `upstream`; `origin` is the writable fork.
 
 ## Exit Criteria

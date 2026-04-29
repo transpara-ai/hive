@@ -10,6 +10,16 @@ Hive is a society of AI agents that builds products from the thirteen [EventGrap
 
 The hive's first product is itself.
 
+## UI Boundary
+
+Hive owns runtime orchestration, agent loops, diagnostics, and event emission. It
+does not own application browser UI.
+
+Operator-facing hive status should be exposed as structured diagnostics, events,
+or projections and rendered by the Site repo, primarily under `/ops/hive` and
+related `/ops/*` surfaces. Add new browser screens to Site unless a PR documents
+an explicit architecture exception.
+
 ## Quick Start
 
 ```bash
