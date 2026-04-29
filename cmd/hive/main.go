@@ -1151,6 +1151,12 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		go pruner.Start(ctx)
 	}
 
+	apiKey := os.Getenv("LOVYOU_API_KEY")
+	var siteClient *api.Client
+	if apiKey != "" {
+		siteClient = api.New(apiBase, apiKey)
+	}
+
 	rt, err := hive.New(ctx, hive.Config{
 		Store:           s,
 		Actors:          actors,
@@ -1161,6 +1167,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		CatalogPath:     catalogPath,
 		Loop:            loop,
 		TelemetryWriter: tw,
+		APIClient:       siteClient,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: %w", err)
@@ -1189,7 +1196,6 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 	// path (site restart, network partition, hive downtime) and replays
 	// them through the same dispatcher. Requires postgres + an API key —
 	// otherwise the ticker can't store a watermark or talk to the site.
-	apiKey := os.Getenv("LOVYOU_API_KEY")
 	if pool != nil && apiKey != "" && space != "" {
 		if err := reconciliation.EnsureTables(ctx, pool); err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: reconciliation tables: %v (continuing without reconciliation)\n", err)
