@@ -117,35 +117,7 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 		if len(buildCauses) > 0 {
 			causesSuffix = fmt.Sprintf(`,"causes":["%s"]`, buildCauses[0])
 		}
-		instruction := fmt.Sprintf(`You are the Critic. Review this diff and decide: PASS or REVISE.
-
-## Diff
-%s
-
-## Your Tools
-- Use knowledge.search to check relevant invariants and conventions
-- Use knowledge.get to read the CLAUDE.md or coding standards
-- Use Read/Grep to verify the change in context
-- Read loop/scout.md to find the Scout's open gap
-- Read loop/build.md to check what the Builder claims was built
-
-## Rules
-- PASS if the code is correct, tested, and follows conventions
-- REVISE if there are bugs, missing tests, security issues, or invariant violations
-- Check Invariant 11 (IDs not names) and Invariant 12 (VERIFIED — tests exist)
-
-## Required Checks (Lessons 168/171/200)
-1. **Scout gap cross-reference:** Read loop/scout.md. Read loop/build.md. If build.md does not explicitly reference the Scout's open gap, issue VERDICT: REVISE.
-2. **Degenerate iteration:** If ALL changed files in the diff are under loop/ with no product code changes, issue VERDICT: REVISE.
-
-## Output
-End your response with exactly one of:
-VERDICT: PASS
-VERDICT: REVISE
-
-If REVISE, create a fix task (causes links to the build being reviewed — Invariant 2: CAUSALITY):
-curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"Fix: <subject>","description":"<what needs fixing>","priority":"high"%s}'
-`, diff, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug, causesSuffix)
+		instruction := buildCriticInstruction(diff, apiKey, r.cfg.APIBase, r.cfg.SpaceSlug, causesSuffix)
 
 		result, err := op.Operate(ctx, decision.OperateTask{
 			WorkDir:     r.cfg.RepoPath,
@@ -227,6 +199,38 @@ func (r *Runner) getCommitDiff(hash string) (string, error) {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
 	return string(out), nil
+}
+
+func buildCriticInstruction(diff, apiKey, apiBase, spaceSlug, causesSuffix string) string {
+	return fmt.Sprintf(`You are the Critic. Review this diff and decide: PASS or REVISE.
+
+## Diff
+%s
+
+## Your Tools
+- Use knowledge.search to check relevant invariants and conventions
+- Use knowledge.get to read the CLAUDE.md or coding standards
+- Use Read/Grep to verify the change in context
+- Read loop/scout.md to find the Scout's open gap
+- Read loop/build.md to check what the Builder claims was built
+
+## Rules
+- PASS if the code is correct, tested, and follows conventions
+- REVISE if there are bugs, missing tests, security issues, or invariant violations
+- Check Invariant 11 (IDs not names) and Invariant 12 (VERIFIED — tests exist)
+
+## Required Checks (Lessons 168/171/200)
+1. **Scout gap cross-reference:** Read loop/scout.md. Read loop/build.md. If build.md does not explicitly reference the Scout's open gap, issue VERDICT: REVISE.
+2. **Degenerate iteration:** If ALL changed files in the diff are under loop/ with no product code changes, issue VERDICT: REVISE.
+
+## Output
+End your response with exactly one of:
+VERDICT: PASS
+VERDICT: REVISE
+
+If REVISE, create a fix task (causes links to the build being reviewed — Invariant 2: CAUSALITY):
+curl -s -X POST -H "Authorization: Bearer %s" -H "Content-Type: application/json" -H "Accept: application/json" "%s/app/%s/op" -d '{"op":"intend","kind":"task","title":"Fix: <subject>","description":"<what needs fixing>","priority":"high"%s}'
+`, diff, apiKey, apiBase, spaceSlug, causesSuffix)
 }
 
 func buildReviewPrompt(c commit, diff, sharedCtx, scoutContent, buildContent string) string {

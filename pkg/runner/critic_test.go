@@ -112,6 +112,58 @@ func TestBuildReviewPromptWithArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildCriticInstructionWithAPIKeyAndCauses(t *testing.T) {
+	instr := buildCriticInstruction(
+		"+ new code",
+		"test-api-key-12345",
+		"https://api.test.local",
+		"myspace",
+		`,"causes":["build-node-999"]`,
+	)
+
+	for _, want := range []string{
+		"Authorization: Bearer test-api-key-12345",
+		"https://api.test.local/app/myspace/op",
+		`"causes":["build-node-999"]`,
+		`"op":"intend"`,
+		"Scout gap cross-reference",
+		"Degenerate iteration",
+		"VERDICT: REVISE",
+	} {
+		if !contains(instr, want) {
+			t.Errorf("instruction missing %q", want)
+		}
+	}
+}
+
+func TestBuildCriticInstructionWithoutAPIKeyKeepsReviewContract(t *testing.T) {
+	instr := buildCriticInstruction("+ test", "", "https://api.test", "space", "")
+
+	for _, want := range []string{
+		"You are the Critic",
+		"## Diff",
+		"## Your Tools",
+		"Scout gap cross-reference",
+		"Degenerate iteration",
+		"VERDICT: PASS",
+		"VERDICT: REVISE",
+	} {
+		if !contains(instr, want) {
+			t.Errorf("instruction missing %q", want)
+		}
+	}
+}
+
+func TestBuildCriticInstructionEmptyDiff(t *testing.T) {
+	instr := buildCriticInstruction("", "key", "https://api.test", "space", "")
+	if !contains(instr, "You are the Critic") {
+		t.Error("instruction malformed for empty diff")
+	}
+	if !contains(instr, "## Diff") {
+		t.Error("instruction missing diff section for empty diff")
+	}
+}
+
 func TestIsDegenerateIteration(t *testing.T) {
 	tests := []struct {
 		name   string
