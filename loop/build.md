@@ -1,45 +1,57 @@
-# Build: Auth: ship email magic link for Workspace-blocked users
+# Build: Investigate refinery gaps: O&M Control Center: Gas Turbine 2 Performance Analysis
 
-- **Commit:** 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-- **Subject:** [hive:builder] Auth: ship email magic link for Workspace-blocked users
-- **Cost:** $0.6489
-- **Timestamp:** 2026-03-29T14:53:18Z
+- **Commit:** b543b252f01db303a748f11b03e5bef558cbb5a6
+- **Subject:** [hive:builder] Investigate refinery gaps: O&M Control Center: Gas Turbine 2 Performance Analysis
+- **Cost:** $0.5952
+- **Timestamp:** 2026-04-29T12:46:30Z
 
 ## Task
 
-Corporate Google Workspace users (e.g. transpara.com) cannot log in because their admin blocks OAuth app approvals. Email magic link is the fallback. This is user-blocking.
+## Investigation Trigger
+This task was spawned because the parent refinery item has missing or insufficient gates: Definition of Done, Test Plan, Acceptance Criteria.
 
-**Target repo:** site
+## Parent Spec
+Title: O&M Control Center: Gas Turbine 2 Performance Analysis
+State at spawn: requirement.investigating
 
-**TASK 1 � Magic link request handler**
-Add `POST /auth/magic-link` in `site/handlers/auth.go` (or ne...
+## Required ...
 
 ## What Was Built
 
-Build and tests pass. Here's what was done:
+`★ Insight ─────────────────────────────────────`
+The investigation revealed a two-layer gap: the spec is missing its gates (DoD/AC/Test Plan), AND the underlying system is missing a `gas_turbine` profile in the Transpara MCP catalog. The profile absence means no scored analysis is possible — the surface-level spec gap masks a deeper data model gap. Both must be resolved before implementation can begin.
+`─────────────────────────────────────────────────`
 
-**Already implemented (prior iteration):**
-- `magic_link_tokens` DB table in `migrate()`
-- `POST /auth/magic-link/request` — generates token, stores hash, logs link
-- `GET /auth/magic-link/verify` — validates token, creates session, redirects to `/app`
-- Full test suite (happy path, expired, used, invalid, idempotent)
+## Summary
 
-**Added this iteration (`auth/auth.go`):**
-- `GET /auth/google` — new route for the OAuth redirect (renamed from `handleLogin` to `handleGoogleOAuth`)
-- `GET /auth/login` — new login page with Google button + collapsible "Use email instead" section; email form posts to `/auth/magic-link/request` with a JS-enhanced inline confirmation ("Check your email") on success
+**Investigation complete — no code changes needed.**
 
-ACTION: DONE
+**Key finding:** The Transpara MCP profile catalog has no `gas_turbine` profile. All performance scoring tools (`explain_entity_performance`, `rank_entities`, `detect_regressions`) require a `profile_id` — without one, GT-2 analysis can only show raw KPI values with no deviation scoring, peer comparison, or regression detection.
+
+**Deliverables written to `loop/investigation-o-m-control-gas-turbine-2.md`:**
+
+| Gate | Status |
+|---|---|
+| Definition of Done | Drafted — 8 items covering profile registration, dashboard render, alarm state, tool correctness |
+| Acceptance Criteria | Drafted — 8 ACs covering load time, profile correctness, KPI history, attention detection, peer comparison, regression, security |
+| Test Plan | Drafted — 8 phases: profile registration → entity existence → KPI coverage → performance explanation → attention detection → regression injection → dashboard render → alarm state |
+
+**6 ambiguities returned to Clarify** (cannot be guessed):
+1. Which plant/site does GT-2 belong to? (root_id unknown — blocks all MCP tool calls)
+2. Nameplate data (rated capacity, design heat rate) — required to calibrate the profile
+3. Refresh frequency (real-time vs. near-real-time vs. batch)
+4. Primary user persona (O&M engineer vs. plant manager vs. 
 
 ## Diff Stat
 
 ```
-commit 2dcb0264f37bdb4249b132b1f00f4760d6cf6734
-Author: Matt Searles <matt.s.searles@gmail.com>
-Date:   Mon Mar 30 01:53:18 2026 +1100
+commit b543b252f01db303a748f11b03e5bef558cbb5a6
+Author: hive <hive@lovyou.ai>
+Date:   Wed Apr 29 13:46:30 2026 +0100
 
-    [hive:builder] Auth: ship email magic link for Workspace-blocked users
+    [hive:builder] Investigate refinery gaps: O&M Control Center: Gas Turbine 2 Performance Analysis
 
- auth/auth.go  | 93 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
- loop/build.md | 40 +++++++++++++++++--------
- 2 files changed, 120 insertions(+), 13 deletions(-)
+ loop/build.md                                   |  65 ++++-----
+ loop/investigation-o-m-control-gas-turbine-2.md | 176 ++++++++++++++++++++++++
+ 2 files changed, 210 insertions(+), 31 deletions(-)
 ```

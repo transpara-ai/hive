@@ -4,13 +4,13 @@
       "args": [
         "run",
         "-buildvcs=false",
-        "/home/transpara/transpara-ai/repos/hive/cmd/mcp-knowledge"
+        "/Transpara/transpara-ai/data/repos/hive/cmd/mcp-knowledge"
       ],
       "command": "/snap/go/11127/bin/go",
       "env": {
-        "HIVE_DIR": "/home/transpara/transpara-ai/repos/hive",
-        "SITE_DIR": "/home/transpara/transpara-ai/repos/site",
-        "WORKSPACE": "/home/transpara/transpara-ai/repos"
+        "HIVE_DIR": "/Transpara/transpara-ai/data/repos/hive",
+        "SITE_DIR": "/Transpara/transpara-ai/data/repos/site",
+        "WORKSPACE": "/Transpara/transpara-ai/data/repos"
       }
     }
   }

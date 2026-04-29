@@ -5004,3 +5004,43 @@ Zooming out: the 211→212→213→408 sequence is now a confirmed case study in
 **FORMALIZE**
 
 **Lesson 216** — Structural process fixes are cumulative and eventually convergent. Lesson 211 named the selection law (friction minimization). Lesson 212 closed "multiple tasks in scope." Lesson 213 closed "forward references in prose." No single fix changed the outcome. Together, they converged to correct selection in iteration 408. The implication: when a loop phase fails repeatedly, the correct response is not repetition or stronger emphasis — it is structural analysis: identify the smallest structural change that closes the specific failure mode, apply it, and expect convergence after N≥1 iterations. Meta-work on the loop compounds across iterations; its ROI is delayed but real.
+
+---
+
+## Iteration 409 — Gas Turbine 2 investigation: two-layer gap found, 6 ambiguities returned to Clarify
+
+**Scout gap:** Refinery spec "O&M Control Center: Gas Turbine 2 Performance Analysis" missing Definition of Done, Test Plan, and Acceptance Criteria
+**Builder task:** Investigate and draft missing gates; identify blockers before implementation
+**Critic verdict:** N/A — critique.md is from iteration 408 (assertClaim); no Critic output exists for this iteration
+
+---
+
+**COVER**
+
+The Builder ran a full investigation of the Gas Turbine 2 spec and found a two-layer gap. The surface gap is the missing gates (DoD/AC/Test Plan) — all three were drafted and written to `loop/investigation-o-m-control-gas-turbine-2.md`. The deeper gap is structural: the Transpara MCP catalog has no `gas_turbine` profile. Every performance scoring tool (`explain_entity_performance`, `rank_entities`, `detect_regressions`) requires a `profile_id`. Without one, GT-2 analysis can only surface raw KPI values with no deviation scoring, peer comparison, or regression detection. No code was written — correctly so. Six ambiguities were returned to Clarify: root_id/plant-site affiliation, nameplate data (rated capacity, design heat rate), refresh frequency, primary user persona, and two others.
+
+The critique.md is stale: it reflects the iteration 408 assertClaim PASS verdict, not the current iteration. No Critic phase ran against this iteration's build artifacts.
+
+---
+
+**BLIND**
+
+**Artifact mismatch undetected.** critique.md carries iteration 408 content. The loop has no guard that checks whether critique.md was updated in the same commit as build.md. A Reflector reading both files without timestamps would conclude the Critic approved the GT-2 investigation — it did not. This creates a false integrity signal in the loop audit trail: every iteration that forgets to run the Critic still shows a prior PASS in critique.md.
+
+**Ambiguity return has no resolution gate.** The 6 ambiguities are written to an investigation document, but there is no mechanism that blocks a future Builder from selecting the GT-2 task before those questions are answered. Questions sent to Clarify enter a document and disappear. A Builder reading only Scout's next task assignment will pick up the spec, find no root_id, fail all MCP tool calls, and produce a degenerate build. The investigation correctly identified the blockers; the loop has no structural way to enforce those blockers.
+
+**Profile gap is a data model precondition, not a task.** The missing `gas_turbine` profile cannot be created by a Builder writing application code — it requires configuration or a separate registration step. This type of external precondition (infra/data model) is not currently distinguished from implementation preconditions in Scout's task queue.
+
+---
+
+**ZOOM**
+
+Zooming out: the Builder correctly chose not to write code. Investigation-only output is the right response when preconditions are unmet. The two-layer gap finding (spec gaps + profile gap) is well-reasoned and actionable. The $0.5952 cost is appropriate for a full MCP-assisted investigation.
+
+The deeper pattern: investigation tasks expose preconditions that the loop has no enforcement mechanism for. The Scout/Builder cycle assumes that once DoD and AC are drafted, the task is implementable. This assumption fails when external systems (MCP profiles, plant configurations, missing root_ids) must be in place first. Investigations that return ambiguities need a different task state — not "ready for Builder" but "blocked on Clarify."
+
+---
+
+**FORMALIZE**
+
+**Lesson 217** — Investigation tasks that surface external preconditions must gate Builder selection. An investigation that produces DoD/AC/Test Plan artifacts but identifies 6 unresolvable ambiguities (plant site, nameplate data, root_id) is not ready for implementation. The current loop treats investigation completion as a green light for Builder selection; it should treat returned ambiguities as a BLOCKED state that prevents Builder pickup until Clarify resolves them. Without this gate, the Builder will attempt implementation against an underspecified task, fail all tool calls that require a root_id or profile_id, and produce a degenerate build. The fix is structural: define a `requirement.blocked` state (or equivalent) and have Scout exclude tasks in that state from its selection set.
