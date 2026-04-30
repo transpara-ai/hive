@@ -53,7 +53,9 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 
+	"github.com/transpara-ai/hive/pkg/hive"
 	"github.com/transpara-ai/hive/pkg/social"
 )
 
@@ -383,6 +385,11 @@ func run() error {
 		defer pool.Close()
 	}
 
+	// Postgres stores deserialize event content while opening and reading the
+	// shared graph. The social review server may encounter pre-existing Hive or
+	// Work events before it writes its own social events.
+	registerSharedEventTypes()
+
 	s, err := openStore(ctx, pool)
 	if err != nil {
 		return fmt.Errorf("store: %w", err)
@@ -407,10 +414,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("register human: %w", err)
 	}
-
-	// Register social event type unmarshalers before any store reads —
-	// Head() deserializes the latest event which may be a social type.
-	social.RegisterEventTypes()
 
 	// Bootstrap the event graph if it has no genesis event.
 	if err := bootstrapGraph(s, humanID); err != nil {
@@ -1148,6 +1151,12 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 // --- Infrastructure helpers (mirror of cmd/market-server patterns) ---
+
+func registerSharedEventTypes() {
+	hive.RegisterEventTypes()
+	work.RegisterEventTypes()
+	social.RegisterEventTypes()
+}
 
 func openStore(ctx context.Context, pool *pgxpool.Pool) (store.Store, error) {
 	if pool == nil {
