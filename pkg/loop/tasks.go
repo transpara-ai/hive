@@ -102,12 +102,12 @@ func executeTaskCommands(
 			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID)
 		case "complete":
 			err = execTaskComplete(cmd.Payload, tasks, agentID, causes, convID)
-			case "comment":
-				err = execTaskComment(cmd.Payload, tasks, agentID, causes, convID)
-			case "artifact":
-				err = execTaskArtifact(cmd.Payload, tasks, agentID, causes, convID)
-			case "depend":
-				err = execTaskDepend(cmd.Payload, tasks, agentID, causes, convID)
+		case "comment":
+			err = execTaskComment(cmd.Payload, tasks, agentID, causes, convID)
+		case "artifact":
+			err = execTaskArtifact(cmd.Payload, tasks, agentID, causes, convID)
+		case "depend":
+			err = execTaskDepend(cmd.Payload, tasks, agentID, causes, convID)
 		}
 		if err != nil {
 			fmt.Printf("warning: /task %s failed: %v\n", cmd.Action, err)

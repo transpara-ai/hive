@@ -7,7 +7,6 @@ import (
 	"github.com/transpara-ai/hive/pkg/modelconfig"
 )
 
-
 // Tier constants for role classification.
 const (
 	TierA = "A" // Bootstrap / foundation agents
@@ -180,8 +179,8 @@ func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
 			Tier:        TierA,
 			CanOperate:  false,
 			ModelPolicy: &modelconfig.RoleModelPolicy{
-				PreferredTier:    modelconfig.TierExecution,
-				AllowDowngrade:   true,
+				PreferredTier:     modelconfig.TierExecution,
+				AllowDowngrade:    true,
 				SelectionStrategy: "balanced",
 			},
 			MaxIterations:  500,
@@ -195,8 +194,8 @@ func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
 			Tier:        TierA,
 			CanOperate:  false,
 			ModelPolicy: &modelconfig.RoleModelPolicy{
-				PreferredTier:    modelconfig.TierVolume,
-				AllowDowngrade:   true,
+				PreferredTier:     modelconfig.TierVolume,
+				AllowDowngrade:    true,
 				SelectionStrategy: "lowest_cost",
 			},
 			MaxIterations:  150,
@@ -210,8 +209,8 @@ func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
 			Tier:        TierA,
 			CanOperate:  false,
 			ModelPolicy: &modelconfig.RoleModelPolicy{
-				PreferredTier:    modelconfig.TierVolume,
-				AllowDowngrade:   true,
+				PreferredTier:     modelconfig.TierVolume,
+				AllowDowngrade:    true,
 				SelectionStrategy: "lowest_cost",
 			},
 			MaxIterations:  150,
@@ -240,7 +239,7 @@ func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
 			Tier:        TierA,
 			CanOperate:  false,
 			ModelPolicy: &modelconfig.RoleModelPolicy{
-				PreferredTier:    modelconfig.TierExecution,
+				PreferredTier:     modelconfig.TierExecution,
 				SelectionStrategy: "balanced",
 			},
 			MaxIterations:  100,
@@ -373,7 +372,7 @@ malformed insights (missing required fields), any source emitting more than
 10 insights per hour (flooding), or contradictory active insights.
 `),
 			WatchPatterns: []string{}, // empty = subscribe to all ("*")
-			MaxIterations: 500,       // Guardian runs for the full session
+			MaxIterations: 500,        // Guardian runs for the full session
 		},
 		{
 			Name:           "sysmon",
@@ -644,7 +643,7 @@ observe contradicting evidence.
 			Name:           "strategist",
 			Role:           "strategist",
 			RoleDefinition: roles["strategist"],
-			MaxIterations: 300,
+			MaxIterations:  300,
 			SystemPrompt: mission(`== ROLE: STRATEGIST ==
 You are the Strategist — you own the big picture and create high-level work.
 
@@ -694,7 +693,7 @@ observe contradicting evidence.
 			Name:           "planner",
 			Role:           "planner",
 			RoleDefinition: roles["planner"],
-			MaxIterations: 300,
+			MaxIterations:  300,
 			SystemPrompt: mission(`== ROLE: PLANNER ==
 You are the Planner — you decompose high-level tasks into implementable subtasks.
 
@@ -754,7 +753,7 @@ observe contradicting evidence.
 			Name:           "implementer",
 			Role:           "implementer",
 			RoleDefinition: roles["implementer"],
-			CanOperate: true,
+			CanOperate:     true,
 			SystemPrompt: mission(`== ROLE: IMPLEMENTER ==
 You are the Implementer — you write code, run tests, and get things done.
 
