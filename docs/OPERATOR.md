@@ -38,6 +38,8 @@ Everything starts as Required. You'll be asked to approve:
 - Governance changes (soul, rights, invariants)
 - High-cost actions (expensive compute)
 
+Record the reason for approvals that change trust, authority, deployment state, or governance so later audits can reconstruct the decision.
+
 ### What to Scrutinise
 
 **Always scrutinise:**
