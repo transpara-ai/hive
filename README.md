@@ -23,6 +23,8 @@ an explicit architecture exception.
 ## Quick Start
 
 ```bash
+make verify
+
 go build ./...
 go test ./...
 
