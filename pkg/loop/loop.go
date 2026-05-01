@@ -91,6 +91,10 @@ type Config struct {
 	// create, assign, complete, and comment on tasks through the work graph.
 	TaskStore *work.TaskStore
 
+	// PhaseGateStore enables /phase gate, approve, and reject commands through
+	// the work graph.
+	PhaseGateStore *work.PhaseGateStore
+
 	// ConvID is the conversation ID for task operations.
 	ConvID types.ConversationID
 
@@ -387,8 +391,9 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 		}
 
-		// 2.5. PROCESS task commands from the response.
+		// 2.5. PROCESS work graph commands from the response.
 		l.processTaskCommands(response)
+		l.processPhaseCommands(response)
 
 		// 2.6. PROCESS /health command from the response.
 		if cmd := parseHealthCommand(response); cmd != nil {
@@ -940,6 +945,28 @@ func (l *Loop) processTaskCommands(response string) {
 	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID)
 	if executed > 0 {
 		fmt.Printf("[%s] executed %d/%d task commands\n", l.agent.Name(), executed, len(commands))
+	}
+}
+
+// processPhaseCommands extracts and executes /phase commands from the response.
+func (l *Loop) processPhaseCommands(response string) {
+	if l.config.PhaseGateStore == nil {
+		return
+	}
+
+	commands := parsePhaseCommands(response)
+	if len(commands) == 0 {
+		return
+	}
+
+	var causes []types.EventID
+	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+		causes = []types.EventID{lastEv}
+	}
+
+	executed := executePhaseCommands(commands, l.config.PhaseGateStore, l.agent.ID(), causes, l.config.ConvID)
+	if executed > 0 {
+		fmt.Printf("[%s] executed %d/%d phase commands\n", l.agent.Name(), executed, len(commands))
 	}
 }
 

@@ -294,6 +294,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		Task:           "", // dynamic agents have no seed task
 
 		TaskStore:       r.tasks,
+		PhaseGateStore:  r.phaseGates,
 		ConvID:          r.convID,
 		OnTaskCompleted: r.mirrorTaskCompletion,
 		CanOperate:      false,
