@@ -971,12 +971,16 @@ func (l *Loop) autoAssignOpenTask() {
 			continue
 		}
 		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
-		if childErr != nil || hasChildren {
-			continue
-		}
-		var causes []types.EventID
-		if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
-			causes = []types.EventID{lastEv}
+			if childErr != nil || hasChildren {
+				continue
+			}
+			readiness, readyErr := l.config.TaskStore.Readiness(t.ID)
+			if readyErr != nil || !readiness.Ready {
+				continue
+			}
+			var causes []types.EventID
+			if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+				causes = []types.EventID{lastEv}
 		}
 		if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
 			fmt.Printf("  → auto-assigned canonical leaf: %s — %s\n", t.ID.Value(), t.Title)

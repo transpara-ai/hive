@@ -152,10 +152,13 @@ Task commands (one per line, JSON payload):
 /task assign {"task_id": "...", "assignee": "self"}
 /task complete {"task_id": "...", "summary": "..."}
 /task comment {"task_id": "...", "body": "..."}
+/task artifact {"task_id": "...", "label": "definition_of_done|acceptance_criteria|test_plan", "media_type": "text/markdown", "body": "..."}
 /task depend {"task_id": "...", "depends_on": "..."}
 
 Priority values: low, medium, high, critical
 Use "self" as assignee to assign to yourself.
+Implementation tasks cannot be assigned until they have these task artifacts:
+definition_of_done, acceptance_criteria, and test_plan.
 
 CRITICAL — TASK IDs ARE UUIDs:
 The task list shows IDs in this format: [status] 019d6a45-4359-746b-98cb-191007acc33f: Title
@@ -702,15 +705,17 @@ CRITICAL — WHAT TO DECOMPOSE:
 - NEVER re-decompose a task that already has subtasks depending on it
 - If a task is already small enough to implement in one Operate call, leave it alone
 
-CRITICAL — TWO-PHASE DECOMPOSITION (one phase per response):
-Phase 1 — CREATE ONLY: emit all /task create commands for your subtasks. Nothing else.
-  The system assigns UUIDs after this response is processed.
-Phase 2 — DEPEND ONLY: on the NEXT iteration the new tasks appear in your observation
-  with their real UUIDs. Use those UUIDs to emit /task depend commands.
+	CRITICAL — TWO-PHASE DECOMPOSITION (one phase per response):
+	Phase 1 — CREATE ONLY: emit all /task create commands for your subtasks. Nothing else.
+	  The system assigns UUIDs after this response is processed.
+	Phase 2 — GATE + DEPEND: on the NEXT iteration the new tasks appear in your observation
+	  with their real UUIDs. For each implementation subtask, emit three /task artifact
+	  commands using labels definition_of_done, acceptance_criteria, and test_plan, then
+	  emit /task depend with the subtask UUID.
 
-NEVER emit /task depend or /task assign for a task you are creating in the same response.
-The UUID does not exist until after the response is processed — any placeholder you write
-will fail. One response = create. Next response = depend.
+	NEVER emit /task artifact, /task depend, or /task assign for a task you are creating in the same response.
+	The UUID does not exist until after the response is processed — any placeholder you write
+	will fail. One response = create. Next response = depend.
 
 Task IDs are UUIDs (e.g., 019d6a45-4359-746b-98cb-191007acc33f). Only use IDs that
 already appear in your observation (task list). Never invent or guess a task_id.
@@ -720,13 +725,17 @@ already appear in your observation (task list). Never invent or guess a task_id.
   Wrong:   /task depend {"task_id": "<parent-uuid>", "depends_on": "<parent-uuid>"}
 task_id and depends_on MUST be different UUIDs. A task cannot depend on itself.
 
-When you find a task worth decomposing:
-1. Analyze what it requires
-2. Phase 1 response: emit /task create for each subtask only
-3. Phase 2 response: for each subtask, emit /task depend with task_id=<subtask-uuid> and depends_on=<parent-uuid>
-4. Each subtask should specify: which files to create/modify, what to implement, how to test
+	When you find a task worth decomposing:
+	1. Analyze what it requires
+	2. Phase 1 response: emit /task create for each subtask only
+	3. Phase 2 response: for each subtask, attach readiness gates:
+	   /task artifact {"task_id":"<subtask-uuid>","label":"definition_of_done","media_type":"text/markdown","body":"..."}
+	   /task artifact {"task_id":"<subtask-uuid>","label":"acceptance_criteria","media_type":"text/markdown","body":"..."}
+	   /task artifact {"task_id":"<subtask-uuid>","label":"test_plan","media_type":"text/markdown","body":"..."}
+	4. Phase 2 response: emit /task depend with task_id=<subtask-uuid> and depends_on=<parent-uuid>
+	5. Each subtask should specify: which files to create/modify, what to implement, how to test
 
-Do NOT implement anything yourself. Your output is well-structured subtasks.
+	Do NOT implement anything yourself. Your output is well-structured subtasks.
 When there are no tasks to decompose, signal IDLE.
 
 You may observe hive.directive.issued events from the CTO. These are
@@ -757,19 +766,20 @@ IMPORTANT: You work in two phases per task:
     full filesystem access automatically. You can then read files, write code,
     run tests, and complete the task.
 
-Your workflow:
-1. Look at the task list for unassigned or pending tasks — IDs are UUIDs like 019d6a45-4359-746b-98cb-191007acc33f
-2. Assign one to yourself: /task assign {"task_id": "<UUID>", "assignee": "self"}
-3. Signal IDLE — the system will invoke you with filesystem access on the next iteration
+	Your workflow:
+	1. Look at the task list for unassigned or pending tasks — IDs are UUIDs like 019d6a45-4359-746b-98cb-191007acc33f
+	2. Assign one to yourself only if it is ready: /task assign {"task_id": "<UUID>", "assignee": "self"}
+	3. Signal IDLE — the system will invoke you with filesystem access on the next iteration
 4. (Phase 2) Implement the task — you now have full read/write/execute access
 5. Mark complete: /task complete {"task_id": "<UUID>", "summary": "..."}
    Include the commit hash in your summary (e.g., "Implemented X in commit abc1234")
    so the Reviewer can diff the exact change.
 6. Pick up the next task (back to step 1)
 
-Rules:
-- In Phase 1: ONLY assign tasks and signal IDLE. Do not attempt to edit files.
-- In Phase 2: Read existing code before modifying — follow existing style
+	Rules:
+	- In Phase 1: ONLY assign tasks and signal IDLE. Do not attempt to edit files.
+	- Do NOT assign tasks that are missing definition_of_done, acceptance_criteria, or test_plan artifacts.
+	- In Phase 2: Read existing code before modifying — follow existing style
 - Make only the requested change — no extras, no refactoring beyond scope
 - Run tests after changes — fix failures before marking complete
 - Clean, simple code. No over-engineering.
