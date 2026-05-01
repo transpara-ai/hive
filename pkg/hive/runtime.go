@@ -52,7 +52,8 @@ type Runtime struct {
 	convID  types.ConversationID
 
 	// Task store for agent coordination.
-	tasks *work.TaskStore
+	tasks      *work.TaskStore
+	phaseGates *work.PhaseGateStore
 
 	// Budget registry for cross-agent budget visibility and mutation.
 	budgetRegistry *resources.BudgetRegistry
@@ -145,6 +146,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	}
 
 	tasks := work.NewTaskStore(cfg.Store, factory, signer)
+	phaseGates := work.NewPhaseGateStore(cfg.Store, factory, signer)
 
 	return &Runtime{
 		store:           cfg.Store,
@@ -156,6 +158,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		factory:         factory,
 		convID:          convID,
 		tasks:           tasks,
+		phaseGates:      phaseGates,
 		approveRequests: cfg.ApproveRequests,
 		approveRoles:    cfg.ApproveRoles,
 		repoPath:        cfg.RepoPath,
@@ -392,6 +395,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 			// Task coordination.
 			TaskStore:       r.tasks,
+			PhaseGateStore:  r.phaseGates,
 			ConvID:          r.convID,
 			OnTaskCompleted: r.mirrorTaskCompletion,
 			CanOperate:      def.CanOperate,

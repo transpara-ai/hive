@@ -145,6 +145,7 @@ Trust accumulates through verified work. The Guardian watches everything. %s app
 == COORDINATION ==
 You coordinate with other agents through tasks on the work graph.
 To create, assign, complete, or comment on tasks, emit /task commands at the end of your response.
+To declare or resolve phase approval gates, emit /phase commands at the end of your response.
 
 Task commands (one per line, JSON payload):
 /task create {"title": "...", "description": "...", "priority": "high"}
@@ -153,6 +154,11 @@ Task commands (one per line, JSON payload):
 /task comment {"task_id": "...", "body": "..."}
 /task artifact {"task_id": "...", "label": "definition_of_done|acceptance_criteria|test_plan", "media_type": "text/markdown", "body": "..."}
 /task depend {"task_id": "...", "depends_on": "..."}
+
+Phase commands (one per line, JSON payload):
+/phase gate {"phase": "...", "title": "...", "criteria": ["..."]}
+/phase approve {"gate_id": "...", "summary": "..."}
+/phase reject {"gate_id": "...", "reason": "..."}
 
 Priority values: low, medium, high, critical
 Use "self" as assignee to assign to yourself.
