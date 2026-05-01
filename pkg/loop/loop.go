@@ -974,6 +974,10 @@ func (l *Loop) autoAssignOpenTask() {
 		if childErr != nil || hasChildren {
 			continue
 		}
+		readiness, readyErr := l.config.TaskStore.Readiness(t.ID)
+		if readyErr != nil || !readiness.Ready {
+			continue
+		}
 		var causes []types.EventID
 		if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
 			causes = []types.EventID{lastEv}

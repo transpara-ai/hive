@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 func TestIsMetaTaskBody(t *testing.T) {
@@ -60,6 +62,17 @@ func TestParseTaskCommandsMetaTaskNotFiltered(t *testing.T) {
 	}
 }
 
+func TestParseTaskCommandsArtifact(t *testing.T) {
+	response := `/task artifact {"task_id":"evt_00000000000000000000000000000001","label":"definition_of_done","body":"done means tested"}`
+	commands := parseTaskCommands(response)
+	if len(commands) != 1 {
+		t.Fatalf("got %d commands, want 1", len(commands))
+	}
+	if commands[0].Action != "artifact" {
+		t.Errorf("action = %q, want artifact", commands[0].Action)
+	}
+}
+
 func TestExecTaskCreateRejectsMetaTask(t *testing.T) {
 	// execTaskCreate must return an error for meta-task payloads before
 	// reaching TaskStore.Create. A nil TaskStore is safe because the guard
@@ -86,6 +99,57 @@ func TestExecTaskCreateRejectsMetaTask(t *testing.T) {
 	}
 }
 
+func TestExecTaskAssignRejectsUngatedTask(t *testing.T) {
+	ts, causes := newTaskCommandStore(t)
+	agentID := types.MustActorID("actor_00000000000000000000000000000111")
+	convID := types.MustConversationID("conv_00000000000000000000000000000111")
+	task, err := ts.Create(agentID, "Implement gate", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	err = execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID)
+	if err == nil {
+		t.Fatal("expected assignment error for ungated task, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing gates") {
+		t.Fatalf("error = %q, want missing gates", err.Error())
+	}
+}
+
+func TestExecTaskArtifactEnablesAssignment(t *testing.T) {
+	ts, causes := newTaskCommandStore(t)
+	agentID := types.MustActorID("actor_00000000000000000000000000000112")
+	convID := types.MustConversationID("conv_00000000000000000000000000000112")
+	task, err := ts.Create(agentID, "Implement ready gate", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	for _, label := range work.RequiredReadinessGateLabels() {
+		payload := []byte(`{"task_id":"` + task.ID.Value() + `","label":"` + label + `","media_type":"text/markdown","body":"gate"}`)
+		if err := execTaskArtifact(payload, ts, agentID, causes, convID); err != nil {
+			t.Fatalf("execTaskArtifact %s: %v", label, err)
+		}
+	}
+	if err := execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID); err != nil {
+		t.Fatalf("execTaskAssign: %v", err)
+	}
+}
+
+func newTaskCommandStore(t *testing.T) (*work.TaskStore, []types.EventID) {
+	t.Helper()
+	_, g := agentWithGraph(t, newMockProvider(`/signal {"signal":"IDLE"}`))
+	factory := event.NewEventFactory(g.Registry())
+	head, err := g.Store().Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	if head.IsNone() {
+		t.Fatal("expected agent boot event cause")
+	}
+	return work.NewTaskStore(g.Store(), factory, &testSigner{}), []types.EventID{head.Unwrap().ID()}
+}
 
 func TestIsMetaTaskBodyTitleDescriptionJoin(t *testing.T) {
 	// The join is title + " " + description — a pattern can span the boundary.

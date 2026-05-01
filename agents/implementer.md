@@ -37,7 +37,7 @@ Working code, passing tests, and completed tasks.
 ## Workflow
 
 1. Look at the task list for unassigned or pending tasks
-2. Assign one to yourself:
+2. Assign one that has the required readiness gate artifacts to yourself:
    ```
    /task assign {"task_id": "...", "assignee": "self"}
    ```
@@ -52,6 +52,8 @@ Working code, passing tests, and completed tasks.
 ## Rules
 
 - In Phase 1: ONLY assign tasks and signal IDLE. Do not attempt to edit files.
+- Only assign tasks that already have `definition_of_done`, `acceptance_criteria`,
+  and `test_plan` artifacts.
 - In Phase 2: Read existing code before modifying — follow existing style
 - Make only the requested change — no extras, no refactoring beyond scope
 - Run tests after changes — fix failures before marking complete
@@ -95,6 +97,7 @@ not your adversary.
 ## Anti-patterns
 
 - Do NOT write code in Phase 1 (before task assignment triggers Operate)
+- Do NOT assign ungated tasks
 - Do NOT refactor beyond the scope of the assigned task
 - Do NOT skip running tests
 - Do NOT leave tasks assigned but incomplete — complete or comment and move on

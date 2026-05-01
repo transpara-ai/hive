@@ -12,7 +12,7 @@ import (
 
 // TaskCommand represents a parsed /task command from an agent's response.
 type TaskCommand struct {
-	Action  string          // "create", "assign", "complete", "comment", "depend"
+	Action  string          // "create", "assign", "complete", "comment", "artifact", "depend"
 	Payload json.RawMessage // action-specific JSON
 }
 
@@ -37,6 +37,13 @@ type taskCompletePayload struct {
 type taskCommentPayload struct {
 	TaskID string `json:"task_id"`
 	Body   string `json:"body"`
+}
+
+type taskArtifactPayload struct {
+	TaskID    string `json:"task_id"`
+	Label     string `json:"label"`
+	MediaType string `json:"media_type"`
+	Body      string `json:"body"`
 }
 
 type taskDependPayload struct {
@@ -64,7 +71,7 @@ func parseTaskCommands(response string) []TaskCommand {
 		jsonStr := strings.TrimSpace(rest[idx+1:])
 
 		switch action {
-		case "create", "assign", "complete", "comment", "depend":
+		case "create", "assign", "complete", "comment", "artifact", "depend":
 			commands = append(commands, TaskCommand{
 				Action:  action,
 				Payload: json.RawMessage(jsonStr),
@@ -97,6 +104,8 @@ func executeTaskCommands(
 			err = execTaskComplete(cmd.Payload, tasks, agentID, causes, convID)
 		case "comment":
 			err = execTaskComment(cmd.Payload, tasks, agentID, causes, convID)
+		case "artifact":
+			err = execTaskArtifact(cmd.Payload, tasks, agentID, causes, convID)
 		case "depend":
 			err = execTaskDepend(cmd.Payload, tasks, agentID, causes, convID)
 		}
@@ -183,6 +192,13 @@ func execTaskAssign(
 			return fmt.Errorf("invalid assignee: %w", err)
 		}
 	}
+	readiness, err := tasks.Readiness(taskID)
+	if err != nil {
+		return fmt.Errorf("check readiness: %w", err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("task is not ready for assignment; missing gates: %s", strings.Join(readiness.MissingGates, ", "))
+	}
 	if err := tasks.Assign(agentID, taskID, assignee, causes, convID); err != nil {
 		return err
 	}
@@ -231,6 +247,28 @@ func execTaskComment(
 		return err
 	}
 	fmt.Printf("  → task comment: %s\n", p.TaskID)
+	return nil
+}
+
+func execTaskArtifact(
+	payload json.RawMessage,
+	tasks *work.TaskStore,
+	agentID types.ActorID,
+	causes []types.EventID,
+	convID types.ConversationID,
+) error {
+	var p taskArtifactPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+	taskID, err := types.NewEventID(p.TaskID)
+	if err != nil {
+		return fmt.Errorf("invalid task_id: %w", err)
+	}
+	if err := tasks.AddArtifact(agentID, taskID, p.Label, p.MediaType, p.Body, causes, convID); err != nil {
+		return err
+	}
+	fmt.Printf("  → task artifact: %s — %s\n", p.TaskID, p.Label)
 	return nil
 }
 
