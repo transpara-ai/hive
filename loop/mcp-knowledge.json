@@ -6,7 +6,7 @@
         "-buildvcs=false",
         "/Transpara/transpara-ai/data/repos/hive/cmd/mcp-knowledge"
       ],
-      "command": "/snap/go/11127/bin/go",
+      "command": "/snap/bin/go",
       "env": {
         "HIVE_DIR": "/Transpara/transpara-ai/data/repos/hive",
         "SITE_DIR": "/Transpara/transpara-ai/data/repos/site",
