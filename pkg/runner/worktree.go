@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 // mergeToMainMu serializes all MergeToMain calls. git checkout+merge is not
@@ -80,6 +82,11 @@ func CreateTaskWorktree(repoDir, taskTitle, taskID string) (*WorktreeContext, er
 func (wc *WorktreeContext) MergeToMain() error {
 	mergeToMainMu.Lock()
 	defer mergeToMainMu.Unlock()
+
+	if err := safety.RequireAuthorized(safety.ActionRepoMergeMain); err != nil {
+		log.Printf("[worktree] main_merge.blocked branch=%s source=%s: %v", wc.Branch, wc.SourceDir, err)
+		return err
+	}
 
 	// Switch source repo to main.
 	if err := gitIn(wc.SourceDir, "checkout", "main"); err != nil {
