@@ -434,7 +434,7 @@ func addToRegistry(path, slug, absPath, org, lang, buildCmd, testCmd string) err
 
 // ─── Runner mode ─────────────────────────────────────────────────────
 
-func runRunner(role, space, apiBase, repoPath string, budget float64, agentID string, oneShot, prMode bool) error {
+func runRunner(role, space, apiBase, repoPath string, budget float64, agentID string, oneShot, direct, prMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -490,7 +490,8 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 		RolePrompt: rolePrompt,
 		BudgetUSD:  budget,
 		OneShot:    oneShot,
-		PRMode:     prMode,
+		Direct:     direct || role != "builder",
+		PRMode:     direct && prMode,
 	})
 
 	log.Printf("hive agent starting: role=%s model=%s space=%s repo=%s agent-id=%s one-shot=%v",
@@ -543,7 +544,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 // ─── Pipeline mode ───────────────────────────────────────────────────
 
 // runPipeline runs Scout → Builder → Critic in sequence. One full cycle.
-func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, prMode, useWorktrees, autoClone bool, storeDSN string) error {
+func runPipeline(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, direct, prMode, useWorktrees, autoClone bool, storeDSN string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -657,8 +658,10 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 			RolePrompt:   runner.LoadRolePrompt(hiveDir, role),
 			BudgetUSD:    budget,
 			OneShot:      true,
+			Direct:       direct,
+			ProposalMode: !direct,
 			NoPush:       role == "builder",
-			PRMode:       role == "builder" && prMode,
+			PRMode:       direct && role == "builder" && prMode,
 			UseWorktrees: role == "builder" && useWorktrees,
 			RepoMap:      repoMap,
 			Registry:     reg,
@@ -773,8 +776,8 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 		}
 	}
 
-	if prMode {
-		log.Printf("[pipeline] --pr enabled; skipping final direct commit/push/deploy sweep")
+	if !direct {
+		log.Printf("[pipeline] proposal mode; skipping final direct commit/push/deploy sweep")
 		log.Printf("[pipeline] ── cycle complete ──")
 		return nil
 	}
@@ -859,7 +862,7 @@ const (
 // runDaemon loops runPipeline at the given interval until SIGINT/SIGTERM.
 // On pipeline failure it retries after a short backoff. After 3 consecutive
 // failures it halts. Writes loop/daemon.status after each cycle.
-func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, prMode, useWorktrees, autoClone bool, storeDSN string) error {
+func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, repoMap map[string]string, interval time.Duration, direct, prMode, useWorktrees, autoClone bool, storeDSN string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -887,11 +890,11 @@ func runDaemon(space, apiBase, repoPath string, budget float64, agentID string, 
 		start := time.Now()
 		log.Printf("[daemon] ── cycle %d start ──", cycle)
 
-		if prMode {
+		if direct && prMode {
 			daemonResetToMain(repoPath)
 		}
 
-		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, prMode, useWorktrees, autoClone, storeDSN)
+		pipelineErr := runPipeline(space, apiBase, repoPath, budget, agentID, repoMap, direct, prMode, useWorktrees, autoClone, storeDSN)
 
 		elapsed := time.Since(start)
 		spent = dailyBudget.Spent()

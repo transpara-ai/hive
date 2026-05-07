@@ -153,7 +153,7 @@ func cmdPipeline(args []string) error {
 	}
 }
 
-func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, prMode, worktrees, autoClone *bool) {
+func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, direct, prMode, worktrees, autoClone *bool) {
 	space = fs.String("space", "hive", "lovyou.ai space slug")
 	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
@@ -161,7 +161,8 @@ func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, r
 	storeDSN = fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repos = fs.String("repos", "", "Named repos: name=path,name=path")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
-	prMode = fs.Bool("pr", false, "Create feature branch and open PR instead of pushing to main")
+	direct = fs.Bool("direct", false, "Use legacy direct commit/push behavior instead of local PR proposal mode")
+	prMode = fs.Bool("pr", false, "Compatibility alias for legacy PR behavior when used with --direct")
 	worktrees = fs.Bool("worktrees", false, "Each Builder task gets its own git worktree")
 	autoClone = fs.Bool("auto-clone", false, "Clone missing repos from registry URLs before each cycle")
 	return
@@ -169,23 +170,23 @@ func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, r
 
 func cmdPipelineRun(args []string) error {
 	fs := flag.NewFlagSet("pipeline run", flag.ContinueOnError)
-	space, apiBase, repo, agentID, storeDSN, repos, budget, prMode, worktrees, autoClone := pipelineFlags(fs)
+	space, apiBase, repo, agentID, storeDSN, repos, budget, direct, prMode, worktrees, autoClone := pipelineFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	repoMap := parseRepos(*repos, *repo)
-	return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *prMode, *worktrees, *autoClone, *storeDSN)
+	return runPipeline(*space, *apiBase, *repo, *budget, *agentID, repoMap, *direct, *prMode, *worktrees, *autoClone, *storeDSN)
 }
 
 func cmdPipelineDaemon(args []string) error {
 	fs := flag.NewFlagSet("pipeline daemon", flag.ContinueOnError)
-	space, apiBase, repo, agentID, storeDSN, repos, budget, prMode, worktrees, autoClone := pipelineFlags(fs)
+	space, apiBase, repo, agentID, storeDSN, repos, budget, direct, prMode, worktrees, autoClone := pipelineFlags(fs)
 	interval := fs.Duration("interval", 30*time.Minute, "Pipeline cycle interval")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	repoMap := parseRepos(*repos, *repo)
-	return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *prMode, *worktrees, *autoClone, *storeDSN)
+	return runDaemon(*space, *apiBase, *repo, *budget, *agentID, repoMap, *interval, *direct, *prMode, *worktrees, *autoClone, *storeDSN)
 }
 
 // ─── role ─────────────────────────────────────────────────────────────────────
@@ -213,32 +214,33 @@ func cmdRole(args []string) error {
 	}
 }
 
-func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, prMode *bool) {
+func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, direct, prMode *bool) {
 	space = fs.String("space", "hive", "lovyou.ai space slug")
 	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
 	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
-	prMode = fs.Bool("pr", false, "Create feature branch and open PR instead of pushing to main")
+	direct = fs.Bool("direct", false, "Use legacy direct commit/push behavior instead of local PR proposal mode")
+	prMode = fs.Bool("pr", false, "Compatibility alias for legacy PR behavior when used with --direct")
 	return
 }
 
 func cmdRoleRun(role string, args []string) error {
 	fs := flag.NewFlagSet("role "+role+" run", flag.ContinueOnError)
-	space, apiBase, repo, agentID, budget, prMode := roleFlags(fs)
+	space, apiBase, repo, agentID, budget, direct, prMode := roleFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, true, *prMode)
+	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, true, *direct, *prMode)
 }
 
 func cmdRoleDaemon(role string, args []string) error {
 	fs := flag.NewFlagSet("role "+role+" daemon", flag.ContinueOnError)
-	space, apiBase, repo, agentID, budget, prMode := roleFlags(fs)
+	space, apiBase, repo, agentID, budget, direct, prMode := roleFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, false, *prMode)
+	return runRunner(role, *space, *apiBase, *repo, *budget, *agentID, false, *direct, *prMode)
 }
 
 // ─── ingest ───────────────────────────────────────────────────────────────────

@@ -351,7 +351,7 @@ func TestCommitAndPushPlainPushBlockedByDefault(t *testing.T) {
 	restoreLogs := captureLogs(&logs)
 	defer restoreLogs()
 
-	r := New(Config{Role: "builder", RepoPath: repoDir})
+	r := New(Config{Role: "builder", RepoPath: repoDir, Direct: true})
 	err := r.commitAndPush(api.Node{ID: "task-plain", Title: "Plain push", Kind: "task"})
 	assertAuthorityError(t, err, safety.ActionRepoPushDefaultBranch)
 
@@ -374,7 +374,7 @@ func TestCommitAndPushFeatureBranchPushBlockedByDefault(t *testing.T) {
 	restoreLogs := captureLogs(&logs)
 	defer restoreLogs()
 
-	r := New(Config{Role: "builder", RepoPath: repoDir, PRMode: true})
+	r := New(Config{Role: "builder", RepoPath: repoDir, Direct: true, PRMode: true})
 	err := r.commitAndPush(api.Node{ID: "task-feature", Title: "Feature push", Kind: "task"})
 	assertAuthorityError(t, err, safety.ActionRepoPushDefaultBranch)
 
@@ -401,7 +401,7 @@ func TestNoPushSkipsSafetyGateAndPreservesCommitOnlyBehavior(t *testing.T) {
 	restoreLogs := captureLogs(&logs)
 	defer restoreLogs()
 
-	r := New(Config{Role: "builder", RepoPath: repoDir, NoPush: true})
+	r := New(Config{Role: "builder", RepoPath: repoDir, Direct: true, NoPush: true})
 	if err := r.commitAndPush(api.Node{ID: "task-nopush", Title: "No push", Kind: "task"}); err != nil {
 		t.Fatalf("commitAndPush NoPush: %v", err)
 	}
@@ -413,6 +413,115 @@ func TestNoPushSkipsSafetyGateAndPreservesCommitOnlyBehavior(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "repo.push.blocked") {
 		t.Fatalf("NoPush path logged push block unexpectedly:\n%s", logs.String())
+	}
+}
+
+func TestDefaultBuilderProposalModeCommitsBranchAndWritesArtifact(t *testing.T) {
+	repoDir, remoteDir := initGitRepoWithOrigin(t)
+	hiveDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "proposal.txt"), []byte("proposal"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	restoreLogs := captureLogs(&logs)
+	defer restoreLogs()
+
+	r := New(Config{Role: "builder", RepoPath: repoDir, HiveDir: hiveDir})
+	if err := r.commitAndPush(api.Node{ID: "task-proposal", Title: "Add proposal mode", Body: "Implement local proposal artifacts.", Kind: "task"}); err != nil {
+		t.Fatalf("commitAndPush proposal mode: %v", err)
+	}
+
+	branch := gitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if !strings.HasPrefix(branch, "feat/") {
+		t.Fatalf("branch = %q, want feat/ prefix", branch)
+	}
+	if got := gitOutput(t, repoDir, "rev-list", "--count", "HEAD"); got != "2" {
+		t.Fatalf("local commit count = %s, want 2", got)
+	}
+	if got := gitOutput(t, remoteDir, "rev-list", "--count", "main"); got != "1" {
+		t.Fatalf("remote commit count = %s, want 1", got)
+	}
+	if got := gitOutput(t, repoDir, "ls-remote", "--heads", "origin", branch); got != "" {
+		t.Fatalf("remote feature branch exists after proposal mode:\n%s", got)
+	}
+	if strings.Contains(logs.String(), "repo.push.blocked") {
+		t.Fatalf("proposal mode logged push block unexpectedly:\n%s", logs.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(hiveDir, "loop", "pr-proposal.md"))
+	if err != nil {
+		t.Fatalf("read pr-proposal.md: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{"# PR Proposal: Add proposal mode", branch, "Commit:", "Diff Stat", "Push, remote PR creation, deployment, or merge requires explicit human approval"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("pr-proposal.md missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestBuilderProposalModeUpdatesWorktreeBranch(t *testing.T) {
+	repoDir, _ := initGitRepoWithOrigin(t)
+	hiveDir := t.TempDir()
+	wt, err := CreateTaskWorktree(repoDir, "Add worktree proposal mode", "task-wt-proposal")
+	if err != nil {
+		t.Fatalf("CreateTaskWorktree: %v", err)
+	}
+	t.Cleanup(func() { wt.Cleanup() })
+
+	if err := os.WriteFile(filepath.Join(wt.Dir, "worktree-proposal.txt"), []byte("proposal"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := New(Config{Role: "builder", RepoPath: wt.Dir, HiveDir: hiveDir})
+	r.worktree = wt
+	if err := r.commitAndPush(api.Node{ID: "task-wt-proposal", Title: "Add worktree proposal mode", Kind: "task"}); err != nil {
+		t.Fatalf("commitAndPush proposal worktree: %v", err)
+	}
+
+	branch := gitOutput(t, wt.Dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if !strings.HasPrefix(branch, "feat/") {
+		t.Fatalf("branch = %q, want feat/ prefix", branch)
+	}
+	if wt.Branch != branch {
+		t.Fatalf("worktree context branch = %q, want checked-out branch %q", wt.Branch, branch)
+	}
+
+	data, err := os.ReadFile(filepath.Join(hiveDir, "loop", "pr-proposal.md"))
+	if err != nil {
+		t.Fatalf("read pr-proposal.md: %v", err)
+	}
+	if !strings.Contains(string(data), "- **Branch:** "+branch) {
+		t.Fatalf("proposal did not record worktree proposal branch %q:\n%s", branch, data)
+	}
+}
+
+func TestCriticProposalUpdatePreservesExistingBuilderBranch(t *testing.T) {
+	repoDir, _ := initGitRepoWithOrigin(t)
+	hiveDir := t.TempDir()
+	loopDir := filepath.Join(hiveDir, "loop")
+	if err := os.MkdirAll(loopDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "# PR Proposal: Existing\n\n- **Branch:** feat/keep-this-branch\n- **Commit:** old\n\n## Task Summary\n\nKeep this body.\n"
+	if err := os.WriteFile(filepath.Join(loopDir, "pr-proposal.md"), []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hash := gitOutput(t, repoDir, "rev-parse", "HEAD")
+	r := New(Config{RepoPath: repoDir, HiveDir: hiveDir})
+	r.writePRProposalForCommit(commit{hash: hash, subject: "[hive:builder] Existing"}, "critic passed")
+
+	data, err := os.ReadFile(filepath.Join(loopDir, "pr-proposal.md"))
+	if err != nil {
+		t.Fatalf("read pr-proposal.md: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{"- **Branch:** feat/keep-this-branch", "- **Review Status:** critic passed", "Keep this body."} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("updated proposal missing %q:\n%s", want, content)
+		}
 	}
 }
 
