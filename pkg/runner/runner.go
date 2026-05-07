@@ -19,30 +19,30 @@ import (
 	"github.com/transpara-ai/hive/pkg/api"
 	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/registry"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
-
 
 // Config holds everything a Runner needs.
 type Config struct {
-	Role       string // e.g. "builder"
-	AgentID    string // lovyou.ai user ID for this agent (filters task assignment)
-	SpaceSlug  string // lovyou.ai space slug (e.g. "hive")
-	RepoPath   string // absolute path to the repo to operate on
-	HiveDir    string // path to hive repo (for state.md, role prompts)
-	APIClient  *api.Client
-	APIBase    string // Base URL for agent curl commands (e.g. "http://localhost:8082")
-	Provider   intelligence.Provider
-	RolePrompt string // loaded from agents/{role}.md
-	Interval   time.Duration
-	BudgetUSD     float64 // daily budget, 0 = $10 default
-	OneShot       bool    // if true, work one task then exit (for testing)
-	NoPush        bool              // if true, commit but don't push (pipeline pushes after Critic PASS)
-	PRMode        bool              // if true, create a feature branch before committing
-	CouncilTopic    string            // optional: focus the council on a specific question
-	RepoMap         map[string]string // named repos: name → absolute path (for multi-repo pipeline)
-	BaselineCommit  string            // commit hash before Builder ran — Critic only reviews after this
-	Registry        *registry.Registry // repo metadata for prompts, build/test commands
-	UseWorktrees    bool              // if true, each Builder task gets its own git worktree
+	Role           string // e.g. "builder"
+	AgentID        string // lovyou.ai user ID for this agent (filters task assignment)
+	SpaceSlug      string // lovyou.ai space slug (e.g. "hive")
+	RepoPath       string // absolute path to the repo to operate on
+	HiveDir        string // path to hive repo (for state.md, role prompts)
+	APIClient      *api.Client
+	APIBase        string // Base URL for agent curl commands (e.g. "http://localhost:8082")
+	Provider       intelligence.Provider
+	RolePrompt     string // loaded from agents/{role}.md
+	Interval       time.Duration
+	BudgetUSD      float64            // daily budget, 0 = $10 default
+	OneShot        bool               // if true, work one task then exit (for testing)
+	NoPush         bool               // if true, commit but don't push (pipeline pushes after Critic PASS)
+	PRMode         bool               // if true, create a feature branch before committing
+	CouncilTopic   string             // optional: focus the council on a specific question
+	RepoMap        map[string]string  // named repos: name → absolute path (for multi-repo pipeline)
+	BaselineCommit string             // commit hash before Builder ran — Critic only reviews after this
+	Registry       *registry.Registry // repo metadata for prompts, build/test commands
+	UseWorktrees   bool               // if true, each Builder task gets its own git worktree
 }
 
 // CostTracker records per-call spending.
@@ -634,6 +634,10 @@ func (r *Runner) commitAndPush(t api.Node) error {
 
 	// When on a feature branch, push with upstream tracking set.
 	if branch != "" {
+		args := []string{"push", "--set-upstream", "origin", branch}
+		if err := r.authorizeRepoPush("commitAndPush.feature_branch", branch, args, t); err != nil {
+			return err
+		}
 		if err := r.git("push", "--set-upstream", "origin", branch); err != nil {
 			return fmt.Errorf("git push feature branch: %w", err)
 		}
@@ -641,6 +645,9 @@ func (r *Runner) commitAndPush(t api.Node) error {
 		return nil
 	}
 
+	if err := r.authorizeRepoPush("commitAndPush.current_branch", "", []string{"push"}, t); err != nil {
+		return err
+	}
 	if err := r.git("push"); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
@@ -651,6 +658,9 @@ func (r *Runner) commitAndPush(t api.Node) error {
 
 // Push pushes the current branch. Called by the pipeline after Critic PASS.
 func (r *Runner) Push() error {
+	if err := r.authorizeRepoPush("Push", "", []string{"push"}, api.Node{}); err != nil {
+		return err
+	}
 	return r.git("push")
 }
 
@@ -665,6 +675,38 @@ func (r *Runner) CommitAll(msg string) error {
 		return fmt.Errorf("git add: %w", err)
 	}
 	return r.git("commit", "-m", msg)
+}
+
+func (r *Runner) authorizeRepoPush(path string, branch string, args []string, t api.Node) error {
+	if err := safety.RequireAuthorized(safety.ActionRepoPushDefaultBranch); err != nil {
+		if branch == "" {
+			branch = r.currentBranch()
+		}
+		log.Printf("repo.push.blocked action=%s outcome=%s role=%s repo=%s branch=%s path=%s task_id=%s task_title=%q git_args=%q: %v",
+			safety.ActionRepoPushDefaultBranch,
+			safety.DefaultOutcome(safety.ActionRepoPushDefaultBranch),
+			r.cfg.Role,
+			r.cfg.RepoPath,
+			branch,
+			path,
+			t.ID,
+			t.Title,
+			args,
+			err,
+		)
+		return err
+	}
+	return nil
+}
+
+func (r *Runner) currentBranch() string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = r.cfg.RepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (r *Runner) git(args ...string) error {
@@ -728,9 +770,10 @@ func stripHivePrefix(s string) string {
 // interleaving. Returns the core title.
 //
 // Examples:
-//   "[hive:builder] Fix: X"                        → "X"
-//   "[hive:builder] Fix: [hive:builder] Fix: X"    → "X"
-//   "[hive:critic] [hive:builder] Fix: Fix: X"     → "X"
+//
+//	"[hive:builder] Fix: X"                        → "X"
+//	"[hive:builder] Fix: [hive:builder] Fix: X"    → "X"
+//	"[hive:critic] [hive:builder] Fix: Fix: X"     → "X"
 func stripRetryPrefixes(s string) string {
 	for {
 		before := s
