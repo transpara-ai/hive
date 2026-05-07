@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 // initGitRepo creates a minimal git repo in dir with one commit so that
@@ -110,8 +113,9 @@ func TestGitConfigScopedToWorktree(t *testing.T) {
 	}
 }
 
-// TestMergeToMain verifies that a worktree branch is merged back to main.
-func TestMergeToMain(t *testing.T) {
+// TestMergeToMainBlockedByDefault verifies that direct main-branch mutation is
+// gated before any git checkout, pull, or merge command runs.
+func TestMergeToMainBlockedByDefault(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
@@ -121,7 +125,7 @@ func TestMergeToMain(t *testing.T) {
 	}
 	defer wc.Cleanup()
 
-	// Add a commit on the worktree branch.
+	// Add a commit on the worktree branch. The merge must still be blocked.
 	newFile := filepath.Join(wc.Dir, "feature.txt")
 	if err := os.WriteFile(newFile, []byte("feature"), 0644); err != nil {
 		t.Fatalf("write feature.txt: %v", err)
@@ -133,20 +137,21 @@ func TestMergeToMain(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Merge back to main.
-	if err := wc.MergeToMain(); err != nil {
-		t.Fatalf("MergeToMain: %v", err)
+	err = wc.MergeToMain()
+	if err == nil {
+		t.Fatal("MergeToMain returned nil, want authority error")
 	}
+	assertAuthorityError(t, err, safety.ActionRepoMergeMain)
 
-	// Verify the file is now on main.
+	// Verify the file was not merged to main.
 	mergedFile := filepath.Join(repoDir, "feature.txt")
-	if _, err := os.Stat(mergedFile); err != nil {
-		t.Errorf("feature.txt not found on main after merge: %v", err)
+	if _, err := os.Stat(mergedFile); !os.IsNotExist(err) {
+		t.Errorf("feature.txt exists on main after blocked merge; err=%v", err)
 	}
 }
 
-// TestMergeToMainConcurrency verifies that concurrent MergeToMain calls do not
-// corrupt repo state. The mutex must serialise all calls.
+// TestMergeToMainConcurrency verifies that concurrent MergeToMain calls remain
+// serialized and blocked by the safety gate.
 func TestMergeToMainConcurrency(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
@@ -161,8 +166,8 @@ func TestMergeToMainConcurrency(t *testing.T) {
 		}
 		worktrees[i] = wc
 
-		// Each worktree needs a unique commit so the merge is non-empty.
-		newFile := filepath.Join(wc.Dir, "concurrent.txt")
+		// Each worktree gets a unique commit so this would be a real merge without the gate.
+		newFile := filepath.Join(wc.Dir, fmt.Sprintf("concurrent-%d.txt", i))
 		if err := os.WriteFile(newFile, []byte("data"), 0644); err != nil {
 			t.Fatalf("write file %d: %v", i, err)
 		}
@@ -174,7 +179,6 @@ func TestMergeToMainConcurrency(t *testing.T) {
 		}
 	}
 
-	// Launch all merges concurrently — must not panic or deadlock.
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 	for i, wc := range worktrees {
@@ -188,10 +192,10 @@ func TestMergeToMainConcurrency(t *testing.T) {
 
 	for i, wc := range worktrees {
 		defer wc.Cleanup()
-		// Merge conflicts are possible when multiple branches touch the same file;
-		// what we're testing is that there's no panic, deadlock, or data race.
-		// At least one merge must succeed.
-		_ = errs[i]
+		if errs[i] == nil {
+			t.Fatalf("MergeToMain %d returned nil, want authority error", i)
+		}
+		assertAuthorityError(t, errs[i], safety.ActionRepoMergeMain)
 	}
 }
 
@@ -216,4 +220,19 @@ func TestCleanup(t *testing.T) {
 
 	// Second call must not panic.
 	wc.Cleanup()
+}
+
+func assertAuthorityError(t *testing.T, err error, wantAction safety.ProtectedAction) {
+	t.Helper()
+
+	var authorityErr safety.AuthorityError
+	if !errors.As(err, &authorityErr) {
+		t.Fatalf("error = %T %v, want safety.AuthorityError", err, err)
+	}
+	if authorityErr.Action != wantAction {
+		t.Fatalf("authority action = %q, want %q", authorityErr.Action, wantAction)
+	}
+	if authorityErr.Outcome != safety.ApprovalRequired {
+		t.Fatalf("authority outcome = %q, want %q", authorityErr.Outcome, safety.ApprovalRequired)
+	}
 }
