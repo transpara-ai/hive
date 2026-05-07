@@ -261,6 +261,10 @@ func ensureSpecRepo(slug, specBody string) (string, error) {
 		}
 	}
 
+	if err := authorizeIngestRepoBootstrap(slug, org, repoDir); err != nil {
+		return "", err
+	}
+
 	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", org, slug)
 
 	// Create GitHub repo (ignore error if it already exists).
@@ -315,6 +319,34 @@ func ensureSpecRepo(slug, specBody string) (string, error) {
 	}
 
 	return repoDir, nil
+}
+
+func authorizeIngestRepoBootstrap(slug, org, repoDir string) error {
+	var errs []error
+	if err := safety.RequireAuthorized(safety.ActionRepoCreate); err != nil {
+		log.Printf("repo.create.blocked action=%s outcome=%s org=%s repo=%s path=%s: %v",
+			safety.ActionRepoCreate,
+			safety.DefaultOutcome(safety.ActionRepoCreate),
+			org,
+			slug,
+			repoDir,
+			err,
+		)
+		errs = append(errs, err)
+	}
+	if err := safety.RequireAuthorized(safety.ActionRepoPushDefaultBranch); err != nil {
+		log.Printf("repo.push.blocked action=%s outcome=%s org=%s repo=%s branch=main path=%s git_args=%q: %v",
+			safety.ActionRepoPushDefaultBranch,
+			safety.DefaultOutcome(safety.ActionRepoPushDefaultBranch),
+			org,
+			slug,
+			repoDir,
+			[]string{"push", "-u", org, "main"},
+			err,
+		)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // repoInRegistry checks if a slug already exists in repos.json.

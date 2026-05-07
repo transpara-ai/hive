@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 func TestRunIngest(t *testing.T) {
@@ -149,6 +153,86 @@ func TestRunIngest_MissingFile(t *testing.T) {
 	err := runIngest("/nonexistent/spec.md", "hive", "http://localhost:9999", "high")
 	if err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestRunIngestBlocksRepoBootstrapByDefault(t *testing.T) {
+	var logs bytes.Buffer
+	restoreLogs := captureMainLogs(&logs)
+	defer restoreLogs()
+
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("# Needs Repo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOVYOU_API_KEY", "test-key")
+
+	calledAPI := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledAPI = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"node":{"id":"unexpected"}}`))
+	}))
+	defer srv.Close()
+
+	err := runIngest(specPath, "hive", srv.URL, "high")
+	if err == nil {
+		t.Fatal("expected repo bootstrap authority error")
+	}
+	if calledAPI {
+		t.Fatal("API was called after repo bootstrap was blocked")
+	}
+	var authErr safety.AuthorityError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("error type = %T, want wrapped safety.AuthorityError", err)
+	}
+	if authErr.Action != safety.ActionRepoCreate {
+		t.Fatalf("action = %s, want %s", authErr.Action, safety.ActionRepoCreate)
+	}
+
+	for _, want := range []string{
+		"repo.create.blocked",
+		"repo.push.blocked",
+		string(safety.ActionRepoCreate),
+		string(safety.ActionRepoPushDefaultBranch),
+		string(safety.ApprovalRequired),
+		"repo=needs-repo",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log missing %q:\n%s", want, logs.String())
+		}
+	}
+}
+
+func TestAuthorizeIngestRepoBootstrapBlocksProtectedActionsByDefault(t *testing.T) {
+	var logs bytes.Buffer
+	restoreLogs := captureMainLogs(&logs)
+	defer restoreLogs()
+
+	err := authorizeIngestRepoBootstrap("new-service", "transpara-ai", "/tmp/new-service")
+	if err == nil {
+		t.Fatal("expected repo create authority error")
+	}
+	var authErr safety.AuthorityError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("error type = %T, want safety.AuthorityError", err)
+	}
+	if authErr.Action != safety.ActionRepoCreate {
+		t.Fatalf("action = %s, want %s", authErr.Action, safety.ActionRepoCreate)
+	}
+
+	for _, want := range []string{
+		"repo.create.blocked",
+		"repo.push.blocked",
+		"org=transpara-ai",
+		"repo=new-service",
+		"branch=main",
+		"path=/tmp/new-service",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log missing %q:\n%s", want, logs.String())
+		}
 	}
 }
 
