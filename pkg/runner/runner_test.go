@@ -1,10 +1,12 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/api"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 func TestParseAction(t *testing.T) {
@@ -125,8 +128,8 @@ func TestCostTracker(t *testing.T) {
 
 func TestModelForRole(t *testing.T) {
 	tests := []struct {
-		role  string
-		want  string
+		role string
+		want string
 	}{
 		{"builder", "claude-sonnet-4-6"},
 		{"scout", "claude-haiku-4-5-20251001"},
@@ -335,6 +338,155 @@ func TestBranchResetOnDaemonCycle(t *testing.T) {
 	cfg := Config{PRMode: false}
 	if got := buildBranchName(cfg, "some task title"); got != "" {
 		t.Errorf("buildBranchName with PRMode=false: expected \"\", got %q", got)
+	}
+}
+
+func TestCommitAndPushPlainPushBlockedByDefault(t *testing.T) {
+	repoDir, remoteDir := initGitRepoWithOrigin(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "plain.txt"), []byte("plain"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	restoreLogs := captureLogs(&logs)
+	defer restoreLogs()
+
+	r := New(Config{Role: "builder", RepoPath: repoDir})
+	err := r.commitAndPush(api.Node{ID: "task-plain", Title: "Plain push", Kind: "task"})
+	assertAuthorityError(t, err, safety.ActionRepoPushDefaultBranch)
+
+	if got := gitOutput(t, repoDir, "rev-list", "--count", "HEAD"); got != "2" {
+		t.Fatalf("local commit count = %s, want 2", got)
+	}
+	if got := gitOutput(t, remoteDir, "rev-list", "--count", "main"); got != "1" {
+		t.Fatalf("remote commit count = %s, want 1", got)
+	}
+	assertLogContains(t, logs.String(), "repo.push.blocked", "task-plain", "commitAndPush.current_branch")
+}
+
+func TestCommitAndPushFeatureBranchPushBlockedByDefault(t *testing.T) {
+	repoDir, remoteDir := initGitRepoWithOrigin(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	restoreLogs := captureLogs(&logs)
+	defer restoreLogs()
+
+	r := New(Config{Role: "builder", RepoPath: repoDir, PRMode: true})
+	err := r.commitAndPush(api.Node{ID: "task-feature", Title: "Feature push", Kind: "task"})
+	assertAuthorityError(t, err, safety.ActionRepoPushDefaultBranch)
+
+	branch := gitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if got := gitOutput(t, repoDir, "rev-list", "--count", "HEAD"); got != "2" {
+		t.Fatalf("local commit count = %s, want 2", got)
+	}
+	if got := gitOutput(t, remoteDir, "rev-list", "--count", "main"); got != "1" {
+		t.Fatalf("remote main commit count = %s, want 1", got)
+	}
+	if got := gitOutput(t, repoDir, "ls-remote", "--heads", "origin", branch); got != "" {
+		t.Fatalf("remote feature branch exists after blocked push:\n%s", got)
+	}
+	assertLogContains(t, logs.String(), "repo.push.blocked", "task-feature", branch, "commitAndPush.feature_branch")
+}
+
+func TestNoPushSkipsSafetyGateAndPreservesCommitOnlyBehavior(t *testing.T) {
+	repoDir, remoteDir := initGitRepoWithOrigin(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "nopush.txt"), []byte("nopush"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	restoreLogs := captureLogs(&logs)
+	defer restoreLogs()
+
+	r := New(Config{Role: "builder", RepoPath: repoDir, NoPush: true})
+	if err := r.commitAndPush(api.Node{ID: "task-nopush", Title: "No push", Kind: "task"}); err != nil {
+		t.Fatalf("commitAndPush NoPush: %v", err)
+	}
+	if got := gitOutput(t, repoDir, "rev-list", "--count", "HEAD"); got != "2" {
+		t.Fatalf("local commit count = %s, want 2", got)
+	}
+	if got := gitOutput(t, remoteDir, "rev-list", "--count", "main"); got != "1" {
+		t.Fatalf("remote commit count = %s, want 1", got)
+	}
+	if strings.Contains(logs.String(), "repo.push.blocked") {
+		t.Fatalf("NoPush path logged push block unexpectedly:\n%s", logs.String())
+	}
+}
+
+func TestPushBlockedByDefault(t *testing.T) {
+	repoDir, _ := initGitRepoWithOrigin(t)
+
+	var logs bytes.Buffer
+	restoreLogs := captureLogs(&logs)
+	defer restoreLogs()
+
+	r := New(Config{Role: "critic", RepoPath: repoDir})
+	err := r.Push()
+	assertAuthorityError(t, err, safety.ActionRepoPushDefaultBranch)
+	assertLogContains(t, logs.String(), "repo.push.blocked", "Push", "critic")
+}
+
+func initGitRepoWithOrigin(t *testing.T) (string, string) {
+	t.Helper()
+
+	repoDir := t.TempDir()
+	remoteDir := filepath.Join(t.TempDir(), "origin.git")
+	runGitDir(t, repoDir, "init", "-b", "main")
+	runGitDir(t, repoDir, "config", "user.email", "test@test.com")
+	runGitDir(t, repoDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "README"), []byte("init"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitDir(t, repoDir, "add", ".")
+	runGitDir(t, repoDir, "commit", "-m", "init")
+	runGitDir(t, "", "init", "--bare", remoteDir)
+	runGitDir(t, repoDir, "remote", "add", "origin", remoteDir)
+	runGitDir(t, repoDir, "push", "--set-upstream", "origin", "main")
+	return repoDir, remoteDir
+}
+
+func runGitDir(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func captureLogs(buf *bytes.Buffer) func() {
+	prevWriter := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	return func() {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	}
+}
+
+func assertLogContains(t *testing.T, body string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(body, want) {
+			t.Fatalf("log missing %q:\n%s", want, body)
+		}
 	}
 }
 
