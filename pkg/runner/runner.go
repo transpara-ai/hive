@@ -36,8 +36,10 @@ type Config struct {
 	Interval       time.Duration
 	BudgetUSD      float64            // daily budget, 0 = $10 default
 	OneShot        bool               // if true, work one task then exit (for testing)
+	Direct         bool               // if true, use legacy direct push behavior
 	NoPush         bool               // if true, commit but don't push (pipeline pushes after Critic PASS)
 	PRMode         bool               // if true, create a feature branch before committing
+	ProposalMode   bool               // if true, non-builder phases update local PR proposal artifacts
 	CouncilTopic   string             // optional: focus the council on a specific question
 	RepoMap        map[string]string  // named repos: name → absolute path (for multi-repo pipeline)
 	BaselineCommit string             // commit hash before Builder ran — Critic only reviews after this
@@ -568,6 +570,135 @@ func (r *Runner) gitDiffStat() string {
 	return s
 }
 
+func (r *Runner) gitDiffStatForCommit(hash string) string {
+	if hash == "" {
+		return r.gitDiffStat()
+	}
+	cmd := exec.Command("git", "show", "--stat", hash)
+	cmd.Dir = r.cfg.RepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	if len(s) > 1000 {
+		s = s[:1000] + "\n... (truncated)"
+	}
+	return s
+}
+
+// writePRProposal writes a local PR-ready proposal artifact. In default
+// builder mode this replaces branch pushes and remote PR creation.
+func (r *Runner) writePRProposal(t api.Node, buildStatus, reviewStatus string) {
+	hash := r.gitHash()
+	r.writePRProposalContent(t.Title, t.Body, hash, r.currentBranch(), r.gitDiffStatForCommit(hash), buildStatus, reviewStatus, []string{t.ID})
+}
+
+func (r *Runner) writePRProposalForCommit(c commit, reviewStatus string) {
+	title := prTitleFromSubject(c.subject)
+	branch := r.existingProposalBranch()
+	if branch == "" {
+		branch = r.currentBranch()
+	}
+	r.writePRProposalContent(title, r.existingProposalTaskSummary(), c.hash, branch, r.gitDiffStatForCommit(c.hash), "build status carried from builder phase when available", reviewStatus, nil)
+}
+
+func (r *Runner) existingProposalTaskSummary() string {
+	path := filepath.Join(r.cfg.HiveDir, "loop", "pr-proposal.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+	marker := "\n## Task Summary\n\n"
+	start := strings.Index(content, marker)
+	if start == -1 {
+		return ""
+	}
+	summary := content[start+len(marker):]
+	if end := strings.Index(summary, "\n## "); end != -1 {
+		summary = summary[:end]
+	}
+	return strings.TrimSpace(summary)
+}
+
+func (r *Runner) existingProposalBranch() string {
+	path := filepath.Join(r.cfg.HiveDir, "loop", "pr-proposal.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "- **Branch:**") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "- **Branch:**"))
+		}
+	}
+	return ""
+}
+
+func (r *Runner) writePRProposalContent(title, body, hash, branch, diffStat, buildStatus, reviewStatus string, causes []string) {
+	if title == "" {
+		title = "Untitled builder proposal"
+	}
+	if branch == "" {
+		branch = "unknown"
+	}
+	if hash == "" {
+		hash = "unknown"
+	}
+	if len(body) > 600 {
+		body = body[:600] + "..."
+	}
+
+	critiquePath := filepath.Join(r.cfg.HiveDir, "loop", "critique.md")
+	critiqueRef := ""
+	if _, err := os.Stat(critiquePath); err == nil {
+		critiqueRef = "loop/critique.md"
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("# PR Proposal: %s\n\n", title))
+	b.WriteString(fmt.Sprintf("- **Branch:** %s\n", branch))
+	b.WriteString(fmt.Sprintf("- **Commit:** %s\n", hash))
+	if buildStatus != "" {
+		b.WriteString(fmt.Sprintf("- **Build/Test Status:** %s\n", buildStatus))
+	}
+	if reviewStatus != "" {
+		b.WriteString(fmt.Sprintf("- **Review Status:** %s\n", reviewStatus))
+	}
+	if critiqueRef != "" {
+		b.WriteString(fmt.Sprintf("- **Critic Reference:** %s\n", critiqueRef))
+	}
+	b.WriteString("- **Authority:** Push, remote PR creation, deployment, or merge requires explicit human approval.\n")
+	if body != "" {
+		b.WriteString(fmt.Sprintf("\n## Task Summary\n\n%s\n", body))
+	}
+	if diffStat != "" {
+		b.WriteString(fmt.Sprintf("\n## Diff Stat\n\n```\n%s\n```\n", diffStat))
+	}
+
+	content := b.String()
+	path := filepath.Join(r.cfg.HiveDir, "loop", "pr-proposal.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		log.Printf("[runner] create loop dir for pr-proposal.md: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		log.Printf("[runner] write pr-proposal.md: %v", err)
+	}
+
+	if r.cfg.APIClient != nil {
+		cleanCauses := causes[:0]
+		for _, cause := range causes {
+			if cause != "" {
+				cleanCauses = append(cleanCauses, cause)
+			}
+		}
+		_, _ = r.cfg.APIClient.CreateDocument(r.cfg.SpaceSlug, fmt.Sprintf("PR Proposal: %s", title), content, cleanCauses)
+	}
+}
+
 // ─── Build verification ──────────────────────────────────────────────
 
 func (r *Runner) verifyBuild() error {
@@ -609,6 +740,9 @@ func (r *Runner) commitAndPush(t api.Node) error {
 		if err := r.git("checkout", "-B", branch); err != nil {
 			return fmt.Errorf("git checkout -B %s: %w", branch, err)
 		}
+		if r.worktree != nil {
+			r.worktree.Branch = branch
+		}
 		log.Printf("[builder] on feature branch: %s", branch)
 	}
 
@@ -624,6 +758,12 @@ func (r *Runner) commitAndPush(t api.Node) error {
 	msg := fmt.Sprintf("[hive:%s] %s", r.cfg.Role, stripRetryPrefixes(t.Title))
 	if err := r.git("commit", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %w", err)
+	}
+
+	if r.builderProposalMode() {
+		log.Printf("[builder] committed proposal locally: %s", msg)
+		r.writePRProposal(t, "build passed", "")
+		return nil
 	}
 
 	// Push (unless NoPush — pipeline pushes after Critic PASS).
@@ -697,6 +837,10 @@ func (r *Runner) authorizeRepoPush(path string, branch string, args []string, t 
 		return err
 	}
 	return nil
+}
+
+func (r *Runner) builderProposalMode() bool {
+	return r.cfg.Role == "builder" && !r.cfg.Direct
 }
 
 func (r *Runner) currentBranch() string {
@@ -862,7 +1006,7 @@ func branchSlug(title string, date time.Time) string {
 // buildBranchName returns the branch to create before committing, or "" when
 // PRMode is disabled (caller should skip the git checkout -b step).
 func buildBranchName(cfg Config, title string) string {
-	if !cfg.PRMode {
+	if !cfg.PRMode && !(cfg.Role == "builder" && !cfg.Direct) {
 		return ""
 	}
 	return branchSlug(title, time.Now())
