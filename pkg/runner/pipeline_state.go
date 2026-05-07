@@ -276,6 +276,7 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 		sm.runner.cfg.Role = agent
 		sm.runner.cfg.OneShot = true
 		sm.runner.done = false
+		sm.routeWorktreeRepo(agent)
 
 		// Per-phase timeout: no single phase should run longer than 20 minutes.
 		// This catches hung CLI subprocesses that survive the Operate timeout.
@@ -300,8 +301,9 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 		// Determine the next event based on what happened.
 		event := sm.inferEvent(agent)
 
-		// After Critic PASS, merge the worktree branch into main.
-		if event == EventCritiquePass && sm.worktree != nil {
+		// After Critic PASS, merge the worktree branch into main only in
+		// explicit direct mode. Proposal mode must remain local and PR-ready.
+		if sm.shouldMergeWorktree(event) {
 			if err := sm.worktree.MergeToMain(); err != nil {
 				log.Printf("[pipeline] merge conflict — escalating: %v", err)
 				event = EventEscalation
@@ -347,6 +349,21 @@ func (sm *PipelineStateMachine) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (sm *PipelineStateMachine) shouldMergeWorktree(event PipelineEvent) bool {
+	return event == EventCritiquePass && sm.worktree != nil && sm.runner != nil && sm.runner.cfg.Direct
+}
+
+func (sm *PipelineStateMachine) routeWorktreeRepo(agent string) {
+	if sm.worktree == nil || sm.runner == nil {
+		return
+	}
+	switch agent {
+	case "tester", "critic":
+		sm.runner.cfg.RepoPath = sm.worktree.Dir
+		sm.runner.worktree = sm.worktree
+	}
 }
 
 func workflowStageForAgent(agent string) string {

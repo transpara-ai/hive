@@ -292,6 +292,52 @@ func TestInferEventCriticPass(t *testing.T) {
 	}
 }
 
+func TestProposalModeSkipsWorktreeMergeOnCriticPass(t *testing.T) {
+	sm := &PipelineStateMachine{
+		runner:   New(Config{Direct: false}),
+		worktree: &WorktreeContext{Branch: "feat/proposal"},
+	}
+	if sm.shouldMergeWorktree(EventCritiquePass) {
+		t.Fatal("proposal mode must not merge worktree branches after Critic PASS")
+	}
+
+	sm.runner.cfg.Direct = true
+	if !sm.shouldMergeWorktree(EventCritiquePass) {
+		t.Fatal("direct mode should keep legacy worktree merge behavior after Critic PASS")
+	}
+
+	if sm.shouldMergeWorktree(EventCritiqueRevise) {
+		t.Fatal("worktree merge must only happen after Critic PASS")
+	}
+}
+
+func TestWorktreeProposalRoutesTesterAndCriticToWorktree(t *testing.T) {
+	sourceRepo := t.TempDir()
+	worktreeDir := t.TempDir()
+	sm := &PipelineStateMachine{
+		runner:   New(Config{RepoPath: sourceRepo}),
+		worktree: &WorktreeContext{Dir: worktreeDir, Branch: "feat/proposal", SourceDir: sourceRepo},
+	}
+
+	for _, agent := range []string{"tester", "critic"} {
+		sm.runner.cfg.RepoPath = sourceRepo
+		sm.runner.worktree = nil
+		sm.routeWorktreeRepo(agent)
+		if sm.runner.cfg.RepoPath != worktreeDir {
+			t.Fatalf("%s repo path = %q, want worktree %q", agent, sm.runner.cfg.RepoPath, worktreeDir)
+		}
+		if sm.runner.Worktree() != sm.worktree {
+			t.Fatalf("%s runner did not retain worktree context", agent)
+		}
+	}
+
+	sm.runner.cfg.RepoPath = sourceRepo
+	sm.routeWorktreeRepo("reflector")
+	if sm.runner.cfg.RepoPath != sourceRepo {
+		t.Fatalf("reflector repo path = %q, want source repo %q", sm.runner.cfg.RepoPath, sourceRepo)
+	}
+}
+
 // TestReviseCountIncrementsOnCritiqueRevise verifies that the reviseCount field
 // increments each time EventCritiqueRevise is applied and does not increment
 // for other events.

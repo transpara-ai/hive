@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,29 @@ func TestCmdPipelineUnknownSubverb(t *testing.T) {
 	}
 }
 
+func TestPipelineFlagsDefaultToProposalMode(t *testing.T) {
+	fs := flag.NewFlagSet("pipeline run", flag.ContinueOnError)
+	_, _, _, _, _, _, _, direct, prMode, _, _ := pipelineFlags(fs)
+	if err := fs.Parse([]string{"--pr=false"}); err != nil {
+		t.Fatal(err)
+	}
+	if *direct {
+		t.Fatal("pipeline --pr=false must not opt out of proposal mode")
+	}
+	if *prMode {
+		t.Fatal("--pr=false should only set the compatibility flag false")
+	}
+
+	fs = flag.NewFlagSet("pipeline run", flag.ContinueOnError)
+	_, _, _, _, _, _, _, direct, _, _, _ = pipelineFlags(fs)
+	if err := fs.Parse([]string{"--direct"}); err != nil {
+		t.Fatal(err)
+	}
+	if !*direct {
+		t.Fatal("--direct should opt into legacy direct mode")
+	}
+}
+
 func TestCmdRoleRequiresName(t *testing.T) {
 	err := cmdRole(nil)
 	if err == nil || !strings.Contains(err.Error(), "role name") {
@@ -86,6 +110,29 @@ func TestCmdRoleUnknownSubverb(t *testing.T) {
 	err := cmdRole([]string{"builder", "frob"})
 	if err == nil || !strings.Contains(err.Error(), "frob") {
 		t.Fatalf("expected unknown-subverb error, got: %v", err)
+	}
+}
+
+func TestRoleFlagsDefaultBuilderToProposalMode(t *testing.T) {
+	fs := flag.NewFlagSet("role builder run", flag.ContinueOnError)
+	_, _, _, _, _, direct, prMode := roleFlags(fs)
+	if err := fs.Parse([]string{"--pr=false"}); err != nil {
+		t.Fatal(err)
+	}
+	if *direct {
+		t.Fatal("role --pr=false must not opt out of proposal mode")
+	}
+	if *prMode {
+		t.Fatal("--pr=false should only set the compatibility flag false")
+	}
+
+	fs = flag.NewFlagSet("role builder run", flag.ContinueOnError)
+	_, _, _, _, _, direct, _ = roleFlags(fs)
+	if err := fs.Parse([]string{"--direct"}); err != nil {
+		t.Fatal(err)
+	}
+	if !*direct {
+		t.Fatal("--direct should opt into legacy direct mode")
 	}
 }
 
