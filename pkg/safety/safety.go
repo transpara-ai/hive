@@ -17,22 +17,22 @@ const (
 type ProtectedAction string
 
 const (
-	ActionProductionDeploy          ProtectedAction = "production.deploy"
-	ActionRepoCreate                ProtectedAction = "repo.create"
-	ActionRepoDelete                ProtectedAction = "repo.delete"
-	ActionRepoPushDefaultBranch     ProtectedAction = "repo.push.default_branch"
-	ActionRepoMutateCrossRepo       ProtectedAction = "repo.mutate.cross_repo"
-	ActionAgentSpawnPersistent      ProtectedAction = "agent.spawn.persistent"
-	ActionAgentRetire               ProtectedAction = "agent.retire"
-	ActionAgentEscalatePermissions  ProtectedAction = "agent.escalate_permissions"
-	ActionPolicyChange              ProtectedAction = "policy.change"
-	ActionSecretAccess              ProtectedAction = "secret.access"
-	ActionExternalCompanyVoice      ProtectedAction = "external_communication.company_voice"
-	ActionDataDelete                ProtectedAction = "data.delete"
-	ActionSelfModificationActivate  ProtectedAction = "self_modification.activate"
+	ActionProductionDeploy           ProtectedAction = "production.deploy"
+	ActionRepoCreate                 ProtectedAction = "repo.create"
+	ActionRepoDelete                 ProtectedAction = "repo.delete"
+	ActionRepoPushDefaultBranch      ProtectedAction = "repo.push.default_branch"
+	ActionRepoMutateCrossRepo        ProtectedAction = "repo.mutate.cross_repo"
+	ActionAgentSpawnPersistent       ProtectedAction = "agent.spawn.persistent"
+	ActionAgentRetire                ProtectedAction = "agent.retire"
+	ActionAgentEscalatePermissions   ProtectedAction = "agent.escalate_permissions"
+	ActionPolicyChange               ProtectedAction = "policy.change"
+	ActionSecretAccess               ProtectedAction = "secret.access"
+	ActionExternalCompanyVoice       ProtectedAction = "external_communication.company_voice"
+	ActionDataDelete                 ProtectedAction = "data.delete"
+	ActionSelfModificationActivate   ProtectedAction = "self_modification.activate"
 	ActionBillingSpendAboveThreshold ProtectedAction = "billing.spend_above_threshold"
-	ActionLicenseChange             ProtectedAction = "license.change"
-	ActionRepoMergeMain             ProtectedAction = "repo.merge.main"
+	ActionLicenseChange              ProtectedAction = "license.change"
+	ActionRepoMergeMain              ProtectedAction = "repo.merge.main"
 )
 
 // AuthorityError is returned when an action must not execute without approval.
