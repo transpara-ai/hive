@@ -11,6 +11,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 )
 
@@ -80,6 +81,26 @@ func (r *Runtime) processApprovedRoles(ctx context.Context) {
 
 		if ctx.Err() != nil {
 			return
+		}
+
+		target := "agent:" + name
+		if !r.approveRequests && r.hasAuthorityRequest(safety.ActionAgentSpawnPersistent, target) {
+			continue
+		}
+		_, authErr := r.authorizeProtectedAction(protectedActionRequest{
+			Action:            safety.ActionAgentSpawnPersistent,
+			RequestingActor:   approvedEv.Source(),
+			Target:            target,
+			Environment:       string(AgentIdentityEnvironmentProduction),
+			RequestedOutcome:  "create persistent agent",
+			Justification:     fmt.Sprintf("approved role %q is ready to become a persistent Hive agent", name),
+			RiskSummary:       "persistent agents can continue operating across Hive runtime iterations",
+			ProposedOperation: "spawnDynamicAgent",
+			CausalEventIDs:    []types.EventID{approvedEv.ID()},
+		})
+		if authErr != nil {
+			fmt.Fprintf(os.Stderr, "[watcher] authority required to spawn %q: %v\n", name, authErr)
+			continue
 		}
 
 		if err := r.spawnDynamicAgent(ctx, proposal, budgetEv); err != nil {

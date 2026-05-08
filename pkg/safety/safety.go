@@ -25,6 +25,7 @@ const (
 	ActionRepoMutateCrossRepo        ProtectedAction = "repo.mutate.cross_repo"
 	ActionAgentSpawnPersistent       ProtectedAction = "agent.spawn.persistent"
 	ActionAgentRetire                ProtectedAction = "agent.retire"
+	ActionAgentRevoke                ProtectedAction = "agent.revoke"
 	ActionAgentEscalatePermissions   ProtectedAction = "agent.escalate_permissions"
 	ActionPolicyChange               ProtectedAction = "policy.change"
 	ActionSecretAccess               ProtectedAction = "secret.access"
@@ -46,6 +47,7 @@ var ProtectedActions = []ProtectedAction{
 	ActionRepoMutateCrossRepo,
 	ActionAgentSpawnPersistent,
 	ActionAgentRetire,
+	ActionAgentRevoke,
 	ActionAgentEscalatePermissions,
 	ActionPolicyChange,
 	ActionSecretAccess,
@@ -54,6 +56,20 @@ var ProtectedActions = []ProtectedAction{
 	ActionSelfModificationActivate,
 	ActionBillingSpendAboveThreshold,
 	ActionLicenseChange,
+}
+
+var protectedActionSet = func() map[ProtectedAction]bool {
+	set := make(map[ProtectedAction]bool, len(ProtectedActions))
+	for _, action := range ProtectedActions {
+		set[action] = true
+	}
+	return set
+}()
+
+// IsProtectedAction returns true only for the known DF-SOP-0001 protected
+// action vocabulary. Unknown actions are not autonomous by default.
+func IsProtectedAction(action ProtectedAction) bool {
+	return protectedActionSet[action]
 }
 
 // AuthorityError is returned when an action must not execute without approval.
@@ -69,27 +85,10 @@ func (e AuthorityError) Error() string {
 // DefaultOutcome returns the safety-first default for protected actions.
 // The default posture is conservative until EventGraph authority policy is wired in.
 func DefaultOutcome(action ProtectedAction) AuthorityOutcome {
-	switch action {
-	case ActionProductionDeploy,
-		ActionRepoCreate,
-		ActionRepoDelete,
-		ActionRepoPushDefaultBranch,
-		ActionRepoMergeMain,
-		ActionRepoMutateCrossRepo,
-		ActionAgentSpawnPersistent,
-		ActionAgentRetire,
-		ActionAgentEscalatePermissions,
-		ActionPolicyChange,
-		ActionSecretAccess,
-		ActionExternalCompanyVoice,
-		ActionDataDelete,
-		ActionSelfModificationActivate,
-		ActionBillingSpendAboveThreshold,
-		ActionLicenseChange:
+	if IsProtectedAction(action) {
 		return ApprovalRequired
-	default:
-		return Autonomous
 	}
+	return Forbidden
 }
 
 // RequireAuthorized returns nil only for actions that are autonomous by default.
@@ -100,4 +99,42 @@ func RequireAuthorized(action ProtectedAction) error {
 		return nil
 	}
 	return AuthorityError{Action: action, Outcome: outcome}
+}
+
+// ApprovalAllowsAction returns true only when the approved protected action is
+// the same known action being requested. Approval for lifecycle changes, role
+// creation, or any other protected action must not leak into self-modification.
+func ApprovalAllowsAction(approvedAction, requestedAction ProtectedAction) bool {
+	if !IsProtectedAction(approvedAction) || !IsProtectedAction(requestedAction) {
+		return false
+	}
+	return approvedAction == requestedAction
+}
+
+// AgentLifecycleOperation names Hive lifecycle operations that map to
+// DF-SOP-0001 protected actions.
+type AgentLifecycleOperation string
+
+const (
+	AgentLifecycleSpawnPersistent     AgentLifecycleOperation = "spawn_persistent"
+	AgentLifecycleRetire              AgentLifecycleOperation = "retire"
+	AgentLifecycleRevoke              AgentLifecycleOperation = "revoke"
+	AgentLifecycleEscalatePermissions AgentLifecycleOperation = "escalate_permissions"
+)
+
+// RequiredActionForAgentLifecycleOperation maps lifecycle operations to their
+// canonical protected action. Unknown lifecycle operations fail closed.
+func RequiredActionForAgentLifecycleOperation(op AgentLifecycleOperation) (ProtectedAction, error) {
+	switch op {
+	case AgentLifecycleSpawnPersistent:
+		return ActionAgentSpawnPersistent, nil
+	case AgentLifecycleRetire:
+		return ActionAgentRetire, nil
+	case AgentLifecycleRevoke:
+		return ActionAgentRevoke, nil
+	case AgentLifecycleEscalatePermissions:
+		return ActionAgentEscalatePermissions, nil
+	default:
+		return ProtectedAction(""), AuthorityError{Action: ProtectedAction(op), Outcome: Forbidden}
+	}
 }

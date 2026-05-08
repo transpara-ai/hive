@@ -28,6 +28,7 @@ repo.merge.main
 repo.mutate.cross_repo
 agent.spawn.persistent
 agent.retire
+agent.revoke
 agent.escalate_permissions
 policy.change
 secret.access
