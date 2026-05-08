@@ -19,7 +19,7 @@ var (
 )
 
 func allHiveEventTypes() []types.EventType {
-	return []types.EventType{
+	eventTypes := []types.EventType{
 		EventTypeRunStarted, EventTypeRunCompleted,
 		EventTypeAgentSpawned, EventTypeAgentStopped,
 		EventTypeProgress, EventTypeRoleDefinition,
@@ -30,6 +30,8 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeSiteRespond, EventTypeSiteExpress,
 		EventTypeSiteAssert, EventTypeSiteProgress,
 	}
+	eventTypes = append(eventTypes, phase3EventTypes()...)
+	return eventTypes
 }
 
 // hiveContent is embedded in all hive content types. Uses no-op Accept
@@ -135,6 +137,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.progress", event.Unmarshal[ProgressContent])
 	event.RegisterContentUnmarshaler("hive.role.definition", event.Unmarshal[RoleDefinitionContent])
 	event.RegisterContentUnmarshaler("agent.identity.registered", event.Unmarshal[AgentIdentityRegisteredContent])
+	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }
 
