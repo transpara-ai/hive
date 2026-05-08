@@ -838,7 +838,7 @@ func authorizeFinalPipelineSweep(repoMap map[string]string, activeRepo string, a
 	}
 	if err := safety.RequireAuthorized(safety.ActionRepoMutateCrossRepo); err != nil {
 		outcome := safety.DefaultOutcome(safety.ActionRepoMutateCrossRepo)
-		log.Printf("repo.mutate_cross_repo.blocked action=%s outcome=%s repos=%d active_repo=%s: %v",
+		log.Printf("repo.mutate.cross_repo.blocked action=%s outcome=%s repos=%d active_repo=%s: %v",
 			safety.ActionRepoMutateCrossRepo,
 			outcome,
 			len(repoMap),
