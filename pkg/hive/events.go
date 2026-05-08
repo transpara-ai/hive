@@ -9,12 +9,13 @@ import (
 
 // Hive event types — runtime lifecycle and agent coordination.
 var (
-	EventTypeRunStarted      = types.MustEventType("hive.run.started")
-	EventTypeRunCompleted    = types.MustEventType("hive.run.completed")
-	EventTypeAgentSpawned    = types.MustEventType("hive.agent.spawned")
-	EventTypeAgentStopped    = types.MustEventType("hive.agent.stopped")
-	EventTypeProgress        = types.MustEventType("hive.progress")
-	EventTypeRoleDefinition  = types.MustEventType("hive.role.definition")
+	EventTypeRunStarted              = types.MustEventType("hive.run.started")
+	EventTypeRunCompleted            = types.MustEventType("hive.run.completed")
+	EventTypeAgentSpawned            = types.MustEventType("hive.agent.spawned")
+	EventTypeAgentStopped            = types.MustEventType("hive.agent.stopped")
+	EventTypeProgress                = types.MustEventType("hive.progress")
+	EventTypeRoleDefinition          = types.MustEventType("hive.role.definition")
+	EventTypeAgentIdentityRegistered = types.MustEventType("agent.identity.registered")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -22,6 +23,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeRunStarted, EventTypeRunCompleted,
 		EventTypeAgentSpawned, EventTypeAgentStopped,
 		EventTypeProgress, EventTypeRoleDefinition,
+		EventTypeAgentIdentityRegistered,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
@@ -65,6 +67,28 @@ type AgentSpawnedContent struct {
 }
 
 func (c AgentSpawnedContent) EventTypeName() string { return "hive.agent.spawned" }
+
+// AgentIdentityRegisteredContent records the DF-SPEC-0003 identity
+// registration projection Hive needs for operator/audit views. It stores only
+// public key material and provenance metadata, never private key material.
+type AgentIdentityRegisteredContent struct {
+	hiveContent
+	ActorID          types.ActorID   `json:"ActorID"`
+	DisplayName      string          `json:"DisplayName"`
+	Role             string          `json:"Role"`
+	PublicKey        types.PublicKey `json:"PublicKey"`
+	KeyProvenance    string          `json:"KeyProvenance"`
+	Environment      string          `json:"Environment"`
+	IdentityMode     string          `json:"IdentityMode"`
+	ExternalKeyRef   string          `json:"ExternalKeyRef,omitempty"`
+	LifecycleStatus  string          `json:"LifecycleStatus"`
+	AuthorityScope   string          `json:"AuthorityScope"`
+	RegistrationPath string          `json:"RegistrationPath"`
+}
+
+func (c AgentIdentityRegisteredContent) EventTypeName() string {
+	return "agent.identity.registered"
+}
 
 // AgentStoppedContent is emitted when an agent's loop ends.
 type AgentStoppedContent struct {
@@ -110,6 +134,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.agent.stopped", event.Unmarshal[AgentStoppedContent])
 	event.RegisterContentUnmarshaler("hive.progress", event.Unmarshal[ProgressContent])
 	event.RegisterContentUnmarshaler("hive.role.definition", event.Unmarshal[RoleDefinitionContent])
+	event.RegisterContentUnmarshaler("agent.identity.registered", event.Unmarshal[AgentIdentityRegisteredContent])
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }
 

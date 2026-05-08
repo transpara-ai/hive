@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"time"
 
@@ -55,6 +56,22 @@ type AgentDef struct {
 	// RoleDefinition is the template this instance derives from.
 	// Nil for legacy AgentDefs that predate the template system.
 	RoleDefinition *modelconfig.RoleDefinition
+
+	// IdentityEnvironment controls production identity guardrails. Empty is
+	// production so callers fail closed unless they explicitly mark fixtures.
+	IdentityEnvironment AgentIdentityEnvironment
+
+	// IdentityMode controls key provenance. Empty generates production-safe
+	// key material. Deterministic fixtures are development/test only.
+	IdentityMode AgentIdentityMode
+
+	// ExternalKeyRef identifies externally managed key material without storing
+	// the private key in EventGraph. Required for externally managed identity.
+	ExternalKeyRef string
+
+	// SigningKey is optional in-memory key material supplied by an approved
+	// environment-scoped mechanism. It is never emitted to EventGraph.
+	SigningKey ed25519.PrivateKey
 }
 
 // Validate checks that the AgentDef has all required fields.

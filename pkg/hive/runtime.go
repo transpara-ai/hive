@@ -497,6 +497,11 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 // It returns the agent and the resolved model name so callers can pass it to telemetry.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, error) {
+	identity, err := prepareAgentIdentity(def)
+	if err != nil {
+		return nil, "", err
+	}
+
 	// Resolve model/provider through the precedence chain.
 	input := modelconfig.ResolutionInput{
 		Role:          def.Role,
@@ -523,6 +528,9 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		Name:           def.Name,
 		Graph:          r.graph,
 		Provider:       tracker,
+		Environment:    identity.AgentEnv,
+		IdentityMode:   identity.AgentMode,
+		SigningKey:     identity.SigningKey,
 		ConversationID: r.convID,
 	})
 	if err != nil {
@@ -537,6 +545,9 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		Model:   resolved.Model,
 		ActorID: agent.ID().Value(),
 	})
+	if err := r.emitAgentIdentityRegistered(agent.ID(), def, identity); err != nil {
+		return nil, "", fmt.Errorf("record identity provenance: %w", err)
+	}
 
 	// Emit role definition as a first-class event (queryable, versionable).
 	if def.RoleDefinition != nil {
@@ -555,6 +566,39 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	}
 
 	return agent, resolved.Model, nil
+}
+
+func (r *Runtime) emitAgentIdentityRegistered(agentID types.ActorID, def AgentDef, identity preparedAgentIdentity) error {
+	registered, err := r.actors.Get(agentID)
+	if err != nil {
+		return fmt.Errorf("lookup registered actor: %w", err)
+	}
+
+	var causes []types.EventID
+	head, err := r.store.Head()
+	if err != nil {
+		return fmt.Errorf("store head: %w", err)
+	}
+	if head.IsSome() {
+		causes = []types.EventID{head.Unwrap().ID()}
+	}
+
+	content := AgentIdentityRegisteredContent{
+		ActorID:          agentID,
+		DisplayName:      def.Name,
+		Role:             def.Role,
+		PublicKey:        registered.PublicKey(),
+		KeyProvenance:    string(identity.Provenance),
+		Environment:      string(identity.Environment),
+		IdentityMode:     string(identity.Mode),
+		ExternalKeyRef:   def.ExternalKeyRef,
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive",
+		RegistrationPath: "hive.runtime.spawnAgent",
+	}
+
+	_, err = r.graph.Record(EventTypeAgentIdentityRegistered, r.humanID, content, causes, r.convID, r.signer)
+	return err
 }
 
 // emit appends a hive event to the graph. Best-effort.
