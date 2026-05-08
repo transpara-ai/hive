@@ -30,7 +30,7 @@ func TestAuthorizeFinalPipelineSweepBlocksRepoMapByDefault(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"repo.mutate_cross_repo.blocked",
+		"repo.mutate.cross_repo.blocked",
 		string(safety.ActionRepoMutateCrossRepo),
 		string(safety.ApprovalRequired),
 		"repos=2",
@@ -50,7 +50,7 @@ func TestAuthorizeFinalPipelineSweepAllowsSingleRepoDirectPushPath(t *testing.T)
 	if err := authorizeFinalPipelineSweep(nil, "/tmp/hive", nil); err != nil {
 		t.Fatalf("authorizeFinalPipelineSweep with no repo map: %v", err)
 	}
-	if strings.Contains(logs.String(), "repo.mutate_cross_repo.blocked") {
+	if strings.Contains(logs.String(), "repo.mutate.cross_repo.blocked") {
 		t.Fatalf("single-repo path logged cross-repo block unexpectedly:\n%s", logs.String())
 	}
 }

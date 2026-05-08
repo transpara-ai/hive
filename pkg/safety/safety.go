@@ -21,6 +21,7 @@ const (
 	ActionRepoCreate                 ProtectedAction = "repo.create"
 	ActionRepoDelete                 ProtectedAction = "repo.delete"
 	ActionRepoPushDefaultBranch      ProtectedAction = "repo.push.default_branch"
+	ActionRepoMergeMain              ProtectedAction = "repo.merge.main"
 	ActionRepoMutateCrossRepo        ProtectedAction = "repo.mutate.cross_repo"
 	ActionAgentSpawnPersistent       ProtectedAction = "agent.spawn.persistent"
 	ActionAgentRetire                ProtectedAction = "agent.retire"
@@ -32,8 +33,28 @@ const (
 	ActionSelfModificationActivate   ProtectedAction = "self_modification.activate"
 	ActionBillingSpendAboveThreshold ProtectedAction = "billing.spend_above_threshold"
 	ActionLicenseChange              ProtectedAction = "license.change"
-	ActionRepoMergeMain              ProtectedAction = "repo.merge.main"
 )
+
+// ProtectedActions is the DF-SOP-0001 baseline vocabulary. Repos may add
+// narrower protected actions, but must not rename or weaken this set.
+var ProtectedActions = []ProtectedAction{
+	ActionProductionDeploy,
+	ActionRepoCreate,
+	ActionRepoDelete,
+	ActionRepoPushDefaultBranch,
+	ActionRepoMergeMain,
+	ActionRepoMutateCrossRepo,
+	ActionAgentSpawnPersistent,
+	ActionAgentRetire,
+	ActionAgentEscalatePermissions,
+	ActionPolicyChange,
+	ActionSecretAccess,
+	ActionExternalCompanyVoice,
+	ActionDataDelete,
+	ActionSelfModificationActivate,
+	ActionBillingSpendAboveThreshold,
+	ActionLicenseChange,
+}
 
 // AuthorityError is returned when an action must not execute without approval.
 type AuthorityError struct {
@@ -53,6 +74,7 @@ func DefaultOutcome(action ProtectedAction) AuthorityOutcome {
 		ActionRepoCreate,
 		ActionRepoDelete,
 		ActionRepoPushDefaultBranch,
+		ActionRepoMergeMain,
 		ActionRepoMutateCrossRepo,
 		ActionAgentSpawnPersistent,
 		ActionAgentRetire,
@@ -63,8 +85,7 @@ func DefaultOutcome(action ProtectedAction) AuthorityOutcome {
 		ActionDataDelete,
 		ActionSelfModificationActivate,
 		ActionBillingSpendAboveThreshold,
-		ActionLicenseChange,
-		ActionRepoMergeMain:
+		ActionLicenseChange:
 		return ApprovalRequired
 	default:
 		return Autonomous
