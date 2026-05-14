@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -265,15 +266,27 @@ func cmdIngest(args []string) error {
 
 // ─── council ──────────────────────────────────────────────────────────────────
 
-func cmdCouncil(args []string) error {
+func newCouncilFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("council", flag.ContinueOnError)
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
-	repo := fs.String("repo", "", "Path to repo (default: current dir)")
-	budget := fs.Float64("budget", 10.0, "Daily budget in USD")
-	topic := fs.String("topic", "", "Focus the council on a specific question")
+	fs.String("space", "hive", "lovyou.ai space slug")
+	fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	fs.String("repo", "", "Path to repo (default: current dir)")
+	fs.Float64("budget", 10.0, "Daily budget in USD")
+	fs.String("topic", "", "Focus the council on a specific question")
+	fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
+	return fs
+}
+
+func cmdCouncil(args []string) error {
+	fs := newCouncilFlagSet()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runCouncilCmd(*space, *apiBase, *repo, *budget, *topic)
+	space := fs.Lookup("space").Value.String()
+	apiBase := fs.Lookup("api").Value.String()
+	repo := fs.Lookup("repo").Value.String()
+	budget, _ := strconv.ParseFloat(fs.Lookup("budget").Value.String(), 64)
+	topic := fs.Lookup("topic").Value.String()
+	catalog := fs.Lookup("catalog").Value.String()
+	return runCouncilCmd(space, apiBase, repo, budget, topic, catalog)
 }
