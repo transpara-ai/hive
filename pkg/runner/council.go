@@ -22,7 +22,8 @@ type councilMember struct {
 
 // RunCouncil convenes all agents for a deliberation session.
 // Each agent receives shared context and speaks from their perspective.
-// Uses the runner Config — same provider, API client, paths.
+// Resolves per-role providers through cfg.Pool (required); civilization/pipeline/role
+// modes still use cfg.Provider but council does not.
 func RunCouncil(ctx context.Context, cfg Config) error {
 	log.Println("[council] ═══ Convening the hive council ═══")
 	start := time.Now()
@@ -44,18 +45,65 @@ func RunCouncil(ctx context.Context, cfg Config) error {
 
 	log.Printf("[council] %d agents assembled: %s", len(members), memberNames(members))
 
+	// Pre-resolve every member's provider so config errors surface before fan-out
+	// and so the unique-provider summary is logged once.
+	if cfg.Pool == nil {
+		return fmt.Errorf("council requires Config.Pool to be set")
+	}
+	roleNames := make([]string, 0, len(members))
+	for _, m := range members {
+		roleNames = append(roleNames, m.role)
+	}
+	if err := cfg.Pool.WarmForRoles(roleNames); err != nil {
+		return fmt.Errorf("council pool warm-up: %w", err)
+	}
+	stats := cfg.Pool.Stats()
+	log.Printf("[council] %s", stats.Summary())
+
+	// Decision 5b warning: roles marked CanOperate=true whose resolved
+	// provider doesn't implement IOperator will silently fall back to
+	// Reason(). Surface this once at warm-up so misconfigurations are
+	// visible without blocking the council. When CanOperateLookup is nil
+	// (other callers, tests that don't care), skip the warning loop.
+	for _, m := range members {
+		if cfg.CanOperateLookup == nil || !cfg.CanOperateLookup(m.role) {
+			continue
+		}
+		provider, err := cfg.Pool.For(m.role)
+		if err != nil {
+			continue
+		}
+		if _, ok := provider.(decision.IOperator); !ok {
+			model := "?"
+			if named, ok := provider.(interface {
+				Name() string
+				Model() string
+			}); ok {
+				model = named.Name() + "/" + named.Model()
+			}
+			log.Printf("[council] warning: role %s is CanOperate=true but resolved provider %s does not implement IOperator; Operate() calls will fall back to Reason()", m.role, model)
+		}
+	}
+
 	// Each agent deliberates (concurrently for speed).
 	// Use Operate() if available so agents can search the knowledge layer.
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	totalCost := 0.0
 
-	op, canOperate := cfg.Provider.(decision.IOperator)
-
 	for i := range members {
 		wg.Add(1)
 		go func(m *councilMember) {
 			defer wg.Done()
+
+			provider, err := cfg.Pool.For(m.role)
+			if err != nil {
+				log.Printf("[council] %s: pool.For: %v", m.role, err)
+				m.response = fmt.Sprintf("(could not contribute: %v)", err)
+				return
+			}
+
+			op, canOperate := provider.(decision.IOperator)
 
 			if canOperate {
 				// Operate mode: agent can search knowledge, read code, check the board.
@@ -80,7 +128,7 @@ func RunCouncil(ctx context.Context, cfg Config) error {
 			} else {
 				// Reason fallback: static context, no search.
 				prompt := buildCouncilPrompt(m.role, m.prompt, sharedContext, cfg.CouncilTopic)
-				resp, err := cfg.Provider.Reason(ctx, prompt, nil)
+				resp, err := provider.Reason(ctx, prompt, nil)
 				if err != nil {
 					log.Printf("[council] %s: error: %v", m.role, err)
 					m.response = fmt.Sprintf("(could not contribute: %v)", err)

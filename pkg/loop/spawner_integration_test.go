@@ -23,7 +23,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 )
 

@@ -9,7 +9,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/loop"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/hive/pkg/telemetry"

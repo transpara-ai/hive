@@ -28,7 +28,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/budget"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
@@ -1031,8 +1031,8 @@ func (l *Loop) hasAssignedTask() bool {
 	}
 	// Check if any assigned task is not yet completed.
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetStatus(t.ID)
-		if status != work.StatusCompleted {
+		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
+		if status != work.LegacyStatusCompleted {
 			return true
 		}
 	}
@@ -1043,8 +1043,8 @@ func (l *Loop) hasAssignedTask() bool {
 func (l *Loop) nextAssignedTask() work.Task {
 	tasks, _ := l.config.TaskStore.GetByAssignee(l.agent.ID())
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetStatus(t.ID)
-		if status != work.StatusCompleted {
+		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
+		if status != work.LegacyStatusCompleted {
 			return t
 		}
 	}

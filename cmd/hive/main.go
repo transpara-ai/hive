@@ -44,6 +44,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/actor/pgactor"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -501,7 +502,7 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 
 // ─── Council mode ────────────────────────────────────────────────────
 
-func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string) error {
+func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic, catalogPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -514,31 +515,79 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic string
 	absRepo, _ := filepath.Abs(repoPath)
 	hiveDir := findHiveDir()
 
-	// Use the best model available for council deliberation.
-	councilModel := os.Getenv("COUNCIL_MODEL")
-	if councilModel == "" {
-		councilModel = "sonnet"
-	}
-	provider, err := intelligence.New(intelligence.Config{
-		Provider:     "claude-cli",
-		Model:        councilModel,
-		MaxBudgetUSD: budget,
-		APIKey:       resolveAnthropicKey(),
-	})
+	resolver, err := buildCouncilResolver(catalogPath)
 	if err != nil {
-		return fmt.Errorf("provider: %w", err)
+		return fmt.Errorf("resolver: %w", err)
 	}
+	// Thread --budget into every pool-built provider. Without this wrapper,
+	// modelconfig.ToIntelligenceConfig produces configs with MaxBudgetUSD=0
+	// and claude-cli falls back to its $1/call default, far below the $10
+	// daily budget operators expect.
+	pool := modelconfig.NewProviderPoolWithBuilder(resolver, councilProviderBuilder(intelligence.New, budget))
+
+	// Precompute role → CanOperate map once, then pass as a closure on Config.
+	// Bridges the runner package (which can't import hive) to the live
+	// AgentDef registry without per-call slice allocation + linear scan.
+	canOperateMap := make(map[string]bool)
+	for _, def := range hive.StarterAgents("") {
+		canOperateMap[def.Role] = def.CanOperate
+	}
+	canOperateLookup := func(role string) bool { return canOperateMap[role] }
 
 	return runner.RunCouncil(ctx, runner.Config{
-		SpaceSlug:    space,
-		RepoPath:     absRepo,
-		HiveDir:      hiveDir,
-		APIClient:    client,
-		APIBase:      apiBase,
-		Provider:     provider,
-		BudgetUSD:    budget,
-		CouncilTopic: topic,
+		SpaceSlug:        space,
+		RepoPath:         absRepo,
+		HiveDir:          hiveDir,
+		APIClient:        client,
+		APIBase:          apiBase,
+		Pool:             pool,
+		BudgetUSD:        budget,
+		CouncilTopic:     topic,
+		CanOperateLookup: canOperateLookup,
 	})
+}
+
+// councilProviderBuilder returns a provider builder closure that injects the
+// operator's --budget into every intelligence.Config before delegating to the
+// real constructor. Threading budget through here is essential because the
+// modelconfig.Resolver (used by ProviderPool) does not carry a per-call cost
+// cap; without this wrapper, claude-cli providers default to a $1 per-call
+// cap (far below the daily --budget operators set).
+//
+// The `inner` parameter is the underlying constructor (intelligence.New in
+// production, a capturing fake in tests).
+func councilProviderBuilder(
+	inner func(intelligence.Config) (intelligence.Provider, error),
+	budget float64,
+) func(intelligence.Config) (intelligence.Provider, error) {
+	return func(cfg intelligence.Config) (intelligence.Provider, error) {
+		cfg.MaxBudgetUSD = budget
+		return inner(cfg)
+	}
+}
+
+// buildCouncilResolver returns a Resolver for the council. Precedence:
+//  1. --catalog flag wins if non-empty.
+//  2. COUNCIL_MODEL env var fallback ONLY when --catalog is unset.
+//  3. DefaultResolver().
+//
+// Decision 5a of the design spec.
+func buildCouncilResolver(catalogPath string) (*modelconfig.Resolver, error) {
+	if catalogPath != "" {
+		if env := os.Getenv("COUNCIL_MODEL"); env != "" {
+			log.Printf("[council] note: --catalog provided; COUNCIL_MODEL=%s env var ignored", env)
+		}
+		return modelconfig.ResolverFromCatalogFile(catalogPath)
+	}
+	if env := os.Getenv("COUNCIL_MODEL"); env != "" {
+		r, err := modelconfig.DefaultResolverWithModel(env)
+		if err != nil {
+			return nil, fmt.Errorf("COUNCIL_MODEL=%q: %w", env, err)
+		}
+		log.Printf("[council] legacy mode: COUNCIL_MODEL=%s → synthetic single-model resolver", env)
+		return r, nil
+	}
+	return modelconfig.DefaultResolver(), nil
 }
 
 // ─── Pipeline mode ───────────────────────────────────────────────────

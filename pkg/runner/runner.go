@@ -16,35 +16,37 @@ import (
 
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/api"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/registry"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 // Config holds everything a Runner needs.
 type Config struct {
-	Role           string // e.g. "builder"
-	AgentID        string // lovyou.ai user ID for this agent (filters task assignment)
-	SpaceSlug      string // lovyou.ai space slug (e.g. "hive")
-	RepoPath       string // absolute path to the repo to operate on
-	HiveDir        string // path to hive repo (for state.md, role prompts)
-	APIClient      *api.Client
-	APIBase        string // Base URL for agent curl commands (e.g. "http://localhost:8082")
-	Provider       intelligence.Provider
-	RolePrompt     string // loaded from agents/{role}.md
-	Interval       time.Duration
-	BudgetUSD      float64            // daily budget, 0 = $10 default
-	OneShot        bool               // if true, work one task then exit (for testing)
-	Direct         bool               // if true, use legacy direct push behavior
-	NoPush         bool               // if true, commit but don't push (pipeline pushes after Critic PASS)
-	PRMode         bool               // if true, create a feature branch before committing
-	ProposalMode   bool               // if true, non-builder phases update local PR proposal artifacts
-	CouncilTopic   string             // optional: focus the council on a specific question
-	RepoMap        map[string]string  // named repos: name → absolute path (for multi-repo pipeline)
-	BaselineCommit string             // commit hash before Builder ran — Critic only reviews after this
-	Registry       *registry.Registry // repo metadata for prompts, build/test commands
-	UseWorktrees   bool               // if true, each Builder task gets its own git worktree
+	Role             string // e.g. "builder"
+	AgentID          string // lovyou.ai user ID for this agent (filters task assignment)
+	SpaceSlug        string // lovyou.ai space slug (e.g. "hive")
+	RepoPath         string // absolute path to the repo to operate on
+	HiveDir          string // path to hive repo (for state.md, role prompts)
+	APIClient        *api.Client
+	APIBase          string // Base URL for agent curl commands (e.g. "http://localhost:8082")
+	Provider         intelligence.Provider
+	Pool             *modelconfig.ProviderPool // set by council; nil for civilization/pipeline/role modes
+	CanOperateLookup func(role string) bool    // council-only; nil means no warning is emitted
+	RolePrompt       string                    // loaded from agents/{role}.md
+	Interval         time.Duration
+	BudgetUSD        float64            // daily budget, 0 = $10 default
+	OneShot          bool               // if true, work one task then exit (for testing)
+	Direct           bool               // if true, use legacy direct push behavior
+	NoPush           bool               // if true, commit but don't push (pipeline pushes after Critic PASS)
+	PRMode           bool               // if true, create a feature branch before committing
+	ProposalMode     bool               // if true, non-builder phases update local PR proposal artifacts
+	CouncilTopic     string             // optional: focus the council on a specific question
+	RepoMap          map[string]string  // named repos: name → absolute path (for multi-repo pipeline)
+	BaselineCommit   string             // commit hash before Builder ran — Critic only reviews after this
+	Registry         *registry.Registry // repo metadata for prompts, build/test commands
+	UseWorktrees     bool               // if true, each Builder task gets its own git worktree
 }
 
 // CostTracker records per-call spending.

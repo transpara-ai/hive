@@ -152,3 +152,14 @@ func TestCmdCouncilRejectsUnknownFlag(t *testing.T) {
 		t.Fatalf("error should mention unknown flag name, got: %v", err)
 	}
 }
+
+func TestCmdCouncil_AcceptsCatalogFlag(t *testing.T) {
+	fs := newCouncilFlagSet()
+	args := []string{"--catalog", "/tmp/test-catalog.yaml", "--topic", "x"}
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := fs.Lookup("catalog").Value.String(); got != "/tmp/test-catalog.yaml" {
+		t.Errorf("--catalog value=%q; want /tmp/test-catalog.yaml", got)
+	}
+}

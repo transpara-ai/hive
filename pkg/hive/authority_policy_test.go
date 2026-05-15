@@ -6,7 +6,7 @@ import (
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 

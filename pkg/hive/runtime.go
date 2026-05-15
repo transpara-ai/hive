@@ -12,12 +12,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
@@ -30,7 +32,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/knowledge"
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/membrane"
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 	"github.com/transpara-ai/work"
@@ -483,6 +485,14 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	return nil
 }
 
+// canOperateMismatch returns true when an agent flagged CanOperate=true
+// has been resolved to a provider that does not implement IOperator.
+// The check is factored out so it can be unit-tested without standing
+// up a full runtime.
+func canOperateMismatch(canOperate, providerSupportsOperate bool) bool {
+	return canOperate && !providerSupportsOperate
+}
+
 // buildCheckpointSink constructs a CheckpointSink for an agent.
 // Returns nil when thoughtStore is nil (disables checkpointing gracefully).
 // The heartbeat emitter is nil here — the loop wires it in Run() where it
@@ -517,6 +527,13 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	provider, err := intelligence.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)
+	}
+
+	// Decision 5b warning.
+	_, supportsOperate := provider.(decision.IOperator)
+	if canOperateMismatch(def.CanOperate, supportsOperate) {
+		log.Printf("[runtime] warning: agent %s (role %s) is CanOperate=true but resolved provider %s/%s does not implement IOperator; Operate() calls will fall back to Reason()",
+			def.Name, def.Role, resolved.Provider, resolved.Model)
 	}
 
 	// Wrap in tracking provider for token accounting.

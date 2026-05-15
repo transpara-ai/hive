@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 )
 
 // dynamicAgentTracker manages the lifecycle of agents spawned after boot.

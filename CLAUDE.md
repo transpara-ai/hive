@@ -168,7 +168,7 @@ Subcommands:
 - `pipeline run` / `pipeline daemon` — Scout→Builder→Critic state machine
 - `role <name> run` / `role <name> daemon` — single agent
 - `ingest <file>` — post a markdown spec as a task
-- `council [--topic STR]` — convene one deliberation
+- `council [--topic STR] [--catalog PATH]` — convene one deliberation; `--catalog` selects a model catalog YAML (without it, falls back to `COUNCIL_MODEL` env or the built-in default)
 
 Civilization flags:
 - `--human` — Human operator name (required)

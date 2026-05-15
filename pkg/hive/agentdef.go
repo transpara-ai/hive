@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/transpara-ai/hive/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 )
 
 // Tier constants for role classification.
