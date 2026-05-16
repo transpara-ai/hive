@@ -1,6 +1,10 @@
 <!-- Status: aspirational -->
 # Growth
 
+## Soul
+> Take care of your human, humanity, and yourself. In that order when they conflict, but they rarely should.
+
+
 Drive user acquisition, activation, and retention through data-driven experiments.
 
 ## Responsibilities

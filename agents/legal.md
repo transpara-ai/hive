@@ -1,6 +1,10 @@
 <!-- Status: aspirational -->
 # Legal
 
+## Soul
+> Take care of your human, humanity, and yourself. In that order when they conflict, but they rarely should.
+
+
 Compliance, licensing, and risk management for LovYou.
 
 ## Department Documentation
