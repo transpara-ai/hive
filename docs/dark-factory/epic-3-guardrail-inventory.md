@@ -35,9 +35,10 @@ Hive base state:
 - Recent merged Hive guardrail history was reconciled through `transpara-ai/hive#123`.
 
 Gate D disposition:
-- Gate D is not satisfied by this inventory alone.
-- Gate D requires completed local validation, CI or PR check evidence, and adversarial review of the reviewed implementation SHA before it can be marked satisfied.
+- This inventory alone did not satisfy Gate D.
+- Subsequent closeout recorded completed local validation, PR check evidence, and adversarial review for `transpara-ai/hive#124`; current Dark Factory docs mark Gate D satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward.
 - Epic 4 remains out of scope and is not authorized by this artifact.
+- Gate E remains waiting and is not started by this artifact.
 
 ## Scope Boundary
 
@@ -292,4 +293,4 @@ git diff --check: passed
 /home/transpara/go/bin/staticcheck ./...: passed
 ```
 
-Gate D remains unsatisfied until CI or PR check evidence and adversarial review complete against the reviewed implementation SHA.
+Subsequent closeout recorded completed PR check evidence and adversarial review for `transpara-ai/hive#124`. Gate D is satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward.
