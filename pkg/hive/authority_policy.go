@@ -11,11 +11,14 @@ import (
 type protectedActionRequest struct {
 	Action            safety.ProtectedAction
 	RequestingActor   types.ActorID
+	RequestingRole    string
 	Target            string
 	Environment       string
+	RiskClass         string
 	RequestedOutcome  string
 	Justification     string
 	RiskSummary       string
+	Scope             []string
 	EvidenceReviewed  []types.EventID
 	ProposedOperation string
 	CausalEventIDs    []types.EventID
@@ -52,6 +55,11 @@ func (r *Runtime) recordAuthorityRequest(req protectedActionRequest) (types.Even
 	if actorID.IsZero() {
 		actorID = r.humanID
 	}
+	riskClass := req.RiskClass
+	if riskClass == "" {
+		riskClass = safety.RiskClass(req.Action)
+	}
+	scope := authorityScope(req)
 
 	causes, err := r.authorityCauses(req.CausalEventIDs)
 	if err != nil {
@@ -78,12 +86,15 @@ func (r *Runtime) recordAuthorityRequest(req protectedActionRequest) (types.Even
 	detail := AuthorityRequestRecordedContent{
 		RequestID:         stored.ID(),
 		RequestingActor:   actorID,
+		RequestingRole:    req.RequestingRole,
 		ActionName:        string(req.Action),
 		Target:            req.Target,
 		Environment:       req.Environment,
+		RiskClass:         riskClass,
 		RequestedOutcome:  req.RequestedOutcome,
 		Justification:     req.Justification,
 		RiskSummary:       req.RiskSummary,
+		Scope:             scope,
 		EvidenceReviewed:  req.EvidenceReviewed,
 		ProposedOperation: req.ProposedOperation,
 		CausalEventIDs:    causes,
@@ -95,18 +106,30 @@ func (r *Runtime) recordAuthorityRequest(req protectedActionRequest) (types.Even
 }
 
 func (r *Runtime) recordAuthorityDecision(requestID types.EventID, req protectedActionRequest) error {
+	scope := authorityScope(req)
 	content := AuthorityDecisionRecordedContent{
 		DecisionID:       requestID.Value(),
 		RequestID:        requestID,
 		ApproverActor:    r.humanID,
+		DeciderRole:      "operator",
 		Outcome:          "approved",
 		ApprovedTarget:   req.Target,
 		ApprovedAction:   string(req.Action),
+		Scope:            scope,
 		EvidenceReviewed: req.EvidenceReviewed,
 		Rationale:        "auto-approved via --approve-requests",
 	}
 	_, err := r.graph.Record(EventTypeAuthorityDecisionRecorded, r.humanID, content, []types.EventID{requestID}, r.convID, r.signer)
 	return err
+}
+
+func authorityScope(req protectedActionRequest) []string {
+	if len(req.Scope) > 0 {
+		scope := make([]string, len(req.Scope))
+		copy(scope, req.Scope)
+		return scope
+	}
+	return []string{string(req.Action)}
 }
 
 func (r *Runtime) authorityCauses(causalEventIDs []types.EventID) ([]types.EventID, error) {

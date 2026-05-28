@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
-	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 
@@ -77,6 +77,12 @@ func TestAuthorizeProtectedActionRecordsRequestAndBlocksWithoutApproval(t *testi
 	if details[0].ActionName != string(safety.ActionAgentSpawnPersistent) {
 		t.Fatalf("detail action = %q, want %q", details[0].ActionName, safety.ActionAgentSpawnPersistent)
 	}
+	if details[0].RiskClass != safety.RiskClass(safety.ActionAgentSpawnPersistent) {
+		t.Fatalf("detail risk class = %q, want %q", details[0].RiskClass, safety.RiskClass(safety.ActionAgentSpawnPersistent))
+	}
+	if len(details[0].Scope) != 1 || details[0].Scope[0] != string(safety.ActionAgentSpawnPersistent) {
+		t.Fatalf("detail scope = %#v, want [%s]", details[0].Scope, safety.ActionAgentSpawnPersistent)
+	}
 }
 
 func TestAuthorizeProtectedActionWithAutoApprovalRecordsDecision(t *testing.T) {
@@ -108,6 +114,50 @@ func TestAuthorizeProtectedActionWithAutoApprovalRecordsDecision(t *testing.T) {
 	}
 	if decisions[0].ApprovedAction != string(safety.ActionAgentRetire) {
 		t.Fatalf("approved action = %q, want %q", decisions[0].ApprovedAction, safety.ActionAgentRetire)
+	}
+	if decisions[0].DeciderRole != "operator" {
+		t.Fatalf("decider role = %q, want operator", decisions[0].DeciderRole)
+	}
+	if len(decisions[0].Scope) != 1 || decisions[0].Scope[0] != string(safety.ActionAgentRetire) {
+		t.Fatalf("decision scope = %#v, want [%s]", decisions[0].Scope, safety.ActionAgentRetire)
+	}
+}
+
+func TestAuthorizeProtectedActionPreservesExplicitScopeAndRiskClass(t *testing.T) {
+	rt := newIdentityTestRuntime(t)
+
+	_, err := rt.authorizeProtectedAction(protectedActionRequest{
+		Action:           safety.ActionRuntimeInvokeExternal,
+		RequestingRole:   "runner",
+		Target:           "runtime:external",
+		Environment:      "test",
+		RiskClass:        "critical",
+		Scope:            []string{"runtime.invoke.external", "runtime:test-only"},
+		RequestedOutcome: "blocked external runtime invocation",
+		Justification:    "prove Epic 3 records explicit scope",
+	})
+	if err == nil {
+		t.Fatal("protected action without approval returned nil error")
+	}
+
+	details := authorityRequestsByType[AuthorityRequestRecordedContent](t, rt, EventTypeAuthorityRequestRecorded)
+	if len(details) != 1 {
+		t.Fatalf("authority.request.recorded count = %d, want 1", len(details))
+	}
+	if details[0].RequestingRole != "runner" {
+		t.Fatalf("requesting role = %q, want runner", details[0].RequestingRole)
+	}
+	if details[0].RiskClass != "critical" {
+		t.Fatalf("risk class = %q, want critical", details[0].RiskClass)
+	}
+	wantScope := []string{"runtime.invoke.external", "runtime:test-only"}
+	if len(details[0].Scope) != len(wantScope) {
+		t.Fatalf("scope len = %d, want %d: %#v", len(details[0].Scope), len(wantScope), details[0].Scope)
+	}
+	for i := range wantScope {
+		if details[0].Scope[i] != wantScope[i] {
+			t.Fatalf("scope[%d] = %q, want %q", i, details[0].Scope[i], wantScope[i])
+		}
 	}
 }
 

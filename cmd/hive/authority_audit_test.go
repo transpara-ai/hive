@@ -8,6 +8,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
+	hivepkg "github.com/transpara-ai/hive/pkg/hive"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 
@@ -53,6 +54,27 @@ func TestAuthorityAuditEmitterRecordsAuthorityRequested(t *testing.T) {
 	if content.Causes.Len() != 1 {
 		t.Fatalf("causes len = %d, want 1", content.Causes.Len())
 	}
+
+	detailPage, err := s.ByType(hivepkg.EventTypeAuthorityRequestRecorded, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query authority request details: %v", err)
+	}
+	if len(detailPage.Items()) != 1 {
+		t.Fatalf("authority.request.recorded count = %d, want 1", len(detailPage.Items()))
+	}
+	detail, ok := detailPage.Items()[0].Content().(hivepkg.AuthorityRequestRecordedContent)
+	if !ok {
+		t.Fatalf("detail content type = %T, want hive.AuthorityRequestRecordedContent", detailPage.Items()[0].Content())
+	}
+	if detail.ActionName != string(safety.ActionRepoCreate) {
+		t.Fatalf("detail action = %q, want %q", detail.ActionName, safety.ActionRepoCreate)
+	}
+	if detail.RiskClass != safety.RiskClass(safety.ActionRepoCreate) {
+		t.Fatalf("detail risk class = %q, want %q", detail.RiskClass, safety.RiskClass(safety.ActionRepoCreate))
+	}
+	if len(detail.Scope) != 1 || detail.Scope[0] != string(safety.ActionRepoCreate) {
+		t.Fatalf("detail scope = %#v, want [%s]", detail.Scope, safety.ActionRepoCreate)
+	}
 }
 
 func TestAuthorizeFinalPipelineSweepEmitsAuthorityRequest(t *testing.T) {
@@ -84,6 +106,21 @@ func TestAuthorizeFinalPipelineSweepEmitsAuthorityRequest(t *testing.T) {
 	}
 	if !strings.Contains(content.Justification, "repos=2") {
 		t.Fatalf("justification missing repo count: %q", content.Justification)
+	}
+
+	detailPage, err := s.ByType(hivepkg.EventTypeAuthorityRequestRecorded, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query authority request details: %v", err)
+	}
+	if len(detailPage.Items()) != 1 {
+		t.Fatalf("authority.request.recorded count = %d, want 1", len(detailPage.Items()))
+	}
+	detail := detailPage.Items()[0].Content().(hivepkg.AuthorityRequestRecordedContent)
+	if detail.ActionName != string(safety.ActionRepoMutateCrossRepo) {
+		t.Fatalf("detail action = %q, want %q", detail.ActionName, safety.ActionRepoMutateCrossRepo)
+	}
+	if detail.RiskClass != safety.RiskClass(safety.ActionRepoMutateCrossRepo) {
+		t.Fatalf("detail risk class = %q, want %q", detail.RiskClass, safety.RiskClass(safety.ActionRepoMutateCrossRepo))
 	}
 }
 
@@ -118,6 +155,33 @@ func TestAuthorizeIngestRepoBootstrapEmitsAuthorityRequests(t *testing.T) {
 	} {
 		if !got[string(want)] {
 			t.Fatalf("missing authority request for %s", want)
+		}
+	}
+
+	detailPage, err := s.ByType(hivepkg.EventTypeAuthorityRequestRecorded, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query authority request details: %v", err)
+	}
+	if len(detailPage.Items()) != 2 {
+		t.Fatalf("authority.request.recorded count = %d, want 2", len(detailPage.Items()))
+	}
+	detailActions := map[string]bool{}
+	for _, ev := range detailPage.Items() {
+		content := ev.Content().(hivepkg.AuthorityRequestRecordedContent)
+		if content.RiskClass == "" {
+			t.Fatalf("detail risk class is empty for %s", content.ActionName)
+		}
+		if len(content.Scope) != 1 || content.Scope[0] != content.ActionName {
+			t.Fatalf("detail scope = %#v, want [%s]", content.Scope, content.ActionName)
+		}
+		detailActions[content.ActionName] = true
+	}
+	for _, want := range []safety.ProtectedAction{
+		safety.ActionRepoCreate,
+		safety.ActionRepoPushDefaultBranch,
+	} {
+		if !detailActions[string(want)] {
+			t.Fatalf("missing authority request detail for %s", want)
 		}
 	}
 }

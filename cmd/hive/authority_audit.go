@@ -12,6 +12,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
+	hivepkg "github.com/transpara-ai/hive/pkg/hive"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 
@@ -54,9 +55,11 @@ func newAuthorityAuditEmitter(ctx context.Context, dsn string) (*authorityAuditE
 }
 
 func newAuthorityAuditEmitterForStore(s store.Store, actorID types.ActorID) *authorityAuditEmitter {
+	registry := event.DefaultRegistry()
+	hivepkg.RegisterWithRegistry(registry)
 	return &authorityAuditEmitter{
 		store:   s,
-		factory: event.NewEventFactory(event.DefaultRegistry()),
+		factory: event.NewEventFactory(registry),
 		signer:  deriveAuthorityAuditSigner(actorID),
 		actorID: actorID,
 		convID:  types.MustConversationID("conv_hive_authority_audit"),
@@ -104,6 +107,27 @@ func (e *authorityAuditEmitter) EmitAuthorityRequest(action safety.ProtectedActi
 	}
 	if _, err := e.store.Append(ev); err != nil {
 		return fmt.Errorf("authority audit append: %w", err)
+	}
+	detail := hivepkg.AuthorityRequestRecordedContent{
+		RequestID:         ev.ID(),
+		RequestingActor:   e.actorID,
+		RequestingRole:    "hive-cli",
+		ActionName:        string(action),
+		Environment:       "local",
+		RiskClass:         safety.RiskClass(action),
+		RequestedOutcome:  string(outcome),
+		Justification:     justification,
+		RiskSummary:       fmt.Sprintf("%s requires %s", action, outcome),
+		Scope:             []string{string(action)},
+		ProposedOperation: justification,
+		CausalEventIDs:    causes,
+	}
+	detailEv, err := e.factory.Create(hivepkg.EventTypeAuthorityRequestRecorded, e.actorID, detail, []types.EventID{ev.ID()}, e.convID, e.store, e.signer)
+	if err != nil {
+		return fmt.Errorf("authority audit detail create: %w", err)
+	}
+	if _, err := e.store.Append(detailEv); err != nil {
+		return fmt.Errorf("authority audit detail append: %w", err)
 	}
 	return nil
 }

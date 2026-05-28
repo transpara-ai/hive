@@ -93,7 +93,7 @@ func TestBuildScoutPrompt(t *testing.T) {
 	if !searchString(prompt, "Gap:") {
 		t.Error("prompt missing gap report format")
 	}
-	if !searchString(prompt, "MUST create tasks") || !searchString(prompt, "gap report") {
-		// Scout writes reports now, not tasks
+	if !searchString(prompt, "gap report") {
+		t.Error("prompt missing gap report instruction")
 	}
 }

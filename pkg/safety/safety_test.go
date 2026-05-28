@@ -24,6 +24,7 @@ func TestProtectedActionsMatchDFSOPVocabulary(t *testing.T) {
 		"agent.spawn.persistent",
 		"agent.retire",
 		"agent.revoke",
+		"agent.key.rotate",
 		"agent.escalate_permissions",
 		"policy.change",
 		"secret.access",
@@ -32,6 +33,13 @@ func TestProtectedActionsMatchDFSOPVocabulary(t *testing.T) {
 		"self_modification.activate",
 		"billing.spend_above_threshold",
 		"license.change",
+		"release.certify",
+		"capability.promote",
+		"capability.activate",
+		"capability.rollback",
+		"runtime.invoke.external",
+		"memory.ingest.sensitive",
+		"knowledge.activate",
 	}
 	if len(ProtectedActions) != len(want) {
 		t.Fatalf("ProtectedActions len = %d, want %d", len(ProtectedActions), len(want))
@@ -50,6 +58,35 @@ func TestDefaultOutcomeFailsClosedForUnknownActions(t *testing.T) {
 	}
 	if err := RequireAuthorized(action); err == nil {
 		t.Fatalf("RequireAuthorized(%q) returned nil, want fail-closed authority error", action)
+	}
+}
+
+func TestHighRiskEpic3ActionsRequireApproval(t *testing.T) {
+	for _, action := range []ProtectedAction{
+		ActionRepoPushDefaultBranch,
+		ActionRepoMergeMain,
+		ActionProductionDeploy,
+		ActionSecretAccess,
+		ActionCapabilityPromote,
+		ActionCapabilityActivate,
+		ActionRuntimeInvokeExternal,
+		ActionRepoMutateCrossRepo,
+	} {
+		if !IsProtectedAction(action) {
+			t.Fatalf("%s is not registered as protected", action)
+		}
+		if got := DefaultOutcome(action); got != ApprovalRequired {
+			t.Fatalf("DefaultOutcome(%q) = %s, want %s", action, got, ApprovalRequired)
+		}
+		if RiskClass(action) != "high" && RiskClass(action) != "critical" {
+			t.Fatalf("RiskClass(%q) = %q, want high or critical", action, RiskClass(action))
+		}
+	}
+}
+
+func TestRiskClassFailsClosedForUnknownAction(t *testing.T) {
+	if got := RiskClass("unknown.high_risk"); got != "critical" {
+		t.Fatalf("RiskClass(unknown.high_risk) = %q, want critical", got)
 	}
 }
 
@@ -99,6 +136,15 @@ func TestLifecycleApprovalDoesNotGrantSelfModification(t *testing.T) {
 	}
 	if ApprovalAllowsAction(ActionAgentRetire, ActionSelfModificationActivate) {
 		t.Fatal("agent.retire approval must not grant self_modification.activate")
+	}
+	if ApprovalAllowsAction(ActionCapabilityPromote, ActionCapabilityActivate) {
+		t.Fatal("capability.promote approval must not grant capability.activate")
+	}
+	if ApprovalAllowsAction(ProtectedAction("unknown.high_risk"), ActionRepoMergeMain) {
+		t.Fatal("unknown approval must not grant known repo.merge.main")
+	}
+	if ApprovalAllowsAction(ActionRepoMergeMain, ProtectedAction("unknown.high_risk")) {
+		t.Fatal("known approval must not grant unknown action")
 	}
 	if !ApprovalAllowsAction(ActionSelfModificationActivate, ActionSelfModificationActivate) {
 		t.Fatal("matching self_modification.activate approval should authorize only that action")

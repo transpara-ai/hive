@@ -4,7 +4,7 @@ Date: 2026-05-08
 
 Source of truth: `transpara-ai/docs` `dark-factory/DF-SOP-0001-authority-gated-side-effects.md`.
 
-Hive owns the current runtime constants for the shared Phase 1 authority vocabulary in `pkg/safety`.
+Hive owns the current runtime constants for the shared Dark Factory authority vocabulary in `pkg/safety`.
 
 ## Authority Outcomes
 
@@ -29,6 +29,7 @@ repo.mutate.cross_repo
 agent.spawn.persistent
 agent.retire
 agent.revoke
+agent.key.rotate
 agent.escalate_permissions
 policy.change
 secret.access
@@ -37,6 +38,13 @@ data.delete
 self_modification.activate
 billing.spend_above_threshold
 license.change
+release.certify
+capability.promote
+capability.activate
+capability.rollback
+runtime.invoke.external
+memory.ingest.sensitive
+knowledge.activate
 ```
 
 ## Local Alignment Notes

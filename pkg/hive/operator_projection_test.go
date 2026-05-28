@@ -27,20 +27,25 @@ func TestBuildOperatorProjectionPendingAndDecisions(t *testing.T) {
 	appendEvent(EventTypeAuthorityRequestRecorded, AuthorityRequestRecordedContent{
 		RequestID:        decidedRequestID,
 		RequestingActor:  actorID,
+		RequestingRole:   "operator",
 		ActionName:       "agent.revoke",
 		Target:           "actor_revoked",
 		Environment:      "production",
+		RiskClass:        "critical",
 		RequestedOutcome: "revoke agent",
 		Justification:    "compromised key",
 		RiskSummary:      "key compromise",
+		Scope:            []string{"agent.revoke"},
 	})
 	appendEvent(EventTypeAuthorityDecisionRecorded, AuthorityDecisionRecordedContent{
 		DecisionID:     "decision-1",
 		RequestID:      decidedRequestID,
 		ApproverActor:  actorID,
+		DeciderRole:    "operator",
 		Outcome:        "approved",
 		ApprovedTarget: "actor_revoked",
 		ApprovedAction: "agent.revoke",
+		Scope:          []string{"agent.revoke"},
 		Rationale:      "valid revocation evidence",
 	})
 
@@ -61,6 +66,12 @@ func TestBuildOperatorProjectionPendingAndDecisions(t *testing.T) {
 	}
 	if decision.RequestedAction != "agent.revoke" || decision.RequestedTarget != "actor_revoked" {
 		t.Fatalf("decision did not join request details: %+v", decision)
+	}
+	if decision.DeciderRole != "operator" {
+		t.Fatalf("decision decider role = %q, want operator", decision.DeciderRole)
+	}
+	if len(decision.Scope) != 1 || decision.Scope[0] != "agent.revoke" {
+		t.Fatalf("decision scope = %#v, want [agent.revoke]", decision.Scope)
 	}
 }
 

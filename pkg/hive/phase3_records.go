@@ -356,12 +356,15 @@ type AuthorityRequestRecordedContent struct {
 	hiveContent
 	RequestID         types.EventID   `json:"RequestID"`
 	RequestingActor   types.ActorID   `json:"RequestingActor"`
+	RequestingRole    string          `json:"RequestingRole,omitempty"`
 	ActionName        string          `json:"ActionName"`
 	Target            string          `json:"Target"`
 	Environment       string          `json:"Environment"`
+	RiskClass         string          `json:"RiskClass"`
 	RequestedOutcome  string          `json:"RequestedOutcome"`
 	Justification     string          `json:"Justification"`
 	RiskSummary       string          `json:"RiskSummary"`
+	Scope             []string        `json:"Scope,omitempty"`
 	EvidenceReviewed  []types.EventID `json:"EvidenceReviewed,omitempty"`
 	ProposedOperation string          `json:"ProposedOperation,omitempty"`
 	CausalEventIDs    []types.EventID `json:"CausalEventIDs,omitempty"`
@@ -378,9 +381,11 @@ type AuthorityDecisionRecordedContent struct {
 	DecisionID       string          `json:"DecisionID"`
 	RequestID        types.EventID   `json:"RequestID"`
 	ApproverActor    types.ActorID   `json:"ApproverActor"`
+	DeciderRole      string          `json:"DeciderRole,omitempty"`
 	Outcome          string          `json:"Outcome"`
 	ApprovedTarget   string          `json:"ApprovedTarget"`
 	ApprovedAction   string          `json:"ApprovedAction"`
+	Scope            []string        `json:"Scope,omitempty"`
 	Conditions       []string        `json:"Conditions,omitempty"`
 	ExpiresAt        types.Timestamp `json:"ExpiresAt,omitempty"`
 	EvidenceReviewed []types.EventID `json:"EvidenceReviewed,omitempty"`

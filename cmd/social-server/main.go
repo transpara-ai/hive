@@ -1066,7 +1066,7 @@ func reactionMapToSlice(postID types.EventID, counts map[string]int) []social.Re
 		return nil
 	}
 	reactions := make([]social.Reaction, 0, len(counts))
-	for r, _ := range counts {
+	for r := range counts {
 		reactions = append(reactions, social.Reaction{PostID: postID, Reaction: r})
 	}
 	return reactions
