@@ -26,6 +26,7 @@ const (
 	ActionAgentSpawnPersistent       ProtectedAction = "agent.spawn.persistent"
 	ActionAgentRetire                ProtectedAction = "agent.retire"
 	ActionAgentRevoke                ProtectedAction = "agent.revoke"
+	ActionAgentKeyRotate             ProtectedAction = "agent.key.rotate"
 	ActionAgentEscalatePermissions   ProtectedAction = "agent.escalate_permissions"
 	ActionPolicyChange               ProtectedAction = "policy.change"
 	ActionSecretAccess               ProtectedAction = "secret.access"
@@ -34,6 +35,13 @@ const (
 	ActionSelfModificationActivate   ProtectedAction = "self_modification.activate"
 	ActionBillingSpendAboveThreshold ProtectedAction = "billing.spend_above_threshold"
 	ActionLicenseChange              ProtectedAction = "license.change"
+	ActionReleaseCertify             ProtectedAction = "release.certify"
+	ActionCapabilityPromote          ProtectedAction = "capability.promote"
+	ActionCapabilityActivate         ProtectedAction = "capability.activate"
+	ActionCapabilityRollback         ProtectedAction = "capability.rollback"
+	ActionRuntimeInvokeExternal      ProtectedAction = "runtime.invoke.external"
+	ActionMemoryIngestSensitive      ProtectedAction = "memory.ingest.sensitive"
+	ActionKnowledgeActivate          ProtectedAction = "knowledge.activate"
 )
 
 // ProtectedActions is the DF-SOP-0001 baseline vocabulary. Repos may add
@@ -48,6 +56,7 @@ var ProtectedActions = []ProtectedAction{
 	ActionAgentSpawnPersistent,
 	ActionAgentRetire,
 	ActionAgentRevoke,
+	ActionAgentKeyRotate,
 	ActionAgentEscalatePermissions,
 	ActionPolicyChange,
 	ActionSecretAccess,
@@ -56,6 +65,13 @@ var ProtectedActions = []ProtectedAction{
 	ActionSelfModificationActivate,
 	ActionBillingSpendAboveThreshold,
 	ActionLicenseChange,
+	ActionReleaseCertify,
+	ActionCapabilityPromote,
+	ActionCapabilityActivate,
+	ActionCapabilityRollback,
+	ActionRuntimeInvokeExternal,
+	ActionMemoryIngestSensitive,
+	ActionKnowledgeActivate,
 }
 
 var protectedActionSet = func() map[ProtectedAction]bool {
@@ -89,6 +105,43 @@ func DefaultOutcome(action ProtectedAction) AuthorityOutcome {
 		return ApprovalRequired
 	}
 	return Forbidden
+}
+
+// RiskClass returns the conservative Dark Factory risk class for known
+// protected actions. Unknown actions are treated as critical for audit wording
+// while DefaultOutcome still forbids them.
+func RiskClass(action ProtectedAction) string {
+	switch action {
+	case ActionProductionDeploy,
+		ActionRepoPushDefaultBranch,
+		ActionRepoMergeMain,
+		ActionRepoDelete,
+		ActionRepoMutateCrossRepo,
+		ActionSecretAccess,
+		ActionSelfModificationActivate,
+		ActionAgentEscalatePermissions,
+		ActionAgentKeyRotate,
+		ActionCapabilityActivate,
+		ActionCapabilityRollback,
+		ActionRuntimeInvokeExternal,
+		ActionMemoryIngestSensitive,
+		ActionKnowledgeActivate:
+		return "critical"
+	case ActionRepoCreate,
+		ActionAgentSpawnPersistent,
+		ActionAgentRetire,
+		ActionAgentRevoke,
+		ActionPolicyChange,
+		ActionExternalCompanyVoice,
+		ActionDataDelete,
+		ActionBillingSpendAboveThreshold,
+		ActionLicenseChange,
+		ActionReleaseCertify,
+		ActionCapabilityPromote:
+		return "high"
+	default:
+		return "critical"
+	}
 }
 
 // RequireAuthorized returns nil only for actions that are autonomous by default.

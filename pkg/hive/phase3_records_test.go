@@ -162,15 +162,16 @@ func phase3RecordContentCases(t *testing.T, actorID types.ActorID) []struct {
 		{EventTypeAuthorityRequestRecorded, AuthorityRequestRecordedContent{
 			RequestID: eventID, RequestingActor: actorID, ActionName: "agent.spawn.persistent",
 			Target: "agent:builder", Environment: "production", RequestedOutcome: "promote trial to active",
-			Justification: "persistent identity is required", RiskSummary: "long-lived agent authority",
+			RequestingRole: "operator", RiskClass: "high", Justification: "persistent identity is required",
+			RiskSummary: "long-lived agent authority", Scope: []string{"agent.spawn.persistent"},
 			EvidenceReviewed: []types.EventID{eventID}, ProposedOperation: "register active identity",
 			CausalEventIDs: []types.EventID{eventID}, ExpiresAt: now,
 		}},
 		{EventTypeAuthorityDecisionRecorded, AuthorityDecisionRecordedContent{
 			DecisionID: decisionID.Value(), RequestID: eventID, ApproverActor: actorID,
 			Outcome: "approved", ApprovedTarget: "agent:builder", ApprovedAction: "agent.spawn.persistent",
-			Conditions: []string{"scope=hive"}, ExpiresAt: now, EvidenceReviewed: []types.EventID{eventID},
-			Rationale: "bounded persistence",
+			DeciderRole: "operator", Scope: []string{"agent.spawn.persistent"}, Conditions: []string{"scope=hive"},
+			ExpiresAt: now, EvidenceReviewed: []types.EventID{eventID}, Rationale: "bounded persistence",
 		}},
 		{EventTypeAuthorityExecutionReceipt, AuthorityExecutionReceiptContent{
 			RequestID: eventID, DecisionEventID: decisionID, ExecutingActor: actorID,

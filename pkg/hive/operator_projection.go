@@ -28,12 +28,15 @@ type OperatorApprovalProjection struct {
 	EventID           string    `json:"event_id"`
 	RequestID         string    `json:"request_id"`
 	RequestingActor   string    `json:"requesting_actor"`
+	RequestingRole    string    `json:"requesting_role,omitempty"`
 	ActionName        string    `json:"action_name"`
 	Target            string    `json:"target"`
 	Environment       string    `json:"environment"`
+	RiskClass         string    `json:"risk_class"`
 	RequestedOutcome  string    `json:"requested_outcome"`
 	Justification     string    `json:"justification"`
 	RiskSummary       string    `json:"risk_summary"`
+	Scope             []string  `json:"scope,omitempty"`
 	ProposedOperation string    `json:"proposed_operation,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -43,9 +46,11 @@ type OperatorDecisionProjection struct {
 	DecisionID      string    `json:"decision_id"`
 	RequestID       string    `json:"request_id"`
 	ApproverActor   string    `json:"approver_actor"`
+	DeciderRole     string    `json:"decider_role,omitempty"`
 	Outcome         string    `json:"outcome"`
 	ApprovedAction  string    `json:"approved_action"`
 	ApprovedTarget  string    `json:"approved_target"`
+	Scope           []string  `json:"scope,omitempty"`
 	Rationale       string    `json:"rationale"`
 	RequestedAction string    `json:"requested_action,omitempty"`
 	RequestedTarget string    `json:"requested_target,omitempty"`
@@ -116,12 +121,15 @@ func BuildOperatorProjection(s store.Store, limit int) OperatorProjection {
 			EventID:           pe.event.ID().Value(),
 			RequestID:         content.RequestID.Value(),
 			RequestingActor:   content.RequestingActor.Value(),
+			RequestingRole:    content.RequestingRole,
 			ActionName:        content.ActionName,
 			Target:            content.Target,
 			Environment:       content.Environment,
+			RiskClass:         content.RiskClass,
 			RequestedOutcome:  content.RequestedOutcome,
 			Justification:     content.Justification,
 			RiskSummary:       content.RiskSummary,
+			Scope:             append([]string(nil), content.Scope...),
 			ProposedOperation: content.ProposedOperation,
 			CreatedAt:         pe.event.Timestamp().Value(),
 		}
@@ -141,9 +149,11 @@ func BuildOperatorProjection(s store.Store, limit int) OperatorProjection {
 			DecisionID:     content.DecisionID,
 			RequestID:      requestID,
 			ApproverActor:  content.ApproverActor.Value(),
+			DeciderRole:    content.DeciderRole,
 			Outcome:        content.Outcome,
 			ApprovedAction: content.ApprovedAction,
 			ApprovedTarget: content.ApprovedTarget,
+			Scope:          append([]string(nil), content.Scope...),
 			Rationale:      content.Rationale,
 			CreatedAt:      pe.event.Timestamp().Value(),
 		}
