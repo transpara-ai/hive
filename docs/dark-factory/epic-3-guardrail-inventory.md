@@ -3,9 +3,9 @@ doc_id: HIVE-DF-EPIC-003-GUARDRAIL-INVENTORY
 title: Hive Dark Factory Epic 3 Guardrail Inventory
 doc_type: implementation-evidence
 status: draft
-version: 1.0.0
+version: 1.1.0
 created: 2026-05-28
-updated: 2026-05-28
+updated: 2026-06-03
 owner: human
 steward: assistant
 project: dark-factory
@@ -36,9 +36,15 @@ Hive base state:
 
 Gate D disposition:
 - This inventory alone did not satisfy Gate D.
-- Subsequent closeout recorded completed local validation, PR check evidence, and adversarial review for `transpara-ai/hive#124`; current Dark Factory docs mark Gate D satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward.
-- Epic 4 remains out of scope and is not authorized by this artifact.
-- Gate E remains waiting and is not started by this artifact.
+- The subsequent Epic 3 closeout recorded completed local validation, PR check evidence, and adversarial review for `transpara-ai/hive#124`; at that time, Dark Factory docs marked Gate D satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward.
+- At the Epic 3 closeout, Epic 4 and Gate E remained out of scope and were not authorized by this artifact.
+- Later Gate E through Gate J closures belong to their later bounded packets and implementation PRs; this artifact does not authorize or broaden them.
+
+Epic 10 residual-risk closure update:
+- Source packet: `transpara-ai/docs#93`, merged at `e34cc184c0c90873a5e7665d80f8cd7dd088d4b0`, selected only a bounded `transpara-ai/hive` local-emulation evidence seam for R-001/R-002/R-003.
+- Implementation branch: `codex/epic-10-hive-residual-risk-closure`.
+- The update closes R-001/R-002/R-003 only for the selected Hive side-effect-free local emulation seam. It does not authorize production deploy, default-branch push, worktree merge to main, live PR mutation, branch push, global activation, auto-merge, secret access, upstream push, or any other real protected side effect.
+- Real runner/worktree protected side-effect paths remain blocked by default and still require separate authorization before any production or repository-mutating execution path is introduced.
 
 ## Scope Boundary
 
@@ -82,14 +88,20 @@ Authority request evidence was tightened in two places:
 
 Operator projections remain EventGraph-read-only. They read authority request and decision records and expose bounded projection output without appending or recording EventGraph events.
 
-Policy engine adapter evidence:
-- `PolicyEngineAdapterDecision` is not applicable in this branch because the Hive paths changed here are code-level default gates and authority evidence recorders, not policy-adapter-mediated decisions.
+Original Epic 3 policy engine adapter evidence:
+- `PolicyEngineAdapterDecision` was not applicable in the Epic 3 branch because the Hive paths changed there were code-level default gates and authority evidence recorders, not policy-adapter-mediated decisions.
 - If a future Hive path delegates authority decisions to a policy adapter, it must use the canonical v3.9 adapter evidence chain with real adapter and policy bundle identifiers.
 
-Execution receipt evidence:
+Original Epic 3 execution receipt evidence:
 - `authority.execution.receipt` remains registered as a Phase 3 record type.
 - No approved protected side-effect execution path was added in Epic 3.
 - Real protected-action execution remains out of scope. No ceremonial execution receipt was emitted.
+
+Epic 10 evidence update:
+- `pkg/hive/phase3_records.go` registers `policy.engine.adapter.decision` with the Dark Factory v3.9 `PolicyEngineAdapterDecision` field vocabulary: adapter ID/version, policy bundle ID/hash, protected action type, actor, resources, input facts, raw/canonical decision, reason codes, evidence refs, latency, and authority-decision link.
+- `pkg/hive/authority_policy.go` adds a side-effect-free local emulation seam for `repo.merge.main` and `repo.push.default_branch`. The seam records authority request evidence, requires an approved authority decision, records policy-adapter evidence with a matching policy bundle hash, and emits `authority.execution.receipt` only after approved local emulation.
+- Negative trials block and produce no receipt for missing audit/graph dependencies, missing policy adapter evidence, missing policy bundle evidence, stale or mismatched policy bundle hash, forbidden policy decision, missing authority decision, cross-action mismatch, receipt without local emulation, real default-branch push, real worktree merge to main, and production deploy.
+- The direct runner push and worktree merge functions were not converted into production execution paths. They still block through `safety.RequireAuthorized`.
 
 ## Search Attestation
 
@@ -97,7 +109,7 @@ Searches run from `transpara-ai/hive`:
 
 ```text
 rg -n "RequireAuthorized|DefaultOutcome|ApprovalAllowsAction|IsProtectedAction|authorizeProtectedAction" cmd pkg docs/dark-factory -g'*.go' -g'*.md'
-rg -n "EventTypeAuthorityRequestRecorded|EventTypeAuthorityDecisionRecorded|EventTypeAuthorityExecutionReceipt|AuthorityRequestRecordedContent|AuthorityDecisionRecordedContent|AuthorityExecutionReceiptContent" cmd pkg docs/dark-factory -g'*.go' -g'*.md'
+rg -n "EventTypeAuthorityRequestRecorded|EventTypeAuthorityDecisionRecorded|EventTypePolicyEngineAdapterDecision|EventTypeAuthorityExecutionReceipt|AuthorityRequestRecordedContent|AuthorityDecisionRecordedContent|PolicyEngineAdapterDecisionContent|AuthorityExecutionReceiptContent" cmd pkg docs/dark-factory -g'*.go' -g'*.md'
 rg -n "\.blocked|blocked action=|proposal mode|ProposalMode|builderProposalMode|PR proposal|operator projection|BuildOperatorProjection|NewOperatorProjectionServer|store\.Append|graph\.Record" cmd pkg docs/dark-factory -g'*.go' -g'*.md'
 gh pr list --repo transpara-ai/hive --state merged --limit 30 --json number,title,mergedAt,headRefName,mergeCommit
 ```
@@ -108,6 +120,7 @@ Results:
 - CLI blocked paths are in `cmd/hive/main.go` and authority audit emission is in `cmd/hive/authority_audit.go`.
 - Direct runner and worktree blocked paths remain in `pkg/runner/runner.go` and `pkg/runner/worktree.go`.
 - Phase 3 authority record types and content are in `pkg/hive/phase3_records.go`.
+- Epic 10 local-emulation evidence is in `pkg/hive/authority_policy.go`, `pkg/hive/phase3_records.go`, and `pkg/hive/authority_policy_emulation_test.go`.
 - Operator projection code in `pkg/hive/operator_projection.go` reads from EventGraph store APIs and does not call `store.Append` or `graph.Record`.
 - All search hits are represented in the inventory below. Ambiguous or non-ingested blocking paths are classified as `Temporary out-of-band accepted risk`.
 
@@ -129,14 +142,15 @@ Results:
 | G-012 | Operator projections | `pkg/hive/operator_projection.go`, `pkg/hive/operator_projection_test.go`, `pkg/hive/operator_api.go`, Hive `#120` | Reads bounded authority state and lifecycle/key audit records for operators. | read-only display of authority requests and decisions | medium | Reads EventGraph store records only. No EventGraph mutation surface was found. | Out of scope | AuthorityRequest: read-only display; AuthorityDecision: read-only display; ExecutionReceipt: not displayed here; PolicyEngineAdapterDecision: not applicable. | Add role, risk class, and scope to projection output. | `TestBuildOperatorProjectionPendingAndDecisions`; `TestBuildOperatorProjectionLifecycleAndKeyAudit`; full validation passed. | None. Operator consequence: projection is informational and cannot approve or execute. | implemented |
 | G-013 | Model/provider routing | model catalog and resolver paths, Hive `#121` | Routes model/provider choice for agents; search found no protected-action execution or authority decision surface in this branch. | `runtime.invoke.external` only if future runtime invocation becomes authority-bearing | critical | None because current routing does not execute a protected external runtime invocation as an authority decision. | Out of scope | AuthorityRequest: not applicable; AuthorityDecision: not applicable; ExecutionReceipt: not applicable; PolicyEngineAdapterDecision: not applicable. | Add `runtime.invoke.external` vocabulary so future paths fail closed if selected. | `TestHighRiskEpic3ActionsRequireApproval`; full validation passed. | None in current routing. Revisit if routing starts invoking external runtime services as a protected action. | verified by inspection |
 | G-014 | Canonical soul statement | Agent docs, Hive `#123` | Governance/culture statement only; no authority gate, protected side effect, or operator projection mutation surface. | none | n/a | None. | Out of scope | AuthorityRequest: not applicable; AuthorityDecision: not applicable; ExecutionReceipt: not applicable; PolicyEngineAdapterDecision: not applicable. | None. | Live PR history and file search; full validation passed. | None. | verified by inspection |
+| G-015 | Epic 10 local protected-action emulation seam | `pkg/hive/authority_policy.go`, `pkg/hive/phase3_records.go`, `pkg/hive/authority_policy_emulation_test.go`, docs `#93` | Records a side-effect-free local emulation for `repo.merge.main` or `repo.push.default_branch` only after policy-bundle evidence, approved authority decision, and local-emulation mode are present. Blocks every missing, stale, forbidden, cross-action, real-push, real-merge, or deploy path before a receipt. | `repo.merge.main`, `repo.push.default_branch` | critical | Canonical `authority.requested`, Hive `authority.request.recorded`, Hive `authority.decision.recorded`, Hive `policy.engine.adapter.decision`, and Hive `authority.execution.receipt` for the approved local-emulation path only. | EventGraph-ingested local emulation evidence | AuthorityRequest: canonical plus Hive detail; AuthorityDecision: Hive detail; PolicyEngineAdapterDecision: Hive Phase 3 content with v3.9-compatible fields and policy bundle ID/hash; ExecutionReceipt: emitted only for approved side-effect-free local emulation. | Add bounded local emulation seam and focused positive/negative trials. | `TestRecordProtectedActionLocalEmulationReceiptsApprovedPolicyPath`; `TestProtectedActionLocalEmulationNegativeTrialsBlockReceipts`; `TestProtectedActionLocalEmulationMissingDependenciesBlock`; `TestRegisterEventTypesIncludesPhase3Unmarshalers`. | R-001/R-002/R-003 closed only for this local emulation seam. Operator consequence: approved local emulation records auditable evidence and receipt; real protected side effects remain blocked and separately unauthorized. | implemented |
 
 ## Protected Action Coverage
 
 | Protected action | Present in Hive vocabulary | Current Hive source | Guardrail IDs | Required outcome | Test evidence | Classification or exclusion |
 | --- | --- | --- | --- | --- | --- | --- |
 | `production.deploy` | yes | `pkg/safety/safety.go` | G-003, G-006 | approval required; no deploy execution | `TestProtectedActionsMatchDFSOPVocabulary` | covered; deploy remains neutralized |
-| `repo.push.default_branch` | yes | `pkg/safety/safety.go` | G-002, G-004, G-006 | approval required; blocked by default | safety tests, runner tests, ingest tests | covered with G-002 accepted risk |
-| `repo.merge.main` | yes | `pkg/safety/safety.go` | G-001, G-006 | approval required; blocked by default | safety tests, pipeline proposal tests | covered with G-001 accepted risk |
+| `repo.push.default_branch` | yes | `pkg/safety/safety.go`, `pkg/hive/authority_policy.go` | G-002, G-004, G-006, G-015 | approval required; real push blocked by default; side-effect-free local emulation can be receipted with policy and authority evidence | safety tests, runner tests, ingest tests, Epic 10 local-emulation tests | real side effect blocked; bounded local emulation evidence implemented |
+| `repo.merge.main` | yes | `pkg/safety/safety.go`, `pkg/hive/authority_policy.go` | G-001, G-006, G-015 | approval required; real merge blocked by default; side-effect-free local emulation can be receipted with policy and authority evidence | safety tests, pipeline proposal tests, Epic 10 local-emulation tests | real side effect blocked; bounded local emulation evidence implemented |
 | `repo.create` | yes | `pkg/safety/safety.go` | G-004 | approval required; blocked by default | ingest and authority audit tests | EventGraph-ingested when audit store configured |
 | `repo.delete` | yes | `pkg/safety/safety.go` | G-008 | approval required; no Hive execution path found | safety tests | vocabulary covered |
 | `repo.mutate.cross_repo` | yes | `pkg/safety/safety.go` | G-003 | approval required; blocked by default | pipeline and authority audit tests | EventGraph-ingested when audit store configured |
@@ -172,30 +186,33 @@ Affected protected actions:
 - `repo.push.default_branch`
 
 Classification:
-- `Temporary out-of-band accepted risk`
+- Closed only for the Epic 10 side-effect-free local emulation seam.
+- Real direct runner push and worktree merge execution remain blocked and separately unauthorized.
 
 Reason:
-- The runner and worktree guardrails predate this Epic 3 slice and do not receive an EventGraph authority audit store or runtime graph dependency at the blocking boundary.
-- Wiring store-backed audit into those package-level boundaries would be broader than the minimal Hive reconciliation authorized here.
+- Epic 10 adds an explicit local emulation request path for `repo.merge.main` and `repo.push.default_branch` through the Hive runtime authority policy.
+- The local emulation path records store-backed authority request evidence and links it to policy-adapter evidence, authority decision evidence, and a receipt.
+- The existing runner/worktree production side-effect functions were not enabled and still block through `safety.RequireAuthorized`.
 
 Owner:
 - Hive
 
 Expiry or revisit trigger:
-- Before any approval-enabled direct runner push, worktree main merge, or Epic 4 production activation path.
+- Before any approval-enabled direct runner push, worktree main merge, branch push, live PR mutation, deploy, or other real protected side effect.
 
 Bounded closeout condition:
-- The paths must continue to block by default and tests must continue to prove no protected side effect executes.
+- The selected local emulation seam must continue to record authority evidence without repository mutation.
+- Real runner/worktree protected side-effect paths must continue to block by default.
 
 Next action:
-- Add explicit audit-store plumbing or route these operations through the runtime authority policy before enabling any approved execution path.
+- For any future real execution path, create a separate authorization packet and route the concrete runner/worktree side-effect boundary through policy and authority evidence before enabling execution.
 
 Operator consequence:
-- The operation is denied locally. Operators see a blocked log and an authority error, not an EventGraph authority detail record.
+- Approved local emulation produces inspectable evidence. Real default-branch push or worktree merge still returns a local authority error and does not mutate the repository.
 
-Blocks Epic 4:
-- Yes, if Epic 4 needs these direct execution paths.
-- No, if Epic 4 remains proposal-only or routes execution through a store-backed authority path first.
+Blocks future production execution:
+- Yes, if that future scope needs a real protected repository mutation.
+- No, for this bounded local emulation evidence seam.
 
 ### R-002: ExecutionReceipt Has No Real Approved Side-Effect-Free Path In Epic 3
 
@@ -206,10 +223,12 @@ Affected protected actions:
 - All approved protected actions that would execute a side effect.
 
 Classification:
-- `Temporary out-of-band accepted risk`
+- Closed only for the Epic 10 side-effect-free local emulation seam.
+- Real protected-action execution remains separately unauthorized.
 
 Reason:
-- Epic 3 did not add real protected-action execution. Emitting a ceremonial receipt without an approved safe local emulation path would weaken the evidence model.
+- Epic 10 emits `authority.execution.receipt` only after approved side-effect-free local emulation with request, decision, policy adapter, and policy bundle evidence.
+- The negative trials reject receipt creation for missing dependency, missing policy evidence, missing or stale policy bundle hash, forbidden policy, missing authority decision, cross-action mismatch, and non-emulation modes.
 
 Owner:
 - Hive
@@ -218,16 +237,16 @@ Expiry or revisit trigger:
 - Before any approved protected action execution path is introduced.
 
 Bounded closeout condition:
-- `authority.execution.receipt` remains registered but un-emitted unless tied to a real approved side-effect-free local emulation path or real approved execution boundary.
+- A receipt is valid only when tied to the approved Epic 10 local emulation path or to a separately authorized future execution boundary.
 
 Next action:
-- Add receipt tests only when there is a real execution or safe emulation boundary to receipt.
+- Add a separate packet before any receipt-bearing real side-effect execution.
 
 Operator consequence:
-- Operators should treat absence of receipts in Epic 3 as "nothing executed", not as missing evidence for executed work.
+- Operators can treat an Epic 10 receipt as evidence that local emulation ran without repository mutation. They must not treat it as evidence that a real push, merge, deploy, or live PR mutation executed.
 
-Blocks Epic 4:
-- Yes, if Epic 4 includes approved protected execution.
+Blocks future production execution:
+- Yes, if that future scope includes real protected execution without a separately authorized receipt-bearing path.
 
 ### R-003: PolicyEngineAdapterDecision Is Not Used By Current Hive Gates
 
@@ -238,32 +257,36 @@ Affected protected actions:
 - Any future policy-adapter-mediated protected action.
 
 Classification:
-- `Temporary out-of-band accepted risk`
+- Closed only for the Epic 10 side-effect-free local emulation seam.
+- Future policy-adapter-mediated production decisions remain separately unauthorized.
 
 Reason:
-- Current Hive gates use code-level default denial and runtime authority records, not a policy engine adapter or policy bundle.
+- Epic 10 records `policy.engine.adapter.decision` with `adapter_id`, `adapter_version`, `policy_bundle_id`, `policy_bundle_hash`, `protected_action_type`, `actor_id`, `resource_refs`, `input_facts`, `raw_decision`, `canonical_decision`, `reason_codes`, `evidence_refs`, and `authority_decision_ref`.
+- The implementation rejects missing policy adapter evidence, missing policy bundle ID/hash, stale or mismatched policy bundle hash, forbidden canonical decision, and cross-action mismatch.
 
 Owner:
-- Hive and EventGraph, if a shared adapter contract becomes necessary.
+- Hive for the local emulation seam.
+- Hive and EventGraph, if a future shared production adapter contract becomes necessary.
 
 Expiry or revisit trigger:
-- Before introducing policy-adapter-mediated Hive authority decisions.
+- Before introducing policy-adapter-mediated real protected side effects, production decisions, or global activation.
 
 Bounded closeout condition:
-- No Hive path may claim policy bundle evidence without real `adapter_id`, `adapter_version`, `policy_bundle_id`, and `policy_bundle_hash` evidence.
+- The Epic 10 local emulation seam may claim policy-bundle evidence only when the adapter ID/version and policy bundle ID/hash are present and hash-matched.
+- No other Hive path may claim policy-bundle evidence without its own authorized adapter evidence.
 
 Next action:
-- Adopt the canonical v3.9 `PolicyEngineAdapterDecision` pattern when a real policy adapter is introduced.
+- For production policy-adapter use, create a separate authorization packet and connect the real adapter and policy bundle to the target side-effect boundary.
 
 Operator consequence:
-- Operators receive authority request and decision records, but no policy-bundle decision evidence from this branch.
+- Operators receive policy-adapter evidence for the bounded local emulation seam. They do not receive production policy-adapter authorization from this branch.
 
-Blocks Epic 4:
-- Yes, if Epic 4 relies on policy adapter decisions.
+Blocks future production execution:
+- Yes, if that future scope relies on policy adapter decisions without a separately authorized production adapter path.
 
 ## Validation Evidence
 
-Targeted validation already run:
+Epic 3 targeted validation:
 
 ```text
 go test ./cmd/hive ./pkg/safety ./pkg/hive
@@ -277,20 +300,24 @@ ok  	github.com/transpara-ai/hive/pkg/safety
 ok  	github.com/transpara-ai/hive/pkg/hive
 ```
 
-Required local validation:
+Epic 10 local-emulation validation run from `codex/epic-10-hive-residual-risk-closure`:
 
 ```text
-make verify
 git diff --check
-staticcheck ./...
+go test ./cmd/hive ./pkg/safety ./pkg/hive ./pkg/runner
+go test ./...
+/home/transpara/go/bin/staticcheck ./...
+make verify
 ```
 
 Results:
 
 ```text
-make verify: passed
 git diff --check: passed
+go test ./cmd/hive ./pkg/safety ./pkg/hive ./pkg/runner: passed
+go test ./...: passed
 /home/transpara/go/bin/staticcheck ./...: passed
+make verify: passed
 ```
 
-Subsequent closeout recorded completed PR check evidence and adversarial review for `transpara-ai/hive#124`. Gate D is satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward.
+Subsequent closeout recorded completed PR check evidence and adversarial review for `transpara-ai/hive#124`. Gate D was satisfied only for the bounded Epic 3 Hive governance reconciliation, with R-001/R-002/R-003 carried forward at that time. The Epic 10 update above closes those residuals only for the selected side-effect-free local emulation seam; broader docs tracker and checkpoint reconciliation remain a later docs closeout step.
