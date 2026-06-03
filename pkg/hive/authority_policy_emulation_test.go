@@ -11,82 +11,100 @@ import (
 )
 
 func TestRecordProtectedActionLocalEmulationReceiptsApprovedPolicyPath(t *testing.T) {
-	rt := newIdentityTestRuntime(t)
-	rt.approveRequests = true
-	req := validProtectedActionLocalEmulationRequest(rt, safety.ActionRepoMergeMain)
-
-	result, err := rt.recordProtectedActionLocalEmulation(req)
-	if err != nil {
-		t.Fatalf("recordProtectedActionLocalEmulation: %v", err)
-	}
-	if result.RequestID.IsZero() || result.DecisionEventID.IsZero() ||
-		result.PolicyAdapterDecisionID.IsZero() || result.ExecutionReceiptID.IsZero() {
-		t.Fatalf("result missing evidence IDs: %#v", result)
-	}
-	if result.RealSideEffectExecuted || result.RepositoryMutationExecuted {
-		t.Fatalf("local emulation reported real side effects: %#v", result)
+	tests := []struct {
+		name   string
+		action safety.ProtectedAction
+	}{
+		{
+			name:   "repo merge main",
+			action: safety.ActionRepoMergeMain,
+		},
+		{
+			name:   "repo push default branch",
+			action: safety.ActionRepoPushDefaultBranch,
+		},
 	}
 
-	requests := authorityRequestsByType[AuthorityRequestRecordedContent](t, rt, EventTypeAuthorityRequestRecorded)
-	if len(requests) != 1 {
-		t.Fatalf("authority.request.recorded count = %d, want 1", len(requests))
-	}
-	if requests[0].RequestID != result.RequestID {
-		t.Fatalf("request ID = %s, want %s", requests[0].RequestID, result.RequestID)
-	}
-	if requests[0].ActionName != string(safety.ActionRepoMergeMain) {
-		t.Fatalf("request action = %q, want %q", requests[0].ActionName, safety.ActionRepoMergeMain)
-	}
-	if !containsString(requests[0].Scope, protectedActionEmulationModeSideEffectFreeLocal) {
-		t.Fatalf("request scope missing local emulation mode: %#v", requests[0].Scope)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := newIdentityTestRuntime(t)
+			rt.approveRequests = true
+			req := validProtectedActionLocalEmulationRequest(rt, tc.action)
 
-	decisions := authorityRequestsByType[AuthorityDecisionRecordedContent](t, rt, EventTypeAuthorityDecisionRecorded)
-	if len(decisions) != 1 {
-		t.Fatalf("authority.decision.recorded count = %d, want 1", len(decisions))
-	}
-	if decisions[0].RequestID != result.RequestID {
-		t.Fatalf("decision request ID = %s, want %s", decisions[0].RequestID, result.RequestID)
-	}
-	if decisions[0].ApprovedAction != string(safety.ActionRepoMergeMain) {
-		t.Fatalf("approved action = %q, want %q", decisions[0].ApprovedAction, safety.ActionRepoMergeMain)
-	}
+			result, err := rt.recordProtectedActionLocalEmulation(req)
+			if err != nil {
+				t.Fatalf("recordProtectedActionLocalEmulation: %v", err)
+			}
+			if result.RequestID.IsZero() || result.DecisionEventID.IsZero() ||
+				result.PolicyAdapterDecisionID.IsZero() || result.ExecutionReceiptID.IsZero() {
+				t.Fatalf("result missing evidence IDs: %#v", result)
+			}
+			if result.RealSideEffectExecuted || result.RepositoryMutationExecuted {
+				t.Fatalf("local emulation reported real side effects: %#v", result)
+			}
 
-	policies := authorityRequestsByType[PolicyEngineAdapterDecisionContent](t, rt, EventTypePolicyEngineAdapterDecision)
-	if len(policies) != 1 {
-		t.Fatalf("policy.engine.adapter.decision count = %d, want 1", len(policies))
-	}
-	if policies[0].AuthorityDecisionRef == nil || *policies[0].AuthorityDecisionRef != result.DecisionEventID {
-		t.Fatalf("policy authority decision ref = %v, want %s", policies[0].AuthorityDecisionRef, result.DecisionEventID)
-	}
-	if policies[0].PolicyBundleHash != req.ExpectedPolicyBundleHash {
-		t.Fatalf("policy bundle hash = %q, want %q", policies[0].PolicyBundleHash, req.ExpectedPolicyBundleHash)
-	}
-	if policies[0].CanonicalDecision != policyCanonicalApprovalRequired {
-		t.Fatalf("canonical decision = %q, want %q", policies[0].CanonicalDecision, policyCanonicalApprovalRequired)
-	}
+			requests := authorityRequestsByType[AuthorityRequestRecordedContent](t, rt, EventTypeAuthorityRequestRecorded)
+			if len(requests) != 1 {
+				t.Fatalf("authority.request.recorded count = %d, want 1", len(requests))
+			}
+			if requests[0].RequestID != result.RequestID {
+				t.Fatalf("request ID = %s, want %s", requests[0].RequestID, result.RequestID)
+			}
+			if requests[0].ActionName != string(tc.action) {
+				t.Fatalf("request action = %q, want %q", requests[0].ActionName, tc.action)
+			}
+			if !containsString(requests[0].Scope, protectedActionEmulationModeSideEffectFreeLocal) {
+				t.Fatalf("request scope missing local emulation mode: %#v", requests[0].Scope)
+			}
 
-	receipts := authorityRequestsByType[AuthorityExecutionReceiptContent](t, rt, EventTypeAuthorityExecutionReceipt)
-	if len(receipts) != 1 {
-		t.Fatalf("authority.execution.receipt count = %d, want 1", len(receipts))
-	}
-	if receipts[0].RequestID != result.RequestID || receipts[0].DecisionEventID != result.DecisionEventID {
-		t.Fatalf("receipt authority refs = (%s, %s), want (%s, %s)", receipts[0].RequestID, receipts[0].DecisionEventID, result.RequestID, result.DecisionEventID)
-	}
-	if !strings.Contains(receipts[0].Operation, protectedActionEmulationModeSideEffectFreeLocal) {
-		t.Fatalf("receipt operation does not record local emulation mode: %q", receipts[0].Operation)
-	}
-	if receipts[0].TargetStateBefore == "" || receipts[0].TargetStateAfter == "" {
-		t.Fatalf("receipt missing before/after state: %#v", receipts[0])
-	}
-	if receipts[0].ResultStatus != "succeeded" {
-		t.Fatalf("receipt result = %q, want succeeded", receipts[0].ResultStatus)
-	}
-	if !containsString(receipts[0].ProducedResourceIDs, "policy.adapter.decision:"+result.PolicyAdapterDecisionID.Value()) {
-		t.Fatalf("receipt missing policy produced resource: %#v", receipts[0].ProducedResourceIDs)
-	}
+			decisions := authorityRequestsByType[AuthorityDecisionRecordedContent](t, rt, EventTypeAuthorityDecisionRecorded)
+			if len(decisions) != 1 {
+				t.Fatalf("authority.decision.recorded count = %d, want 1", len(decisions))
+			}
+			if decisions[0].RequestID != result.RequestID {
+				t.Fatalf("decision request ID = %s, want %s", decisions[0].RequestID, result.RequestID)
+			}
+			if decisions[0].ApprovedAction != string(tc.action) {
+				t.Fatalf("approved action = %q, want %q", decisions[0].ApprovedAction, tc.action)
+			}
 
-	validateV39PolicyAndReceipt(t, req, result, policies[0])
+			policies := authorityRequestsByType[PolicyEngineAdapterDecisionContent](t, rt, EventTypePolicyEngineAdapterDecision)
+			if len(policies) != 1 {
+				t.Fatalf("policy.engine.adapter.decision count = %d, want 1", len(policies))
+			}
+			if policies[0].AuthorityDecisionRef == nil || *policies[0].AuthorityDecisionRef != result.DecisionEventID {
+				t.Fatalf("policy authority decision ref = %v, want %s", policies[0].AuthorityDecisionRef, result.DecisionEventID)
+			}
+			if policies[0].PolicyBundleHash != req.ExpectedPolicyBundleHash {
+				t.Fatalf("policy bundle hash = %q, want %q", policies[0].PolicyBundleHash, req.ExpectedPolicyBundleHash)
+			}
+			if policies[0].CanonicalDecision != policyCanonicalApprovalRequired {
+				t.Fatalf("canonical decision = %q, want %q", policies[0].CanonicalDecision, policyCanonicalApprovalRequired)
+			}
+
+			receipts := authorityRequestsByType[AuthorityExecutionReceiptContent](t, rt, EventTypeAuthorityExecutionReceipt)
+			if len(receipts) != 1 {
+				t.Fatalf("authority.execution.receipt count = %d, want 1", len(receipts))
+			}
+			if receipts[0].RequestID != result.RequestID || receipts[0].DecisionEventID != result.DecisionEventID {
+				t.Fatalf("receipt authority refs = (%s, %s), want (%s, %s)", receipts[0].RequestID, receipts[0].DecisionEventID, result.RequestID, result.DecisionEventID)
+			}
+			if !strings.Contains(receipts[0].Operation, protectedActionEmulationModeSideEffectFreeLocal) {
+				t.Fatalf("receipt operation does not record local emulation mode: %q", receipts[0].Operation)
+			}
+			if receipts[0].TargetStateBefore == "" || receipts[0].TargetStateAfter == "" {
+				t.Fatalf("receipt missing before/after state: %#v", receipts[0])
+			}
+			if receipts[0].ResultStatus != "succeeded" {
+				t.Fatalf("receipt result = %q, want succeeded", receipts[0].ResultStatus)
+			}
+			if !containsString(receipts[0].ProducedResourceIDs, "policy.adapter.decision:"+result.PolicyAdapterDecisionID.Value()) {
+				t.Fatalf("receipt missing policy produced resource: %#v", receipts[0].ProducedResourceIDs)
+			}
+
+			validateV39PolicyAndReceipt(t, req, result, policies[0])
+		})
+	}
 }
 
 func TestProtectedActionLocalEmulationNegativeTrialsBlockReceipts(t *testing.T) {
