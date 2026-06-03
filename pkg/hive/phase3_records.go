@@ -25,6 +25,7 @@ var (
 	EventTypeAgentKeyRevoked                   = types.MustEventType("agent.key.revoked")
 	EventTypeAuthorityRequestRecorded          = types.MustEventType("authority.request.recorded")
 	EventTypeAuthorityDecisionRecorded         = types.MustEventType("authority.decision.recorded")
+	EventTypePolicyEngineAdapterDecision       = types.MustEventType("policy.engine.adapter.decision")
 	EventTypeAuthorityExecutionReceipt         = types.MustEventType("authority.execution.receipt")
 	EventTypeAgentAuditLinked                  = types.MustEventType("agent.audit.linked")
 )
@@ -50,6 +51,7 @@ func phase3EventTypes() []types.EventType {
 		EventTypeAgentKeyRevoked,
 		EventTypeAuthorityRequestRecorded,
 		EventTypeAuthorityDecisionRecorded,
+		EventTypePolicyEngineAdapterDecision,
 		EventTypeAuthorityExecutionReceipt,
 		EventTypeAgentAuditLinked,
 	}
@@ -75,6 +77,7 @@ func registerPhase3ContentUnmarshalers() {
 	event.RegisterContentUnmarshaler("agent.key.revoked", event.Unmarshal[AgentKeyRevokedContent])
 	event.RegisterContentUnmarshaler("authority.request.recorded", event.Unmarshal[AuthorityRequestRecordedContent])
 	event.RegisterContentUnmarshaler("authority.decision.recorded", event.Unmarshal[AuthorityDecisionRecordedContent])
+	event.RegisterContentUnmarshaler("policy.engine.adapter.decision", event.Unmarshal[PolicyEngineAdapterDecisionContent])
 	event.RegisterContentUnmarshaler("authority.execution.receipt", event.Unmarshal[AuthorityExecutionReceiptContent])
 	event.RegisterContentUnmarshaler("agent.audit.linked", event.Unmarshal[AgentAuditLinkedContent])
 }
@@ -394,6 +397,33 @@ type AuthorityDecisionRecordedContent struct {
 
 func (c AuthorityDecisionRecordedContent) EventTypeName() string {
 	return "authority.decision.recorded"
+}
+
+// PolicyEngineAdapterDecisionContent records policy-adapter evidence using the
+// Dark Factory v3.9 PolicyEngineAdapterDecision field vocabulary.
+type PolicyEngineAdapterDecisionContent struct {
+	hiveContent
+	DecisionID           string         `json:"decision_id"`
+	AdapterID            string         `json:"adapter_id"`
+	AdapterVersion       string         `json:"adapter_version"`
+	PolicyBundleID       string         `json:"policy_bundle_id"`
+	PolicyBundleHash     string         `json:"policy_bundle_hash"`
+	ProtectedActionType  string         `json:"protected_action_type"`
+	ActorID              string         `json:"actor_id"`
+	ResourceRefs         []string       `json:"resource_refs,omitempty"`
+	InputFacts           map[string]any `json:"input_facts,omitempty"`
+	RawDecision          string         `json:"raw_decision"`
+	CanonicalDecision    string         `json:"canonical_decision"`
+	ReasonCodes          []string       `json:"reason_codes,omitempty"`
+	EvidenceRefs         []string       `json:"evidence_refs,omitempty"`
+	LatencyMS            float64        `json:"latency_ms"`
+	FailureMode          string         `json:"failure_mode,omitempty"`
+	AuthorityDecisionRef *types.EventID `json:"authority_decision_ref,omitempty"`
+	ExecutionReceiptRef  *types.EventID `json:"execution_receipt_ref,omitempty"`
+}
+
+func (c PolicyEngineAdapterDecisionContent) EventTypeName() string {
+	return "policy.engine.adapter.decision"
 }
 
 // AuthorityExecutionReceiptContent records execution of an approved protected action.

@@ -173,6 +173,15 @@ func phase3RecordContentCases(t *testing.T, actorID types.ActorID) []struct {
 			DeciderRole: "operator", Scope: []string{"agent.spawn.persistent"}, Conditions: []string{"scope=hive"},
 			ExpiresAt: now, EvidenceReviewed: []types.EventID{eventID}, Rationale: "bounded persistence",
 		}},
+		{EventTypePolicyEngineAdapterDecision, PolicyEngineAdapterDecisionContent{
+			DecisionID: "policy_decision_001", AdapterID: "hive.local-policy-emulator",
+			AdapterVersion: "1.0.0", PolicyBundleID: "dark-factory-epic-10-local-emulation",
+			PolicyBundleHash:    "sha256:dark-factory-epic-10-local-emulation",
+			ProtectedActionType: "repo.merge.main", ActorID: actorID.Value(), ResourceRefs: []string{"repo:transpara-ai/hive"},
+			InputFacts: map[string]any{"mode": "side_effect_free_local_emulation"}, RawDecision: "approval required for local emulation",
+			CanonicalDecision: "approval_required", ReasonCodes: []string{"protected_action", "local_emulation_only"},
+			EvidenceRefs: []string{eventID.Value()}, LatencyMS: 1, AuthorityDecisionRef: &decisionID,
+		}},
 		{EventTypeAuthorityExecutionReceipt, AuthorityExecutionReceiptContent{
 			RequestID: eventID, DecisionEventID: decisionID, ExecutingActor: actorID,
 			Operation: "agent identity registration", TargetStateBefore: "trial", TargetStateAfter: "active",
