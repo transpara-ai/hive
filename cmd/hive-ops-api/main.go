@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"log"
@@ -9,7 +11,9 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive"
 )
 
@@ -38,16 +42,72 @@ func main() {
 	defer store.Close()
 
 	hive.RegisterEventTypes()
-	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit)
+
+	opts, decisionMode := decisionWriterOptions()
+	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
 
 	authMode := "disabled"
 	if *apiKey != "" {
 		authMode = "bearer"
 	}
-	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d)\n", *addr, authMode, *limit)
+	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, decisions=%s)\n", *addr, authMode, *limit, decisionMode)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
+}
+
+// decisionWriterOptions provisions the optional operator-decision writer from
+// the environment. The writer is enabled only when HIVE_OPS_HUMAN_ACTOR is set;
+// otherwise the server stays strictly read-only (today's behavior), so an
+// unconfigured ops-api must not fail. The graph is still only ever written by
+// hive — this process — never by Site.
+//
+//   - HIVE_OPS_HUMAN_ACTOR : the human actor id recorded as the approver/signer
+//     of the decision. Required to enable the write path.
+//   - HIVE_OPS_SIGNING_KEY : optional explicit signing seed. When unset, the
+//     signer is derived deterministically from the human actor id, matching the
+//     hive runtime identity scheme (sha256("signer:"+id)).
+func decisionWriterOptions() ([]hive.OperatorServerOption, string) {
+	human := os.Getenv("HIVE_OPS_HUMAN_ACTOR")
+	if human == "" {
+		return nil, "read-only"
+	}
+	humanID, err := types.NewActorID(human)
+	if err != nil {
+		log.Printf("HIVE_OPS_HUMAN_ACTOR invalid (%v); operator decisions disabled, server read-only", err)
+		return nil, "read-only"
+	}
+
+	registry := event.DefaultRegistry()
+	hive.RegisterWithRegistry(registry)
+	factory := event.NewEventFactory(registry)
+
+	seed := "signer:" + humanID.Value()
+	if key := os.Getenv("HIVE_OPS_SIGNING_KEY"); key != "" {
+		seed = key
+	}
+	signer := newOpsSigner(seed)
+	conv := types.MustConversationID("conv_hive_ops_api")
+
+	return []hive.OperatorServerOption{
+		hive.WithOperatorDecisionWriter(factory, signer, humanID, conv),
+	}, "enabled"
+}
+
+// opsSigner is a deterministic Ed25519 signer for the ops-api decision writer,
+// matching the hive runtime's signer scheme.
+type opsSigner struct {
+	key ed25519.PrivateKey
+}
+
+func (s *opsSigner) Sign(data []byte) (types.Signature, error) {
+	sig := ed25519.Sign(s.key, data)
+	return types.NewSignature(sig)
+}
+
+func newOpsSigner(seed string) *opsSigner {
+	h := sha256.Sum256([]byte(seed))
+	return &opsSigner{key: ed25519.NewKeyFromSeed(h[:])}
 }
 
 func envOrDefault(name, fallback string) string {

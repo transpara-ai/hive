@@ -42,6 +42,7 @@ const (
 	ActionRuntimeInvokeExternal      ProtectedAction = "runtime.invoke.external"
 	ActionMemoryIngestSensitive      ProtectedAction = "memory.ingest.sensitive"
 	ActionKnowledgeActivate          ProtectedAction = "knowledge.activate"
+	ActionRepoPullRequestCreate      ProtectedAction = "pull_request.create"
 )
 
 // ProtectedActions is the DF-SOP-0001 baseline vocabulary. Repos may add
@@ -72,6 +73,7 @@ var ProtectedActions = []ProtectedAction{
 	ActionRuntimeInvokeExternal,
 	ActionMemoryIngestSensitive,
 	ActionKnowledgeActivate,
+	ActionRepoPullRequestCreate,
 }
 
 var protectedActionSet = func() map[ProtectedAction]bool {
@@ -137,7 +139,8 @@ func RiskClass(action ProtectedAction) string {
 		ActionBillingSpendAboveThreshold,
 		ActionLicenseChange,
 		ActionReleaseCertify,
-		ActionCapabilityPromote:
+		ActionCapabilityPromote,
+		ActionRepoPullRequestCreate:
 		return "high"
 	default:
 		return "critical"

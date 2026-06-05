@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/safety"
 )
@@ -235,11 +236,40 @@ func (r *Runtime) recordAuthorityDecision(requestID types.EventID, req protected
 		EvidenceReviewed: req.EvidenceReviewed,
 		Rationale:        "auto-approved via --approve-requests",
 	}
+	// Use r.graph.Record (not the store-only helper) so the event is published to
+	// the in-process bus. Live subscribers — the telemetry writer and the agent
+	// loop — depend on receiving authority.decision.recorded via the bus.
+	// The store-only helper (appendAuthorityDecisionRecorded) exists only for the
+	// busless ops-api process, which has no bus to publish to.
 	ev, err := r.graph.Record(EventTypeAuthorityDecisionRecorded, r.humanID, content, []types.EventID{requestID}, r.convID, r.signer)
 	if err != nil {
 		return types.EventID{}, err
 	}
 	return ev.ID(), nil
+}
+
+// appendAuthorityDecisionRecorded constructs and persists an
+// authority.decision.recorded event without requiring a full *Runtime. It is
+// used exclusively by the store-only ops-api POST handler, which runs in a
+// separate process that has no in-process event bus.
+//
+// The Runtime auto-approval path (Runtime.recordAuthorityDecision) uses
+// r.graph.Record directly so that the event is published to the bus. Live
+// subscribers — the telemetry writer and the agent loop — depend on that
+// publish. Do NOT route the runtime path through this helper.
+//
+// The decision causes the request, and content.RequestID is what
+// BuildOperatorProjection matches to drop the request out of PendingApprovals.
+func appendAuthorityDecisionRecorded(s store.Store, factory *event.EventFactory, signer event.Signer, humanID types.ActorID, convID types.ConversationID, requestID types.EventID, content AuthorityDecisionRecordedContent) (types.EventID, error) {
+	ev, err := factory.Create(EventTypeAuthorityDecisionRecorded, humanID, content, []types.EventID{requestID}, convID, s, signer)
+	if err != nil {
+		return types.EventID{}, err
+	}
+	stored, err := s.Append(ev)
+	if err != nil {
+		return types.EventID{}, err
+	}
+	return stored.ID(), nil
 }
 
 func authorityScope(req protectedActionRequest) []string {

@@ -3,6 +3,7 @@ package hive
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
@@ -279,4 +280,72 @@ func recordHiveTestEvent(t *testing.T, rt *Runtime, eventType types.EventType, c
 		t.Fatalf("record %s: %v", eventType, err)
 	}
 	return ev
+}
+
+// TestRecordAuthorityDecisionRuntimePublishesToBus is a regression test
+// pinning that Runtime.recordAuthorityDecision publishes the
+// authority.decision.recorded event to the in-process bus.
+//
+// This test FAILS against the no-publish regression (where recordAuthorityDecision
+// delegates to appendAuthorityDecisionRecorded, which only appends to the store
+// without calling graph.Record/Publish). It PASSES once the runtime path uses
+// r.graph.Record, which publishes to all bus subscribers.
+//
+// The telemetry writer and agent loop subscribe to the bus with a "* " pattern;
+// they depend on receiving this event to function correctly.
+func TestRecordAuthorityDecisionRuntimePublishesToBus(t *testing.T) {
+	rt := newIdentityTestRuntime(t)
+	rt.approveRequests = true
+
+	// Subscribe to the bus with a catch-all pattern before driving any decision.
+	// The bus delivers events asynchronously from per-subscriber goroutines.
+	received := make(chan event.Event, 16)
+	pattern := types.MustSubscriptionPattern("*")
+	subID := rt.graph.Bus().Subscribe(pattern, func(ev event.Event) {
+		received <- ev
+	})
+	t.Cleanup(func() { rt.graph.Bus().Unsubscribe(subID) })
+
+	// Drive a decision through the runtime path. authorizeProtectedAction with
+	// approveRequests=true calls recordAuthorityDecision, which must publish.
+	requestID, err := rt.authorizeProtectedAction(protectedActionRequest{
+		Action:            safety.ActionAgentRetire,
+		Target:            "agent:regression-bus-test",
+		Environment:       string(AgentIdentityEnvironmentProduction),
+		RequestedOutcome:  "retire agent for bus-publish regression test",
+		Justification:     "regression: runtime recordAuthorityDecision must publish to bus",
+		RiskSummary:       "retire is reversible",
+		ProposedOperation: "retireAgent",
+	})
+	if err != nil {
+		t.Fatalf("authorizeProtectedAction: %v", err)
+	}
+	if requestID.IsZero() {
+		t.Fatal("requestID is zero")
+	}
+
+	// Wait for the authority.decision.recorded event to arrive on the bus.
+	// The bus is async (goroutine delivery), so allow a short timeout.
+	const busDeliveryTimeout = 2 * time.Second
+	deadline := time.After(busDeliveryTimeout)
+	for {
+		select {
+		case ev := <-received:
+			if ev.Type() == EventTypeAuthorityDecisionRecorded {
+				content, ok := ev.Content().(AuthorityDecisionRecordedContent)
+				if !ok {
+					t.Fatalf("authority.decision.recorded content type = %T, want AuthorityDecisionRecordedContent", ev.Content())
+				}
+				if content.RequestID != requestID {
+					t.Fatalf("published decision RequestID = %s, want %s", content.RequestID, requestID)
+				}
+				// PASS: the event was published to the bus.
+				return
+			}
+			// Other events (authority.requested, authority.request.recorded, etc.) — keep waiting.
+		case <-deadline:
+			t.Fatal("authority.decision.recorded was NOT published to the bus within timeout; " +
+				"Runtime.recordAuthorityDecision must use r.graph.Record, not the store-only helper")
+		}
+	}
 }

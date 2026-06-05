@@ -35,6 +35,8 @@ func routeAndDispatch(args []string) error {
 		return cmdIngest(rest)
 	case "council":
 		return cmdCouncil(rest)
+	case "factory":
+		return cmdFactory(rest)
 	case "-h", "--help", "help":
 		fmt.Println(helpText())
 		return nil
@@ -56,6 +58,10 @@ func helpText() string {
 	b.WriteString("  role <name> daemon       Single agent, continuous with throttling\n")
 	b.WriteString("  ingest <file>            Post a markdown spec as a task\n")
 	b.WriteString("  council [--topic ...]    Convene one deliberation\n")
+	b.WriteString("  factory daemon           Always-on governing loop (Keepalive; block on bus)\n")
+	b.WriteString("  factory order            Submit one Order into the running daemon\n")
+	b.WriteString("  factory request-pr       Raise a draft-PR authority request (gate holds)\n")
+	b.WriteString("  factory create-pr        Create the approved draft PR (gated GitHub step)\n")
 	b.WriteString("\nRun 'hive <verb> --help' for verb-specific flags.\n")
 	return b.String()
 }
