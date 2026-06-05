@@ -40,6 +40,7 @@ func TestProtectedActionsMatchDFSOPVocabulary(t *testing.T) {
 		"runtime.invoke.external",
 		"memory.ingest.sensitive",
 		"knowledge.activate",
+		"pull_request.create",
 	}
 	if len(ProtectedActions) != len(want) {
 		t.Fatalf("ProtectedActions len = %d, want %d", len(ProtectedActions), len(want))
@@ -127,6 +128,18 @@ func TestUnknownLifecycleOperationFailsClosed(t *testing.T) {
 	}
 	if authErr.Outcome != Forbidden {
 		t.Fatalf("outcome = %q, want %q", authErr.Outcome, Forbidden)
+	}
+}
+
+func TestPullRequestCreateRequiresApproval(t *testing.T) {
+	if !IsProtectedAction(ActionRepoPullRequestCreate) {
+		t.Fatal("pull_request.create must be a known protected action")
+	}
+	if got := DefaultOutcome(ActionRepoPullRequestCreate); got != ApprovalRequired {
+		t.Fatalf("DefaultOutcome = %q, want ApprovalRequired", got)
+	}
+	if ActionRepoPullRequestCreate != "pull_request.create" {
+		t.Fatalf("wire value = %q, want pull_request.create", ActionRepoPullRequestCreate)
 	}
 }
 
