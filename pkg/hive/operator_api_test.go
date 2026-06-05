@@ -357,3 +357,155 @@ func seedPendingDraftPRRequest(t *testing.T, s store.Store, factory *event.Event
 	}
 	return requestID
 }
+
+// seedPendingActionRequest appends a pending authority request for an arbitrary
+// protected action and scope (no decision recorded, so it surfaces in
+// PendingApprovals). It mirrors seedPendingDraftPRRequest's anchor+detail
+// structure but lets a test choose the action/scope, to exercise the draft-PR
+// gate on the decision endpoint.
+func seedPendingActionRequest(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, actionName string, scope []string) types.EventID {
+	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	anchorCauses := []types.EventID{head.Unwrap().ID()}
+	anchor, err := factory.Create(event.EventTypeAuthorityRequested, human, event.AuthorityRequestContent{
+		Action:        actionName,
+		Actor:         human,
+		Level:         event.AuthorityLevelRequired,
+		Justification: "seed pending request",
+		Causes:        types.MustNonEmpty(anchorCauses),
+	}, anchorCauses, conv, s, signer)
+	if err != nil {
+		t.Fatalf("create authority.requested: %v", err)
+	}
+	storedAnchor, err := s.Append(anchor)
+	if err != nil {
+		t.Fatalf("append authority.requested: %v", err)
+	}
+	requestID := storedAnchor.ID()
+
+	content := AuthorityRequestRecordedContent{
+		RequestID:        requestID,
+		RequestingActor:  human,
+		RequestingRole:   "guardian",
+		ActionName:       actionName,
+		Target:           "seed-target",
+		Environment:      "production",
+		RequestedOutcome: "seed",
+		Justification:    "seed pending request",
+		RiskSummary:      "seed",
+		Scope:            scope,
+	}
+	detail, err := factory.Create(EventTypeAuthorityRequestRecorded, human, content, []types.EventID{requestID}, conv, s, signer)
+	if err != nil {
+		t.Fatalf("create authority.request.recorded: %v", err)
+	}
+	if _, err := s.Append(detail); err != nil {
+		t.Fatalf("append authority.request.recorded: %v", err)
+	}
+	return requestID
+}
+
+// TestOperatorDecisionEndpointRejectsNonDraftPR verifies the decision endpoint
+// authorizes ONLY the draft-PR create action (P1-a). A pending request for any
+// other protected action, or a pull_request.create request whose scope is not a
+// valid draft-PR scope, must be refused with 403 and write no decision — so the
+// human-decision surface can never approve, e.g., an agent-spawn or deploy.
+func TestOperatorDecisionEndpointRejectsNonDraftPR(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorDecisionWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	postApproval := func(t *testing.T, requestID string) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"request_id": requestID, "decision": "approved", "approver": human.Value(), "reason": "x",
+		})
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/operator-decision", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post decision: %v", err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	assertNoDecision := func(t *testing.T) {
+		t.Helper()
+		if proj := BuildOperatorProjection(s, 50); len(proj.AuthorityDecisions) != 0 {
+			t.Fatalf("refused decision must not write a decision, got %+v", proj.AuthorityDecisions)
+		}
+	}
+
+	t.Run("non-draft-PR action", func(t *testing.T) {
+		requestID := seedPendingActionRequest(t, s, factory, signer, human, conv,
+			"agent.spawn.persistent", []string{"agent.spawn.persistent", "builder"})
+		resp := postApproval(t, requestID.Value())
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("non-draft-PR action: status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+		}
+		assertNoDecision(t)
+	})
+
+	t.Run("draft-PR action with malformed scope", func(t *testing.T) {
+		requestID := seedPendingActionRequest(t, s, factory, signer, human, conv,
+			string(safety.ActionRepoPullRequestCreate), []string{string(safety.ActionRepoPullRequestCreate), "transpara-ai/docs"})
+		resp := postApproval(t, requestID.Value())
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("malformed draft-PR scope: status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+		}
+		assertNoDecision(t)
+	})
+}
+
+// TestOperatorDecisionEndpointRejectsAlreadyDecided verifies a request is
+// decided exactly once (P2-a). Once a decision is recorded, a second POST for
+// the same request must be refused with 409 — a denial cannot be overwritten by
+// a later approval (no latest-wins). The original denial must survive intact.
+func TestOperatorDecisionEndpointRejectsAlreadyDecided(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorDecisionWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	requestID := seedPendingDraftPRRequest(t, s, factory, signer, human, conv)
+
+	post := func(t *testing.T, decision string) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"request_id": requestID.Value(), "decision": decision, "approver": human.Value(), "reason": decision,
+		})
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/operator-decision", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post decision: %v", err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	// First decision: deny. Recorded normally.
+	if resp := post(t, "denied"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("first (deny) decision: status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	// Second decision for the same request must be refused — a later approval
+	// cannot overwrite the recorded denial.
+	if resp := post(t, "approved"); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second (approve) decision: status = %d, want %d", resp.StatusCode, http.StatusConflict)
+	}
+
+	// Exactly one decision survives, and it is the original denial.
+	proj := BuildOperatorProjection(s, 50)
+	if len(proj.AuthorityDecisions) != 1 {
+		t.Fatalf("expected exactly one decision, got %d: %+v", len(proj.AuthorityDecisions), proj.AuthorityDecisions)
+	}
+	if proj.AuthorityDecisions[0].Outcome != "denied" {
+		t.Fatalf("decision outcome = %q, want denied (denial must not be overwritten)", proj.AuthorityDecisions[0].Outcome)
+	}
+}

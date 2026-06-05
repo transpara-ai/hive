@@ -10,6 +10,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 // maxDecisionBodyBytes caps the POST /api/hive/operator-decision request body
@@ -142,6 +143,32 @@ func handleOperatorDecision(w http.ResponseWriter, r *http.Request, s store.Stor
 	}
 	if !found {
 		http.Error(w, fmt.Sprintf("no pending authority request %q", body.RequestID), http.StatusNotFound)
+		return
+	}
+
+	// P1-a: this endpoint decides ONLY the draft-PR create action. Refuse any
+	// other pending protected action — and any request whose scope is not a
+	// valid draft-PR scope — so a decision recorded here can never approve, e.g.,
+	// an agent-spawn or deploy request. This mirrors the Site render gate.
+	if request.ActionName != string(safety.ActionRepoPullRequestCreate) {
+		http.Error(w, fmt.Sprintf("request %q action %q is not %q: this endpoint only decides draft-PR creation", body.RequestID, request.ActionName, safety.ActionRepoPullRequestCreate), http.StatusForbidden)
+		return
+	}
+	if _, err := ParseDraftPRScope(request.Scope); err != nil {
+		http.Error(w, fmt.Sprintf("request %q scope is not a valid draft-PR scope: %v", body.RequestID, err), http.StatusForbidden)
+		return
+	}
+
+	// P2-a: a request is decided exactly once. If a decision was already recorded
+	// for it, refuse with 409 rather than appending a rival decision — otherwise a
+	// later approval could silently overwrite (shadow) an earlier denial, because
+	// the decision read path resolves duplicates latest-wins. The graph stays
+	// append-only; we simply never record a second decision for the same request.
+	if _, decided, err := findAuthorityDecisionByRequestID(s, body.RequestID, limit); err != nil {
+		http.Error(w, fmt.Sprintf("check existing decision: %v", err), http.StatusInternalServerError)
+		return
+	} else if decided {
+		http.Error(w, fmt.Sprintf("request %q already has a recorded decision", body.RequestID), http.StatusConflict)
 		return
 	}
 

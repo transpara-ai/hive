@@ -23,6 +23,14 @@ func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11Dr
 	}, nil
 }
 
+// PreflightHead satisfies the work#44 Epic11PullRequestCreator preflight: it
+// reports the approved head SHA and a single in-scope dark-factory/ file so
+// epic11ValidateRemoteHead passes. It is not a mutation, so it does not count
+// toward calls.
+func (f *fakePRClient) PreflightHead(_ context.Context, m work.Epic11DraftPullRequestMutation) (work.Epic11RemoteHeadState, error) {
+	return work.Epic11RemoteHeadState{HeadSHA: m.HeadSHA, ChangedFiles: []string{"dark-factory/civic-roles.md"}}, nil
+}
+
 // newWorkTaskStore constructs a *work.TaskStore backed by an in-memory store
 // using only exported APIs. It mirrors the pattern established by
 // newDecisionTestStore, adding work.RegisterWithRegistry so the task store
