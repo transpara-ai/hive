@@ -1,9 +1,19 @@
 package loop
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+
+	hiveagent "github.com/transpara-ai/agent"
 	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/work"
 )
 
 // ════════════════════════════════════════════════════════════════════════
@@ -291,5 +301,106 @@ func TestEnrichCTOObservation_CTO(t *testing.T) {
 	}
 	if !containsStr(result, "BUDGET (from Allocator):") {
 		t.Error("missing BUDGET section")
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// FactoryOrder growth-loop — dormant regression guard (H6)
+// ════════════════════════════════════════════════════════════════════════
+
+// TestEnrichCTOObservation_FactoryOrderTaskVisible locks in that a
+// work.task.created event — the exact event type that work.SeedFactoryOrder
+// produces — is counted in the CTO briefing's TASK FLOW line.
+//
+// This is the dormant growth-loop hook: a FactoryOrder enters the graph as a
+// work.task.created event (via work.TaskStore.Create / work.SeedFactoryOrder).
+// enrichCTOObservation already counts pending work.task.* events, so the order
+// flow is ALREADY visible to the CTO with no new product code. This test locks
+// that invariant against regressions.
+func TestEnrichCTOObservation_FactoryOrderTaskVisible(t *testing.T) {
+	// Build a shared graph with work event types registered (required for
+	// TaskStore.Create to produce a well-typed event).
+	s := store.NewInMemoryStore()
+	as := actor.NewInMemoryActorStore()
+	g := graph.New(s, as)
+	if err := g.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close() })
+	work.RegisterWithRegistry(g.Registry())
+
+	// Create a CTO agent on that graph.
+	provider := newMockProvider("noop")
+	ctoAgent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:     hiveagent.Role("cto"),
+		Name:     "cto-growth-loop-test",
+		Graph:    g,
+		Provider: provider,
+	})
+	if err != nil {
+		t.Fatalf("hiveagent.New: %v", err)
+	}
+
+	// Build the CTO loop.
+	l, err := New(Config{
+		Agent:   ctoAgent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+	})
+	if err != nil {
+		t.Fatalf("loop.New: %v", err)
+	}
+
+	// Produce a real work.task.created event via TaskStore — the same code path
+	// that work.SeedFactoryOrder uses. We need a cause event; use the chain head
+	// which is the agent's boot event.
+	head, err := g.Store().Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	if head.IsNone() {
+		t.Fatal("expected agent boot event as chain head")
+	}
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_00000000000000000000000000000042")
+	_, err = ts.Create(
+		ctoAgent.ID(),
+		"DarkFactory order: produce widget v2",
+		"Seeded from FactoryOrder fo_test_001",
+		[]types.EventID{head.Unwrap().ID()},
+		convID,
+		work.PriorityHigh,
+	)
+	if err != nil {
+		t.Fatalf("TaskStore.Create: %v", err)
+	}
+
+	// Retrieve the stored work.task.created event and inject it into
+	// pendingEvents so enrichCTOObservation can count it.
+	page, err := g.Store().ByType(work.EventTypeTaskCreated, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType work.task.created: %v", err)
+	}
+	taskEvents := page.Items()
+	if len(taskEvents) == 0 {
+		t.Fatal("expected at least one work.task.created event in store")
+	}
+
+	l.mu.Lock()
+	l.pendingEvents = append(l.pendingEvents, taskEvents...)
+	l.mu.Unlock()
+
+	// Enrich a CTO observation with the pending task event present.
+	result := l.enrichCTOObservation("## Observation")
+
+	// The TASK FLOW line must reflect created=1 — the FactoryOrder-seeded task
+	// is visible to the CTO with no new product code.
+	if !strings.Contains(result, "created=1") {
+		t.Errorf("TASK FLOW should show created=1 for a FactoryOrder-seeded task; got briefing:\n%s", result)
+	}
+	// Sanity: the briefing structure is still present.
+	if !containsStr(result, "TASK FLOW:") {
+		t.Error("missing TASK FLOW section in briefing")
 	}
 }
