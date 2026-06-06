@@ -407,6 +407,15 @@ func extractCommitHash(text, repoPath string) string {
 func extractCommitRange(text, repoPath string) (string, string) {
 	var baseToken, headToken string
 	for _, line := range strings.Split(text, "\n") {
+		// Parse only the machine-written header block. buildOperateArtifactBody
+		// emits the commit:/base:/head:/range: lines, then a blank line, then the
+		// `git diff --stat` section — whose filenames are agent-controlled. Stop at
+		// the blank line so a file named like a header key (e.g. "head:<hex>")
+		// cannot override the verified range and force a single-commit fallback that
+		// re-hides an earlier commit from the reviewer.
+		if strings.TrimSpace(line) == "" {
+			break
+		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
 			continue

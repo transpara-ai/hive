@@ -1170,7 +1170,11 @@ func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) 
 }
 
 // buildOperateArtifactBody captures the verified commit range and changed file
-// list from the repo. Returns a structured string the Reviewer can parse.
+// list from the repo. Returns a structured string the Reviewer can parse: a
+// header block (commit:/base:/head:/range:) of machine-verified values, a blank
+// line, then the `git diff --stat`. extractCommitRange parses only up to that
+// blank line, so the agent-controlled filenames in the stat cannot spoof the
+// header — preserve the blank-line separator if this format ever changes.
 func buildOperateArtifactBody(repoPath, baseHead, postHead string) string {
 	if repoPath == "" {
 		return "(no repo path configured)"

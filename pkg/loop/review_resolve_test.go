@@ -280,3 +280,93 @@ func TestFetchArtifactBody_WaiverReturnsFalse(t *testing.T) {
 		t.Fatal("fetchArtifactBody returned true for waiver ref; expected false")
 	}
 }
+
+// The artifact body embeds a `git diff --stat` section whose filenames are
+// agent-controlled. A file NAMED like a header key (e.g. "head:<hex>") must not
+// be parsed as a base:/head: line and override the machine-written range —
+// otherwise an untrusted implementer could force a single-commit fallback and
+// re-hide an earlier commit from the reviewer (the round-8 class). This proves
+// the gate holds across the injection input-domain, not just one shape.
+func TestExtractCommitRange_RejectsStatSectionInjection(t *testing.T) {
+	repo := newTempGitRepo(t)
+	preHead := gitCommand(repo, "rev-parse", "HEAD")
+	commitFile(t, repo, "first.txt", "first\n", "A")
+	commitFile(t, repo, "second.txt", "second\n", "B")
+	postHead := gitCommand(repo, "rev-parse", "HEAD")
+
+	clean := buildOperateArtifactBody(repo, preHead, postHead)
+	if b, h := extractCommitRange(clean, repo); b != preHead || h != postHead {
+		t.Fatalf("clean body resolved to (%q,%q), want (%q,%q)", b, h, preHead, postHead)
+	}
+
+	zeros := strings.Repeat("0", 40)
+	appendages := []struct {
+		name string
+		rows string
+	}{
+		{"head_garbage_stat_row", " head:" + zeros + " | 1 +"},
+		{"base_garbage_stat_row", " base:" + zeros + " | 1 +"},
+		{"both_keys", " base:" + zeros + " | 1 +\n head:" + zeros + " | 1 +"},
+		{"real_hash_suffixed", " head:" + preHead + " | 1 +"},
+		{"clean_override_no_suffix", "head: " + preHead},
+	}
+	for _, a := range appendages {
+		t.Run(a.name, func(t *testing.T) {
+			body := clean + "\n" + a.rows
+			b, h := extractCommitRange(body, repo)
+			if b != preHead || h != postHead {
+				t.Errorf("stat-section injection overrode the header: got (%q,%q), want (%q,%q)\ninjected rows:\n%s", b, h, preHead, postHead, a.rows)
+			}
+		})
+	}
+}
+
+// End-to-end: an untrusted implementer makes two commits and names a file in the
+// FINAL commit "head:<hex>" so its real `git diff --stat` row would inject a
+// head: line. The reviewer resolution must still return the full pre..post range
+// (not fall back to a single-commit diff that hides the earlier commit).
+func TestResolveCommitForTask_Strategy0_AdversarialFilename(t *testing.T) {
+	repo := newTempGitRepo(t)
+	preHead := gitCommand(repo, "rev-parse", "HEAD")
+	commitFile(t, repo, "first.txt", "SECRET unreviewed change\n", "A hidden")
+	commitFile(t, repo, "head:"+strings.Repeat("0", 40), "x\n", "B benign")
+	postHead := gitCommand(repo, "rev-parse", "HEAD")
+
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_adversarial_filename")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Adversarial filename", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	artifactBody := buildOperateArtifactBody(repo, preHead, postHead)
+	if err := ts.AddArtifact(agent.ID(), task.ID, "Operate result", "text/plain", artifactBody, causes, convID); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+	if err := ts.Complete(agent.ID(), task.ID, "done", causes, convID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	completedContent := completedTaskContent(t, g, task.ID)
+	l := &Loop{config: Config{RepoPath: repo, TaskStore: ts}}
+	commitHash, diffRef := l.resolveCommitForTask(completedContent, true)
+
+	wantRef := preHead + ".." + postHead
+	if diffRef != wantRef {
+		t.Errorf("diffRef = %q, want %q (a single-commit fallback would re-hide first.txt)", diffRef, wantRef)
+	}
+	if commitHash != postHead {
+		t.Errorf("commitHash = %q, want %q", commitHash, postHead)
+	}
+	stat := gitCommand(repo, "diff", diffRef, "--stat")
+	if !strings.Contains(stat, "first.txt") {
+		t.Fatalf("resolved diff hides first.txt (round-8 re-opened); stat:\n%s", stat)
+	}
+}
