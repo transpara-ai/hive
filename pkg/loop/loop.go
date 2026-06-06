@@ -156,6 +156,12 @@ type Config struct {
 	HeartbeatInterval int
 }
 
+// maxPendingEvents bounds the per-agent observation buffer. A keepalive agent
+// that sleeps through a churn storm must not accumulate an unbounded backlog and
+// dump it into the next observation context (invariant BOUNDED). When the cap is
+// exceeded the oldest events are dropped — the newest context wins.
+const maxPendingEvents = 256
+
 // Loop runs an agent's observe-reason-act-reflect cycle.
 type Loop struct {
 	agent   *hiveagent.Agent
@@ -836,20 +842,28 @@ func (l *Loop) onEvent(ev event.Event) {
 		return
 	}
 
-	// Drop per-iteration lifecycle/telemetry churn entirely: do not wake on it,
-	// and do not queue it in pendingEvents. Queuing it would let a sleeping
-	// (keepalive) agent accumulate the whole storm in memory and dump stale
-	// noise into its observation context on the next substantive wake. The
-	// consumers of pendingEvents (cto/spawner/reviewer/health) only scan
-	// substantive events, and observe() still pulls recent graph events via
-	// the agent's own memory, so nothing substantive is lost.
+	// Queue for the next observation unless this is pure lifecycle telemetry.
+	// Peer evaluations (agent.evaluated) are queued for governance visibility
+	// even though they do not wake the agent — observe() renders pendingEvents,
+	// and the agent's own Memory is self-scoped, so the bus is the only path by
+	// which a peer's evaluation reaches it. Bounded so a long keepalive sleep
+	// cannot accumulate an unbounded backlog (invariant BOUNDED).
+	if isObservable(ev.Type()) {
+		l.mu.Lock()
+		l.pendingEvents = append(l.pendingEvents, ev)
+		if over := len(l.pendingEvents) - maxPendingEvents; over > 0 {
+			l.pendingEvents = l.pendingEvents[over:]
+		}
+		l.mu.Unlock()
+	}
+
+	// Only substantive work wakes a quiescent keepalive agent. Per-iteration
+	// lifecycle/telemetry churn (state changes, observations, evaluations) must
+	// not re-wake idle governance agents — they stay subscribed and see any
+	// queued events on their next substantive wake.
 	if !isWakeWorthy(ev.Type()) {
 		return
 	}
-
-	l.mu.Lock()
-	l.pendingEvents = append(l.pendingEvents, ev)
-	l.mu.Unlock()
 
 	// Signal the wake channel (non-blocking).
 	select {

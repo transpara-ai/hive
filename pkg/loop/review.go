@@ -415,6 +415,21 @@ func gitCommand(dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitTry runs a git command and reports whether it succeeded. Unlike
+// gitCommand, it distinguishes a genuinely empty result (ok=true — e.g. a clean
+// `status --porcelain`) from a git failure (ok=false — e.g. the directory is not
+// a checkout), so callers that must verify repo state can fail closed on the
+// latter instead of mistaking an error for "clean / no commit".
+func gitTry(dir string, args ...string) (string, bool) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
 // truncateDiff applies the three-tier truncation strategy from the design spec.
 //   - ≤ maxLines: include full diff
 //   - maxLines+1 to 1000: first 200 lines + last 50 lines + omission note

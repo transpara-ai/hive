@@ -58,14 +58,21 @@ func TestClassifyOperateCommit(t *testing.T) {
 		{"real commit advances HEAD", "aaaa", "bbbb", "committed in bbbb", false, commitVerified},
 		{"real commit, terse summary", "aaaa", "bbbb", "done", false, commitVerified},
 		{"first commit in fresh repo", "", "bbbb", "committed", false, commitVerified},
-		{"HEAD moved beats leftover dirt", "aaaa", "bbbb", "done", true, commitVerified},
+		// A commit that advances HEAD but leaves the tree dirty is a PARTIAL
+		// commit: the agent produced uncommitted side effects it never captured.
+		// An autonomy guard must not treat that as cleanly verified.
+		{"HEAD moved but tree dirty fails closed", "aaaa", "bbbb", "done", true, commitDirty},
+		{"HEAD moved + commit claim + dirty fails closed", "aaaa", "bbbb", "committed", true, commitDirty},
 		{"confab: claims commit, HEAD unmoved", "aaaa", "aaaa", "committed in 89f8886", false, commitConfabulated},
 		{"confab: claim beats dirty", "aaaa", "aaaa", "committed in 89f8886", true, commitConfabulated},
 		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", "ran git commit -m docs", false, commitConfabulated},
 		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", "Updated the catalog", true, commitDirty},
 		{"honest no-op: no claim, clean, HEAD unmoved", "aaaa", "aaaa", "nothing to commit", false, commitWaivable},
 		{"honest no-op: terse, clean", "aaaa", "aaaa", "no changes needed", false, commitWaivable},
-		{"unverifiable HEAD + commit claim fails closed", "aaaa", "", "committed in deadbeef", false, commitConfabulated},
+		// Unverifiable repo HEAD (git unreadable) must fail closed regardless of
+		// the summary — both when a commit is claimed and when none is.
+		{"unverifiable HEAD + commit claim fails closed", "aaaa", "", "committed in deadbeef", false, commitUnverifiable},
+		{"unverifiable HEAD, no claim, fails closed", "aaaa", "", "edited some files", false, commitUnverifiable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -226,6 +233,74 @@ func TestRun_ConfabulatedOperateDoesNotProcessUntrustedResponse(t *testing.T) {
 	}
 	if taskHasCompletedEvent(t, g, task.ID) {
 		t.Fatal("confabulated Operate produced a work.task.completed event")
+	}
+}
+
+// #2: an unverifiable repo (RepoPath is not a git checkout, or git is
+// unavailable) must fail closed, never silently waive+complete. gitCommand
+// returns "" on any error, which previously fell through to commitWaivable.
+func TestHandleOperateResult_UnverifiableRepoDoesNotComplete(t *testing.T) {
+	nonRepo := t.TempDir() // a directory that is NOT a git repository
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_unverifiable_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write something", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: nonRepo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No commit claim + a non-git repo: HEAD is unreadable, so the gate cannot
+	// verify the Operate. It must refuse to complete, not waive.
+	completed := l.handleOperateResult(context.Background(), task, "priorhead", "Analyzed the directory; made some edits.")
+	if completed {
+		t.Fatal("handleOperateResult completed a task in an unverifiable (non-git) repo")
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("unverifiable repo produced a work.task.completed event")
+	}
+}
+
+// #4: failing an Operate must reflect in Work task state — a blocked (retryable)
+// task — not leave it looking assigned/in-progress. Loop tasks start at
+// StatusCreated (the loop never enters the v3.9 lifecycle), so the fail path
+// must advance Created→Ready→Running→Blocked.
+func TestFailOperateTask_TransitionsTaskToBlocked(t *testing.T) {
+	repo := newTempGitRepo(t)
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_block_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the doc", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	l.failOperateTask(context.Background(), task, "commit verification failed (test)")
+
+	status, err := ts.GetStatus(task.ID)
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if status != work.StatusBlocked {
+		t.Fatalf("after failOperateTask, task status = %s, want %s", status, work.StatusBlocked)
 	}
 }
 
