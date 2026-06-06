@@ -46,69 +46,6 @@ func TestClaimsCommit(t *testing.T) {
 	}
 }
 
-// claimsNoOp must detect affirmative "no work was needed" assertions (the only
-// summaries allowed to waive+complete a clean, unchanged repo), while rejecting
-// work claims, terse/empty summaries, and commit claims.
-func TestClaimsNoOp(t *testing.T) {
-	affirmative := []string{
-		"Nothing to commit, working tree clean.",
-		"No changes needed; the catalog already matches.",
-		"The file already exists with the correct content.",
-		"Already up to date.",
-		"Made no changes — nothing to do.",
-	}
-	for _, s := range affirmative {
-		if !claimsNoOp(s) {
-			t.Errorf("claimsNoOp(%q) = false, want true", s)
-		}
-	}
-	notNoOp := []string{
-		"Updated docs/civilization-roles.md with the new section.",
-		"done",
-		"",
-		"Wrote the catalog and committed in 89f8886",
-		"Analyzed the directory structure.",
-		// A work claim must veto a no-op even when it contains a no-op substring:
-		// describing work ("Implemented") while mentioning "already exists" is a
-		// no-effect Operate, not a legitimate no-op (round-6 bypass).
-		"Implemented handling for repository already exists errors",
-		"Created the file even though it already exists elsewhere",
-	}
-	for _, s := range notNoOp {
-		if claimsNoOp(s) {
-			t.Errorf("claimsNoOp(%q) = true, want false (only affirmative no-ops may waive)", s)
-		}
-	}
-}
-
-// claimsWork must flag concrete-change verbs (which veto the no-op waiver) while
-// treating inspection verbs as NOT work (consistent with a legitimate no-op).
-func TestClaimsWork(t *testing.T) {
-	work := []string{
-		"Implemented handling for already exists errors",
-		"Updated docs/civilization-roles.md",
-		"Created the catalog file",
-		"Removed the dead code path",
-		"Refactored the gate",
-	}
-	for _, s := range work {
-		if !claimsWork(s) {
-			t.Errorf("claimsWork(%q) = false, want true", s)
-		}
-	}
-	notWork := []string{
-		"Nothing to commit, working tree clean.",
-		"Checked the catalog; it already matches.",
-		"Analyzed and verified the structure; no changes needed.",
-		"",
-	}
-	for _, s := range notWork {
-		if claimsWork(s) {
-			t.Errorf("claimsWork(%q) = true, want false (inspection/no-op is not work)", s)
-		}
-	}
-}
-
 // ── classifyOperateCommit: HEAD movement + self-report + working-tree state ──
 func TestClassifyOperateCommit(t *testing.T) {
 	tests := []struct {
@@ -134,12 +71,15 @@ func TestClassifyOperateCommit(t *testing.T) {
 		{"confab: claim beats dirty", "aaaa", "aaaa", false, "committed in 89f8886", true, commitConfabulated},
 		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", false, "ran git commit -m docs", false, commitConfabulated},
 		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", false, "Updated the catalog", true, commitDirty},
-		{"honest no-op: affirmative no-op, clean, HEAD unmoved", "aaaa", "aaaa", false, "nothing to commit", false, commitWaivable},
-		{"honest no-op: already-matches phrasing", "aaaa", "aaaa", false, "the file already matches; no changes needed", false, commitWaivable},
-		// Clean + unchanged but NO affirmative no-op → no-effect Operate, fail closed.
-		{"no-effect: work claim, clean, unmoved", "aaaa", "aaaa", false, "Updated the file", false, commitNoEffect},
-		{"no-effect: terse summary, clean, unmoved", "aaaa", "aaaa", false, "done", false, commitNoEffect},
-		{"no-effect: empty summary, clean, unmoved", "aaaa", "aaaa", false, "", false, commitNoEffect},
+		// Clean tree + HEAD unmoved is ALWAYS a no-change Operate now — the summary
+		// is never trusted to prove a no-op, so every such case fails closed
+		// regardless of phrasing (affirmative no-op, work claim, terse, or empty).
+		{"no-change: no-op phrasing still does not complete", "aaaa", "aaaa", false, "nothing to commit", false, commitNoEffect},
+		{"no-change: already-matches phrasing", "aaaa", "aaaa", false, "the file already matches; no changes needed", false, commitNoEffect},
+		{"no-change: work claim", "aaaa", "aaaa", false, "Updated the file", false, commitNoEffect},
+		{"no-change: terse summary", "aaaa", "aaaa", false, "done", false, commitNoEffect},
+		{"no-change: empty summary", "aaaa", "aaaa", false, "", false, commitNoEffect},
+		{"no-change: round-7 bypass probe", "aaaa", "aaaa", false, "Changed the handler; the registry already contains the entry", false, commitNoEffect},
 		// Unverifiable repo HEAD (git unreadable) must fail closed.
 		{"unverifiable HEAD fails closed", "aaaa", "", false, "committed in deadbeef", false, commitUnverifiable},
 	}
@@ -152,18 +92,17 @@ func TestClassifyOperateCommit(t *testing.T) {
 	}
 }
 
-// completesTask is the proceed/deny authority and must be DENY BY DEFAULT: only
-// commitVerified and commitWaivable complete; every other verdict — including an
-// unrecognized/future one — refuses. This locks the polarity so a new verdict
-// cannot inherit "complete" by omission.
+// completesTask is the proceed/deny authority and must be DENY BY DEFAULT: ONLY
+// commitVerified completes; every other verdict — a no-change Operate
+// (commitNoEffect) and any unrecognized/future one — refuses. This locks the
+// polarity so a new verdict cannot inherit "complete" by omission.
 func TestCommitVerdict_CompletesTask_DenyByDefault(t *testing.T) {
 	completing := map[commitVerdict]bool{
 		commitVerified: true,
-		commitWaivable: true,
 	}
 	all := []commitVerdict{
-		commitVerified, commitWaivable, commitConfabulated, commitDiverged,
-		commitDirty, commitUnverifiable,
+		commitVerified, commitConfabulated, commitDiverged,
+		commitDirty, commitUnverifiable, commitNoEffect,
 		commitVerdict(9999), // unrecognized / future verdict must NOT complete
 	}
 	for _, v := range all {
@@ -175,10 +114,10 @@ func TestCommitVerdict_CompletesTask_DenyByDefault(t *testing.T) {
 
 // Proof over the WHOLE input domain: for every combination of HEAD readability,
 // movement, ancestry, commit-claim, and dirtiness, the gate may complete the
-// task ONLY when the inputs describe an affirmatively safe shape — a real
-// advancing clean commit, or a clean no-op with no commit claim. Any other
-// combination must NOT complete. This is the "test the whole input space, not
-// the reported case" guarantee: it forecloses fail-open seams by construction.
+// task ONLY when the inputs describe the single safe shape — a real advancing
+// clean commit. A clean unchanged repo never completes (the summary is never
+// trusted). This is the "test the whole input space, not the reported case"
+// guarantee: it forecloses fail-open seams by construction.
 func TestClassifyOperateCommit_ExhaustiveInputSpace(t *testing.T) {
 	const pre = "aaaa"
 	posts := map[string]string{"unreadable": "", "unmoved": "aaaa", "moved": "bbbb"}
@@ -190,11 +129,9 @@ func TestClassifyOperateCommit_ExhaustiveInputSpace(t *testing.T) {
 					verdict := classifyOperateCommit(pre, post, advanced, summary, dirty)
 					completes := verdict.completesTask()
 
-					// The only safe-to-complete shapes: a real advancing clean
-					// commit, or a clean unchanged repo with an AFFIRMATIVE no-op.
-					safeVerified := post != "" && post != pre && advanced && !dirty
-					safeNoop := post != "" && post == pre && claimsNoOp(summary) && !dirty
-					want := safeVerified || safeNoop
+					// The ONLY safe-to-complete shape: a real advancing clean commit.
+					// The summary cannot make a no-change Operate complete.
+					want := post != "" && post != pre && advanced && !dirty
 
 					if completes != want {
 						t.Errorf("post=%s adv=%v sum=%s dirty=%v → verdict=%d completes=%v, want %v",
@@ -280,38 +217,6 @@ func TestHandleOperateResult_DirtyUncommittedDoesNotComplete(t *testing.T) {
 	}
 }
 
-// A genuine no-op (no commit claim, clean tree, HEAD unmoved) still completes via
-// waiver, so the gate does not over-correct and stall legitimate work.
-func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
-	repo := newTempGitRepo(t)
-	head := gitCommand(repo, "rev-parse", "HEAD")
-	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
-	agent, g := agentWithGraph(t, provider)
-	factory := event.NewEventFactory(g.Registry())
-	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
-	convID := types.MustConversationID("conv_noop_test")
-	var causes []types.EventID
-	if !agent.LastEvent().IsZero() {
-		causes = []types.EventID{agent.LastEvent()}
-	}
-	task, err := ts.Create(agent.ID(), "Check the catalog", "desc", causes, convID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	completed := l.handleOperateResult(context.Background(), task, head, true,
-		"Nothing to commit; the catalog already exists.")
-	if !completed {
-		t.Fatal("handleOperateResult returned completed=false for an honest no-op; it should waive and complete")
-	}
-	if !taskHasCompletedEvent(t, g, task.ID) {
-		t.Fatal("honest no-op Operate did not produce a work.task.completed event")
-	}
-}
-
 // P1a: on commit-verification failure the loop must short-circuit (stop +
 // escalate) and NOT process the untrusted Operate summary for /task, /signal,
 // etc. The confabulated summary below embeds a TASK_DONE signal; if the loop
@@ -393,9 +298,52 @@ func TestHandleOperateResult_WorkClaimNoEffectDoesNotComplete(t *testing.T) {
 	}
 }
 
+// #P1 (round-7): the no-op waiver is removed entirely — a clean, UNCHANGED repo
+// can never be distinguished as a legitimate no-op from a no-effect/wrong-repo
+// Operate using an untrusted free-text summary (every phrase/verb heuristic is
+// bypassable, e.g. "Changed ... already contains ..."). It must ALWAYS fail
+// closed and escalate, never auto-complete.
+func TestHandleOperateResult_NoChangeNeverCompletes(t *testing.T) {
+	summaries := []string{
+		"Changed the handler; the registry already contains the entry.", // round-7 bypass probe
+		"Nothing to commit, working tree clean.",                        // even an honest-sounding no-op
+		"The file already exists with the correct content.",
+		"done",
+		"",
+	}
+	for _, summary := range summaries {
+		repo := newTempGitRepo(t)
+		head := gitCommand(repo, "rev-parse", "HEAD")
+		provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+		agent, g := agentWithGraph(t, provider)
+		factory := event.NewEventFactory(g.Registry())
+		ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+		convID := types.MustConversationID("conv_nochange")
+		var causes []types.EventID
+		if !agent.LastEvent().IsZero() {
+			causes = []types.EventID{agent.LastEvent()}
+		}
+		task, err := ts.Create(agent.ID(), "Write the catalog", "desc", causes, convID)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		completed := l.handleOperateResult(context.Background(), task, head, true, summary)
+		if completed {
+			t.Fatalf("clean+unchanged repo completed via summary %q — no-change Operate must always escalate", summary)
+		}
+		if taskHasCompletedEvent(t, g, task.ID) {
+			t.Fatalf("clean+unchanged repo produced a completed event via summary %q", summary)
+		}
+	}
+}
+
 // #2: an unverifiable repo (RepoPath is not a git checkout, or git is
 // unavailable) must fail closed, never silently waive+complete. gitCommand
-// returns "" on any error, which previously fell through to commitWaivable.
+// returns "" on any error, which previously fell through to a completing verdict.
 func TestHandleOperateResult_UnverifiableRepoDoesNotComplete(t *testing.T) {
 	nonRepo := t.TempDir() // a directory that is NOT a git repository
 	provider := newMockProvider(`/signal {"signal":"IDLE"}`)

@@ -1167,27 +1167,6 @@ func (l *Loop) attachOperateArtifact(task work.Task) {
 	}
 }
 
-// waiveOperateArtifact exempts a task from the artifact requirement when
-// Operate produced no new commits. Best-effort.
-func (l *Loop) waiveOperateArtifact(task work.Task, reason string) {
-	if l.config.TaskStore == nil {
-		return
-	}
-	// Causes: use agent's last event for causality chain.
-	var causes []types.EventID
-	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
-		causes = []types.EventID{lastEv}
-	}
-	err := l.config.TaskStore.WaiveArtifact(
-		l.agent.ID(), task.ID,
-		reason,
-		causes, l.config.ConvID,
-	)
-	if err != nil {
-		fmt.Printf("[%s] warning: waive artifact failed: %v\n", l.agent.Name(), err)
-	}
-}
-
 // buildOperateArtifactBody captures the commit hash and changed file list
 // from the repo. Returns a structured string the Reviewer can parse.
 func buildOperateArtifactBody(repoPath string) string {

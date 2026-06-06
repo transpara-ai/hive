@@ -15,10 +15,9 @@ import (
 type commitVerdict int
 
 const (
-	// commitVerified: the repo HEAD advanced — a real commit exists.
+	// commitVerified: the repo HEAD advanced — a real commit exists. This is the
+	// ONLY verdict that auto-completes a task.
 	commitVerified commitVerdict = iota
-	// commitWaivable: no commit, clean tree, no commit claim — a legitimate no-op.
-	commitWaivable
 	// commitConfabulated: the agent claimed a commit but HEAD did not advance.
 	// The commit was confabulated or landed in another repo — never trust it.
 	commitConfabulated
@@ -35,27 +34,24 @@ const (
 	// forward commit. "HEAD changed" is not "HEAD advanced"; for an autonomy
 	// guard a non-advancing move is a failure, never a verified commit.
 	commitDiverged
-	// commitNoEffect: HEAD did not move and the tree is clean, but the agent did
-	// NOT affirmatively report a no-op — it described work (or said nothing). A
-	// clean, unchanged repo paired with a work claim is a no-effect Operate
-	// (often a wrong-repo run): there is no evidence the task was actually done,
-	// so it must not be waived+completed. Waiver requires an affirmative no-op.
+	// commitNoEffect: HEAD did not move and the tree is clean — the Operate
+	// produced no change to the target repo. There is NO reliable, non-heuristic
+	// way to distinguish a legitimate "already done" no-op from a no-effect /
+	// wrong-repo Operate using an untrusted free-text summary (three review rounds
+	// confirmed every phrase/verb heuristic is bypassable). So a no-change Operate
+	// never auto-completes; it escalates for human confirmation.
 	commitNoEffect
 )
 
 // completesTask reports whether a verdict permits completing the task. This is
-// the proceed/deny authority for the gate and it is DENY BY DEFAULT: only an
-// affirmatively safe outcome — a verified advancing commit, or a proven clean
-// no-op — completes. Every other verdict, INCLUDING any unhandled or
-// future-added verdict, refuses. A new verdict cannot accidentally inherit
-// "complete" by omission.
+// the proceed/deny authority for the gate and it is DENY BY DEFAULT: ONLY a
+// verified advancing commit completes. Every other verdict — including a
+// no-change Operate (commitNoEffect) and any unhandled/future-added verdict —
+// refuses. A task auto-completes only on positive evidence (a real, clean,
+// forward commit); a clean unchanged repo is never auto-completed from an
+// untrusted summary.
 func (v commitVerdict) completesTask() bool {
-	switch v {
-	case commitVerified, commitWaivable:
-		return true
-	default:
-		return false
-	}
+	return v == commitVerified
 }
 
 // refusalReason returns the escalation message for a non-completing verdict. The
@@ -72,7 +68,7 @@ func (v commitVerdict) refusalReason(repoPath, preHead string) string {
 	case commitUnverifiable:
 		return fmt.Sprintf("could not read %s HEAD after Operate — refusing to complete on unverifiable state", repoPath)
 	case commitNoEffect:
-		return fmt.Sprintf("Operate reported work but %s is unchanged and clean (no commit, no diff, no no-op claim) — refusing to complete a no-effect Operate (possible wrong-repo run)", repoPath)
+		return fmt.Sprintf("Operate produced no change to %s (HEAD unmoved, tree clean) — refusing to auto-complete; escalating for human confirmation (a genuine no-op cannot be distinguished from a no-effect/wrong-repo run via an untrusted summary)", repoPath)
 	default:
 		return fmt.Sprintf("unrecognized commit verdict %d in %s — refusing to complete (fail closed)", int(v), repoPath)
 	}
@@ -116,82 +112,6 @@ func claimsCommit(summary string) bool {
 	return false
 }
 
-// claimsNoOp reports whether an Operate summary AFFIRMATIVELY asserts that no
-// work was needed (the file already matched, nothing to change, etc.). The
-// waiver path requires this: the mere ABSENCE of a commit claim is not evidence
-// of a legitimate no-op — an agent that did work in the wrong repo, or returned
-// a terse/empty summary, leaves the target repo clean and unchanged too. Only an
-// affirmative no-op may waive+complete.
-func claimsNoOp(summary string) bool {
-	s := strings.ToLower(summary)
-	// A work claim VETOES a no-op. A no-op phrase can appear inside a summary that
-	// actually describes work ("Implemented handling for 'already exists'
-	// errors"), so the mere presence of a no-op substring is not proof. If the
-	// summary asserts a concrete change, it is not a clean no-op — fail closed.
-	if claimsWork(s) {
-		return false
-	}
-	for _, p := range []string{
-		"nothing to commit",
-		"nothing to change",
-		"nothing to do",
-		"nothing to update",
-		"no changes needed",
-		"no change needed",
-		"no changes were needed",
-		"no changes required",
-		"no changes to make",
-		"no modifications needed",
-		"no edits needed",
-		"no update needed",
-		"no action needed",
-		"no action required",
-		"no work needed",
-		"made no changes",
-		"no further changes",
-		"already exists",
-		"already present",
-		"already contains",
-		"already correct",
-		"already matches",
-		"already up to date",
-		"already up-to-date",
-		"already complete",
-		"already in place",
-		"already satisfied",
-		"no-op",
-		"no op",
-	} {
-		if strings.Contains(s, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// claimsWork reports whether a summary asserts that a concrete change was made.
-// It vetoes the no-op waiver: a clean, unchanged repo paired with a work claim
-// is a no-effect Operate (often wrong-repo), not a legitimate no-op. Only
-// completed-change verbs are listed — inspection verbs (checked/analyzed/
-// reviewed/verified) are consistent with a no-op and are NOT work. The veto
-// errs toward escalation: a genuine no-op phrased with a change verb fails
-// closed (a recoverable human review) rather than risk a false completion.
-func claimsWork(summary string) bool {
-	s := strings.ToLower(summary)
-	for _, v := range []string{
-		"implemented", "added", "created", "wrote", "rewrote", "modified",
-		"refactored", "deleted", "removed", "renamed", "replaced", "edited",
-		"generated", "appended", "inserted", "updated", "patched", "fixed",
-		"authored", "drafted", "introduced", "corrected", "committed",
-		"applied", "staged", "populated", "scaffolded",
-	} {
-		if strings.Contains(s, v) {
-			return true
-		}
-	}
-	return false
-}
-
 // classifyOperateCommit cross-checks repo HEAD movement against the agent's
 // self-reported summary. Never trust the self-report: a commit claim that the
 // repo HEAD does not corroborate is a confabulation (or a wrong-repo commit).
@@ -228,13 +148,10 @@ func classifyOperateCommit(preHead, postHead string, advanced bool, summary stri
 	if headMoved {
 		return commitVerified
 	}
-	// Clean tree, HEAD unmoved. Waive+complete ONLY if the agent affirmatively
-	// reports a no-op. A clean, unchanged repo with a work claim (or a terse/empty
-	// summary) is a no-effect Operate — possibly a wrong-repo run — and must fail
-	// closed rather than silently complete.
-	if claimsNoOp(summary) {
-		return commitWaivable
-	}
+	// Clean tree, HEAD unmoved: the Operate produced no change to the target repo.
+	// A legitimate "already done" no-op cannot be distinguished from a no-effect /
+	// wrong-repo Operate using an untrusted free-text summary, so there is no
+	// auto-complete path here — fail closed and escalate for human confirmation.
 	return commitNoEffect
 }
 
@@ -250,8 +167,9 @@ func shortHash(h string) string {
 }
 
 // handleOperateResult applies the commit-verification gate after an implementer
-// Operate. It returns true if the task was completed (verified commit or honest
-// no-op) and false if the task was failed (confabulated/unverifiable commit).
+// Operate. It returns true only when a real, clean, forward commit was made (the
+// task is completed); every other outcome — including a no-change Operate —
+// fails the task and escalates.
 func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOperateHead string, preHeadReadable bool, summary string) bool {
 	// Inspect repo state with explicit success signals: gitTry distinguishes a
 	// genuine empty result (clean tree) from a git failure. Fail closed when any
@@ -289,13 +207,9 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 		l.failOperateTask(ctx, task, verdict.refusalReason(l.config.RepoPath, preOperateHead))
 		return false
 	}
-	// Completing verdicts differ only in how the artifact gate is satisfied: a
-	// verified commit attaches the real artifact; a clean no-op records a waiver.
-	if verdict == commitVerified {
-		l.attachOperateArtifact(task)
-	} else { // commitWaivable
-		l.waiveOperateArtifact(task, "Operate produced no new commits")
-	}
+	// The only completing verdict is commitVerified — a real, clean, forward
+	// commit. Attach the artifact and complete.
+	l.attachOperateArtifact(task)
 	l.completeTask(ctx, task, summary)
 	return true
 }
