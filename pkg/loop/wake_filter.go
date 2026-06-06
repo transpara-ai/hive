@@ -18,12 +18,16 @@ import (
 //
 // Fail-safe: only the known high-volume churn types are suppressed; every other
 // (including unknown/future) event type wakes, so no substantive work is missed.
+//
+// Deliberately NOT suppressed: agent.acted. Despite being an agent.* event it is
+// an action annotation for SIGNIFICANT work (Agent.Act marks e.g. "write_code",
+// "integrate") and may be the only signal for an action that emits no work/task
+// event — suppressing it could blind sleeping governance agents.
 func isWakeWorthy(eventType types.EventType) bool {
 	switch eventType {
 	case event.EventTypeAgentStateChanged,
 		event.EventTypeAgentObserved,
-		event.EventTypeAgentEvaluated,
-		event.EventTypeAgentActed:
+		event.EventTypeAgentEvaluated:
 		return false
 	default:
 		return true

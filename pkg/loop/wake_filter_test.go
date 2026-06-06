@@ -14,11 +14,11 @@ import (
 // the 2026-06-06 run) while still waking on substantive work. Fail-safe: any
 // unknown/future event type wakes, so no real work is ever missed.
 func TestIsWakeWorthy(t *testing.T) {
+	// Only pure per-iteration lifecycle/telemetry events are suppressed.
 	noise := []types.EventType{
 		event.EventTypeAgentStateChanged,
 		event.EventTypeAgentEvaluated,
 		event.EventTypeAgentObserved,
-		event.EventTypeAgentActed,
 	}
 	for _, et := range noise {
 		if isWakeWorthy(et) {
@@ -28,6 +28,9 @@ func TestIsWakeWorthy(t *testing.T) {
 	substantive := []types.EventType{
 		work.EventTypeTaskCreated,
 		work.EventTypeTaskCompleted,
+		// agent.acted marks SIGNIFICANT actions (Agent.Act: "write_code",
+		// "integrate", ...), not pure churn — it must still wake.
+		event.EventTypeAgentActed,
 		types.MustEventType("hive.gap.detected"),
 		types.MustEventType("hive.role.proposed"),
 		types.MustEventType("authority.request.recorded"),
@@ -40,10 +43,11 @@ func TestIsWakeWorthy(t *testing.T) {
 	}
 }
 
-// onEvent must still append every non-self event to pendingEvents (observation
-// context is unchanged), but only signal the wake channel for substantive
-// events — so a sleeping keepalive agent is not re-woken by the noise storm.
-func TestOnEvent_NoiseStoredButDoesNotWake(t *testing.T) {
+// onEvent must DROP lifecycle/telemetry noise entirely — neither waking the
+// agent nor appending it to pendingEvents. Otherwise a sleeping keepalive agent
+// accumulates the whole churn storm in memory and dumps it into the observation
+// context on the next substantive wake. Substantive events are appended + wake.
+func TestOnEvent_NoiseDroppedAndDoesNotWake(t *testing.T) {
 	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
 	agent, g := agentWithGraph(t, provider)
 	l, err := New(Config{Agent: agent, HumanID: humanID()})
@@ -78,14 +82,17 @@ func TestOnEvent_NoiseStoredButDoesNotWake(t *testing.T) {
 
 	before := pendingLen(l)
 	l.onEvent(noiseEv)
-	if pendingLen(l) != before+1 {
-		t.Fatal("noise event was not appended to pendingEvents — observation context would be lost")
+	if pendingLen(l) != before {
+		t.Fatal("noise event was appended to pendingEvents — it must be dropped to avoid unbounded accumulation while sleeping")
 	}
 	if wakeSignaled(l) {
 		t.Fatal("noise event signaled wake; lifecycle churn must not wake sleeping agents")
 	}
 
 	l.onEvent(substantiveEv)
+	if pendingLen(l) != before+1 {
+		t.Fatal("substantive event was not appended to pendingEvents")
+	}
 	if !wakeSignaled(l) {
 		t.Fatal("substantive event did not signal wake")
 	}

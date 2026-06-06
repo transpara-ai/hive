@@ -2,11 +2,15 @@ package loop
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
 
@@ -42,27 +46,31 @@ func TestClaimsCommit(t *testing.T) {
 	}
 }
 
-// ── classifyOperateCommit: combine HEAD movement with the self-report ──
+// ── classifyOperateCommit: HEAD movement + self-report + working-tree state ──
 func TestClassifyOperateCommit(t *testing.T) {
 	tests := []struct {
 		name      string
 		pre, post string
 		summary   string
+		dirty     bool
 		want      commitVerdict
 	}{
-		{"real commit advances HEAD", "aaaa", "bbbb", "committed in bbbb", commitVerified},
-		{"real commit, terse summary", "aaaa", "bbbb", "done", commitVerified},
-		{"first commit in fresh repo", "", "bbbb", "committed", commitVerified},
-		{"confab: claims commit, HEAD unmoved", "aaaa", "aaaa", "committed in 89f8886", commitConfabulated},
-		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", "ran git commit -m docs", commitConfabulated},
-		{"honest no-op: no claim, HEAD unmoved", "aaaa", "aaaa", "nothing to commit", commitWaivable},
-		{"honest no-op: terse, HEAD unmoved", "aaaa", "aaaa", "no changes needed", commitWaivable},
-		{"unverifiable HEAD + commit claim fails closed", "aaaa", "", "committed in deadbeef", commitConfabulated},
+		{"real commit advances HEAD", "aaaa", "bbbb", "committed in bbbb", false, commitVerified},
+		{"real commit, terse summary", "aaaa", "bbbb", "done", false, commitVerified},
+		{"first commit in fresh repo", "", "bbbb", "committed", false, commitVerified},
+		{"HEAD moved beats leftover dirt", "aaaa", "bbbb", "done", true, commitVerified},
+		{"confab: claims commit, HEAD unmoved", "aaaa", "aaaa", "committed in 89f8886", false, commitConfabulated},
+		{"confab: claim beats dirty", "aaaa", "aaaa", "committed in 89f8886", true, commitConfabulated},
+		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", "ran git commit -m docs", false, commitConfabulated},
+		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", "Updated the catalog", true, commitDirty},
+		{"honest no-op: no claim, clean, HEAD unmoved", "aaaa", "aaaa", "nothing to commit", false, commitWaivable},
+		{"honest no-op: terse, clean", "aaaa", "aaaa", "no changes needed", false, commitWaivable},
+		{"unverifiable HEAD + commit claim fails closed", "aaaa", "", "committed in deadbeef", false, commitConfabulated},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyOperateCommit(tt.pre, tt.post, tt.summary); got != tt.want {
-				t.Errorf("classifyOperateCommit(%q,%q,%q) = %v, want %v", tt.pre, tt.post, tt.summary, got, tt.want)
+			if got := classifyOperateCommit(tt.pre, tt.post, tt.summary, tt.dirty); got != tt.want {
+				t.Errorf("classifyOperateCommit(%q,%q,%q,dirty=%v) = %v, want %v", tt.pre, tt.post, tt.summary, tt.dirty, got, tt.want)
 			}
 		})
 	}
@@ -70,10 +78,8 @@ func TestClassifyOperateCommit(t *testing.T) {
 
 // ── Loop wiring: a confabulated Operate must NOT complete the task ──
 func TestHandleOperateResult_ConfabulatedCommitDoesNotComplete(t *testing.T) {
-	head := gitCommand(".", "rev-parse", "HEAD")
-	if head == "" {
-		t.Skip("not in a git repo")
-	}
+	repo := newTempGitRepo(t)
+	head := gitCommand(repo, "rev-parse", "HEAD")
 
 	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
 	agent, g := agentWithGraph(t, provider)
@@ -90,7 +96,7 @@ func TestHandleOperateResult_ConfabulatedCommitDoesNotComplete(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: ".", TaskStore: ts})
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -107,13 +113,48 @@ func TestHandleOperateResult_ConfabulatedCommitDoesNotComplete(t *testing.T) {
 	}
 }
 
-// A genuine no-op (no commit claim, HEAD unmoved) still completes via waiver,
-// so the gate does not over-correct and stall legitimate non-committing work.
-func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
-	head := gitCommand(".", "rev-parse", "HEAD")
-	if head == "" {
-		t.Skip("not in a git repo")
+// An Operate that edits files but never commits (and never claims a commit) must
+// NOT be waived+completed — unreviewable filesystem side effects must fail.
+func TestHandleOperateResult_DirtyUncommittedDoesNotComplete(t *testing.T) {
+	repo := newTempGitRepo(t)
+	head := gitCommand(repo, "rev-parse", "HEAD")
+	// Simulate Operate editing a file without committing.
+	if err := exec.Command("bash", "-c", "echo edited > "+repo+"/notes.md").Run(); err != nil {
+		t.Fatalf("dirty the repo: %v", err)
 	}
+
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_dirty_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write notes", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Summary describes work but does not claim a commit; HEAD did not move; tree dirty.
+	completed := l.handleOperateResult(context.Background(), task, head, "Updated notes.md with the new content.")
+	if completed {
+		t.Fatal("handleOperateResult completed a task with uncommitted working-tree changes")
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("dirty uncommitted Operate produced a work.task.completed event")
+	}
+}
+
+// A genuine no-op (no commit claim, clean tree, HEAD unmoved) still completes via
+// waiver, so the gate does not over-correct and stall legitimate work.
+func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
+	repo := newTempGitRepo(t)
+	head := gitCommand(repo, "rev-parse", "HEAD")
 	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
 	agent, g := agentWithGraph(t, provider)
 	factory := event.NewEventFactory(g.Registry())
@@ -127,7 +168,7 @@ func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: ".", TaskStore: ts})
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -140,6 +181,96 @@ func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
 		t.Fatal("honest no-op Operate did not produce a work.task.completed event")
 	}
 }
+
+// P1a: on commit-verification failure the loop must short-circuit (stop +
+// escalate) and NOT process the untrusted Operate summary for /task, /signal,
+// etc. The confabulated summary below embeds a TASK_DONE signal; if the loop
+// processed it, Run would return StopTaskDone instead of StopEscalation.
+func TestRun_ConfabulatedOperateDoesNotProcessUntrustedResponse(t *testing.T) {
+	repo := newTempGitRepo(t)
+	op := &mockOperator{
+		reasonResp:     `/signal {"signal":"IDLE"}`,
+		operateSummary: "Wrote the file and committed in deadbeef.\n/signal {\"signal\":\"TASK_DONE\"}",
+	}
+	agent, g := agentWithGraph(t, op)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_p1a_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the doc", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	l, err := New(Config{
+		Agent:      agent,
+		HumanID:    humanID(),
+		RepoPath:   repo,
+		TaskStore:  ts,
+		CanOperate: true,
+		Budget:     resources.BudgetConfig{MaxIterations: 5},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := l.Run(context.Background())
+	if res.Reason != StopEscalation {
+		t.Fatalf("confabulated Operate: reason = %s, want StopEscalation (embedded TASK_DONE must not be processed; detail=%q)", res.Reason, res.Detail)
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("confabulated Operate produced a work.task.completed event")
+	}
+}
+
+// ── helpers ──
+
+// newTempGitRepo creates an isolated, clean git repo with one commit.
+func newTempGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// mockOperator is a provider that supports both Reason and Operate, with a
+// controllable Operate summary (no filesystem side effects).
+type mockOperator struct {
+	reasonResp     string
+	operateSummary string
+}
+
+func (m *mockOperator) Name() string  { return "mockop" }
+func (m *mockOperator) Model() string { return "mockop-model" }
+func (m *mockOperator) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	c, _ := types.NewScore(0.8)
+	return decision.NewResponse(m.reasonResp, c, decision.TokenUsage{InputTokens: 10, OutputTokens: 10}), nil
+}
+func (m *mockOperator) Operate(_ context.Context, _ decision.OperateTask) (decision.OperateResult, error) {
+	return decision.OperateResult{Summary: m.operateSummary, Usage: decision.TokenUsage{InputTokens: 10, OutputTokens: 10}}, nil
+}
+
+var (
+	_ intelligence.Provider = (*mockOperator)(nil)
+	_ decision.IOperator    = (*mockOperator)(nil)
+)
 
 // taskHasCompletedEvent reports whether a work.task.completed event exists for taskID.
 func taskHasCompletedEvent(t *testing.T, g *graph.Graph, taskID types.EventID) bool {

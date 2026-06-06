@@ -362,6 +362,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 					l.captureBoundary(checkpoint.TaskCompleted, response)
 					l.lastCheckpointIter = l.iteration
 				}
+			} else {
+				// Commit verification failed (confabulated / wrong-repo /
+				// uncommitted work). The Operate summary is UNTRUSTED — halt and
+				// escalate instead of letting it drive /task, /phase, /signal,
+				// etc. failOperateTask already escalated to the human.
+				return l.result(StopEscalation, iteration,
+					"commit verification failed; halting implementer for human review")
 			}
 		} else {
 			// Reason path: standard observe-reason loop.
@@ -829,16 +836,20 @@ func (l *Loop) onEvent(ev event.Event) {
 		return
 	}
 
-	l.mu.Lock()
-	l.pendingEvents = append(l.pendingEvents, ev)
-	l.mu.Unlock()
-
-	// Only wake quiescent agents for substantive events. Per-iteration agent
-	// lifecycle/telemetry churn must not re-wake sleeping governance agents
-	// (wakeup-storm guard); it is still stored above for observation context.
+	// Drop per-iteration lifecycle/telemetry churn entirely: do not wake on it,
+	// and do not queue it in pendingEvents. Queuing it would let a sleeping
+	// (keepalive) agent accumulate the whole storm in memory and dump stale
+	// noise into its observation context on the next substantive wake. The
+	// consumers of pendingEvents (cto/spawner/reviewer/health) only scan
+	// substantive events, and observe() still pulls recent graph events via
+	// the agent's own memory, so nothing substantive is lost.
 	if !isWakeWorthy(ev.Type()) {
 		return
 	}
+
+	l.mu.Lock()
+	l.pendingEvents = append(l.pendingEvents, ev)
+	l.mu.Unlock()
 
 	// Signal the wake channel (non-blocking).
 	select {

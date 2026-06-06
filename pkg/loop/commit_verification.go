@@ -16,11 +16,15 @@ type commitVerdict int
 const (
 	// commitVerified: the repo HEAD advanced — a real commit exists.
 	commitVerified commitVerdict = iota
-	// commitWaivable: no commit and no commit claim — a legitimate no-op.
+	// commitWaivable: no commit, clean tree, no commit claim — a legitimate no-op.
 	commitWaivable
 	// commitConfabulated: the agent claimed a commit but HEAD did not advance.
 	// The commit was confabulated or landed in another repo — never trust it.
 	commitConfabulated
+	// commitDirty: HEAD did not advance but the working tree has uncommitted
+	// changes — the agent produced filesystem side effects it never committed.
+	// Completing it would leave unreviewable, uncaptured work.
+	commitDirty
 )
 
 // claimsCommit reports whether an Operate summary affirmatively asserts that a
@@ -64,8 +68,9 @@ func claimsCommit(summary string) bool {
 // classifyOperateCommit cross-checks repo HEAD movement against the agent's
 // self-reported summary. Never trust the self-report: a commit claim that the
 // repo HEAD does not corroborate is a confabulation (or a wrong-repo commit).
-func classifyOperateCommit(preHead, postHead, summary string) commitVerdict {
-	// HEAD advanced — a real commit exists, regardless of what the summary says.
+func classifyOperateCommit(preHead, postHead, summary string, dirty bool) commitVerdict {
+	// HEAD advanced — a real commit exists, regardless of what the summary says
+	// or whether stray uncommitted files remain.
 	if postHead != "" && postHead != preHead {
 		return commitVerified
 	}
@@ -73,6 +78,11 @@ func classifyOperateCommit(preHead, postHead, summary string) commitVerdict {
 	// a commit, the claim is false (or the commit landed in another repo).
 	if claimsCommit(summary) {
 		return commitConfabulated
+	}
+	// No commit and no claim, but the working tree has uncommitted changes: the
+	// agent edited files without committing them — not a legitimate no-op.
+	if dirty {
+		return commitDirty
 	}
 	return commitWaivable
 }
@@ -93,7 +103,8 @@ func shortHash(h string) string {
 // no-op) and false if the task was failed (confabulated/unverifiable commit).
 func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOperateHead, summary string) bool {
 	postOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
-	switch classifyOperateCommit(preOperateHead, postOperateHead, summary) {
+	dirty := gitCommand(l.config.RepoPath, "status", "--porcelain") != ""
+	switch classifyOperateCommit(preOperateHead, postOperateHead, summary, dirty) {
 	case commitVerified:
 		l.attachOperateArtifact(task)
 		l.completeTask(ctx, task, summary)
@@ -102,6 +113,11 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"agent reported a commit but %s HEAD did not advance (still %s) — refusing to complete on an unverified commit",
 			l.config.RepoPath, shortHash(preOperateHead)))
+		return false
+	case commitDirty:
+		l.failOperateTask(ctx, task, fmt.Sprintf(
+			"Operate left uncommitted changes in %s without advancing HEAD — refusing to complete unreviewed, uncommitted filesystem work",
+			l.config.RepoPath))
 		return false
 	default: // commitWaivable
 		l.waiveOperateArtifact(task, "Operate produced no new commits")
