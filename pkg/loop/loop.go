@@ -353,19 +353,15 @@ func (l *Loop) Run(ctx context.Context) Result {
 			response = result.Summary
 			usage = result.Usage
 
-			// Attach artifact or waive — compare HEAD before/after Operate.
-			postOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
-			if postOperateHead != "" && postOperateHead != preOperateHead {
-				l.attachOperateArtifact(task)
-			} else {
-				l.waiveOperateArtifact(task, "Operate produced no new commits")
-			}
-
-			// Auto-complete the task after successful Operate.
-			l.completeTask(ctx, task, result.Summary)
-			if l.sink != nil {
-				l.captureBoundary(checkpoint.TaskCompleted, response)
-				l.lastCheckpointIter = l.iteration
+			// Commit-verification gate: never trust the agent's self-report.
+			// handleOperateResult compares HEAD before/after Operate and
+			// cross-checks the summary — a confabulated (or wrong-repo) commit
+			// fails the task instead of silently completing it.
+			if l.handleOperateResult(ctx, task, preOperateHead, result.Summary) {
+				if l.sink != nil {
+					l.captureBoundary(checkpoint.TaskCompleted, response)
+					l.lastCheckpointIter = l.iteration
+				}
 			}
 		} else {
 			// Reason path: standard observe-reason loop.
