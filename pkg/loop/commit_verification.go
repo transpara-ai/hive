@@ -37,6 +37,39 @@ const (
 	commitDiverged
 )
 
+// completesTask reports whether a verdict permits completing the task. This is
+// the proceed/deny authority for the gate and it is DENY BY DEFAULT: only an
+// affirmatively safe outcome — a verified advancing commit, or a proven clean
+// no-op — completes. Every other verdict, INCLUDING any unhandled or
+// future-added verdict, refuses. A new verdict cannot accidentally inherit
+// "complete" by omission.
+func (v commitVerdict) completesTask() bool {
+	switch v {
+	case commitVerified, commitWaivable:
+		return true
+	default:
+		return false
+	}
+}
+
+// refusalReason returns the escalation message for a non-completing verdict. The
+// default branch is fail-closed: an unrecognized verdict is refused with a
+// generic reason, never silently completed.
+func (v commitVerdict) refusalReason(repoPath, preHead string) string {
+	switch v {
+	case commitConfabulated:
+		return fmt.Sprintf("agent reported a commit but %s HEAD did not advance (still %s) — refusing to complete on an unverified commit", repoPath, shortHash(preHead))
+	case commitDiverged:
+		return fmt.Sprintf("%s HEAD moved to a non-descendant of %s (reset, branch switch, or history rewrite) — refusing to complete on a non-advancing commit", repoPath, shortHash(preHead))
+	case commitDirty:
+		return fmt.Sprintf("Operate left uncommitted changes in %s — refusing to complete unreviewed, uncommitted filesystem work", repoPath)
+	case commitUnverifiable:
+		return fmt.Sprintf("could not read %s HEAD after Operate — refusing to complete on unverifiable state", repoPath)
+	default:
+		return fmt.Sprintf("unrecognized commit verdict %d in %s — refusing to complete (fail closed)", int(v), repoPath)
+	}
+}
+
 // claimsCommit reports whether an Operate summary affirmatively asserts that a
 // git commit was made. It deliberately ignores honest disclaimers ("nothing to
 // commit") so the gate does not fail legitimate no-op Operates.
@@ -158,36 +191,23 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 		}
 		advanced = isAnc
 	}
-	switch classifyOperateCommit(preOperateHead, postOperateHead, advanced, summary, dirty) {
-	case commitVerified:
-		l.attachOperateArtifact(task)
-		l.completeTask(ctx, task, summary)
-		return true
-	case commitConfabulated:
-		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"agent reported a commit but %s HEAD did not advance (still %s) — refusing to complete on an unverified commit",
-			l.config.RepoPath, shortHash(preOperateHead)))
+	verdict := classifyOperateCommit(preOperateHead, postOperateHead, advanced, summary, dirty)
+	// Deny by default: complete ONLY on an affirmatively safe verdict. Any other
+	// verdict — including an unrecognized/future one — refuses and escalates, so
+	// the completion path can never be reached by omission.
+	if !verdict.completesTask() {
+		l.failOperateTask(ctx, task, verdict.refusalReason(l.config.RepoPath, preOperateHead))
 		return false
-	case commitDiverged:
-		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"%s HEAD moved to a non-descendant of %s (reset, branch switch, or history rewrite) — refusing to complete on a non-advancing commit",
-			l.config.RepoPath, shortHash(preOperateHead)))
-		return false
-	case commitDirty:
-		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"Operate left uncommitted changes in %s — refusing to complete unreviewed, uncommitted filesystem work",
-			l.config.RepoPath))
-		return false
-	case commitUnverifiable:
-		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"could not read %s HEAD after Operate — refusing to complete on unverifiable state",
-			l.config.RepoPath))
-		return false
-	default: // commitWaivable
-		l.waiveOperateArtifact(task, "Operate produced no new commits")
-		l.completeTask(ctx, task, summary)
-		return true
 	}
+	// Completing verdicts differ only in how the artifact gate is satisfied: a
+	// verified commit attaches the real artifact; a clean no-op records a waiver.
+	if verdict == commitVerified {
+		l.attachOperateArtifact(task)
+	} else { // commitWaivable
+		l.waiveOperateArtifact(task, "Operate produced no new commits")
+	}
+	l.completeTask(ctx, task, summary)
+	return true
 }
 
 // nextTowardBlocked returns the next legal lifecycle hop from cur toward

@@ -85,6 +85,59 @@ func TestClassifyOperateCommit(t *testing.T) {
 	}
 }
 
+// completesTask is the proceed/deny authority and must be DENY BY DEFAULT: only
+// commitVerified and commitWaivable complete; every other verdict — including an
+// unrecognized/future one — refuses. This locks the polarity so a new verdict
+// cannot inherit "complete" by omission.
+func TestCommitVerdict_CompletesTask_DenyByDefault(t *testing.T) {
+	completing := map[commitVerdict]bool{
+		commitVerified: true,
+		commitWaivable: true,
+	}
+	all := []commitVerdict{
+		commitVerified, commitWaivable, commitConfabulated, commitDiverged,
+		commitDirty, commitUnverifiable,
+		commitVerdict(9999), // unrecognized / future verdict must NOT complete
+	}
+	for _, v := range all {
+		if got, want := v.completesTask(), completing[v]; got != want {
+			t.Errorf("commitVerdict(%d).completesTask() = %v, want %v (gate must deny by default)", int(v), got, want)
+		}
+	}
+}
+
+// Proof over the WHOLE input domain: for every combination of HEAD readability,
+// movement, ancestry, commit-claim, and dirtiness, the gate may complete the
+// task ONLY when the inputs describe an affirmatively safe shape — a real
+// advancing clean commit, or a clean no-op with no commit claim. Any other
+// combination must NOT complete. This is the "test the whole input space, not
+// the reported case" guarantee: it forecloses fail-open seams by construction.
+func TestClassifyOperateCommit_ExhaustiveInputSpace(t *testing.T) {
+	const pre = "aaaa"
+	posts := map[string]string{"unreadable": "", "unmoved": "aaaa", "moved": "bbbb"}
+	summaries := map[string]string{"claim": "committed in bbbb", "noclaim": "analyzed the layout"}
+	for postName, post := range posts {
+		for _, advanced := range []bool{false, true} {
+			for sumName, summary := range summaries {
+				for _, dirty := range []bool{false, true} {
+					verdict := classifyOperateCommit(pre, post, advanced, summary, dirty)
+					completes := verdict.completesTask()
+
+					// The only safe-to-complete shapes:
+					safeVerified := post != "" && post != pre && advanced && !dirty
+					safeNoop := post != "" && post == pre && !claimsCommit(summary) && !dirty
+					want := safeVerified || safeNoop
+
+					if completes != want {
+						t.Errorf("post=%s adv=%v sum=%s dirty=%v → verdict=%d completes=%v, want %v",
+							postName, advanced, sumName, dirty, int(verdict), completes, want)
+					}
+				}
+			}
+		}
+	}
+}
+
 // ── Loop wiring: a confabulated Operate must NOT complete the task ──
 func TestHandleOperateResult_ConfabulatedCommitDoesNotComplete(t *testing.T) {
 	repo := newTempGitRepo(t)
