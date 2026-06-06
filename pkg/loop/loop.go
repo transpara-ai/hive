@@ -833,6 +833,13 @@ func (l *Loop) onEvent(ev event.Event) {
 	l.pendingEvents = append(l.pendingEvents, ev)
 	l.mu.Unlock()
 
+	// Only wake quiescent agents for substantive events. Per-iteration agent
+	// lifecycle/telemetry churn must not re-wake sleeping governance agents
+	// (wakeup-storm guard); it is still stored above for observation context.
+	if !isWakeWorthy(ev.Type()) {
+		return
+	}
+
 	// Signal the wake channel (non-blocking).
 	select {
 	case l.wake <- struct{}{}:

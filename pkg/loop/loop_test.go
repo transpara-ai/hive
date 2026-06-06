@@ -19,6 +19,7 @@ import (
 	hiveagent "github.com/transpara-ai/agent"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/work"
 )
 
 // ════════════════════════════════════════════════════════════════════════
@@ -369,12 +370,16 @@ func TestNewLoopRequiresAgent(t *testing.T) {
 // Additional helpers
 // ════════════════════════════════════════════════════════════════════════
 
-// createMockEvent creates a minimal event for bus testing.
+// createMockEvent creates a minimal SUBSTANTIVE event for bus testing.
+// It must be substantive (a work.task.created event), not lifecycle/telemetry
+// churn: isWakeWorthy deliberately suppresses agent.state.changed/observed/
+// evaluated/acted so the wakeup storm cannot re-wake a sleeping agent, so those
+// types would not wake the loop here either.
 func createMockEvent(t *testing.T, _ store.Store, source types.ActorID) event.Event {
 	t.Helper()
-	// Create a lightweight event using the event builder pattern.
-	// For bus testing, we need a valid event that passes pattern matching.
+	// For bus testing, we need a valid substantive event that wakes the loop.
 	registry := event.DefaultRegistry()
+	work.RegisterWithRegistry(registry)
 	factory := event.NewEventFactory(registry)
 	memStore := store.NewInMemoryStore()
 
@@ -391,19 +396,19 @@ func createMockEvent(t *testing.T, _ store.Store, source types.ActorID) event.Ev
 	}
 
 	convID, _ := types.NewConversationID("conv_test_0000000000000000000000001")
-	ev, err := factory.Create(
-		event.EventTypeAgentActed,
-		source,
-		event.AgentActedContent{AgentID: source, Action: "test_event", Target: "loop"},
-		[]types.EventID{stored.ID()},
-		convID,
-		memStore,
-		signer,
-	)
+	ts := work.NewTaskStore(memStore, factory, signer)
+	if _, err = ts.Create(source, "wake the agent", "substantive work", []types.EventID{stored.ID()}, convID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := memStore.ByType(work.EventTypeTaskCreated, 1, types.None[types.Cursor]())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ev
+	items := page.Items()
+	if len(items) == 0 {
+		t.Fatal("no work.task.created event produced")
+	}
+	return items[0]
 }
 
 func TestParseSignal(t *testing.T) {
