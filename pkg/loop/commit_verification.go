@@ -271,11 +271,19 @@ func (l *Loop) failOperateTask(ctx context.Context, task work.Task, reason strin
 	// Reflect the failure in Work task state so status consumers see a blocked
 	// (retryable) task rather than an assigned, non-completed one. Best-effort:
 	// a transition error must not crash the loop, so it is logged, not returned.
-	if err := l.blockTaskForFailure(task, reason); err != nil {
-		fmt.Printf("[%s] warning: could not block task %s after commit-verification failure: %v\n", l.agent.Name(), task.ID.Value(), err)
+	blockErr := l.blockTaskForFailure(task, reason)
+	if blockErr != nil {
+		fmt.Printf("[%s] warning: could not block task %s after commit-verification failure: %v\n", l.agent.Name(), task.ID.Value(), blockErr)
 	}
-	if err := l.agent.Escalate(ctx, l.humanID,
-		fmt.Sprintf("commit verification failed for task %s (%s): %s", task.ID.Value(), task.Title, reason)); err != nil {
+	// Fail closed AND loud: verify the barrier actually holds. If the task is
+	// somehow still operable (e.g. a transition-append failure left it in an
+	// operable status), say so explicitly in the escalation so a human intervenes
+	// instead of the loop silently re-Operating it on the next run/restart.
+	escalation := fmt.Sprintf("commit verification failed for task %s (%s): %s", task.ID.Value(), task.Title, reason)
+	if blockErr != nil || l.taskIsOperable(task.ID) {
+		escalation += " — WARNING: task could not be durably blocked and MUST NOT be re-operated without explicit human review"
+	}
+	if err := l.agent.Escalate(ctx, l.humanID, escalation); err != nil {
 		fmt.Printf("[%s] warning: escalation after commit-verification failure failed: %v\n", l.agent.Name(), err)
 	}
 	if l.sink != nil {

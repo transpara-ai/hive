@@ -453,8 +453,13 @@ func TestIsOperableStatus(t *testing.T) {
 	}{
 		// Allowlist: the states the implementer is responsible for executing.
 		{work.StatusCreated, true}, // loop default; required by auto-assignment
-		{work.StatusReady, true},   // planned and ready for implementation
-		{work.StatusRunning, true}, // actively executing — re-entrant resume
+		{work.StatusReady, true},   // where an explicit Blocked→Ready retry lands
+		// Running is NOT operable: nothing in the runtime parks a task there for
+		// pickup — it occurs only transiently inside the failure-block walk
+		// (Created→Ready→Running→Blocked), so a task observed Running is mid-block
+		// or stale, never safe to auto-operate. Excluding it keeps a
+		// partially-applied block fail-closed.
+		{work.StatusRunning, false},
 		// Blocked / terminal — never operable.
 		{work.StatusBlocked, false},
 		{work.StatusPolicyBlocked, false},
@@ -476,6 +481,80 @@ func TestIsOperableStatus(t *testing.T) {
 		if got := isOperableStatus(c.status); got != c.operable {
 			t.Errorf("isOperableStatus(%q) = %v, want %v", c.status, got, c.operable)
 		}
+	}
+}
+
+// A task left in StatusRunning (e.g. a failure-block walk that advanced past
+// Ready but did not reach Blocked) must NOT be operable — a partially-applied
+// block fails closed, not open.
+func TestTaskIsOperable_RunningIsNotOperable(t *testing.T) {
+	repo := newTempGitRepo(t)
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_running_op")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "work", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Sanity: a fresh Created task IS operable.
+	if !l.taskIsOperable(task.ID) {
+		t.Fatal("fresh Created task should be operable")
+	}
+	// Drive it to Running, as the block walk does transiently.
+	for _, to := range []work.TaskStatus{work.StatusReady, work.StatusRunning} {
+		if err := ts.TransitionTask(agent.ID(), task.ID, to, "advance", nil, causes, convID); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+	if l.taskIsOperable(task.ID) {
+		t.Fatal("a task left in StatusRunning must not be operable — a partially-applied block must fail closed")
+	}
+}
+
+// A dependency-blocked task must not be operated (taskIsOperable consults
+// IsBlocked and fails closed). Closes the gap where an assigned task with unmet
+// dependencies could be auto-operated.
+func TestTaskIsOperable_DependencyBlockedIsNotOperable(t *testing.T) {
+	repo := newTempGitRepo(t)
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_dep_op")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "work", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	dep, err := ts.Create(agent.ID(), "dependency", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create dep: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !l.taskIsOperable(task.ID) {
+		t.Fatal("task with no dependencies should be operable")
+	}
+	if err := ts.AddDependency(agent.ID(), task.ID, dep.ID, causes, convID); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+	if l.taskIsOperable(task.ID) {
+		t.Fatal("a task with an uncompleted dependency must not be operable")
 	}
 }
 

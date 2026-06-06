@@ -1054,17 +1054,21 @@ func (l *Loop) autoAssignOpenTask() {
 // isOperableStatus reports whether a task in this v3.9 lifecycle status may be
 // picked up for Operate. It is an ALLOWLIST — only the statuses the implementer
 // loop is explicitly responsible for executing return true. Every other status
-// is non-operable: blocked/terminal states (so a failed task transitioned to
-// StatusBlocked is not handed back to Operate — it becomes runnable again only
-// via an explicit, auditable Blocked→Ready transition), the repair and
-// verification phases owned by other flows, and any unknown, future, or
-// zero-value status. An execution barrier must default closed: a status the loop
-// does not explicitly recognise as runnable must never trigger autonomous work.
+// is non-operable: blocked/terminal states, the repair and verification phases
+// owned by other flows, and any unknown, future, or zero-value status. An
+// execution barrier must default closed.
+//
+// StatusRunning is deliberately EXCLUDED: nothing in the runtime parks a task in
+// Running for auto-pickup — it occurs only transiently inside the failure-block
+// walk (Created→Ready→Running→Blocked). Treating Running as operable made a
+// partially-applied block (a transition that advanced to Running but did not
+// reach Blocked) fail open — the failed task would be re-Operated on restart.
+// Excluding it keeps that case fail-closed. StatusReady stays operable because a
+// blocked task is explicitly retried via Blocked→Ready.
 func isOperableStatus(s work.TaskStatus) bool {
 	switch s {
 	case work.StatusCreated, // loop default; required by the auto-assignment path
-		work.StatusReady,   // planned and ready for implementation
-		work.StatusRunning: // actively executing — re-entrant resume
+		work.StatusReady: // fresh-planned work, or an explicit Blocked→Ready retry
 		return true
 	default:
 		return false
@@ -1072,19 +1076,23 @@ func isOperableStatus(s work.TaskStatus) bool {
 }
 
 // taskIsOperable reports whether an assigned task may be Operated. It fails
-// closed: a status read/projection error, a legacy-completed task, or a
-// non-allowlisted v3.9 status all make the task non-operable. An unverifiable
-// status must never be treated as runnable.
+// closed at every check: a status read/projection error, a legacy-completed
+// task, a non-allowlisted v3.9 status, or a dependency block (IsBlocked) all make
+// the task non-operable. An unverifiable or blocked task must never be treated as
+// runnable.
 func (l *Loop) taskIsOperable(taskID types.EventID) bool {
 	legacy, err := l.config.TaskStore.GetCompatibilityStatus(taskID)
 	if err != nil || legacy == work.LegacyStatusCompleted {
 		return false
 	}
 	v39, err := l.config.TaskStore.GetStatus(taskID)
-	if err != nil {
+	if err != nil || !isOperableStatus(v39) {
 		return false
 	}
-	return isOperableStatus(v39)
+	if blocked, err := l.config.TaskStore.IsBlocked(taskID); err != nil || blocked {
+		return false
+	}
+	return true
 }
 
 // hasAssignedTask returns true if the agent has any assigned, operable task.
