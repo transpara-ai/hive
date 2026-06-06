@@ -35,6 +35,12 @@ const (
 	// forward commit. "HEAD changed" is not "HEAD advanced"; for an autonomy
 	// guard a non-advancing move is a failure, never a verified commit.
 	commitDiverged
+	// commitNoEffect: HEAD did not move and the tree is clean, but the agent did
+	// NOT affirmatively report a no-op — it described work (or said nothing). A
+	// clean, unchanged repo paired with a work claim is a no-effect Operate
+	// (often a wrong-repo run): there is no evidence the task was actually done,
+	// so it must not be waived+completed. Waiver requires an affirmative no-op.
+	commitNoEffect
 )
 
 // completesTask reports whether a verdict permits completing the task. This is
@@ -65,6 +71,8 @@ func (v commitVerdict) refusalReason(repoPath, preHead string) string {
 		return fmt.Sprintf("Operate left uncommitted changes in %s — refusing to complete unreviewed, uncommitted filesystem work", repoPath)
 	case commitUnverifiable:
 		return fmt.Sprintf("could not read %s HEAD after Operate — refusing to complete on unverifiable state", repoPath)
+	case commitNoEffect:
+		return fmt.Sprintf("Operate reported work but %s is unchanged and clean (no commit, no diff, no no-op claim) — refusing to complete a no-effect Operate (possible wrong-repo run)", repoPath)
 	default:
 		return fmt.Sprintf("unrecognized commit verdict %d in %s — refusing to complete (fail closed)", int(v), repoPath)
 	}
@@ -108,6 +116,52 @@ func claimsCommit(summary string) bool {
 	return false
 }
 
+// claimsNoOp reports whether an Operate summary AFFIRMATIVELY asserts that no
+// work was needed (the file already matched, nothing to change, etc.). The
+// waiver path requires this: the mere ABSENCE of a commit claim is not evidence
+// of a legitimate no-op — an agent that did work in the wrong repo, or returned
+// a terse/empty summary, leaves the target repo clean and unchanged too. Only an
+// affirmative no-op may waive+complete.
+func claimsNoOp(summary string) bool {
+	s := strings.ToLower(summary)
+	for _, p := range []string{
+		"nothing to commit",
+		"nothing to change",
+		"nothing to do",
+		"nothing to update",
+		"no changes needed",
+		"no change needed",
+		"no changes were needed",
+		"no changes required",
+		"no changes to make",
+		"no modifications needed",
+		"no edits needed",
+		"no update needed",
+		"no action needed",
+		"no action required",
+		"no work needed",
+		"made no changes",
+		"no further changes",
+		"already exists",
+		"already present",
+		"already contains",
+		"already correct",
+		"already matches",
+		"already up to date",
+		"already up-to-date",
+		"already complete",
+		"already in place",
+		"already satisfied",
+		"no-op",
+		"no op",
+	} {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyOperateCommit cross-checks repo HEAD movement against the agent's
 // self-reported summary. Never trust the self-report: a commit claim that the
 // repo HEAD does not corroborate is a confabulation (or a wrong-repo commit).
@@ -144,8 +198,14 @@ func classifyOperateCommit(preHead, postHead string, advanced bool, summary stri
 	if headMoved {
 		return commitVerified
 	}
-	// Clean tree, HEAD unmoved, no commit claim: a legitimate no-op.
-	return commitWaivable
+	// Clean tree, HEAD unmoved. Waive+complete ONLY if the agent affirmatively
+	// reports a no-op. A clean, unchanged repo with a work claim (or a terse/empty
+	// summary) is a no-effect Operate — possibly a wrong-repo run — and must fail
+	// closed rather than silently complete.
+	if claimsNoOp(summary) {
+		return commitWaivable
+	}
+	return commitNoEffect
 }
 
 // shortHash truncates a git hash for log/escalation messages.

@@ -3,6 +3,7 @@ package loop
 import (
 	"testing"
 
+	egagent "github.com/transpara-ai/eventgraph/go/pkg/agent"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -96,7 +97,7 @@ func TestOnEvent_NoiseDroppedAndDoesNotWake(t *testing.T) {
 	otherActor := types.MustActorID("actor_00000000000000000000000000000042")
 
 	noiseEv, err := factory.Create(event.EventTypeAgentStateChanged, otherActor,
-		event.AgentStateChangedContent{AgentID: otherActor, Previous: "idle", Current: "processing"},
+		event.AgentStateChangedContent{AgentID: otherActor, Previous: egagent.StateIdle.String(), Current: egagent.StateProcessing.String()},
 		[]types.EventID{cause}, conv, g.Store(), signer)
 	if err != nil {
 		t.Fatalf("create noise event: %v", err)
@@ -202,6 +203,79 @@ func TestOnEvent_PendingEventsBounded(t *testing.T) {
 	}
 	if got := pendingLen(l); got != maxPendingEvents {
 		t.Fatalf("pendingEvents len = %d, want capped at %d", got, maxPendingEvents)
+	}
+}
+
+// isChurnStateChange must suppress ONLY Idle/Processing churn; every significant
+// lifecycle/governance transition (and any unknown/future state) stays visible.
+func TestIsChurnStateChange(t *testing.T) {
+	agent, g := agentWithGraph(t, newMockProvider(`/signal {"signal":"IDLE"}`))
+	factory := event.NewEventFactory(g.Registry())
+	signer := &testSigner{}
+	conv := types.MustConversationID("conv_churn")
+	actor := types.MustActorID("actor_00000000000000000000000000000099")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	mk := func(current string) event.Event {
+		ev, err := factory.Create(event.EventTypeAgentStateChanged, actor,
+			event.AgentStateChangedContent{AgentID: actor, Previous: egagent.StateIdle.String(), Current: current},
+			causes, conv, g.Store(), signer)
+		if err != nil {
+			t.Fatalf("create state event (%s): %v", current, err)
+		}
+		return ev
+	}
+	for _, s := range []string{egagent.StateIdle.String(), egagent.StateProcessing.String()} {
+		if !isChurnStateChange(mk(s)) {
+			t.Errorf("isChurnStateChange(%s) = false, want true (churn must be suppressed)", s)
+		}
+	}
+	for _, s := range []string{
+		egagent.StateSuspended.String(), egagent.StateRetiring.String(), egagent.StateRetired.String(),
+		egagent.StateWaiting.String(), egagent.StateEscalating.String(), egagent.StateRefusing.String(),
+		"SomeFutureState",
+	} {
+		if isChurnStateChange(mk(s)) {
+			t.Errorf("isChurnStateChange(%s) = true, want false (significant/unknown must stay visible)", s)
+		}
+	}
+}
+
+// #P2 (round-5): significant lifecycle transitions (Suspended/Retiring/Retired)
+// must stay visible to peers AND wake idle governance agents — only Idle/Processing
+// churn is suppressed. Hiding a peer's suspension/retirement is a governance loss.
+func TestOnEvent_SuspensionStateChangeIsObservableAndWakes(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	l, err := New(Config{Agent: agent, HumanID: humanID()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	factory := event.NewEventFactory(g.Registry())
+	signer := &testSigner{}
+	conv := types.MustConversationID("conv_suspend")
+	cause := agent.LastEvent()
+	if cause.IsZero() {
+		t.Fatal("no bootstrap cause")
+	}
+	otherActor := types.MustActorID("actor_00000000000000000000000000000055")
+	suspendEv, err := factory.Create(event.EventTypeAgentStateChanged, otherActor,
+		event.AgentStateChangedContent{AgentID: otherActor, Previous: egagent.StateProcessing.String(), Current: egagent.StateSuspended.String()},
+		[]types.EventID{cause}, conv, g.Store(), signer)
+	if err != nil {
+		t.Fatalf("create suspend event: %v", err)
+	}
+
+	drainWake(l)
+	before := pendingLen(l)
+	l.onEvent(suspendEv)
+	if pendingLen(l) != before+1 {
+		t.Fatal("a peer Suspended state change was not queued — lifecycle transitions must stay visible to peers")
+	}
+	if !wakeSignaled(l) {
+		t.Fatal("a peer Suspended state change did not wake the agent — significant lifecycle changes must wake idle governance agents")
 	}
 }
 

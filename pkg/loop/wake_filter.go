@@ -1,6 +1,7 @@
 package loop
 
 import (
+	egagent "github.com/transpara-ai/eventgraph/go/pkg/agent"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
@@ -47,14 +48,15 @@ func isWakeWorthy(eventType types.EventType) bool {
 	}
 }
 
-// isObservable reports whether an event should be queued into pendingEvents for
-// the agent's next observation, even when it does not wake the agent.
+// isObservable reports the TYPE-LEVEL decision for whether an event should be
+// queued into pendingEvents for the agent's next observation, even when it does
+// not wake the agent.
 //
-// Everything observable EXCEPT pure lifecycle telemetry: agent.state.changed and
-// agent.observed are high-volume, content-free churn with no governance value,
-// so they are dropped from observation context entirely. agent.evaluated (a peer
-// judgment) and every substantive event are kept — visibility is preserved, only
-// the wake is suppressed.
+// agent.observed is pure churn (dropped). agent.state.changed is suppressed at
+// the type level because most of its volume is the Idle⇄Processing toggle — but
+// onEvent overrides this for SIGNIFICANT lifecycle transitions (see
+// isChurnStateChange), so a peer's Suspended/Retiring/Retired is NOT hidden.
+// agent.evaluated (a peer judgment) and every substantive event are kept.
 func isObservable(eventType types.EventType) bool {
 	switch eventType {
 	case event.EventTypeAgentStateChanged,
@@ -62,5 +64,26 @@ func isObservable(eventType types.EventType) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// isChurnStateChange reports whether an agent.state.changed event is pure
+// high-volume operational churn — the Idle⇄Processing toggle that formed the
+// 2026-06-06 wakeup storm — rather than a significant lifecycle/governance
+// transition (Suspended, Retiring, Retired, Waiting, Escalating, Refusing). Only
+// churn is suppressed; significant transitions stay visible to peers and wake
+// idle governance agents. For OBSERVABILITY the fail-safe default is to KEEP an
+// event, so an unknown or unparseable state is treated as significant (not
+// churn) — hiding a lifecycle change is the risk to avoid.
+func isChurnStateChange(ev event.Event) bool {
+	c, ok := ev.Content().(event.AgentStateChangedContent)
+	if !ok {
+		return false
+	}
+	switch c.Current {
+	case egagent.StateIdle.String(), egagent.StateProcessing.String():
+		return true
+	default:
+		return false
 	}
 }

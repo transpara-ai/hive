@@ -361,6 +361,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 			response = result.Summary
 			usage = result.Usage
+			// Record resource consumption immediately: a successful model call
+			// consumed tokens whether or not the commit-verification gate below
+			// passes. The early StopEscalation return on failure must NOT skip
+			// budget accounting (BUDGET invariant) — a failed Operate still costs.
+			l.budget.RecordUsage(usage)
 
 			// Commit-verification gate: never trust the agent's self-report.
 			// handleOperateResult compares HEAD before/after Operate and
@@ -387,10 +392,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 			if reasonErr != nil {
 				return l.result(StopError, iteration, fmt.Sprintf("reason: %v", reasonErr))
 			}
+			// Record the reason call's usage. (The Operate branch records its own
+			// above, before its gate, so neither path can skip budget accounting.)
+			l.budget.RecordUsage(usage)
 		}
-
-		// Record resource consumption.
-		l.budget.RecordUsage(usage)
 
 		if l.config.OnIteration != nil {
 			l.config.OnIteration(iteration, response)
@@ -845,13 +850,25 @@ func (l *Loop) onEvent(ev event.Event) {
 		return
 	}
 
-	// Queue for the next observation unless this is pure lifecycle telemetry.
-	// Peer evaluations (agent.evaluated) are queued for governance visibility
-	// even though they do not wake the agent — observe() renders pendingEvents,
-	// and the agent's own Memory is self-scoped, so the bus is the only path by
-	// which a peer's evaluation reaches it. Bounded so a long keepalive sleep
-	// cannot accumulate an unbounded backlog (invariant BOUNDED).
-	if isObservable(ev.Type()) {
+	observable := isObservable(ev.Type())
+	wake := isWakeWorthy(ev.Type())
+	// agent.state.changed is suppressed at the type level (the Idle⇄Processing
+	// churn that formed the wakeup storm), but a SIGNIFICANT lifecycle transition
+	// (Suspended, Retiring, Retired, ...) must stay visible to peers and wake idle
+	// governance agents — hiding a peer's suspension/retirement is a
+	// governance-visibility loss, not churn. Only the churn states are dropped.
+	if ev.Type() == event.EventTypeAgentStateChanged && !isChurnStateChange(ev) {
+		observable = true
+		wake = true
+	}
+
+	// Queue for the next observation. Peer evaluations (agent.evaluated) and
+	// significant lifecycle changes are queued for governance visibility even when
+	// they do not wake the agent — observe() renders pendingEvents, and the
+	// agent's own Memory is self-scoped, so the bus is the only path by which a
+	// peer's event reaches it. Bounded so a long keepalive sleep cannot accumulate
+	// an unbounded backlog (invariant BOUNDED).
+	if observable {
 		l.mu.Lock()
 		l.pendingEvents = append(l.pendingEvents, ev)
 		if over := len(l.pendingEvents) - maxPendingEvents; over > 0 {
@@ -861,10 +878,10 @@ func (l *Loop) onEvent(ev event.Event) {
 	}
 
 	// Only substantive work wakes a quiescent keepalive agent. Per-iteration
-	// lifecycle/telemetry churn (state changes, observations, evaluations) must
-	// not re-wake idle governance agents — they stay subscribed and see any
-	// queued events on their next substantive wake.
-	if !isWakeWorthy(ev.Type()) {
+	// lifecycle/telemetry churn (idle/processing state changes, observations,
+	// evaluations) must not re-wake idle governance agents — they stay subscribed
+	// and see any queued events on their next substantive wake.
+	if !wake {
 		return
 	}
 

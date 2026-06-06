@@ -46,6 +46,36 @@ func TestClaimsCommit(t *testing.T) {
 	}
 }
 
+// claimsNoOp must detect affirmative "no work was needed" assertions (the only
+// summaries allowed to waive+complete a clean, unchanged repo), while rejecting
+// work claims, terse/empty summaries, and commit claims.
+func TestClaimsNoOp(t *testing.T) {
+	affirmative := []string{
+		"Nothing to commit, working tree clean.",
+		"No changes needed; the catalog already matches.",
+		"The file already exists with the correct content.",
+		"Already up to date.",
+		"Made no changes — nothing to do.",
+	}
+	for _, s := range affirmative {
+		if !claimsNoOp(s) {
+			t.Errorf("claimsNoOp(%q) = false, want true", s)
+		}
+	}
+	notNoOp := []string{
+		"Updated docs/civilization-roles.md with the new section.",
+		"done",
+		"",
+		"Wrote the catalog and committed in 89f8886",
+		"Analyzed the directory structure.",
+	}
+	for _, s := range notNoOp {
+		if claimsNoOp(s) {
+			t.Errorf("claimsNoOp(%q) = true, want false (only affirmative no-ops may waive)", s)
+		}
+	}
+}
+
 // ── classifyOperateCommit: HEAD movement + self-report + working-tree state ──
 func TestClassifyOperateCommit(t *testing.T) {
 	tests := []struct {
@@ -71,8 +101,12 @@ func TestClassifyOperateCommit(t *testing.T) {
 		{"confab: claim beats dirty", "aaaa", "aaaa", false, "committed in 89f8886", true, commitConfabulated},
 		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", false, "ran git commit -m docs", false, commitConfabulated},
 		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", false, "Updated the catalog", true, commitDirty},
-		{"honest no-op: no claim, clean, HEAD unmoved", "aaaa", "aaaa", false, "nothing to commit", false, commitWaivable},
-		{"honest no-op: terse, clean", "aaaa", "aaaa", false, "no changes needed", false, commitWaivable},
+		{"honest no-op: affirmative no-op, clean, HEAD unmoved", "aaaa", "aaaa", false, "nothing to commit", false, commitWaivable},
+		{"honest no-op: already-matches phrasing", "aaaa", "aaaa", false, "the file already matches; no changes needed", false, commitWaivable},
+		// Clean + unchanged but NO affirmative no-op → no-effect Operate, fail closed.
+		{"no-effect: work claim, clean, unmoved", "aaaa", "aaaa", false, "Updated the file", false, commitNoEffect},
+		{"no-effect: terse summary, clean, unmoved", "aaaa", "aaaa", false, "done", false, commitNoEffect},
+		{"no-effect: empty summary, clean, unmoved", "aaaa", "aaaa", false, "", false, commitNoEffect},
 		// Unverifiable repo HEAD (git unreadable) must fail closed.
 		{"unverifiable HEAD fails closed", "aaaa", "", false, "committed in deadbeef", false, commitUnverifiable},
 	}
@@ -115,7 +149,7 @@ func TestCommitVerdict_CompletesTask_DenyByDefault(t *testing.T) {
 func TestClassifyOperateCommit_ExhaustiveInputSpace(t *testing.T) {
 	const pre = "aaaa"
 	posts := map[string]string{"unreadable": "", "unmoved": "aaaa", "moved": "bbbb"}
-	summaries := map[string]string{"claim": "committed in bbbb", "noclaim": "analyzed the layout"}
+	summaries := map[string]string{"claim": "committed in bbbb", "noop": "nothing to commit", "work": "updated the file"}
 	for postName, post := range posts {
 		for _, advanced := range []bool{false, true} {
 			for sumName, summary := range summaries {
@@ -123,9 +157,10 @@ func TestClassifyOperateCommit_ExhaustiveInputSpace(t *testing.T) {
 					verdict := classifyOperateCommit(pre, post, advanced, summary, dirty)
 					completes := verdict.completesTask()
 
-					// The only safe-to-complete shapes:
+					// The only safe-to-complete shapes: a real advancing clean
+					// commit, or a clean unchanged repo with an AFFIRMATIVE no-op.
 					safeVerified := post != "" && post != pre && advanced && !dirty
-					safeNoop := post != "" && post == pre && !claimsCommit(summary) && !dirty
+					safeNoop := post != "" && post == pre && claimsNoOp(summary) && !dirty
 					want := safeVerified || safeNoop
 
 					if completes != want {
@@ -288,6 +323,40 @@ func TestRun_ConfabulatedOperateDoesNotProcessUntrustedResponse(t *testing.T) {
 	}
 	if taskHasCompletedEvent(t, g, task.ID) {
 		t.Fatal("confabulated Operate produced a work.task.completed event")
+	}
+}
+
+// #P1 (round-5): a clean, UNCHANGED target repo with a summary that asserts work
+// but no recognized commit phrase must NOT waive+complete — that is the
+// wrong-repo / no-effect Operate path. Waiver requires an AFFIRMATIVE no-op.
+func TestHandleOperateResult_WorkClaimNoEffectDoesNotComplete(t *testing.T) {
+	repo := newTempGitRepo(t)
+	head := gitCommand(repo, "rev-parse", "HEAD")
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_noeffect")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the catalog", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// HEAD unchanged, tree clean, summary asserts work but uses no commit phrase.
+	completed := l.handleOperateResult(context.Background(), task, head, true,
+		"Updated docs/civilization-roles.md with the new section.")
+	if completed {
+		t.Fatal("completed a no-effect Operate (clean+unchanged repo, work claim) — waiver must require an affirmative no-op")
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("no-effect Operate produced a work.task.completed event")
 	}
 }
 
@@ -639,6 +708,49 @@ func TestRun_BlockedTaskIsNotOperated(t *testing.T) {
 
 	if op.operateCalls != 0 {
 		t.Fatalf("blocked task was Operated %d time(s); a blocked task must not be re-operated without an explicit unblock", op.operateCalls)
+	}
+}
+
+// #P2 (round-5): a failed-verification Operate still consumes tokens, so its
+// usage must be recorded in the budget even though the loop halts. Otherwise
+// failed autonomous Operates are invisible to budget accounting (BUDGET
+// invariant) and can blow the token ceiling silently.
+func TestRun_FailedVerificationRecordsUsage(t *testing.T) {
+	repo := newTempGitRepo(t)
+	op := &mockOperator{
+		reasonResp:     `/signal {"signal":"IDLE"}`,
+		operateSummary: "Wrote the file and committed in deadbeef.", // confab: claims a commit, HEAD will not move
+	}
+	agent, g := agentWithGraph(t, op)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_budget")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the doc", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	l, err := New(Config{
+		Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts,
+		CanOperate: true, ConvID: convID, Budget: resources.BudgetConfig{MaxIterations: 5},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := l.Run(context.Background())
+	if res.Reason != StopEscalation {
+		t.Fatalf("reason = %s, want StopEscalation", res.Reason)
+	}
+	// The mock Operate consumed 10 input + 10 output tokens; they must be recorded.
+	if got := res.Budget.TokensUsed; got == 0 {
+		t.Fatal("failed-verification Operate recorded 0 tokens — budget accounting must include failed Operates")
 	}
 }
 
