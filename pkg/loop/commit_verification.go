@@ -30,6 +30,11 @@ const (
 	// a checkout, or a failed inspection). An autonomy guard must fail closed on
 	// unverifiable state rather than treat it as an honest no-op.
 	commitUnverifiable
+	// commitDiverged: HEAD moved but the new HEAD is NOT a descendant of the
+	// pre-Operate HEAD — a reset, branch switch, or history rewrite, not a
+	// forward commit. "HEAD changed" is not "HEAD advanced"; for an autonomy
+	// guard a non-advancing move is a failure, never a verified commit.
+	commitDiverged
 )
 
 // claimsCommit reports whether an Operate summary affirmatively asserts that a
@@ -73,7 +78,10 @@ func claimsCommit(summary string) bool {
 // classifyOperateCommit cross-checks repo HEAD movement against the agent's
 // self-reported summary. Never trust the self-report: a commit claim that the
 // repo HEAD does not corroborate is a confabulation (or a wrong-repo commit).
-func classifyOperateCommit(preHead, postHead, summary string, dirty bool) commitVerdict {
+// advanced reports whether postHead is a true forward descendant of preHead
+// (computed by the caller via git ancestry); it is meaningful only when HEAD
+// moved.
+func classifyOperateCommit(preHead, postHead string, advanced bool, summary string, dirty bool) commitVerdict {
 	// Unverifiable repo HEAD: a valid HEAD is never empty, so "" means the state
 	// could not be read. Fail closed — never treat unverifiable state as a no-op.
 	if postHead == "" {
@@ -86,13 +94,20 @@ func classifyOperateCommit(preHead, postHead, summary string, dirty bool) commit
 	if !headMoved && claimsCommit(summary) {
 		return commitConfabulated
 	}
+	// HEAD moved but not to a descendant of the pre-Operate HEAD — a reset, branch
+	// switch, or history rewrite. "HEAD changed" is not "HEAD advanced"; this is a
+	// failure, never a verified commit. Diagnosed before the dirty check because
+	// history manipulation is the headline problem.
+	if headMoved && !advanced {
+		return commitDiverged
+	}
 	// Uncommitted changes remain in the working tree — uncaptured, unreviewable
 	// work — whether or not a commit also landed. A commit that leaves the tree
 	// dirty is a partial commit, not a clean verification.
 	if dirty {
 		return commitDirty
 	}
-	// Clean tree and HEAD advanced: a real, fully-captured commit.
+	// Clean tree and HEAD advanced (true descendant): a real, fully-captured commit.
 	if headMoved {
 		return commitVerified
 	}
@@ -114,20 +129,36 @@ func shortHash(h string) string {
 // handleOperateResult applies the commit-verification gate after an implementer
 // Operate. It returns true if the task was completed (verified commit or honest
 // no-op) and false if the task was failed (confabulated/unverifiable commit).
-func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOperateHead, summary string) bool {
+func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOperateHead string, preHeadReadable bool, summary string) bool {
 	// Inspect repo state with explicit success signals: gitTry distinguishes a
-	// genuine empty result (clean tree) from a git failure. If either inspection
-	// fails, the state is unverifiable — fail closed rather than guess.
+	// genuine empty result (clean tree) from a git failure. Fail closed when any
+	// part of the state is unverifiable — the pre-Operate baseline (so a failed
+	// preflight is not mistaken for a "first commit"), the post-Operate HEAD, or
+	// the working-tree status.
 	postOperateHead, headOK := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
 	status, statusOK := gitTry(l.config.RepoPath, "status", "--porcelain")
-	if !headOK || !statusOK {
+	if !preHeadReadable || !headOK || !statusOK {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"could not inspect repo state in %s (git unavailable or not a checkout) — refusing to complete on unverifiable state",
+			"could not verify repo state in %s (unreadable pre/post HEAD or status) — refusing to complete on unverifiable state",
 			l.config.RepoPath))
 		return false
 	}
 	dirty := status != ""
-	switch classifyOperateCommit(preOperateHead, postOperateHead, summary, dirty) {
+	// "HEAD moved" is not "HEAD advanced": confirm the post-Operate HEAD is a true
+	// descendant of the pre-Operate HEAD. A reset / branch switch / history rewrite
+	// changes HEAD without advancing it and must not pass as a commit.
+	advanced := false
+	if postOperateHead != preOperateHead {
+		isAnc, ok := isAncestor(l.config.RepoPath, preOperateHead, postOperateHead)
+		if !ok {
+			l.failOperateTask(ctx, task, fmt.Sprintf(
+				"could not verify commit ancestry in %s — refusing to complete on unverifiable state",
+				l.config.RepoPath))
+			return false
+		}
+		advanced = isAnc
+	}
+	switch classifyOperateCommit(preOperateHead, postOperateHead, advanced, summary, dirty) {
 	case commitVerified:
 		l.attachOperateArtifact(task)
 		l.completeTask(ctx, task, summary)
@@ -135,6 +166,11 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 	case commitConfabulated:
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"agent reported a commit but %s HEAD did not advance (still %s) — refusing to complete on an unverified commit",
+			l.config.RepoPath, shortHash(preOperateHead)))
+		return false
+	case commitDiverged:
+		l.failOperateTask(ctx, task, fmt.Sprintf(
+			"%s HEAD moved to a non-descendant of %s (reset, branch switch, or history rewrite) — refusing to complete on a non-advancing commit",
 			l.config.RepoPath, shortHash(preOperateHead)))
 		return false
 	case commitDirty:

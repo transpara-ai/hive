@@ -51,33 +51,35 @@ func TestClassifyOperateCommit(t *testing.T) {
 	tests := []struct {
 		name      string
 		pre, post string
+		advanced  bool
 		summary   string
 		dirty     bool
 		want      commitVerdict
 	}{
-		{"real commit advances HEAD", "aaaa", "bbbb", "committed in bbbb", false, commitVerified},
-		{"real commit, terse summary", "aaaa", "bbbb", "done", false, commitVerified},
-		{"first commit in fresh repo", "", "bbbb", "committed", false, commitVerified},
+		{"advance: real commit", "aaaa", "bbbb", true, "committed in bbbb", false, commitVerified},
+		{"advance: terse summary", "aaaa", "bbbb", true, "done", false, commitVerified},
 		// A commit that advances HEAD but leaves the tree dirty is a PARTIAL
-		// commit: the agent produced uncommitted side effects it never captured.
-		// An autonomy guard must not treat that as cleanly verified.
-		{"HEAD moved but tree dirty fails closed", "aaaa", "bbbb", "done", true, commitDirty},
-		{"HEAD moved + commit claim + dirty fails closed", "aaaa", "bbbb", "committed", true, commitDirty},
-		{"confab: claims commit, HEAD unmoved", "aaaa", "aaaa", "committed in 89f8886", false, commitConfabulated},
-		{"confab: claim beats dirty", "aaaa", "aaaa", "committed in 89f8886", true, commitConfabulated},
-		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", "ran git commit -m docs", false, commitConfabulated},
-		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", "Updated the catalog", true, commitDirty},
-		{"honest no-op: no claim, clean, HEAD unmoved", "aaaa", "aaaa", "nothing to commit", false, commitWaivable},
-		{"honest no-op: terse, clean", "aaaa", "aaaa", "no changes needed", false, commitWaivable},
-		// Unverifiable repo HEAD (git unreadable) must fail closed regardless of
-		// the summary — both when a commit is claimed and when none is.
-		{"unverifiable HEAD + commit claim fails closed", "aaaa", "", "committed in deadbeef", false, commitUnverifiable},
-		{"unverifiable HEAD, no claim, fails closed", "aaaa", "", "edited some files", false, commitUnverifiable},
+		// commit: uncommitted side effects the agent never captured.
+		{"advance but tree dirty fails closed", "aaaa", "bbbb", true, "done", true, commitDirty},
+		{"advance + commit claim + dirty fails closed", "aaaa", "bbbb", true, "committed", true, commitDirty},
+		// HEAD moved but NOT to a descendant — reset / branch switch / history
+		// rewrite. "HEAD changed" is not "HEAD advanced".
+		{"diverged: moved but not a descendant", "aaaa", "cccc", false, "done", false, commitDiverged},
+		{"diverged: claim does not rescue a non-advance", "aaaa", "cccc", false, "committed in cccc", false, commitDiverged},
+		{"diverged beats dirty", "aaaa", "cccc", false, "done", true, commitDiverged},
+		{"confab: claims commit, HEAD unmoved", "aaaa", "aaaa", false, "committed in 89f8886", false, commitConfabulated},
+		{"confab: claim beats dirty", "aaaa", "aaaa", false, "committed in 89f8886", true, commitConfabulated},
+		{"confab: wrong-repo commit, HEAD unmoved", "aaaa", "aaaa", false, "ran git commit -m docs", false, commitConfabulated},
+		{"dirty: edited but never committed, no claim", "aaaa", "aaaa", false, "Updated the catalog", true, commitDirty},
+		{"honest no-op: no claim, clean, HEAD unmoved", "aaaa", "aaaa", false, "nothing to commit", false, commitWaivable},
+		{"honest no-op: terse, clean", "aaaa", "aaaa", false, "no changes needed", false, commitWaivable},
+		// Unverifiable repo HEAD (git unreadable) must fail closed.
+		{"unverifiable HEAD fails closed", "aaaa", "", false, "committed in deadbeef", false, commitUnverifiable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyOperateCommit(tt.pre, tt.post, tt.summary, tt.dirty); got != tt.want {
-				t.Errorf("classifyOperateCommit(%q,%q,%q,dirty=%v) = %v, want %v", tt.pre, tt.post, tt.summary, tt.dirty, got, tt.want)
+			if got := classifyOperateCommit(tt.pre, tt.post, tt.advanced, tt.summary, tt.dirty); got != tt.want {
+				t.Errorf("classifyOperateCommit(%q,%q,adv=%v,%q,dirty=%v) = %v, want %v", tt.pre, tt.post, tt.advanced, tt.summary, tt.dirty, got, tt.want)
 			}
 		})
 	}
@@ -109,7 +111,7 @@ func TestHandleOperateResult_ConfabulatedCommitDoesNotComplete(t *testing.T) {
 	}
 
 	// The agent claims a commit, but RepoPath HEAD did not move (no commit made).
-	completed := l.handleOperateResult(context.Background(), task, head,
+	completed := l.handleOperateResult(context.Background(), task, head, true,
 		"Wrote docs/civilization-roles.md and committed in 89f8886")
 
 	if completed {
@@ -148,7 +150,7 @@ func TestHandleOperateResult_DirtyUncommittedDoesNotComplete(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	// Summary describes work but does not claim a commit; HEAD did not move; tree dirty.
-	completed := l.handleOperateResult(context.Background(), task, head, "Updated notes.md with the new content.")
+	completed := l.handleOperateResult(context.Background(), task, head, true, "Updated notes.md with the new content.")
 	if completed {
 		t.Fatal("handleOperateResult completed a task with uncommitted working-tree changes")
 	}
@@ -179,7 +181,7 @@ func TestHandleOperateResult_HonestNoOpStillCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	completed := l.handleOperateResult(context.Background(), task, head,
+	completed := l.handleOperateResult(context.Background(), task, head, true,
 		"Nothing to commit; the catalog already exists.")
 	if !completed {
 		t.Fatal("handleOperateResult returned completed=false for an honest no-op; it should waive and complete")
@@ -260,7 +262,7 @@ func TestHandleOperateResult_UnverifiableRepoDoesNotComplete(t *testing.T) {
 	}
 	// No commit claim + a non-git repo: HEAD is unreadable, so the gate cannot
 	// verify the Operate. It must refuse to complete, not waive.
-	completed := l.handleOperateResult(context.Background(), task, "priorhead", "Analyzed the directory; made some edits.")
+	completed := l.handleOperateResult(context.Background(), task, "priorhead", true, "Analyzed the directory; made some edits.")
 	if completed {
 		t.Fatal("handleOperateResult completed a task in an unverifiable (non-git) repo")
 	}
@@ -304,7 +306,218 @@ func TestFailOperateTask_TransitionsTaskToBlocked(t *testing.T) {
 	}
 }
 
+// #P1-B: "HEAD moved" is not "HEAD advanced". A destructive backward reset
+// (or branch jump / history rewrite) changes HEAD to a non-descendant; with a
+// clean tree the old gate marked it verified. An autonomy guard must fail closed
+// on non-ancestor movement, not record it as a real commit.
+func TestHandleOperateResult_HeadResetDoesNotVerify(t *testing.T) {
+	repo := newTempGitRepo(t)
+	// Advance HEAD: init -> c2. Capture c2 as the pre-Operate HEAD.
+	if err := exec.Command("bash", "-c", "cd "+repo+" && git commit -q --allow-empty -m c2").Run(); err != nil {
+		t.Fatalf("make c2: %v", err)
+	}
+	preHead := gitCommand(repo, "rev-parse", "HEAD")
+	// Simulate Operate destructively resetting HEAD backward to the init commit.
+	if err := exec.Command("bash", "-c", "cd "+repo+" && git reset --hard HEAD~1").Run(); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if preHead == gitCommand(repo, "rev-parse", "HEAD") {
+		t.Fatal("setup: HEAD did not change after reset")
+	}
+
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_reset_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the doc", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// HEAD moved (preHead -> older commit) but the new HEAD is NOT a descendant of
+	// preHead — a backward reset. The gate must NOT verify it as a commit.
+	completed := l.handleOperateResult(context.Background(), task, preHead, true, "done")
+	if completed {
+		t.Fatal("handleOperateResult verified a backward HEAD reset as a real commit")
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("backward HEAD reset produced a work.task.completed event")
+	}
+}
+
+// Caution from review: the pre-Operate HEAD capture is best-effort. If the
+// baseline could not be read, a post-Operate commit cannot be confirmed as a
+// genuine advance (preflight failure must not masquerade as a "first commit").
+func TestHandleOperateResult_UnreadablePreHeadFailsClosed(t *testing.T) {
+	repo := newTempGitRepo(t)
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_pre_unreadable")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the doc", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// preHeadReadable=false: the baseline HEAD was unreadable. Even with a clean
+	// post-state, the gate must fail closed rather than assume a first commit.
+	completed := l.handleOperateResult(context.Background(), task, "", false, "committed the file")
+	if completed {
+		t.Fatal("handleOperateResult completed against an unreadable pre-Operate HEAD")
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("unreadable pre-Operate HEAD produced a work.task.completed event")
+	}
+}
+
+// isOperableStatus must exclude blocked/terminal v3.9 statuses so a failed
+// (blocked) task is not re-Operated, while keeping the live working states.
+func TestIsOperableStatus(t *testing.T) {
+	notOperable := []work.TaskStatus{
+		work.StatusBlocked, work.StatusPolicyBlocked, work.StatusFailed,
+		work.StatusRejected, work.StatusSuperseded, work.StatusVerified, work.StatusCertified,
+	}
+	for _, s := range notOperable {
+		if isOperableStatus(s) {
+			t.Errorf("isOperableStatus(%s) = true, want false (blocked/terminal must not be operable)", s)
+		}
+	}
+	operable := []work.TaskStatus{
+		work.StatusCreated, work.StatusReady, work.StatusRunning, work.StatusRepaired,
+	}
+	for _, s := range operable {
+		if !isOperableStatus(s) {
+			t.Errorf("isOperableStatus(%s) = false, want true (live working states must be operable)", s)
+		}
+	}
+}
+
+// #P1-A: blocking a task must be a real EXECUTION barrier, not a dashboard
+// label. After a commit-verification failure blocks the task, the implementer
+// loop must not treat it as runnable — otherwise a restart re-Operates the same
+// blocked task and the human-review barrier is not durable.
+func TestHasAssignedTask_ExcludesBlockedTask(t *testing.T) {
+	repo := newTempGitRepo(t)
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_blocked_excl")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "work", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, CanOperate: true, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Sanity: an assigned, non-blocked task IS operable.
+	if !l.hasAssignedTask() {
+		t.Fatal("assigned non-blocked task should be operable before blocking")
+	}
+
+	// Block it (the commit-verification failure path).
+	if err := l.blockTaskForFailure(task, "verification failed"); err != nil {
+		t.Fatalf("blockTaskForFailure: %v", err)
+	}
+
+	if l.hasAssignedTask() {
+		t.Fatal("blocked task is still reported operable — the human-review barrier is not durable")
+	}
+	if id := l.nextAssignedTask().ID; id.Value() != "" {
+		t.Fatalf("nextAssignedTask returned a blocked task (%s); blocked tasks must be excluded", id.Value())
+	}
+}
+
+// #P1-A: a subsequent Run with CanOperate=true must NOT call Operate for a
+// blocked task until an explicit unblock transition makes it runnable again.
+func TestRun_BlockedTaskIsNotOperated(t *testing.T) {
+	repo := newTempGitRepo(t)
+	op := &countingOperator{reasonResp: `/signal {"signal":"IDLE"}`, operateSummary: `/signal {"signal":"IDLE"}`}
+	agent, g := agentWithGraph(t, op)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_blocked_not_operated")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Blocked work", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	l, err := New(Config{
+		Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts,
+		CanOperate: true, ConvID: convID, Budget: resources.BudgetConfig{MaxIterations: 3},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Block the task (simulate a prior commit-verification failure).
+	if err := l.blockTaskForFailure(task, "prior verification failure"); err != nil {
+		t.Fatalf("blockTaskForFailure: %v", err)
+	}
+
+	l.Run(context.Background())
+
+	if op.operateCalls != 0 {
+		t.Fatalf("blocked task was Operated %d time(s); a blocked task must not be re-operated without an explicit unblock", op.operateCalls)
+	}
+}
+
 // ── helpers ──
+
+// countingOperator records how many times Operate is invoked, to prove the loop
+// does not Operate a blocked task.
+type countingOperator struct {
+	reasonResp     string
+	operateSummary string
+	operateCalls   int
+}
+
+func (m *countingOperator) Name() string  { return "countop" }
+func (m *countingOperator) Model() string { return "countop-model" }
+func (m *countingOperator) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	c, _ := types.NewScore(0.8)
+	return decision.NewResponse(m.reasonResp, c, decision.TokenUsage{InputTokens: 10, OutputTokens: 10}), nil
+}
+func (m *countingOperator) Operate(_ context.Context, _ decision.OperateTask) (decision.OperateResult, error) {
+	m.operateCalls++
+	return decision.OperateResult{Summary: m.operateSummary, Usage: decision.TokenUsage{InputTokens: 10, OutputTokens: 10}}, nil
+}
+
+var (
+	_ intelligence.Provider = (*countingOperator)(nil)
+	_ decision.IOperator    = (*countingOperator)(nil)
+)
 
 // newTempGitRepo creates an isolated, clean git repo with one commit.
 func newTempGitRepo(t *testing.T) string {

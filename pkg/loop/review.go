@@ -430,6 +430,24 @@ func gitTry(dir string, args ...string) (string, bool) {
 	return strings.TrimSpace(string(out)), true
 }
 
+// isAncestor reports whether ancestor is an ancestor of descendant in dir's repo
+// — i.e. descendant is a true forward advance from ancestor. yes is the answer;
+// ok is false when ancestry could not be determined (invalid hash, git failure),
+// so callers can fail closed rather than guess. Uses `git merge-base
+// --is-ancestor`, which exits 0 for ancestor and 1 for not-ancestor.
+func isAncestor(dir, ancestor, descendant string) (yes bool, ok bool) {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true, true
+	}
+	if ee, isExit := err.(*exec.ExitError); isExit && ee.ExitCode() == 1 {
+		return false, true // definitively not an ancestor
+	}
+	return false, false // indeterminate — bad revision or git failure
+}
+
 // truncateDiff applies the three-tier truncation strategy from the design spec.
 //   - ≤ maxLines: include full diff
 //   - maxLines+1 to 1000: first 200 lines + last 50 lines + omission note

@@ -349,8 +349,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 			task := l.nextAssignedTask()
 			instruction := fmt.Sprintf("Task: %s\n\n%s", task.Title, task.Description)
 
-			// Record HEAD before Operate so we can detect new commits.
-			preOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
+			// Record HEAD before Operate so we can detect new commits. gitTry
+			// reports whether the read succeeded: an unreadable pre-Operate HEAD
+			// makes the post-Operate result unverifiable (it must not be mistaken
+			// for a clean "first commit").
+			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
 
 			result, opErr := l.agent.Operate(ctx, l.config.RepoPath, instruction)
 			if opErr != nil {
@@ -363,7 +366,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// handleOperateResult compares HEAD before/after Operate and
 			// cross-checks the summary — a confabulated (or wrong-repo) commit
 			// fails the task instead of silently completing it.
-			if l.handleOperateResult(ctx, task, preOperateHead, result.Summary) {
+			if l.handleOperateResult(ctx, task, preOperateHead, preHeadReadable, result.Summary) {
 				if l.sink != nil {
 					l.captureBoundary(checkpoint.TaskCompleted, response)
 					l.lastCheckpointIter = l.iteration
@@ -1048,7 +1051,39 @@ func (l *Loop) autoAssignOpenTask() {
 	}
 }
 
-// hasAssignedTask returns true if the agent has any assigned (non-completed) tasks.
+// isOperableStatus reports whether a task in this v3.9 lifecycle status may be
+// picked up for Operate. Blocked and terminal statuses are excluded so that a
+// failed task that was transitioned to StatusBlocked (or any non-runnable state)
+// is NOT handed straight back to Operate on the next loop run — the human-review
+// barrier must be a real execution gate, not a dashboard label. A blocked task
+// becomes runnable again only via an explicit, auditable Blocked→Ready
+// transition.
+func isOperableStatus(s work.TaskStatus) bool {
+	switch s {
+	case work.StatusBlocked,
+		work.StatusPolicyBlocked,
+		work.StatusFailed,
+		work.StatusRejected,
+		work.StatusSuperseded,
+		work.StatusVerified,
+		work.StatusCertified:
+		return false
+	default:
+		return true
+	}
+}
+
+// taskIsOperable reports whether an assigned task may be Operated: it must not be
+// legacy-completed and must be in an operable v3.9 lifecycle status.
+func (l *Loop) taskIsOperable(taskID types.EventID) bool {
+	if legacy, _ := l.config.TaskStore.GetCompatibilityStatus(taskID); legacy == work.LegacyStatusCompleted {
+		return false
+	}
+	v39, _ := l.config.TaskStore.GetStatus(taskID)
+	return isOperableStatus(v39)
+}
+
+// hasAssignedTask returns true if the agent has any assigned, operable task.
 func (l *Loop) hasAssignedTask() bool {
 	if l.config.TaskStore == nil {
 		return false
@@ -1057,22 +1092,19 @@ func (l *Loop) hasAssignedTask() bool {
 	if err != nil || len(tasks) == 0 {
 		return false
 	}
-	// Check if any assigned task is not yet completed.
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
-		if status != work.LegacyStatusCompleted {
+		if l.taskIsOperable(t.ID) {
 			return true
 		}
 	}
 	return false
 }
 
-// nextAssignedTask returns the next non-completed task assigned to this agent.
+// nextAssignedTask returns the next operable task assigned to this agent.
 func (l *Loop) nextAssignedTask() work.Task {
 	tasks, _ := l.config.TaskStore.GetByAssignee(l.agent.ID())
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
-		if status != work.LegacyStatusCompleted {
+		if l.taskIsOperable(t.ID) {
 			return t
 		}
 	}
