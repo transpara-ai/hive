@@ -387,24 +387,41 @@ func TestHandleOperateResult_UnreadablePreHeadFailsClosed(t *testing.T) {
 	}
 }
 
-// isOperableStatus must exclude blocked/terminal v3.9 statuses so a failed
-// (blocked) task is not re-Operated, while keeping the live working states.
+// isOperableStatus must be an ALLOWLIST (default closed): only the statuses the
+// implementer loop is responsible for executing are operable. Every other v3.9
+// status — including the repair/verification intermediates and any unknown,
+// future, or zero-value status (e.g. a status read error's fallback) — must be
+// non-operable, so the Operate eligibility gate never fails open. This table
+// covers every work.TaskStatus value plus ""/unknown.
 func TestIsOperableStatus(t *testing.T) {
-	notOperable := []work.TaskStatus{
-		work.StatusBlocked, work.StatusPolicyBlocked, work.StatusFailed,
-		work.StatusRejected, work.StatusSuperseded, work.StatusVerified, work.StatusCertified,
+	cases := []struct {
+		status   work.TaskStatus
+		operable bool
+	}{
+		// Allowlist: the states the implementer is responsible for executing.
+		{work.StatusCreated, true}, // loop default; required by auto-assignment
+		{work.StatusReady, true},   // planned and ready for implementation
+		{work.StatusRunning, true}, // actively executing — re-entrant resume
+		// Blocked / terminal — never operable.
+		{work.StatusBlocked, false},
+		{work.StatusPolicyBlocked, false},
+		{work.StatusFailed, false},
+		{work.StatusRejected, false},
+		{work.StatusSuperseded, false},
+		{work.StatusVerified, false},
+		{work.StatusCertified, false},
+		// Repair / verification phases — owned by other flows, not the implementer.
+		{work.StatusRepairRequired, false},
+		{work.StatusRepairRunning, false},
+		{work.StatusRepaired, false},
+		{work.StatusVerificationRunning, false},
+		// Unknown / future / zero value — must default closed.
+		{work.TaskStatus(""), false},
+		{work.TaskStatus("some_future_status"), false},
 	}
-	for _, s := range notOperable {
-		if isOperableStatus(s) {
-			t.Errorf("isOperableStatus(%s) = true, want false (blocked/terminal must not be operable)", s)
-		}
-	}
-	operable := []work.TaskStatus{
-		work.StatusCreated, work.StatusReady, work.StatusRunning, work.StatusRepaired,
-	}
-	for _, s := range operable {
-		if !isOperableStatus(s) {
-			t.Errorf("isOperableStatus(%s) = false, want true (live working states must be operable)", s)
+	for _, c := range cases {
+		if got := isOperableStatus(c.status); got != c.operable {
+			t.Errorf("isOperableStatus(%q) = %v, want %v", c.status, got, c.operable)
 		}
 	}
 }
