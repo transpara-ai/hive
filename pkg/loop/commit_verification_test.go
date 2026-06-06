@@ -2,7 +2,9 @@ package loop
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
@@ -214,6 +216,49 @@ func TestHandleOperateResult_DirtyUncommittedDoesNotComplete(t *testing.T) {
 	}
 	if taskHasCompletedEvent(t, g, task.ID) {
 		t.Fatal("dirty uncommitted Operate produced a work.task.completed event")
+	}
+}
+
+// A verified Operate may produce more than one commit. The completion artifact
+// must cover the entire verified pre→post range so reviewer context cannot miss
+// an earlier commit in the same Operate.
+func TestHandleOperateResult_VerifiedMultiCommitArtifactCoversFullRange(t *testing.T) {
+	repo := newTempGitRepo(t)
+	preHead := gitCommand(repo, "rev-parse", "HEAD")
+	commitFile(t, repo, "first.txt", "first\n", "first")
+	commitFile(t, repo, "second.txt", "second\n", "second")
+
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_multi_commit_artifact")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write two files", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	l, err := New(Config{Agent: agent, HumanID: humanID(), RepoPath: repo, TaskStore: ts, ConvID: convID})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if completed := l.handleOperateResult(context.Background(), task, preHead, true, "Committed both files."); !completed {
+		t.Fatal("verified multi-commit Operate did not complete")
+	}
+
+	completed := completedTaskContent(t, g, task.ID)
+	body, isArtifact := ts.GetArtifactBody(completed.ArtifactRef)
+	if !isArtifact {
+		t.Fatal("completed task ArtifactRef did not point at an artifact body")
+	}
+	for _, want := range []string{"base: " + preHead, "head: " + gitCommand(repo, "rev-parse", "HEAD"), "first.txt", "second.txt"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("artifact body missing %q; body:\n%s", want, body)
+		}
 	}
 }
 
@@ -780,6 +825,23 @@ func newTempGitRepo(t *testing.T) string {
 	return dir
 }
 
+func commitFile(t *testing.T, repo, path, content, message string) {
+	t.Helper()
+	if err := os.WriteFile(repo+"/"+path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	for _, args := range [][]string{
+		{"add", path},
+		{"commit", "-q", "-m", message},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 // mockOperator is a provider that supports both Reason and Operate, with a
 // controllable Operate summary (no filesystem side effects).
 type mockOperator struct {
@@ -815,4 +877,19 @@ func taskHasCompletedEvent(t *testing.T, g *graph.Graph, taskID types.EventID) b
 		}
 	}
 	return false
+}
+
+func completedTaskContent(t *testing.T, g *graph.Graph, taskID types.EventID) work.TaskCompletedContent {
+	t.Helper()
+	page, err := g.Store().ByType(work.EventTypeTaskCompleted, 1000, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType: %v", err)
+	}
+	for _, ev := range page.Items() {
+		if c, ok := ev.Content().(work.TaskCompletedContent); ok && c.TaskID == taskID {
+			return c
+		}
+	}
+	t.Fatalf("completed event for task %s not found", taskID.Value())
+	return work.TaskCompletedContent{}
 }

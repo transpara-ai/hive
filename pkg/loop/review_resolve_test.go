@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -180,6 +181,54 @@ func TestResolveCommitForTask_Strategy0_ArtifactRef(t *testing.T) {
 	wantRef := head + "^.." + head
 	if diffRef != wantRef {
 		t.Errorf("Strategy 0: diffRef = %q, want %q", diffRef, wantRef)
+	}
+}
+
+func TestResolveCommitForTask_Strategy0_ArtifactRange(t *testing.T) {
+	repo := newTempGitRepo(t)
+	preHead := gitCommand(repo, "rev-parse", "HEAD")
+	commitFile(t, repo, "first.txt", "first\n", "first")
+	commitFile(t, repo, "second.txt", "second\n", "second")
+	postHead := gitCommand(repo, "rev-parse", "HEAD")
+
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_strategy0_range_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Test task", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	artifactBody := buildOperateArtifactBody(repo, preHead, postHead)
+	if err := ts.AddArtifact(agent.ID(), task.ID, "Operate result", "text/plain", artifactBody, causes, convID); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+	if err := ts.Complete(agent.ID(), task.ID, "done", causes, convID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	completedContent := completedTaskContent(t, g, task.ID)
+	l := &Loop{config: Config{RepoPath: repo, TaskStore: ts}}
+	commitHash, diffRef := l.resolveCommitForTask(completedContent, true)
+
+	if commitHash != postHead {
+		t.Errorf("Strategy 0 range: commitHash = %q, want %q", commitHash, postHead)
+	}
+	wantRef := preHead + ".." + postHead
+	if diffRef != wantRef {
+		t.Errorf("Strategy 0 range: diffRef = %q, want %q", diffRef, wantRef)
+	}
+	stat := gitCommand(repo, "diff", diffRef, "--stat")
+	for _, want := range []string{"first.txt", "second.txt"} {
+		if !strings.Contains(stat, want) {
+			t.Fatalf("resolved diff stat missing %q; stat:\n%s", want, stat)
+		}
 	}
 }
 

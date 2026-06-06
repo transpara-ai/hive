@@ -25,10 +25,10 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/budget"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
@@ -1140,21 +1140,21 @@ func (l *Loop) nextAssignedTask() work.Task {
 	return work.Task{}
 }
 
-// attachOperateArtifact captures the current git state as a task artifact.
-// Called after a successful Operate() and before completeTask() to satisfy
-// the artifact gate in TaskStore.Complete(). Best-effort.
+// attachOperateArtifact captures the verified Operate commit range as a task
+// artifact. Called after a successful Operate() and before completeTask() to
+// satisfy the artifact gate in TaskStore.Complete().
 // Note: causes may be empty on the agent's very first event (bootstrap case).
 // The factory handles this by using the graph head as a fallback cause.
-func (l *Loop) attachOperateArtifact(task work.Task) {
+func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) bool {
 	if l.config.TaskStore == nil {
-		return
+		return true
 	}
 	var causes []types.EventID
 	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
 		causes = []types.EventID{lastEv}
 	}
 
-	body := buildOperateArtifactBody(l.config.RepoPath)
+	body := buildOperateArtifactBody(l.config.RepoPath, baseHead, postHead)
 	err := l.config.TaskStore.AddArtifact(
 		l.agent.ID(), task.ID,
 		"Operate result",
@@ -1164,27 +1164,36 @@ func (l *Loop) attachOperateArtifact(task work.Task) {
 	)
 	if err != nil {
 		fmt.Printf("[%s] warning: attach artifact failed: %v\n", l.agent.Name(), err)
+		return false
 	}
+	return true
 }
 
-// buildOperateArtifactBody captures the commit hash and changed file list
-// from the repo. Returns a structured string the Reviewer can parse.
-func buildOperateArtifactBody(repoPath string) string {
+// buildOperateArtifactBody captures the verified commit range and changed file
+// list from the repo. Returns a structured string the Reviewer can parse.
+func buildOperateArtifactBody(repoPath, baseHead, postHead string) string {
 	if repoPath == "" {
 		return "(no repo path configured)"
 	}
-	hash := gitCommand(repoPath, "log", "-1", "--format=%H")
-	stat := gitCommand(repoPath, "diff", "HEAD~1", "--stat")
-	if hash == "" {
+	if postHead == "" {
+		postHead = gitCommand(repoPath, "log", "-1", "--format=%H")
+	}
+	if postHead == "" {
 		return "(no commits)"
 	}
-	return fmt.Sprintf("commit: %s\n\n%s", hash, stat)
+	if baseHead == "" {
+		stat := gitCommand(repoPath, "diff", postHead+"^.."+postHead, "--stat")
+		return fmt.Sprintf("commit: %s\n\n%s", postHead, stat)
+	}
+	diffRef := baseHead + ".." + postHead
+	stat := gitCommand(repoPath, "diff", diffRef, "--stat")
+	return fmt.Sprintf("commit: %s\nbase: %s\nhead: %s\nrange: %s\n\n%s", postHead, baseHead, postHead, diffRef, stat)
 }
 
-// completeTask marks a task as completed in the task store. Best-effort.
-func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string) {
+// completeTask marks a task as completed in the task store.
+func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string) bool {
 	if l.config.TaskStore == nil {
-		return
+		return true
 	}
 	var causes []types.EventID
 	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
@@ -1192,12 +1201,14 @@ func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string)
 	}
 	if err := l.config.TaskStore.Complete(l.agent.ID(), task.ID, summary, causes, l.config.ConvID); err != nil {
 		fmt.Printf("warning: task complete failed: %v\n", err)
+		return false
 	} else {
 		fmt.Printf("  → task completed: %s — %s\n", task.ID.Value(), task.Title)
 		if l.config.OnTaskCompleted != nil {
 			l.config.OnTaskCompleted(ctx, task, summary)
 		}
 	}
+	return true
 }
 
 // currentSnapshot builds a LoopSnapshot from current loop state.

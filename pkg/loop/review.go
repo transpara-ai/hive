@@ -19,7 +19,7 @@ import (
 // ReviewCommand represents the parsed /review command from Reviewer LLM output.
 type ReviewCommand struct {
 	TaskID     string   `json:"task_id"`
-	Verdict    string   `json:"verdict"`    // "approve", "request_changes", "reject"
+	Verdict    string   `json:"verdict"` // "approve", "request_changes", "reject"
 	Summary    string   `json:"summary"`
 	Issues     []string `json:"issues"`
 	Confidence float64  `json:"confidence"` // 0.0–1.0
@@ -320,21 +320,28 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 // Git Helpers
 // ────────────────────────────────────────────────────────────────────
 
-// resolveCommitForTask determines the correct commit hash and diff reference
-// for a completed task. Uses three strategies in priority order:
-//  0. Use ArtifactRef to fetch the artifact body and extract the commit hash (most reliable)
-//  1. Extract commit hash from the task summary text (heuristic)
-//  2. Fall back to HEAD~1 (legacy, race-prone with concurrent completions)
+// resolveCommitForTask determines the correct commit hash and diff reference for
+// a completed task. Uses three strategies in priority order:
+//  0. Use ArtifactRef to fetch the artifact body and extract the verified
+//     Operate range, falling back to its commit hash for legacy artifacts.
+//  1. Extract commit hash from the task summary text (heuristic).
+//  2. Fall back to HEAD~1 (legacy, race-prone with concurrent completions).
 //
 // Returns (commitHash, diffRef) where commitHash is for `git log -1 <hash>`
-// and diffRef is for `git diff <ref>` (e.g., "abc1234^..abc1234").
+// and diffRef is for `git diff <ref>` (e.g., "base..head" or
+// "abc1234^..abc1234").
 func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bool) (string, string) {
 	repo := l.config.RepoPath
 
-	// Strategy 0: use ArtifactRef → fetch artifact body → extract commit hash.
+	// Strategy 0: use ArtifactRef → fetch artifact body → extract Operate range.
 	if taskFound && !task.ArtifactRef.IsZero() {
 		body, isArtifact := l.fetchArtifactBody(task.ArtifactRef)
 		if isArtifact && body != "" {
+			if base, head := extractCommitRange(body, repo); base != "" && head != "" {
+				return head, base + ".." + head
+			}
+			// Legacy artifact bodies recorded only a single commit hash. Keep the old
+			// one-commit behavior for those artifacts.
 			if hash := extractCommitHash(body, repo); hash != "" {
 				return hash, hash + "^.." + hash
 			}
@@ -391,6 +398,46 @@ func extractCommitHash(text, repoPath string) string {
 		}
 	}
 	return ""
+}
+
+// extractCommitRange scans a structured Operate artifact body for base/head
+// commit lines and verifies both commits exist in the repo. The resulting range
+// must also be a forward ancestry path so reviewer diffs align with the
+// commit-verification gate.
+func extractCommitRange(text, repoPath string) (string, string) {
+	var baseToken, headToken string
+	for _, line := range strings.Split(text, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "base":
+			baseToken = strings.TrimSpace(value)
+		case "head":
+			headToken = strings.TrimSpace(value)
+		}
+	}
+	base := verifyCommitToken(baseToken, repoPath)
+	head := verifyCommitToken(headToken, repoPath)
+	if base == "" || head == "" {
+		return "", ""
+	}
+	if base == head {
+		return "", ""
+	}
+	if yes, ok := isAncestor(repoPath, base, head); !ok || !yes {
+		return "", ""
+	}
+	return base, head
+}
+
+func verifyCommitToken(token, repoPath string) string {
+	token = strings.TrimRight(strings.TrimSpace(token), ".,;:()[]")
+	if len(token) < 7 || len(token) > 40 || !isHex(token) {
+		return ""
+	}
+	return gitCommand(repoPath, "rev-parse", "--verify", token+"^{commit}")
 }
 
 // isHex returns true if s contains only hexadecimal characters.

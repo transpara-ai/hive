@@ -208,9 +208,21 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 		return false
 	}
 	// The only completing verdict is commitVerified — a real, clean, forward
-	// commit. Attach the artifact and complete.
-	l.attachOperateArtifact(task)
-	l.completeTask(ctx, task, summary)
+	// commit range from preOperateHead to postOperateHead. Attach that exact range
+	// so downstream review sees every commit produced by this Operate, not just
+	// the final HEAD commit.
+	if !l.attachOperateArtifact(task, preOperateHead, postOperateHead) {
+		l.failOperateTask(ctx, task, fmt.Sprintf(
+			"could not record Operate artifact for verified range %s..%s in %s — refusing to complete without reviewable evidence",
+			shortHash(preOperateHead), shortHash(postOperateHead), l.config.RepoPath))
+		return false
+	}
+	if !l.completeTask(ctx, task, summary) {
+		l.failOperateTask(ctx, task, fmt.Sprintf(
+			"could not record task completion after verified range %s..%s in %s — refusing to report completion without a Work completion event",
+			shortHash(preOperateHead), shortHash(postOperateHead), l.config.RepoPath))
+		return false
+	}
 	return true
 }
 
