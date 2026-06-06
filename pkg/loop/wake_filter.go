@@ -70,17 +70,28 @@ func isObservable(eventType types.EventType) bool {
 // isChurnStateChange reports whether an agent.state.changed event is pure
 // high-volume operational churn — the Idle⇄Processing toggle that formed the
 // 2026-06-06 wakeup storm — rather than a significant lifecycle/governance
-// transition (Suspended, Retiring, Retired, Waiting, Escalating, Refusing). Only
-// churn is suppressed; significant transitions stay visible to peers and wake
-// idle governance agents. For OBSERVABILITY the fail-safe default is to KEEP an
-// event, so an unknown or unparseable state is treated as significant (not
-// churn) — hiding a lifecycle change is the risk to avoid.
+// transition (Suspended, Retiring, Retired, Waiting, Escalating, Refusing).
+//
+// BOTH endpoints must be churn states for the event to count as churn. A
+// transition that merely ENDS in Idle/Processing is not necessarily churn: a
+// resume (Suspended→Idle) ends in Idle but is a significant recovery signal.
+// Classifying by Current alone hid those. Only Idle⇄Processing toggles (both
+// endpoints churn) are suppressed; everything else — including any
+// unknown/unparseable state — stays visible, because for OBSERVABILITY the
+// fail-safe default is to KEEP an event (hiding a lifecycle change is the risk).
 func isChurnStateChange(ev event.Event) bool {
 	c, ok := ev.Content().(event.AgentStateChangedContent)
 	if !ok {
 		return false
 	}
-	switch c.Current {
+	return isChurnState(c.Previous) && isChurnState(c.Current)
+}
+
+// isChurnState reports whether a single operational state is a high-volume churn
+// state (Idle or Processing). Every other state — and any unknown state — is
+// significant.
+func isChurnState(state string) bool {
+	switch state {
 	case egagent.StateIdle.String(), egagent.StateProcessing.String():
 		return true
 	default:

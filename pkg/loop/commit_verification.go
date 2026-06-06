@@ -124,6 +124,13 @@ func claimsCommit(summary string) bool {
 // affirmative no-op may waive+complete.
 func claimsNoOp(summary string) bool {
 	s := strings.ToLower(summary)
+	// A work claim VETOES a no-op. A no-op phrase can appear inside a summary that
+	// actually describes work ("Implemented handling for 'already exists'
+	// errors"), so the mere presence of a no-op substring is not proof. If the
+	// summary asserts a concrete change, it is not a clean no-op — fail closed.
+	if claimsWork(s) {
+		return false
+	}
 	for _, p := range []string{
 		"nothing to commit",
 		"nothing to change",
@@ -156,6 +163,29 @@ func claimsNoOp(summary string) bool {
 		"no op",
 	} {
 		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// claimsWork reports whether a summary asserts that a concrete change was made.
+// It vetoes the no-op waiver: a clean, unchanged repo paired with a work claim
+// is a no-effect Operate (often wrong-repo), not a legitimate no-op. Only
+// completed-change verbs are listed — inspection verbs (checked/analyzed/
+// reviewed/verified) are consistent with a no-op and are NOT work. The veto
+// errs toward escalation: a genuine no-op phrased with a change verb fails
+// closed (a recoverable human review) rather than risk a false completion.
+func claimsWork(summary string) bool {
+	s := strings.ToLower(summary)
+	for _, v := range []string{
+		"implemented", "added", "created", "wrote", "rewrote", "modified",
+		"refactored", "deleted", "removed", "renamed", "replaced", "edited",
+		"generated", "appended", "inserted", "updated", "patched", "fixed",
+		"authored", "drafted", "introduced", "corrected", "committed",
+		"applied", "staged", "populated", "scaffolded",
+	} {
+		if strings.Contains(s, v) {
 			return true
 		}
 	}

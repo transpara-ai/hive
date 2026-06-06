@@ -68,10 +68,43 @@ func TestClaimsNoOp(t *testing.T) {
 		"",
 		"Wrote the catalog and committed in 89f8886",
 		"Analyzed the directory structure.",
+		// A work claim must veto a no-op even when it contains a no-op substring:
+		// describing work ("Implemented") while mentioning "already exists" is a
+		// no-effect Operate, not a legitimate no-op (round-6 bypass).
+		"Implemented handling for repository already exists errors",
+		"Created the file even though it already exists elsewhere",
 	}
 	for _, s := range notNoOp {
 		if claimsNoOp(s) {
 			t.Errorf("claimsNoOp(%q) = true, want false (only affirmative no-ops may waive)", s)
+		}
+	}
+}
+
+// claimsWork must flag concrete-change verbs (which veto the no-op waiver) while
+// treating inspection verbs as NOT work (consistent with a legitimate no-op).
+func TestClaimsWork(t *testing.T) {
+	work := []string{
+		"Implemented handling for already exists errors",
+		"Updated docs/civilization-roles.md",
+		"Created the catalog file",
+		"Removed the dead code path",
+		"Refactored the gate",
+	}
+	for _, s := range work {
+		if !claimsWork(s) {
+			t.Errorf("claimsWork(%q) = false, want true", s)
+		}
+	}
+	notWork := []string{
+		"Nothing to commit, working tree clean.",
+		"Checked the catalog; it already matches.",
+		"Analyzed and verified the structure; no changes needed.",
+		"",
+	}
+	for _, s := range notWork {
+		if claimsWork(s) {
+			t.Errorf("claimsWork(%q) = true, want false (inspection/no-op is not work)", s)
 		}
 	}
 }

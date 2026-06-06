@@ -206,8 +206,9 @@ func TestOnEvent_PendingEventsBounded(t *testing.T) {
 	}
 }
 
-// isChurnStateChange must suppress ONLY Idle/Processing churn; every significant
-// lifecycle/governance transition (and any unknown/future state) stays visible.
+// isChurnStateChange must suppress ONLY the Idle⇄Processing toggle (BOTH
+// endpoints churn). A transition touching any significant state at EITHER end —
+// including a resume (Suspended→Idle) that merely ends in Idle — stays visible.
 func TestIsChurnStateChange(t *testing.T) {
 	agent, g := agentWithGraph(t, newMockProvider(`/signal {"signal":"IDLE"}`))
 	factory := event.NewEventFactory(g.Registry())
@@ -218,27 +219,36 @@ func TestIsChurnStateChange(t *testing.T) {
 	if !agent.LastEvent().IsZero() {
 		causes = []types.EventID{agent.LastEvent()}
 	}
-	mk := func(current string) event.Event {
+	mk := func(previous, current string) event.Event {
 		ev, err := factory.Create(event.EventTypeAgentStateChanged, actor,
-			event.AgentStateChangedContent{AgentID: actor, Previous: egagent.StateIdle.String(), Current: current},
+			event.AgentStateChangedContent{AgentID: actor, Previous: previous, Current: current},
 			causes, conv, g.Store(), signer)
 		if err != nil {
-			t.Fatalf("create state event (%s): %v", current, err)
+			t.Fatalf("create state event (%s→%s): %v", previous, current, err)
 		}
 		return ev
 	}
-	for _, s := range []string{egagent.StateIdle.String(), egagent.StateProcessing.String()} {
-		if !isChurnStateChange(mk(s)) {
-			t.Errorf("isChurnStateChange(%s) = false, want true (churn must be suppressed)", s)
-		}
+	idle, proc := egagent.StateIdle.String(), egagent.StateProcessing.String()
+	susp, retiring := egagent.StateSuspended.String(), egagent.StateRetiring.String()
+
+	cases := []struct {
+		previous, current string
+		churn             bool
+	}{
+		{idle, proc, true},                     // pure churn toggle
+		{proc, idle, true},                     // pure churn toggle
+		{idle, idle, true},                     // churn
+		{susp, idle, false},                    // RESUME — significant, ends in Idle
+		{susp, proc, false},                    // resume into processing — significant
+		{idle, susp, false},                    // suspend — significant
+		{proc, retiring, false},                // retiring — significant
+		{idle, egagent.StateRetired.String(), false},
+		{idle, egagent.StateWaiting.String(), false},
+		{idle, "SomeFutureState", false},       // unknown — keep visible
 	}
-	for _, s := range []string{
-		egagent.StateSuspended.String(), egagent.StateRetiring.String(), egagent.StateRetired.String(),
-		egagent.StateWaiting.String(), egagent.StateEscalating.String(), egagent.StateRefusing.String(),
-		"SomeFutureState",
-	} {
-		if isChurnStateChange(mk(s)) {
-			t.Errorf("isChurnStateChange(%s) = true, want false (significant/unknown must stay visible)", s)
+	for _, c := range cases {
+		if got := isChurnStateChange(mk(c.previous, c.current)); got != c.churn {
+			t.Errorf("isChurnStateChange(%s→%s) = %v, want %v", c.previous, c.current, got, c.churn)
 		}
 	}
 }
@@ -276,6 +286,43 @@ func TestOnEvent_SuspensionStateChangeIsObservableAndWakes(t *testing.T) {
 	}
 	if !wakeSignaled(l) {
 		t.Fatal("a peer Suspended state change did not wake the agent — significant lifecycle changes must wake idle governance agents")
+	}
+}
+
+// #P2 (round-6): the RESUME transition Suspended→Idle has Current=Idle but is a
+// significant recovery signal, not churn. A transition FROM a significant state
+// must stay visible to peers and wake them — classifying by Current alone hid it.
+func TestOnEvent_ResumeStateChangeIsObservableAndWakes(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	l, err := New(Config{Agent: agent, HumanID: humanID()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	factory := event.NewEventFactory(g.Registry())
+	signer := &testSigner{}
+	conv := types.MustConversationID("conv_resume")
+	cause := agent.LastEvent()
+	if cause.IsZero() {
+		t.Fatal("no bootstrap cause")
+	}
+	otherActor := types.MustActorID("actor_00000000000000000000000000000056")
+	// Resume: Suspended -> Idle.
+	resumeEv, err := factory.Create(event.EventTypeAgentStateChanged, otherActor,
+		event.AgentStateChangedContent{AgentID: otherActor, Previous: egagent.StateSuspended.String(), Current: egagent.StateIdle.String()},
+		[]types.EventID{cause}, conv, g.Store(), signer)
+	if err != nil {
+		t.Fatalf("create resume event: %v", err)
+	}
+
+	drainWake(l)
+	before := pendingLen(l)
+	l.onEvent(resumeEv)
+	if pendingLen(l) != before+1 {
+		t.Fatal("a peer Suspended→Idle resume was not queued — recovery transitions must stay visible to peers")
+	}
+	if !wakeSignaled(l) {
+		t.Fatal("a peer Suspended→Idle resume did not wake the agent — a recovery signal must reach sleeping governance peers")
 	}
 }
 
