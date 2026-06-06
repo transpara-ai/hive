@@ -19,7 +19,7 @@ import (
 // ReviewCommand represents the parsed /review command from Reviewer LLM output.
 type ReviewCommand struct {
 	TaskID     string   `json:"task_id"`
-	Verdict    string   `json:"verdict"`    // "approve", "request_changes", "reject"
+	Verdict    string   `json:"verdict"` // "approve", "request_changes", "reject"
 	Summary    string   `json:"summary"`
 	Issues     []string `json:"issues"`
 	Confidence float64  `json:"confidence"` // 0.0–1.0
@@ -320,21 +320,28 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 // Git Helpers
 // ────────────────────────────────────────────────────────────────────
 
-// resolveCommitForTask determines the correct commit hash and diff reference
-// for a completed task. Uses three strategies in priority order:
-//  0. Use ArtifactRef to fetch the artifact body and extract the commit hash (most reliable)
-//  1. Extract commit hash from the task summary text (heuristic)
-//  2. Fall back to HEAD~1 (legacy, race-prone with concurrent completions)
+// resolveCommitForTask determines the correct commit hash and diff reference for
+// a completed task. Uses three strategies in priority order:
+//  0. Use ArtifactRef to fetch the artifact body and extract the verified
+//     Operate range, falling back to its commit hash for legacy artifacts.
+//  1. Extract commit hash from the task summary text (heuristic).
+//  2. Fall back to HEAD~1 (legacy, race-prone with concurrent completions).
 //
 // Returns (commitHash, diffRef) where commitHash is for `git log -1 <hash>`
-// and diffRef is for `git diff <ref>` (e.g., "abc1234^..abc1234").
+// and diffRef is for `git diff <ref>` (e.g., "base..head" or
+// "abc1234^..abc1234").
 func (l *Loop) resolveCommitForTask(task work.TaskCompletedContent, taskFound bool) (string, string) {
 	repo := l.config.RepoPath
 
-	// Strategy 0: use ArtifactRef → fetch artifact body → extract commit hash.
+	// Strategy 0: use ArtifactRef → fetch artifact body → extract Operate range.
 	if taskFound && !task.ArtifactRef.IsZero() {
 		body, isArtifact := l.fetchArtifactBody(task.ArtifactRef)
 		if isArtifact && body != "" {
+			if base, head := extractCommitRange(body, repo); base != "" && head != "" {
+				return head, base + ".." + head
+			}
+			// Legacy artifact bodies recorded only a single commit hash. Keep the old
+			// one-commit behavior for those artifacts.
 			if hash := extractCommitHash(body, repo); hash != "" {
 				return hash, hash + "^.." + hash
 			}
@@ -393,6 +400,55 @@ func extractCommitHash(text, repoPath string) string {
 	return ""
 }
 
+// extractCommitRange scans a structured Operate artifact body for base/head
+// commit lines and verifies both commits exist in the repo. The resulting range
+// must also be a forward ancestry path so reviewer diffs align with the
+// commit-verification gate.
+func extractCommitRange(text, repoPath string) (string, string) {
+	var baseToken, headToken string
+	for _, line := range strings.Split(text, "\n") {
+		// Parse only the machine-written header block. buildOperateArtifactBody
+		// emits the commit:/base:/head:/range: lines, then a blank line, then the
+		// `git diff --stat` section — whose filenames are agent-controlled. Stop at
+		// the blank line so a file named like a header key (e.g. "head:<hex>")
+		// cannot override the verified range and force a single-commit fallback that
+		// re-hides an earlier commit from the reviewer.
+		if strings.TrimSpace(line) == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "base":
+			baseToken = strings.TrimSpace(value)
+		case "head":
+			headToken = strings.TrimSpace(value)
+		}
+	}
+	base := verifyCommitToken(baseToken, repoPath)
+	head := verifyCommitToken(headToken, repoPath)
+	if base == "" || head == "" {
+		return "", ""
+	}
+	if base == head {
+		return "", ""
+	}
+	if yes, ok := isAncestor(repoPath, base, head); !ok || !yes {
+		return "", ""
+	}
+	return base, head
+}
+
+func verifyCommitToken(token, repoPath string) string {
+	token = strings.TrimRight(strings.TrimSpace(token), ".,;:()[]")
+	if len(token) < 7 || len(token) > 40 || !isHex(token) {
+		return ""
+	}
+	return gitCommand(repoPath, "rev-parse", "--verify", token+"^{commit}")
+}
+
 // isHex returns true if s contains only hexadecimal characters.
 func isHex(s string) bool {
 	for _, c := range s {
@@ -413,6 +469,39 @@ func gitCommand(dir string, args ...string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// gitTry runs a git command and reports whether it succeeded. Unlike
+// gitCommand, it distinguishes a genuinely empty result (ok=true — e.g. a clean
+// `status --porcelain`) from a git failure (ok=false — e.g. the directory is not
+// a checkout), so callers that must verify repo state can fail closed on the
+// latter instead of mistaking an error for "clean / no commit".
+func gitTry(dir string, args ...string) (string, bool) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// isAncestor reports whether ancestor is an ancestor of descendant in dir's repo
+// — i.e. descendant is a true forward advance from ancestor. yes is the answer;
+// ok is false when ancestry could not be determined (invalid hash, git failure),
+// so callers can fail closed rather than guess. Uses `git merge-base
+// --is-ancestor`, which exits 0 for ancestor and 1 for not-ancestor.
+func isAncestor(dir, ancestor, descendant string) (yes bool, ok bool) {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true, true
+	}
+	if ee, isExit := err.(*exec.ExitError); isExit && ee.ExitCode() == 1 {
+		return false, true // definitively not an ancestor
+	}
+	return false, false // indeterminate — bad revision or git failure
 }
 
 // truncateDiff applies the three-tier truncation strategy from the design spec.

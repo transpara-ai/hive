@@ -25,10 +25,10 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/budget"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
@@ -155,6 +155,12 @@ type Config struct {
 	// boundary trigger has fired. Default 10.
 	HeartbeatInterval int
 }
+
+// maxPendingEvents bounds the per-agent observation buffer. A keepalive agent
+// that sleeps through a churn storm must not accumulate an unbounded backlog and
+// dump it into the next observation context (invariant BOUNDED). When the cap is
+// exceeded the oldest events are dropped — the newest context wins.
+const maxPendingEvents = 256
 
 // Loop runs an agent's observe-reason-act-reflect cycle.
 type Loop struct {
@@ -343,8 +349,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 			task := l.nextAssignedTask()
 			instruction := fmt.Sprintf("Task: %s\n\n%s", task.Title, task.Description)
 
-			// Record HEAD before Operate so we can detect new commits.
-			preOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
+			// Record HEAD before Operate so we can detect new commits. gitTry
+			// reports whether the read succeeded: an unreadable pre-Operate HEAD
+			// makes the post-Operate result unverifiable (it must not be mistaken
+			// for a clean "first commit").
+			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
 
 			result, opErr := l.agent.Operate(ctx, l.config.RepoPath, instruction)
 			if opErr != nil {
@@ -352,20 +361,28 @@ func (l *Loop) Run(ctx context.Context) Result {
 			}
 			response = result.Summary
 			usage = result.Usage
+			// Record resource consumption immediately: a successful model call
+			// consumed tokens whether or not the commit-verification gate below
+			// passes. The early StopEscalation return on failure must NOT skip
+			// budget accounting (BUDGET invariant) — a failed Operate still costs.
+			l.budget.RecordUsage(usage)
 
-			// Attach artifact or waive — compare HEAD before/after Operate.
-			postOperateHead := gitCommand(l.config.RepoPath, "rev-parse", "HEAD")
-			if postOperateHead != "" && postOperateHead != preOperateHead {
-				l.attachOperateArtifact(task)
+			// Commit-verification gate: never trust the agent's self-report.
+			// handleOperateResult compares HEAD before/after Operate and
+			// cross-checks the summary — a confabulated (or wrong-repo) commit
+			// fails the task instead of silently completing it.
+			if l.handleOperateResult(ctx, task, preOperateHead, preHeadReadable, result.Summary) {
+				if l.sink != nil {
+					l.captureBoundary(checkpoint.TaskCompleted, response)
+					l.lastCheckpointIter = l.iteration
+				}
 			} else {
-				l.waiveOperateArtifact(task, "Operate produced no new commits")
-			}
-
-			// Auto-complete the task after successful Operate.
-			l.completeTask(ctx, task, result.Summary)
-			if l.sink != nil {
-				l.captureBoundary(checkpoint.TaskCompleted, response)
-				l.lastCheckpointIter = l.iteration
+				// Commit verification failed (confabulated / wrong-repo /
+				// uncommitted work). The Operate summary is UNTRUSTED — halt and
+				// escalate instead of letting it drive /task, /phase, /signal,
+				// etc. failOperateTask already escalated to the human.
+				return l.result(StopEscalation, iteration,
+					"commit verification failed; halting implementer for human review")
 			}
 		} else {
 			// Reason path: standard observe-reason loop.
@@ -375,10 +392,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 			if reasonErr != nil {
 				return l.result(StopError, iteration, fmt.Sprintf("reason: %v", reasonErr))
 			}
+			// Record the reason call's usage. (The Operate branch records its own
+			// above, before its gate, so neither path can skip budget accounting.)
+			l.budget.RecordUsage(usage)
 		}
-
-		// Record resource consumption.
-		l.budget.RecordUsage(usage)
 
 		if l.config.OnIteration != nil {
 			l.config.OnIteration(iteration, response)
@@ -833,9 +850,40 @@ func (l *Loop) onEvent(ev event.Event) {
 		return
 	}
 
-	l.mu.Lock()
-	l.pendingEvents = append(l.pendingEvents, ev)
-	l.mu.Unlock()
+	observable := isObservable(ev.Type())
+	wake := isWakeWorthy(ev.Type())
+	// agent.state.changed is suppressed at the type level (the Idle⇄Processing
+	// churn that formed the wakeup storm), but a SIGNIFICANT lifecycle transition
+	// (Suspended, Retiring, Retired, ...) must stay visible to peers and wake idle
+	// governance agents — hiding a peer's suspension/retirement is a
+	// governance-visibility loss, not churn. Only the churn states are dropped.
+	if ev.Type() == event.EventTypeAgentStateChanged && !isChurnStateChange(ev) {
+		observable = true
+		wake = true
+	}
+
+	// Queue for the next observation. Peer evaluations (agent.evaluated) and
+	// significant lifecycle changes are queued for governance visibility even when
+	// they do not wake the agent — observe() renders pendingEvents, and the
+	// agent's own Memory is self-scoped, so the bus is the only path by which a
+	// peer's event reaches it. Bounded so a long keepalive sleep cannot accumulate
+	// an unbounded backlog (invariant BOUNDED).
+	if observable {
+		l.mu.Lock()
+		l.pendingEvents = append(l.pendingEvents, ev)
+		if over := len(l.pendingEvents) - maxPendingEvents; over > 0 {
+			l.pendingEvents = l.pendingEvents[over:]
+		}
+		l.mu.Unlock()
+	}
+
+	// Only substantive work wakes a quiescent keepalive agent. Per-iteration
+	// lifecycle/telemetry churn (idle/processing state changes, observations,
+	// evaluations) must not re-wake idle governance agents — they stay subscribed
+	// and see any queued events on their next substantive wake.
+	if !wake {
+		return
+	}
 
 	// Signal the wake channel (non-blocking).
 	select {
@@ -1020,7 +1068,51 @@ func (l *Loop) autoAssignOpenTask() {
 	}
 }
 
-// hasAssignedTask returns true if the agent has any assigned (non-completed) tasks.
+// isOperableStatus reports whether a task in this v3.9 lifecycle status may be
+// picked up for Operate. It is an ALLOWLIST — only the statuses the implementer
+// loop is explicitly responsible for executing return true. Every other status
+// is non-operable: blocked/terminal states, the repair and verification phases
+// owned by other flows, and any unknown, future, or zero-value status. An
+// execution barrier must default closed.
+//
+// StatusRunning is deliberately EXCLUDED: nothing in the runtime parks a task in
+// Running for auto-pickup — it occurs only transiently inside the failure-block
+// walk (Created→Ready→Running→Blocked). Treating Running as operable made a
+// partially-applied block (a transition that advanced to Running but did not
+// reach Blocked) fail open — the failed task would be re-Operated on restart.
+// Excluding it keeps that case fail-closed. StatusReady stays operable because a
+// blocked task is explicitly retried via Blocked→Ready.
+func isOperableStatus(s work.TaskStatus) bool {
+	switch s {
+	case work.StatusCreated, // loop default; required by the auto-assignment path
+		work.StatusReady: // fresh-planned work, or an explicit Blocked→Ready retry
+		return true
+	default:
+		return false
+	}
+}
+
+// taskIsOperable reports whether an assigned task may be Operated. It fails
+// closed at every check: a status read/projection error, a legacy-completed
+// task, a non-allowlisted v3.9 status, or a dependency block (IsBlocked) all make
+// the task non-operable. An unverifiable or blocked task must never be treated as
+// runnable.
+func (l *Loop) taskIsOperable(taskID types.EventID) bool {
+	legacy, err := l.config.TaskStore.GetCompatibilityStatus(taskID)
+	if err != nil || legacy == work.LegacyStatusCompleted {
+		return false
+	}
+	v39, err := l.config.TaskStore.GetStatus(taskID)
+	if err != nil || !isOperableStatus(v39) {
+		return false
+	}
+	if blocked, err := l.config.TaskStore.IsBlocked(taskID); err != nil || blocked {
+		return false
+	}
+	return true
+}
+
+// hasAssignedTask returns true if the agent has any assigned, operable task.
 func (l *Loop) hasAssignedTask() bool {
 	if l.config.TaskStore == nil {
 		return false
@@ -1029,43 +1121,40 @@ func (l *Loop) hasAssignedTask() bool {
 	if err != nil || len(tasks) == 0 {
 		return false
 	}
-	// Check if any assigned task is not yet completed.
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
-		if status != work.LegacyStatusCompleted {
+		if l.taskIsOperable(t.ID) {
 			return true
 		}
 	}
 	return false
 }
 
-// nextAssignedTask returns the next non-completed task assigned to this agent.
+// nextAssignedTask returns the next operable task assigned to this agent.
 func (l *Loop) nextAssignedTask() work.Task {
 	tasks, _ := l.config.TaskStore.GetByAssignee(l.agent.ID())
 	for _, t := range tasks {
-		status, _ := l.config.TaskStore.GetCompatibilityStatus(t.ID)
-		if status != work.LegacyStatusCompleted {
+		if l.taskIsOperable(t.ID) {
 			return t
 		}
 	}
 	return work.Task{}
 }
 
-// attachOperateArtifact captures the current git state as a task artifact.
-// Called after a successful Operate() and before completeTask() to satisfy
-// the artifact gate in TaskStore.Complete(). Best-effort.
+// attachOperateArtifact captures the verified Operate commit range as a task
+// artifact. Called after a successful Operate() and before completeTask() to
+// satisfy the artifact gate in TaskStore.Complete().
 // Note: causes may be empty on the agent's very first event (bootstrap case).
 // The factory handles this by using the graph head as a fallback cause.
-func (l *Loop) attachOperateArtifact(task work.Task) {
+func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) bool {
 	if l.config.TaskStore == nil {
-		return
+		return true
 	}
 	var causes []types.EventID
 	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
 		causes = []types.EventID{lastEv}
 	}
 
-	body := buildOperateArtifactBody(l.config.RepoPath)
+	body := buildOperateArtifactBody(l.config.RepoPath, baseHead, postHead)
 	err := l.config.TaskStore.AddArtifact(
 		l.agent.ID(), task.ID,
 		"Operate result",
@@ -1075,48 +1164,40 @@ func (l *Loop) attachOperateArtifact(task work.Task) {
 	)
 	if err != nil {
 		fmt.Printf("[%s] warning: attach artifact failed: %v\n", l.agent.Name(), err)
+		return false
 	}
+	return true
 }
 
-// waiveOperateArtifact exempts a task from the artifact requirement when
-// Operate produced no new commits. Best-effort.
-func (l *Loop) waiveOperateArtifact(task work.Task, reason string) {
-	if l.config.TaskStore == nil {
-		return
-	}
-	// Causes: use agent's last event for causality chain.
-	var causes []types.EventID
-	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
-		causes = []types.EventID{lastEv}
-	}
-	err := l.config.TaskStore.WaiveArtifact(
-		l.agent.ID(), task.ID,
-		reason,
-		causes, l.config.ConvID,
-	)
-	if err != nil {
-		fmt.Printf("[%s] warning: waive artifact failed: %v\n", l.agent.Name(), err)
-	}
-}
-
-// buildOperateArtifactBody captures the commit hash and changed file list
-// from the repo. Returns a structured string the Reviewer can parse.
-func buildOperateArtifactBody(repoPath string) string {
+// buildOperateArtifactBody captures the verified commit range and changed file
+// list from the repo. Returns a structured string the Reviewer can parse: a
+// header block (commit:/base:/head:/range:) of machine-verified values, a blank
+// line, then the `git diff --stat`. extractCommitRange parses only up to that
+// blank line, so the agent-controlled filenames in the stat cannot spoof the
+// header — preserve the blank-line separator if this format ever changes.
+func buildOperateArtifactBody(repoPath, baseHead, postHead string) string {
 	if repoPath == "" {
 		return "(no repo path configured)"
 	}
-	hash := gitCommand(repoPath, "log", "-1", "--format=%H")
-	stat := gitCommand(repoPath, "diff", "HEAD~1", "--stat")
-	if hash == "" {
+	if postHead == "" {
+		postHead = gitCommand(repoPath, "log", "-1", "--format=%H")
+	}
+	if postHead == "" {
 		return "(no commits)"
 	}
-	return fmt.Sprintf("commit: %s\n\n%s", hash, stat)
+	if baseHead == "" {
+		stat := gitCommand(repoPath, "diff", postHead+"^.."+postHead, "--stat")
+		return fmt.Sprintf("commit: %s\n\n%s", postHead, stat)
+	}
+	diffRef := baseHead + ".." + postHead
+	stat := gitCommand(repoPath, "diff", diffRef, "--stat")
+	return fmt.Sprintf("commit: %s\nbase: %s\nhead: %s\nrange: %s\n\n%s", postHead, baseHead, postHead, diffRef, stat)
 }
 
-// completeTask marks a task as completed in the task store. Best-effort.
-func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string) {
+// completeTask marks a task as completed in the task store.
+func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string) bool {
 	if l.config.TaskStore == nil {
-		return
+		return true
 	}
 	var causes []types.EventID
 	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
@@ -1124,12 +1205,14 @@ func (l *Loop) completeTask(ctx context.Context, task work.Task, summary string)
 	}
 	if err := l.config.TaskStore.Complete(l.agent.ID(), task.ID, summary, causes, l.config.ConvID); err != nil {
 		fmt.Printf("warning: task complete failed: %v\n", err)
+		return false
 	} else {
 		fmt.Printf("  → task completed: %s — %s\n", task.ID.Value(), task.Title)
 		if l.config.OnTaskCompleted != nil {
 			l.config.OnTaskCompleted(ctx, task, summary)
 		}
 	}
+	return true
 }
 
 // currentSnapshot builds a LoopSnapshot from current loop state.
