@@ -149,11 +149,18 @@ func cmdFactoryOrder(args []string) error {
 	conv := factoryOrderConversation(orderID)
 	causes := fc.headCauses()
 
+	// Optional readiness gates carried by the spec. Absent sections stay empty;
+	// the planner attaches them later and work's Readiness gate enforces a
+	// non-empty body before the task is assignable.
+	dod, ac, testPlan := parseOrderGateSections(string(intent))
 	task, err := work.SeedFactoryOrder(ts, fc.humanID, work.FactoryOrder{
-		Kind:   work.OrderSoftwarePR,
-		ID:     orderID,
-		Title:  orderTitle,
-		Intent: string(intent),
+		Kind:               work.OrderSoftwarePR,
+		ID:                 orderID,
+		Title:              orderTitle,
+		Intent:             string(intent),
+		DefinitionOfDone:   dod,
+		AcceptanceCriteria: ac,
+		TestPlan:           testPlan,
 	}, causes, conv)
 	if err != nil {
 		return fmt.Errorf("seed factory order: %w", err)
@@ -489,6 +496,39 @@ func specStem(path string) string {
 		return "order"
 	}
 	return base
+}
+
+// parseOrderGateSections extracts the optional Definition of Done / Acceptance
+// Criteria / Test Plan sections from an order spec's markdown. A section's body
+// is the text under its "## <name>" heading up to the next heading, trimmed.
+// Missing sections return "" so the planner attaches them later — work's
+// Readiness gate enforces non-empty before the task becomes assignable.
+func parseOrderGateSections(spec string) (definitionOfDone, acceptanceCriteria, testPlan string) {
+	sections := map[string][]string{}
+	current := ""
+	for _, line := range strings.Split(spec, "\n") {
+		if heading, ok := markdownHeading(line); ok {
+			current = strings.ToLower(heading)
+			continue
+		}
+		if current != "" {
+			sections[current] = append(sections[current], line)
+		}
+	}
+	body := func(name string) string {
+		return strings.TrimSpace(strings.Join(sections[name], "\n"))
+	}
+	return body("definition of done"), body("acceptance criteria"), body("test plan")
+}
+
+// markdownHeading reports whether line is an ATX heading (one or more leading
+// '#') and returns the heading text with the '#'s and surrounding space removed.
+func markdownHeading(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "#") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimLeft(trimmed, "#")), true
 }
 
 // factoryOrderConversation derives a stable, unique conversation ID for an
