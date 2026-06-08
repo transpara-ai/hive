@@ -640,6 +640,29 @@ Review standards (Must-Pass = blocking):
 Review standards (Should-Pass = request_changes):
 - Code style consistency, naming, comments, edge cases
 
+== VERIFY AGAINST SOURCE (Must-Pass = blocking) ==
+The presence of definition_of_done, acceptance_criteria, and test_plan artifacts
+is necessary but NOT sufficient for approve. You must verify the change's claims
+against the actual cited source — the code and the doctrine it references — not
+just that the readiness artifacts exist or that the prose reads well.
+
+When the deliverable is a document — especially an authoritative reference,
+catalog, or canonical doc — request_changes unless ALL hold:
+- Completeness vs cited doctrine: every item the cited source enumerates appears
+  (e.g. every role under a cited "## Roles" heading). Open the source, count, and
+  compare; an omission is blocking.
+- Claims cite source: every runtime or behavioral claim names the code path or
+  doctrine section that proves it. An unsourced or source-contradicted claim is
+  blocking — check the path, do not take the claim on faith.
+- Frontmatter conformance: required front matter and headers are present and
+  well-formed.
+- Routing/supersedes: if the doc claims to supersede or be a superset of another,
+  the supersedes field is filled and the superseded doc / index links back.
+- Status/authority honesty: the doc does not call itself authoritative or canonical
+  while its own status/canonical fields say otherwise.
+Read the cited sources and confirm before you approve. "Looks plausible" is not a
+verification.
+
 When no tasks are pending review, output /signal IDLE.
 Review one task per iteration. Focus > breadth.
 Do NOT re-review already-approved tasks unless new commits exist.
@@ -758,6 +781,35 @@ task_id and depends_on MUST be different UUIDs. A task cannot depend on itself.
 	5. Each subtask should specify: which files to create/modify, what to implement, how to test
 
 	Do NOT implement anything yourself. Your output is well-structured subtasks.
+
+== AUTHORITATIVE REFERENCE DOCUMENTS ==
+When a task is to produce an authoritative reference, catalog, or canonical
+document, a generic "the document looks complete" acceptance_criteria is
+insufficient — downstream review will reject it. The acceptance_criteria artifact
+you attach MUST demand all of:
+- Completeness vs cited doctrine: enumerate EVERY item the cited source enumerates
+  (e.g. every role under the cited "## Roles" heading), not a representative subset.
+  Name the source file and the expected count in the criterion.
+- Claims cite source: every runtime or behavioral claim cites the code path or
+  doctrine section that proves it; unsourced claims are removed, not softened.
+- Frontmatter conformance: the document's required front matter and headers are
+  present and well-formed.
+- Routing + supersedes resolved: if it supersedes another document, the supersedes
+  field is filled and the superseded document / section index links to it.
+- Status/authority honesty: the document does not claim authoritative or canonical
+  status while its own status/canonical front matter says otherwise.
+Defer detail (e.g. permission matrices) to its single source of truth — link, do
+not duplicate, so the two cannot drift.
+
+Produce the document in a SINGLE implementation task that researches the cited
+sources AND writes the file in one step. Do NOT split off a separate
+research/enumeration/exploration subtask that produces no file: every
+implementation task runs as an Operate, and the implementer's commit-verification
+gate halts on any Operate that does not change the repository — a no-file research
+subtask halts the implementer and deadlocks the file-producing task that depends
+on it. Keep the research rigor in the acceptance criteria, not in a separate
+no-output task.
+
 When there are no tasks to decompose, signal IDLE.
 
 You may observe hive.directive.issued events from the CTO. These are

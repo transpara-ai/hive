@@ -91,6 +91,7 @@ func executeTaskCommands(
 	agentID types.ActorID,
 	causes []types.EventID,
 	convID types.ConversationID,
+	canOperate bool,
 ) int {
 	executed := 0
 	for _, cmd := range commands {
@@ -99,7 +100,7 @@ func executeTaskCommands(
 		case "create":
 			err = execTaskCreate(cmd.Payload, tasks, agentID, causes, convID)
 		case "assign":
-			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID)
+			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID, canOperate)
 		case "complete":
 			err = execTaskComplete(cmd.Payload, tasks, agentID, causes, convID)
 		case "comment":
@@ -176,6 +177,7 @@ func execTaskAssign(
 	agentID types.ActorID,
 	causes []types.EventID,
 	convID types.ConversationID,
+	canOperate bool,
 ) error {
 	var p taskAssignPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -199,6 +201,17 @@ func execTaskAssign(
 	if !readiness.Ready {
 		return fmt.Errorf("task is not ready for assignment; missing gates: %s", strings.Join(readiness.MissingGates, ", "))
 	}
+	// A ready task carries a readiness contract (definition_of_done /
+	// acceptance_criteria / test_plan) — it is an implementation task whose
+	// deliverable is a committed file. Only a CanOperate agent has filesystem
+	// access, so only it can produce and commit that deliverable. A non-Operate
+	// agent that takes the task can only "complete" it with a /task comment, which
+	// bypasses the commit-verification gate entirely (the round-2 reunification
+	// finding: the spawner delivered a catalog as prose, no file, no #131 check).
+	// Fail closed: deny the assignment unless the actor can operate.
+	if !canOperate {
+		return fmt.Errorf("task %s is an implementation task (carries a readiness contract); only a CanOperate agent may take it — a non-Operate agent cannot produce or commit its file deliverable", p.TaskID)
+	}
 	if err := tasks.Assign(agentID, taskID, assignee, causes, convID); err != nil {
 		return err
 	}
@@ -220,6 +233,25 @@ func execTaskComplete(
 	taskID, err := types.NewEventID(p.TaskID)
 	if err != nil {
 		return fmt.Errorf("invalid task_id: %w", err)
+	}
+	// An implementation task — one carrying a readiness contract — is completed
+	// ONLY through the commit-verified Operate path (handleOperateResult, which
+	// attaches the exact Operate commit range and records the completion). A raw
+	// /task complete must never complete such a task: from a non-Operate agent it
+	// is the comment-only bypass (round-2 finding — the spawner "completed" a write
+	// task with prose and no file); from the implementer itself it is a duplicate
+	// that overwrites the verified commit range with an unverified ArtifactRef
+	// (Codex review on hive#132). The contract signal is ANY required readiness
+	// gate present — broader than full readiness, so a partially gated task is
+	// caught during the gate-building window too. Fail closed if readiness is
+	// unreadable. The FactoryOrder seed and analysis tasks carry no readiness gates
+	// (the seed carries fact prerequisites, not gates), so they remain completable.
+	readiness, rerr := tasks.Readiness(taskID)
+	if rerr != nil {
+		return fmt.Errorf("verify readiness before completion: %w", rerr)
+	}
+	if len(readiness.PresentGates) > 0 {
+		return fmt.Errorf("task %s carries an implementation contract (%d readiness gate(s) present); implementation tasks complete only via the commit-verified Operate path, not a raw /task complete", p.TaskID, len(readiness.PresentGates))
 	}
 	if err := tasks.Complete(agentID, taskID, p.Summary, causes, convID); err != nil {
 		return err

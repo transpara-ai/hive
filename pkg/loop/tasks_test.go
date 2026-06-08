@@ -108,7 +108,7 @@ func TestExecTaskAssignRejectsUngatedTask(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	err = execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID)
+	err = execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID, true)
 	if err == nil {
 		t.Fatal("expected assignment error for ungated task, got nil")
 	}
@@ -132,8 +132,78 @@ func TestExecTaskArtifactEnablesAssignment(t *testing.T) {
 			t.Fatalf("execTaskArtifact %s: %v", label, err)
 		}
 	}
-	if err := execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID); err != nil {
+	if err := execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID, true); err != nil {
 		t.Fatalf("execTaskAssign: %v", err)
+	}
+}
+
+// TestImplementationTaskAssignAndCompleteGuards proves the implementation-task
+// ownership + completion invariant across the input domain:
+//   - assignment of a ready implementation task requires a CanOperate actor;
+//   - completion of ANY task carrying a readiness contract (a gate present, even
+//     partially gated) is refused via the raw /task complete path, regardless of
+//     actor — implementation tasks complete only through the commit-verified
+//     Operate path (handleOperateResult). This closes both the non-Operate comment
+//     bypass (round 2) and the implementer's duplicate raw completion (Codex
+//     review on hive#132);
+//   - a task with no readiness gates is never blocked.
+func TestImplementationTaskAssignAndCompleteGuards(t *testing.T) {
+	ts, causes := newTaskCommandStore(t)
+	agentID := types.MustActorID("actor_00000000000000000000000000000113")
+	convID := types.MustConversationID("conv_00000000000000000000000000000113")
+
+	// A fully gated implementation task.
+	ready, err := ts.Create(agentID, "Write the catalog file", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create ready: %v", err)
+	}
+	for _, label := range work.RequiredReadinessGateLabels() {
+		payload := []byte(`{"task_id":"` + ready.ID.Value() + `","label":"` + label + `","media_type":"text/markdown","body":"gate"}`)
+		if err := execTaskArtifact(payload, ts, agentID, causes, convID); err != nil {
+			t.Fatalf("execTaskArtifact %s: %v", label, err)
+		}
+	}
+	readyAssign := []byte(`{"task_id":"` + ready.ID.Value() + `","assignee":"self"}`)
+	readyComplete := []byte(`{"task_id":"` + ready.ID.Value() + `","summary":"done"}`)
+
+	// Assignment: non-Operate refused, CanOperate permitted.
+	if err := execTaskAssign(readyAssign, ts, agentID, causes, convID, false); err == nil || !strings.Contains(err.Error(), "implementation task") {
+		t.Fatalf("non-Operate assign: want \"implementation task\" error, got %v", err)
+	}
+	if err := execTaskAssign(readyAssign, ts, agentID, causes, convID, true); err != nil {
+		t.Fatalf("CanOperate assign: %v", err)
+	}
+
+	// Completion via raw /task complete is refused for a fully gated impl task —
+	// reserved for the commit-verified Operate path.
+	if err := execTaskComplete(readyComplete, ts, agentID, causes, convID); err == nil || !strings.Contains(err.Error(), "implementation contract") {
+		t.Fatalf("raw complete of ready impl task: want \"implementation contract\" error, got %v", err)
+	}
+
+	// A PARTIALLY gated task (one readiness gate) is still an implementation task;
+	// its raw completion is refused too (the gate-building window, P2).
+	partial, err := ts.Create(agentID, "Half-gated impl task", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create partial: %v", err)
+	}
+	oneGate := work.RequiredReadinessGateLabels()[0]
+	if err := execTaskArtifact([]byte(`{"task_id":"`+partial.ID.Value()+`","label":"`+oneGate+`","media_type":"text/markdown","body":"gate"}`), ts, agentID, causes, convID); err != nil {
+		t.Fatalf("execTaskArtifact partial: %v", err)
+	}
+	partialComplete := []byte(`{"task_id":"` + partial.ID.Value() + `","summary":"done"}`)
+	if err := execTaskComplete(partialComplete, ts, agentID, causes, convID); err == nil || !strings.Contains(err.Error(), "implementation contract") {
+		t.Fatalf("raw complete of partially gated impl task: want \"implementation contract\" error, got %v", err)
+	}
+
+	// A task with NO readiness gates (the seed order / an analysis task) is never
+	// blocked by the completion guard.
+	plain, err := ts.Create(agentID, "Summarize findings", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create plain: %v", err)
+	}
+	plainComplete := []byte(`{"task_id":"` + plain.ID.Value() + `","summary":"posted as comment"}`)
+	if err := execTaskComplete(plainComplete, ts, agentID, causes, convID); err != nil && strings.Contains(err.Error(), "implementation contract") {
+		t.Errorf("guard wrongly fired on a non-implementation task: %v", err)
 	}
 }
 
