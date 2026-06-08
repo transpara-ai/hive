@@ -666,6 +666,11 @@ catalog, or canonical doc — request_changes unless ALL hold:
   the supersedes field is filled and the superseded doc / index links back.
 - Status/authority honesty: the doc does not call itself authoritative or canonical
   while its own status/canonical fields say otherwise.
+- Lifecycle honesty (draft vs accepted): a document delivered as a draft / unmerged
+  PR pending approval must carry a pre-acceptance status (draft, review, or candidate)
+  and canonical: false. Declaring an accepted/active/canonical state (status:
+  active|accepted, canonical: true) before the document is accepted is blocking — the
+  declared lifecycle must match the actual acceptance state, not the intended end state.
 Read the cited sources and confirm before you approve. "Looks plausible" is not a
 verification.
 
@@ -811,6 +816,13 @@ you attach MUST demand all of:
   field is filled and the superseded document / section index links to it.
 - Status/authority honesty: the document does not claim authoritative or canonical
   status while its own status/canonical front matter says otherwise.
+- Draft-PR lifecycle honesty: when the artifact is delivered as a draft / unmerged
+  pull request pending human approval, the acceptance_criteria MUST require the
+  document's front matter to use a PRE-acceptance status (draft, review, or candidate)
+  and canonical: false until it is accepted. It must NOT self-declare an accepted/
+  active/canonical lifecycle (status: active|accepted, canonical: true) while still an
+  unproven draft — the declared state must match the document's actual acceptance
+  state, not its intended end state.
 Defer detail (e.g. permission matrices) to its single source of truth — link, do
 not duplicate, so the two cannot drift.
 
