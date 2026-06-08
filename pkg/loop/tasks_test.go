@@ -137,54 +137,72 @@ func TestExecTaskArtifactEnablesAssignment(t *testing.T) {
 	}
 }
 
-// TestImplementationTaskRequiresCanOperate proves the round-2 reunification guard
-// across the input domain: a task that carries a readiness contract (an
-// implementation task) may be assigned/completed only by a CanOperate agent; a
-// non-Operate agent is refused on both paths, while a task without a readiness
-// contract is never blocked by the guard.
-func TestImplementationTaskRequiresCanOperate(t *testing.T) {
+// TestImplementationTaskAssignAndCompleteGuards proves the implementation-task
+// ownership + completion invariant across the input domain:
+//   - assignment of a ready implementation task requires a CanOperate actor;
+//   - completion of ANY task carrying a readiness contract (a gate present, even
+//     partially gated) is refused via the raw /task complete path, regardless of
+//     actor — implementation tasks complete only through the commit-verified
+//     Operate path (handleOperateResult). This closes both the non-Operate comment
+//     bypass (round 2) and the implementer's duplicate raw completion (Codex
+//     review on hive#132);
+//   - a task with no readiness gates is never blocked.
+func TestImplementationTaskAssignAndCompleteGuards(t *testing.T) {
 	ts, causes := newTaskCommandStore(t)
 	agentID := types.MustActorID("actor_00000000000000000000000000000113")
 	convID := types.MustConversationID("conv_00000000000000000000000000000113")
 
-	task, err := ts.Create(agentID, "Write the catalog file", "", causes, convID, work.PriorityMedium)
+	// A fully gated implementation task.
+	ready, err := ts.Create(agentID, "Write the catalog file", "", causes, convID, work.PriorityMedium)
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("Create ready: %v", err)
 	}
 	for _, label := range work.RequiredReadinessGateLabels() {
-		payload := []byte(`{"task_id":"` + task.ID.Value() + `","label":"` + label + `","media_type":"text/markdown","body":"gate"}`)
+		payload := []byte(`{"task_id":"` + ready.ID.Value() + `","label":"` + label + `","media_type":"text/markdown","body":"gate"}`)
 		if err := execTaskArtifact(payload, ts, agentID, causes, convID); err != nil {
 			t.Fatalf("execTaskArtifact %s: %v", label, err)
 		}
 	}
-	assign := []byte(`{"task_id":"` + task.ID.Value() + `","assignee":"self"}`)
-	complete := []byte(`{"task_id":"` + task.ID.Value() + `","summary":"done"}`)
+	readyAssign := []byte(`{"task_id":"` + ready.ID.Value() + `","assignee":"self"}`)
+	readyComplete := []byte(`{"task_id":"` + ready.ID.Value() + `","summary":"done"}`)
 
-	// canOperate=false on a ready task: assignment refused.
-	if err := execTaskAssign(assign, ts, agentID, causes, convID, false); err == nil {
-		t.Fatal("non-Operate assign of implementation task: want error, got nil")
-	} else if !strings.Contains(err.Error(), "implementation task") {
-		t.Errorf("non-Operate assign error = %q, want \"implementation task\"", err.Error())
+	// Assignment: non-Operate refused, CanOperate permitted.
+	if err := execTaskAssign(readyAssign, ts, agentID, causes, convID, false); err == nil || !strings.Contains(err.Error(), "implementation task") {
+		t.Fatalf("non-Operate assign: want \"implementation task\" error, got %v", err)
 	}
-	// canOperate=false on a ready task: completion refused (the round-2 hole).
-	if err := execTaskComplete(complete, ts, agentID, causes, convID, false); err == nil {
-		t.Fatal("non-Operate complete of implementation task: want error, got nil")
-	} else if !strings.Contains(err.Error(), "implementation task") {
-		t.Errorf("non-Operate complete error = %q, want \"implementation task\"", err.Error())
-	}
-	// canOperate=true on a ready task: assignment permitted (the implementer path).
-	if err := execTaskAssign(assign, ts, agentID, causes, convID, true); err != nil {
-		t.Fatalf("CanOperate assign of implementation task: %v", err)
+	if err := execTaskAssign(readyAssign, ts, agentID, causes, convID, true); err != nil {
+		t.Fatalf("CanOperate assign: %v", err)
 	}
 
-	// A task WITHOUT a readiness contract is never blocked by the guard, even for a
-	// non-Operate agent (e.g. an analysis task delivered as a comment).
+	// Completion via raw /task complete is refused for a fully gated impl task —
+	// reserved for the commit-verified Operate path.
+	if err := execTaskComplete(readyComplete, ts, agentID, causes, convID); err == nil || !strings.Contains(err.Error(), "implementation contract") {
+		t.Fatalf("raw complete of ready impl task: want \"implementation contract\" error, got %v", err)
+	}
+
+	// A PARTIALLY gated task (one readiness gate) is still an implementation task;
+	// its raw completion is refused too (the gate-building window, P2).
+	partial, err := ts.Create(agentID, "Half-gated impl task", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create partial: %v", err)
+	}
+	oneGate := work.RequiredReadinessGateLabels()[0]
+	if err := execTaskArtifact([]byte(`{"task_id":"`+partial.ID.Value()+`","label":"`+oneGate+`","media_type":"text/markdown","body":"gate"}`), ts, agentID, causes, convID); err != nil {
+		t.Fatalf("execTaskArtifact partial: %v", err)
+	}
+	partialComplete := []byte(`{"task_id":"` + partial.ID.Value() + `","summary":"done"}`)
+	if err := execTaskComplete(partialComplete, ts, agentID, causes, convID); err == nil || !strings.Contains(err.Error(), "implementation contract") {
+		t.Fatalf("raw complete of partially gated impl task: want \"implementation contract\" error, got %v", err)
+	}
+
+	// A task with NO readiness gates (the seed order / an analysis task) is never
+	// blocked by the completion guard.
 	plain, err := ts.Create(agentID, "Summarize findings", "", causes, convID, work.PriorityMedium)
 	if err != nil {
 		t.Fatalf("Create plain: %v", err)
 	}
 	plainComplete := []byte(`{"task_id":"` + plain.ID.Value() + `","summary":"posted as comment"}`)
-	if err := execTaskComplete(plainComplete, ts, agentID, causes, convID, false); err != nil && strings.Contains(err.Error(), "implementation task") {
+	if err := execTaskComplete(plainComplete, ts, agentID, causes, convID); err != nil && strings.Contains(err.Error(), "implementation contract") {
 		t.Errorf("guard wrongly fired on a non-implementation task: %v", err)
 	}
 }
