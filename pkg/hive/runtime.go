@@ -27,12 +27,12 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/api"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/membrane"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 	"github.com/transpara-ai/work"
@@ -504,6 +504,23 @@ func buildCheckpointSink(thoughts checkpoint.ThoughtStore, role string) checkpoi
 	return checkpoint.NewDefaultSink(thoughts, nil, role)
 }
 
+// defaultPerCallBudgetUSD is the per-call budget floor for factory/daemon agents
+// when the model catalog leaves it unset. modelconfig.ToIntelligenceConfig yields
+// MaxBudgetUSD=0 for the default catalog, and claude-cli then falls back to a
+// $1/call cap — too low for an opus Operate. $10 matches the council/pipeline
+// operator norm (see councilProviderBuilder in cmd/hive/main.go).
+const defaultPerCallBudgetUSD = 10.0
+
+// applyPerCallBudgetFloor fills an unset per-call budget (<= 0) with floor, so a
+// provider built from a catalog that omits max_budget_usd is not silently capped
+// at claude-cli's $1/call default. An explicit catalog value always wins.
+func applyPerCallBudgetFloor(cfg intelligence.Config, floor float64) intelligence.Config {
+	if cfg.MaxBudgetUSD <= 0 {
+		cfg.MaxBudgetUSD = floor
+	}
+	return cfg
+}
+
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 // It returns the agent and the resolved model name so callers can pass it to telemetry.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, error) {
@@ -524,6 +541,12 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
 	}
 	cfg := modelconfig.ToIntelligenceConfig(resolved, def.SystemPrompt)
+	// The default model catalog leaves the per-call budget unset (MaxBudgetUSD=0),
+	// which makes claude-cli fall back to its $1/call default — far too low for an
+	// opus implementer Operate (a multi-minute research+write task exhausts $1 and
+	// the subprocess exits non-zero mid-task). Apply a sane floor so Operate can
+	// complete; an explicit catalog budget still wins.
+	cfg = applyPerCallBudgetFloor(cfg, defaultPerCallBudgetUSD)
 	provider, err := intelligence.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)

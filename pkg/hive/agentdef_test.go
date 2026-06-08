@@ -167,6 +167,100 @@ func TestStarterAgents_HaveRoleDefinitions(t *testing.T) {
 	}
 }
 
+// TestImplementerWatchesTaskArtifact guards Finding 3 (the wakeup race): the
+// implementer must wake when the Planner attaches readiness gates
+// (work.task.artifact). Without this subscription, an idle keepalive implementer
+// that ran before the gates landed is never re-woken when the task becomes ready.
+func TestImplementerWatchesTaskArtifact(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	var impl *AgentDef
+	for i := range agents {
+		if agents[i].Name == "implementer" {
+			impl = &agents[i]
+			break
+		}
+	}
+	if impl == nil {
+		t.Fatal("implementer AgentDef not found in StarterAgents")
+	}
+	found := false
+	for _, p := range impl.WatchPatterns {
+		if p == "work.task.artifact" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("implementer WatchPatterns must include work.task.artifact (Finding 3 wakeup race); got %v", impl.WatchPatterns)
+	}
+}
+
+// TestContractsEnforceScopeExclusivity guards the content-fidelity fix: the
+// Planner's authoritative-document acceptance_criteria and the Reviewer's
+// verify-against-source standard must enforce EXCLUSIVITY (a scope ceiling), not
+// only completeness. Without a ceiling the society over-enumerates: round 1 of the
+// roles-catalog run produced 46 roles (the 24 in-scope plus 22 roadmap/aspirational
+// roles) because both contracts demanded "enumerate every item the source has" but
+// neither forbade ADDING items absent from the cited sources. The fix makes
+// over-enumeration as blocking as omission, symmetrically, in both contracts.
+func TestContractsEnforceScopeExclusivity(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	promptFor := func(name string) string {
+		for i := range agents {
+			if agents[i].Name == name {
+				return agents[i].SystemPrompt
+			}
+		}
+		t.Fatalf("agent %q not found in StarterAgents", name)
+		return ""
+	}
+
+	planner := promptFor("planner")
+	for _, phrase := range []string{"Exclusivity (scope ceiling)", "over-enumeration"} {
+		if !strings.Contains(planner, phrase) {
+			t.Errorf("planner contract must demand scope exclusivity in acceptance_criteria; missing %q", phrase)
+		}
+	}
+
+	reviewer := promptFor("reviewer")
+	for _, phrase := range []string{"Exclusivity vs cited source", "symmetric with omission"} {
+		if !strings.Contains(reviewer, phrase) {
+			t.Errorf("reviewer contract must block over-enumeration; missing %q", phrase)
+		}
+	}
+}
+
+// TestContractsEnforceDraftLifecycleHonesty guards the round-3 finding: a document
+// delivered as a draft / unmerged PR pending human approval (Gate-E) must declare a
+// PRE-acceptance lifecycle (status draft/review/candidate, canonical:false) until it
+// is accepted — not active/accepted/canonical:true. The round-3 catalog was content-
+// and scope-perfect but FAILED AC-1 because it self-declared status:active +
+// canonical:true while still an unmerged draft, contradicting the repo's own
+// governance definition of "active" (= accepted and currently governing). The Planner
+// AC-demands and the Reviewer verify-against-source must both enforce this.
+func TestContractsEnforceDraftLifecycleHonesty(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	promptFor := func(name string) string {
+		for i := range agents {
+			if agents[i].Name == name {
+				return agents[i].SystemPrompt
+			}
+		}
+		t.Fatalf("agent %q not found in StarterAgents", name)
+		return ""
+	}
+
+	planner := promptFor("planner")
+	if !strings.Contains(planner, "Draft-PR lifecycle honesty") {
+		t.Errorf("planner contract must demand draft-PR lifecycle honesty in acceptance_criteria (status draft/canonical:false until accepted)")
+	}
+
+	reviewer := promptFor("reviewer")
+	if !strings.Contains(reviewer, "Lifecycle honesty (draft vs accepted)") {
+		t.Errorf("reviewer contract must block accepted/active/canonical lifecycle claims on an unmerged draft")
+	}
+}
+
 func TestEffectiveModelPolicy(t *testing.T) {
 	rdPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierVolume}
 	defPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierJudgment}

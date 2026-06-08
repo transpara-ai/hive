@@ -651,6 +651,12 @@ catalog, or canonical doc — request_changes unless ALL hold:
 - Completeness vs cited doctrine: every item the cited source enumerates appears
   (e.g. every role under a cited "## Roles" heading). Open the source, count, and
   compare; an omission is blocking.
+- Exclusivity vs cited source: every enumerated item is present in a cited source.
+  An INCLUSION that no cited source enumerates — an over-enumeration, e.g. a
+  roadmap/aspirational/growth-loop item the running code never registers — is
+  blocking, symmetric with omission. Count BOTH directions: too few is an omission,
+  too many is over-enumeration, and both fail review. "More complete than the
+  cited source" is a defect here, not extra credit.
 - Claims cite source: every runtime or behavioral claim names the code path or
   doctrine section that proves it. An unsourced or source-contradicted claim is
   blocking — check the path, do not take the claim on faith.
@@ -660,6 +666,11 @@ catalog, or canonical doc — request_changes unless ALL hold:
   the supersedes field is filled and the superseded doc / index links back.
 - Status/authority honesty: the doc does not call itself authoritative or canonical
   while its own status/canonical fields say otherwise.
+- Lifecycle honesty (draft vs accepted): a document delivered as a draft / unmerged
+  PR pending approval must carry a pre-acceptance status (draft, review, or candidate)
+  and canonical: false. Declaring an accepted/active/canonical state (status:
+  active|accepted, canonical: true) before the document is accepted is blocking — the
+  declared lifecycle must match the actual acceptance state, not the intended end state.
 Read the cited sources and confirm before you approve. "Looks plausible" is not a
 verification.
 
@@ -790,6 +801,13 @@ you attach MUST demand all of:
 - Completeness vs cited doctrine: enumerate EVERY item the cited source enumerates
   (e.g. every role under the cited "## Roles" heading), not a representative subset.
   Name the source file and the expected count in the criterion.
+- Exclusivity (scope ceiling): enumerate ONLY items the cited sources define. An
+  item that appears only in a roadmap, design, growth-loop, or "future/emergent
+  roles" document — anything the cited code/doctrine does not itself register — is
+  out of scope and is EXCLUDED, not added for comprehensiveness. The criterion must
+  name the forbidden sources and state that over-enumeration (items beyond the cited
+  sources) is as much a defect as omission; "more comprehensive" is not the goal,
+  faithful to the cited sources is.
 - Claims cite source: every runtime or behavioral claim cites the code path or
   doctrine section that proves it; unsourced claims are removed, not softened.
 - Frontmatter conformance: the document's required front matter and headers are
@@ -798,6 +816,13 @@ you attach MUST demand all of:
   field is filled and the superseded document / section index links to it.
 - Status/authority honesty: the document does not claim authoritative or canonical
   status while its own status/canonical front matter says otherwise.
+- Draft-PR lifecycle honesty: when the artifact is delivered as a draft / unmerged
+  pull request pending human approval, the acceptance_criteria MUST require the
+  document's front matter to use a PRE-acceptance status (draft, review, or candidate)
+  and canonical: false until it is accepted. It must NOT self-declare an accepted/
+  active/canonical lifecycle (status: active|accepted, canonical: true) while still an
+  unproven draft — the declared state must match the document's actual acceptance
+  state, not its intended end state.
 Defer detail (e.g. permission matrices) to its single source of truth — link, do
 not duplicate, so the two cannot drift.
 
@@ -868,7 +893,12 @@ evidence-based insights distilled from accumulated experience. Use them as
 context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
-			WatchPatterns: []string{"work.task.created", "work.task.assigned", "code.review.*"},
+			// work.task.artifact wakes an idle keepalive implementer when the
+			// Planner attaches a task's readiness gates — without it, an implementer
+			// that went quiet before the gates landed is never re-woken when the
+			// task becomes ready (Finding 3, the wakeup race). Own artifact events
+			// are skipped in onEvent, so this cannot self-loop.
+			WatchPatterns: []string{"work.task.created", "work.task.assigned", "work.task.artifact", "code.review.*"},
 			MaxIterations: 500, // Implementer needs many iterations for multi-task builds
 			MaxDuration:   4 * time.Hour,
 		},
