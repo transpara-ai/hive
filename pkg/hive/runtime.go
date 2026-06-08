@@ -27,12 +27,12 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/api"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/hive/pkg/knowledge"
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/membrane"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 	"github.com/transpara-ai/work"

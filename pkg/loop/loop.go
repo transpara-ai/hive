@@ -351,7 +351,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// task's readiness contract (DoD/acceptance_criteria/test_plan) so the
 			// implementer builds to the criteria the Planner attached — title+desc
 			// alone left round 1 blind to them and it over-enumerated the catalog.
-			instruction := l.operateInstruction(task)
+			instruction, instrErr := l.operateInstruction(task)
+			if instrErr != nil {
+				// Fail closed: refuse to Operate blind to the readiness contract.
+				// Escalate rather than degrade to title+description when a configured
+				// store cannot load the task's gates.
+				return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", instrErr))
+			}
 
 			// Record HEAD before Operate so we can detect new commits. gitTry
 			// reports whether the read succeeded: an unreadable pre-Operate HEAD
