@@ -91,6 +91,7 @@ func executeTaskCommands(
 	agentID types.ActorID,
 	causes []types.EventID,
 	convID types.ConversationID,
+	canOperate bool,
 ) int {
 	executed := 0
 	for _, cmd := range commands {
@@ -99,9 +100,9 @@ func executeTaskCommands(
 		case "create":
 			err = execTaskCreate(cmd.Payload, tasks, agentID, causes, convID)
 		case "assign":
-			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID)
+			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID, canOperate)
 		case "complete":
-			err = execTaskComplete(cmd.Payload, tasks, agentID, causes, convID)
+			err = execTaskComplete(cmd.Payload, tasks, agentID, causes, convID, canOperate)
 		case "comment":
 			err = execTaskComment(cmd.Payload, tasks, agentID, causes, convID)
 		case "artifact":
@@ -176,6 +177,7 @@ func execTaskAssign(
 	agentID types.ActorID,
 	causes []types.EventID,
 	convID types.ConversationID,
+	canOperate bool,
 ) error {
 	var p taskAssignPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -199,6 +201,17 @@ func execTaskAssign(
 	if !readiness.Ready {
 		return fmt.Errorf("task is not ready for assignment; missing gates: %s", strings.Join(readiness.MissingGates, ", "))
 	}
+	// A ready task carries a readiness contract (definition_of_done /
+	// acceptance_criteria / test_plan) — it is an implementation task whose
+	// deliverable is a committed file. Only a CanOperate agent has filesystem
+	// access, so only it can produce and commit that deliverable. A non-Operate
+	// agent that takes the task can only "complete" it with a /task comment, which
+	// bypasses the commit-verification gate entirely (the round-2 reunification
+	// finding: the spawner delivered a catalog as prose, no file, no #131 check).
+	// Fail closed: deny the assignment unless the actor can operate.
+	if !canOperate {
+		return fmt.Errorf("task %s is an implementation task (carries a readiness contract); only a CanOperate agent may take it — a non-Operate agent cannot produce or commit its file deliverable", p.TaskID)
+	}
 	if err := tasks.Assign(agentID, taskID, assignee, causes, convID); err != nil {
 		return err
 	}
@@ -212,6 +225,7 @@ func execTaskComplete(
 	agentID types.ActorID,
 	causes []types.EventID,
 	convID types.ConversationID,
+	canOperate bool,
 ) error {
 	var p taskCompletePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -220,6 +234,23 @@ func execTaskComplete(
 	taskID, err := types.NewEventID(p.TaskID)
 	if err != nil {
 		return fmt.Errorf("invalid task_id: %w", err)
+	}
+	// A ready task carries a readiness contract — it is an implementation task
+	// whose deliverable is a committed file. Only a CanOperate agent (the
+	// implementer) can produce and commit that file, and its Operate path is
+	// commit-verified. A non-Operate agent cannot have produced the file, so its
+	// completion is necessarily comment-only and bypasses the commit-verification
+	// gate (the round-2 reunification finding: the spawner "completed" a write task
+	// with prose and no file). Fail closed: refuse on the readiness signal, and
+	// refuse too if readiness cannot be determined.
+	if !canOperate {
+		readiness, rerr := tasks.Readiness(taskID)
+		if rerr != nil {
+			return fmt.Errorf("verify readiness before completion: %w", rerr)
+		}
+		if readiness.Ready {
+			return fmt.Errorf("task %s is an implementation task (carries a readiness contract); only a CanOperate agent may complete it (its Operate is commit-verified) — refusing a non-Operate, comment-only completion", p.TaskID)
+		}
 	}
 	if err := tasks.Complete(agentID, taskID, p.Summary, causes, convID); err != nil {
 		return err

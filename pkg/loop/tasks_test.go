@@ -108,7 +108,7 @@ func TestExecTaskAssignRejectsUngatedTask(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	err = execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID)
+	err = execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID, true)
 	if err == nil {
 		t.Fatal("expected assignment error for ungated task, got nil")
 	}
@@ -132,8 +132,60 @@ func TestExecTaskArtifactEnablesAssignment(t *testing.T) {
 			t.Fatalf("execTaskArtifact %s: %v", label, err)
 		}
 	}
-	if err := execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID); err != nil {
+	if err := execTaskAssign([]byte(`{"task_id":"`+task.ID.Value()+`","assignee":"self"}`), ts, agentID, causes, convID, true); err != nil {
 		t.Fatalf("execTaskAssign: %v", err)
+	}
+}
+
+// TestImplementationTaskRequiresCanOperate proves the round-2 reunification guard
+// across the input domain: a task that carries a readiness contract (an
+// implementation task) may be assigned/completed only by a CanOperate agent; a
+// non-Operate agent is refused on both paths, while a task without a readiness
+// contract is never blocked by the guard.
+func TestImplementationTaskRequiresCanOperate(t *testing.T) {
+	ts, causes := newTaskCommandStore(t)
+	agentID := types.MustActorID("actor_00000000000000000000000000000113")
+	convID := types.MustConversationID("conv_00000000000000000000000000000113")
+
+	task, err := ts.Create(agentID, "Write the catalog file", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, label := range work.RequiredReadinessGateLabels() {
+		payload := []byte(`{"task_id":"` + task.ID.Value() + `","label":"` + label + `","media_type":"text/markdown","body":"gate"}`)
+		if err := execTaskArtifact(payload, ts, agentID, causes, convID); err != nil {
+			t.Fatalf("execTaskArtifact %s: %v", label, err)
+		}
+	}
+	assign := []byte(`{"task_id":"` + task.ID.Value() + `","assignee":"self"}`)
+	complete := []byte(`{"task_id":"` + task.ID.Value() + `","summary":"done"}`)
+
+	// canOperate=false on a ready task: assignment refused.
+	if err := execTaskAssign(assign, ts, agentID, causes, convID, false); err == nil {
+		t.Fatal("non-Operate assign of implementation task: want error, got nil")
+	} else if !strings.Contains(err.Error(), "implementation task") {
+		t.Errorf("non-Operate assign error = %q, want \"implementation task\"", err.Error())
+	}
+	// canOperate=false on a ready task: completion refused (the round-2 hole).
+	if err := execTaskComplete(complete, ts, agentID, causes, convID, false); err == nil {
+		t.Fatal("non-Operate complete of implementation task: want error, got nil")
+	} else if !strings.Contains(err.Error(), "implementation task") {
+		t.Errorf("non-Operate complete error = %q, want \"implementation task\"", err.Error())
+	}
+	// canOperate=true on a ready task: assignment permitted (the implementer path).
+	if err := execTaskAssign(assign, ts, agentID, causes, convID, true); err != nil {
+		t.Fatalf("CanOperate assign of implementation task: %v", err)
+	}
+
+	// A task WITHOUT a readiness contract is never blocked by the guard, even for a
+	// non-Operate agent (e.g. an analysis task delivered as a comment).
+	plain, err := ts.Create(agentID, "Summarize findings", "", causes, convID, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create plain: %v", err)
+	}
+	plainComplete := []byte(`{"task_id":"` + plain.ID.Value() + `","summary":"posted as comment"}`)
+	if err := execTaskComplete(plainComplete, ts, agentID, causes, convID, false); err != nil && strings.Contains(err.Error(), "implementation task") {
+		t.Errorf("guard wrongly fired on a non-implementation task: %v", err)
 	}
 }
 

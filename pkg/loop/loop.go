@@ -990,7 +990,7 @@ func (l *Loop) processTaskCommands(response string) {
 		causes = []types.EventID{lastEv}
 	}
 
-	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID)
+	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID, l.config.CanOperate)
 	if executed > 0 {
 		fmt.Printf("[%s] executed %d/%d task commands\n", l.agent.Name(), executed, len(commands))
 	}
