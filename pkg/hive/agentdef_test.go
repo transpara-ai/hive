@@ -195,6 +195,41 @@ func TestImplementerWatchesTaskArtifact(t *testing.T) {
 	}
 }
 
+// TestContractsEnforceScopeExclusivity guards the content-fidelity fix: the
+// Planner's authoritative-document acceptance_criteria and the Reviewer's
+// verify-against-source standard must enforce EXCLUSIVITY (a scope ceiling), not
+// only completeness. Without a ceiling the society over-enumerates: round 1 of the
+// roles-catalog run produced 46 roles (the 24 in-scope plus 22 roadmap/aspirational
+// roles) because both contracts demanded "enumerate every item the source has" but
+// neither forbade ADDING items absent from the cited sources. The fix makes
+// over-enumeration as blocking as omission, symmetrically, in both contracts.
+func TestContractsEnforceScopeExclusivity(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	promptFor := func(name string) string {
+		for i := range agents {
+			if agents[i].Name == name {
+				return agents[i].SystemPrompt
+			}
+		}
+		t.Fatalf("agent %q not found in StarterAgents", name)
+		return ""
+	}
+
+	planner := promptFor("planner")
+	for _, phrase := range []string{"Exclusivity (scope ceiling)", "over-enumeration"} {
+		if !strings.Contains(planner, phrase) {
+			t.Errorf("planner contract must demand scope exclusivity in acceptance_criteria; missing %q", phrase)
+		}
+	}
+
+	reviewer := promptFor("reviewer")
+	for _, phrase := range []string{"Exclusivity vs cited source", "symmetric with omission"} {
+		if !strings.Contains(reviewer, phrase) {
+			t.Errorf("reviewer contract must block over-enumeration; missing %q", phrase)
+		}
+	}
+}
+
 func TestEffectiveModelPolicy(t *testing.T) {
 	rdPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierVolume}
 	defPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierJudgment}
