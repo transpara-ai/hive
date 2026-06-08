@@ -801,6 +801,15 @@ you attach MUST demand all of:
 Defer detail (e.g. permission matrices) to its single source of truth — link, do
 not duplicate, so the two cannot drift.
 
+Produce the document in a SINGLE implementation task that researches the cited
+sources AND writes the file in one step. Do NOT split off a separate
+research/enumeration/exploration subtask that produces no file: every
+implementation task runs as an Operate, and the implementer's commit-verification
+gate halts on any Operate that does not change the repository — a no-file research
+subtask halts the implementer and deadlocks the file-producing task that depends
+on it. Keep the research rigor in the acceptance criteria, not in a separate
+no-output task.
+
 When there are no tasks to decompose, signal IDLE.
 
 You may observe hive.directive.issued events from the CTO. These are
