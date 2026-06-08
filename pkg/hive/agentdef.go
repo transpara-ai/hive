@@ -868,7 +868,12 @@ evidence-based insights distilled from accumulated experience. Use them as
 context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
-			WatchPatterns: []string{"work.task.created", "work.task.assigned", "code.review.*"},
+			// work.task.artifact wakes an idle keepalive implementer when the
+			// Planner attaches a task's readiness gates — without it, an implementer
+			// that went quiet before the gates landed is never re-woken when the
+			// task becomes ready (Finding 3, the wakeup race). Own artifact events
+			// are skipped in onEvent, so this cannot self-loop.
+			WatchPatterns: []string{"work.task.created", "work.task.assigned", "work.task.artifact", "code.review.*"},
 			MaxIterations: 500, // Implementer needs many iterations for multi-task builds
 			MaxDuration:   4 * time.Hour,
 		},

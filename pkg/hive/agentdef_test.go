@@ -167,6 +167,34 @@ func TestStarterAgents_HaveRoleDefinitions(t *testing.T) {
 	}
 }
 
+// TestImplementerWatchesTaskArtifact guards Finding 3 (the wakeup race): the
+// implementer must wake when the Planner attaches readiness gates
+// (work.task.artifact). Without this subscription, an idle keepalive implementer
+// that ran before the gates landed is never re-woken when the task becomes ready.
+func TestImplementerWatchesTaskArtifact(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	var impl *AgentDef
+	for i := range agents {
+		if agents[i].Name == "implementer" {
+			impl = &agents[i]
+			break
+		}
+	}
+	if impl == nil {
+		t.Fatal("implementer AgentDef not found in StarterAgents")
+	}
+	found := false
+	for _, p := range impl.WatchPatterns {
+		if p == "work.task.artifact" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("implementer WatchPatterns must include work.task.artifact (Finding 3 wakeup race); got %v", impl.WatchPatterns)
+	}
+}
+
 func TestEffectiveModelPolicy(t *testing.T) {
 	rdPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierVolume}
 	defPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierJudgment}
