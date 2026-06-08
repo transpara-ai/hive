@@ -347,7 +347,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 		if l.config.CanOperate && l.config.RepoPath != "" && l.hasAssignedTask() {
 			// Operate path: agent has filesystem access and assigned work.
 			task := l.nextAssignedTask()
-			instruction := fmt.Sprintf("Task: %s\n\n%s", task.Title, task.Description)
+			// Operate sees ONLY this instruction (headless subprocess). Fold in the
+			// task's readiness contract (DoD/acceptance_criteria/test_plan) so the
+			// implementer builds to the criteria the Planner attached — title+desc
+			// alone left round 1 blind to them and it over-enumerated the catalog.
+			instruction := l.operateInstruction(task)
 
 			// Record HEAD before Operate so we can detect new commits. gitTry
 			// reports whether the read succeeded: an unreadable pre-Operate HEAD
