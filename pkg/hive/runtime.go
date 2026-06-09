@@ -72,9 +72,12 @@ type Runtime struct {
 	// Knowledge store for distilled insights (survives reboot via chain replay).
 	knowledgeStore knowledge.KnowledgeStore
 
-	// Model resolver for agent provider/model selection. Set once during Run()
-	// and never swapped — closures that capture it are safe without synchronization.
-	resolver *modelconfig.Resolver
+	// Model resolver for agent provider/model selection. Runtime catalog reloads
+	// replace this resolver for future spawns/reads; already-created providers are
+	// not silently swapped mid-loop.
+	resolverMu            sync.RWMutex
+	resolver              *modelconfig.Resolver
+	modelSelectionManager *OperatorModelSelectionManager
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -88,23 +91,25 @@ type Runtime struct {
 	bridgeMu    sync.Mutex
 
 	// Options.
-	approveRequests bool
-	approveRoles    bool
-	repoPath        string
-	loop            bool
-	catalogPath     string
+	approveRequests       bool
+	approveRoles          bool
+	repoPath              string
+	loop                  bool
+	catalogPath           string
+	catalogReloadInterval time.Duration
 }
 
 // Config holds the configuration needed to create a Runtime.
 type Config struct {
-	Store           store.Store
-	Actors          actor.IActorStore
-	HumanID         types.ActorID
-	ApproveRequests bool   // --approve-requests: auto-approve authority requests
-	ApproveRoles    bool   // --approve-roles: auto-approve role proposals
-	RepoPath        string // --repo: path to repo for Operate
-	Loop            bool   // --loop: agents block on bus instead of quiescing
-	CatalogPath     string // --catalog: custom YAML catalog file (merged with defaults)
+	Store                 store.Store
+	Actors                actor.IActorStore
+	HumanID               types.ActorID
+	ApproveRequests       bool          // --approve-requests: auto-approve authority requests
+	ApproveRoles          bool          // --approve-roles: auto-approve role proposals
+	RepoPath              string        // --repo: path to repo for Operate
+	Loop                  bool          // --loop: agents block on bus instead of quiescing
+	CatalogPath           string        // --catalog: custom YAML catalog file (merged with defaults)
+	CatalogReloadInterval time.Duration // reload --catalog for future spawns; 0 disables
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -151,23 +156,24 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	phaseGates := work.NewPhaseGateStore(cfg.Store, factory, signer)
 
 	return &Runtime{
-		store:           cfg.Store,
-		actors:          cfg.Actors,
-		graph:           g,
-		humanID:         cfg.HumanID,
-		systemID:        systemID,
-		signer:          signer,
-		factory:         factory,
-		convID:          convID,
-		tasks:           tasks,
-		phaseGates:      phaseGates,
-		approveRequests: cfg.ApproveRequests,
-		approveRoles:    cfg.ApproveRoles,
-		repoPath:        cfg.RepoPath,
-		loop:            cfg.Loop,
-		catalogPath:     cfg.CatalogPath,
-		telemetryWriter: cfg.TelemetryWriter,
-		apiClient:       cfg.APIClient,
+		store:                 cfg.Store,
+		actors:                cfg.Actors,
+		graph:                 g,
+		humanID:               cfg.HumanID,
+		systemID:              systemID,
+		signer:                signer,
+		factory:               factory,
+		convID:                convID,
+		tasks:                 tasks,
+		phaseGates:            phaseGates,
+		approveRequests:       cfg.ApproveRequests,
+		approveRoles:          cfg.ApproveRoles,
+		repoPath:              cfg.RepoPath,
+		loop:                  cfg.Loop,
+		catalogPath:           cfg.CatalogPath,
+		catalogReloadInterval: cfg.CatalogReloadInterval,
+		telemetryWriter:       cfg.TelemetryWriter,
+		apiClient:             cfg.APIClient,
 	}, nil
 }
 
@@ -189,6 +195,46 @@ func (r *Runtime) RegisterMembrane(cfg membrane.MembraneConfig) error {
 	}
 	r.membraneDefs = append(r.membraneDefs, cfg)
 	return nil
+}
+
+func (r *Runtime) currentResolver() *modelconfig.Resolver {
+	r.resolverMu.RLock()
+	defer r.resolverMu.RUnlock()
+	if r.resolver == nil {
+		return modelconfig.DefaultResolver()
+	}
+	return r.resolver
+}
+
+func (r *Runtime) setResolver(resolver *modelconfig.Resolver) {
+	if resolver == nil {
+		resolver = modelconfig.DefaultResolver()
+	}
+	r.resolverMu.Lock()
+	defer r.resolverMu.Unlock()
+	r.resolver = resolver
+}
+
+func (r *Runtime) runCatalogReloadLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, err := r.modelSelectionManager.ReloadIfChanged(time.Now().UTC())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: model catalog reload failed: %v\n", err)
+				continue
+			}
+			if changed {
+				snapshot := r.modelSelectionManager.Snapshot()
+				r.setResolver(snapshot.Resolver)
+				fmt.Fprintf(os.Stderr, "Model catalog reloaded: %s\n", snapshot.CatalogSource)
+			}
+		}
+	}
 }
 
 // Run creates all registered agents and runs their loops concurrently.
@@ -229,16 +275,21 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	// Create the dynamic agent tracker (manages post-boot spawned agents).
 	r.dynamic = newDynamicAgentTracker()
 
-	// Initialize model resolver for agent spawning.
+	// Initialize model resolver for agent spawning. Optional hot reload affects
+	// future resolver lookups (for example dynamic role spawns); already-created
+	// provider instances are not silently swapped mid-loop.
+	modelSelectionManager, err := NewOperatorModelSelectionManager(r.catalogPath, start.UTC(), r.catalogReloadInterval > 0)
+	if err != nil {
+		return fmt.Errorf("custom catalog: %w", err)
+	}
+	r.modelSelectionManager = modelSelectionManager
+	r.setResolver(modelSelectionManager.Snapshot().Resolver)
+	modelSelection := modelSelectionManager.Snapshot()
 	if r.catalogPath != "" {
-		var err error
-		r.resolver, err = modelconfig.ResolverFromCatalogFile(r.catalogPath)
-		if err != nil {
-			return fmt.Errorf("custom catalog: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Model catalog: %s (merged with defaults)\n", r.catalogPath)
-	} else {
-		r.resolver = modelconfig.DefaultResolver()
+		fmt.Fprintf(os.Stderr, "Model catalog: %s (merged with defaults, reload=%s)\n", r.catalogPath, modelSelection.ReloadMode)
+	}
+	if r.catalogPath != "" && r.catalogReloadInterval > 0 {
+		go r.runCatalogReloadLoop(ctx, r.catalogReloadInterval)
 	}
 
 	// Wire budget registry into telemetry writer now that it exists.
@@ -405,6 +456,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			Keepalive:       r.loop,
 			KnowledgeStore:  r.knowledgeStore,
 			CostSummaryFunc: func() string {
+				resolver := r.currentResolver()
 				entries := r.budgetRegistry.Snapshot()
 				agents := make([]modelconfig.AgentModelEntry, 0, len(entries))
 				for _, e := range entries {
@@ -413,10 +465,10 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 						Model: e.ResolvedModel,
 					})
 				}
-				summaries := modelconfig.EstimateAgentCostsByModel(r.resolver.Catalog(), agents, 10_000, 2_000)
+				summaries := modelconfig.EstimateAgentCostsByModel(resolver.Catalog(), agents, 10_000, 2_000)
 				return modelconfig.FormatCostSummary(summaries)
 			},
-			Catalog: r.resolver.Catalog(),
+			Catalog: r.currentResolver().Catalog(),
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)
 				if err != nil {
@@ -536,7 +588,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		Policy:        def.EffectiveModelPolicy(),
 		CanOperate:    def.CanOperate,
 	}
-	resolved, err := r.resolver.Resolve(input)
+	resolved, err := r.currentResolver().Resolve(input)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
 	}

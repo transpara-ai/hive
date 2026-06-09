@@ -23,6 +23,7 @@ type operatorServerOptions struct {
 	writer            *operatorDecisionWriter
 	runWriter         *operatorRunLaunchWriter
 	projectionOptions []OperatorProjectionOption
+	modelSelection    OperatorModelSelectionSource
 }
 
 // OperatorServerOption configures NewOperatorProjectionServer.
@@ -55,6 +56,16 @@ func WithOperatorDecisionWriter(factory *event.EventFactory, signer event.Signer
 func WithOperatorProjectionModelSelection(config OperatorModelSelectionConfig) OperatorServerOption {
 	return func(o *operatorServerOptions) {
 		o.projectionOptions = append(o.projectionOptions, WithOperatorModelSelection(config))
+		o.modelSelection = func() OperatorModelSelectionConfig { return config }
+	}
+}
+
+// WithOperatorProjectionModelSelectionSource configures the read-only
+// model-selection projection from a dynamic Hive-owned source.
+func WithOperatorProjectionModelSelectionSource(source OperatorModelSelectionSource) OperatorServerOption {
+	return func(o *operatorServerOptions) {
+		o.projectionOptions = append(o.projectionOptions, WithOperatorModelSelectionSource(source))
+		o.modelSelection = source
 	}
 }
 
@@ -110,7 +121,7 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			handleOperatorRunLaunch(w, r, s, writer)
+			handleOperatorRunLaunch(w, r, s, writer, options.modelSelection)
 		})
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

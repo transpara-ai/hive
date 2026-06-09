@@ -163,3 +163,18 @@ func TestCmdCouncil_AcceptsCatalogFlag(t *testing.T) {
 		t.Errorf("--catalog value=%q; want /tmp/test-catalog.yaml", got)
 	}
 }
+
+func TestDaemonCommandsAcceptCatalogReloadIntervalFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"civilization", "daemon", "--catalog-reload-interval", "5s"},
+		{"factory", "daemon", "--catalog-reload-interval", "5s"},
+	} {
+		err := routeAndDispatch(args)
+		if err == nil || !strings.Contains(err.Error(), "human") {
+			t.Fatalf("%v: expected missing-human validation after flag parse, got %v", args, err)
+		}
+		if strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("%v: catalog reload flag was not accepted: %v", args, err)
+		}
+	}
+}

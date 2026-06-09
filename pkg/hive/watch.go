@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/loop"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/hive/pkg/telemetry"
@@ -255,7 +255,8 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 	// tells it to include this, but LLMs forget — enforce it structurally.
 	prompt := proposal.Prompt + nonOperateOutputConvention
 
-	modelID, err := mapModelName(proposal.Model, r.resolver.Catalog())
+	resolver := r.currentResolver()
+	modelID, err := mapModelName(proposal.Model, resolver.Catalog())
 	if err != nil {
 		return fmt.Errorf("resolve model for %s: %w", proposal.Name, err)
 	}
@@ -322,7 +323,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		RepoPath:        r.repoPath,
 		Keepalive:       r.loop,
 		KnowledgeStore:  r.knowledgeStore,
-		Catalog:         r.resolver.Catalog(),
+		Catalog:         resolver.Catalog(),
 		ActorResolver: func(id types.ActorID) string {
 			a, err := r.actors.Get(id)
 			if err != nil {

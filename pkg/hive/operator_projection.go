@@ -96,7 +96,7 @@ type projectionEvent struct {
 }
 
 type operatorProjectionOptions struct {
-	modelSelection OperatorModelSelectionConfig
+	modelSelectionSource OperatorModelSelectionSource
 }
 
 // OperatorProjectionOption configures BuildOperatorProjection.
@@ -106,7 +106,16 @@ type OperatorProjectionOption func(*operatorProjectionOptions)
 // slice of the Site-facing operator projection.
 func WithOperatorModelSelection(config OperatorModelSelectionConfig) OperatorProjectionOption {
 	return func(o *operatorProjectionOptions) {
-		o.modelSelection = config
+		o.modelSelectionSource = func() OperatorModelSelectionConfig { return config }
+	}
+}
+
+// WithOperatorModelSelectionSource uses source to build the read-only
+// model-selection slice at projection time. This lets long-running Hive
+// processes expose catalog reloads without restarting Site.
+func WithOperatorModelSelectionSource(source OperatorModelSelectionSource) OperatorProjectionOption {
+	return func(o *operatorProjectionOptions) {
+		o.modelSelectionSource = source
 	}
 }
 
@@ -117,15 +126,21 @@ func BuildOperatorProjection(s store.Store, limit int, opts ...OperatorProjectio
 		limit = defaultOperatorProjectionLimit
 	}
 	options := operatorProjectionOptions{
-		modelSelection: DefaultOperatorModelSelectionConfig(time.Time{}),
+		modelSelectionSource: func() OperatorModelSelectionConfig {
+			return DefaultOperatorModelSelectionConfig(time.Time{})
+		},
 	}
 	for _, opt := range opts {
 		opt(&options)
 	}
+	modelSelection := DefaultOperatorModelSelectionConfig(time.Time{})
+	if options.modelSelectionSource != nil {
+		modelSelection = options.modelSelectionSource()
+	}
 	p := OperatorProjection{
 		GeneratedAt:    time.Now().UTC(),
 		Source:         "eventgraph",
-		ModelSelection: BuildOperatorModelSelection(options.modelSelection),
+		ModelSelection: BuildOperatorModelSelection(modelSelection),
 	}
 
 	requestEvents := readProjectionEvents(&p, s, EventTypeAuthorityRequestRecorded, limit)

@@ -349,6 +349,67 @@ func TestOperatorRunLaunchEndpointRecordsCausalEvents(t *testing.T) {
 	}
 }
 
+func TestOperatorRunLaunchEndpointRecordsValidatedModelOverride(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := validRunLaunchBodyWithOverrides(t, []map[string]any{
+		{"role": "guardian", "model": "api-sonnet"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post run launch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	runEvents := requireRunLaunchEvents(t, s, EventTypeFactoryRunRequested, 1)
+	runContent, ok := runEvents[0].Content().(FactoryRunRequestedContent)
+	if !ok {
+		t.Fatalf("run content type = %T", runEvents[0].Content())
+	}
+	if len(runContent.ModelOverrides) != 1 {
+		t.Fatalf("model overrides = %+v, want one", runContent.ModelOverrides)
+	}
+	override := runContent.ModelOverrides[0]
+	if override.Role != "guardian" || override.Model != "api-sonnet" {
+		t.Fatalf("recorded override = %+v, want guardian api-sonnet", override)
+	}
+	if override.ResolvedProvider != "anthropic" || override.AuthMode != "api-key" || override.ResolvedModel == "" {
+		t.Fatalf("resolved override = %+v, want explicit anthropic api-key", override)
+	}
+}
+
+func TestOperatorRunLaunchEndpointRejectsUnsafeCanOperateModelOverrideBeforeWriting(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := validRunLaunchBodyWithOverrides(t, []map[string]any{
+		{"role": "implementer", "model": "api-sonnet"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post run launch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	assertNoRunLaunchEvents(t, s)
+}
+
 // TestOperatorDecisionEndpointValidation exercises all negative-case input
 // validation branches of POST /api/hive/operator-decision. Each sub-test
 // asserts the correct 4xx status AND that no decision event was written to the
@@ -579,7 +640,27 @@ func seedPendingActionRequest(t *testing.T, s store.Store, factory *event.EventF
 
 func validRunLaunchBody(t *testing.T) []byte {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{
+	body := validRunLaunchMap()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal valid launch body: %v", err)
+	}
+	return encoded
+}
+
+func validRunLaunchBodyWithOverrides(t *testing.T, overrides []map[string]any) []byte {
+	t.Helper()
+	body := validRunLaunchMap()
+	body["model_overrides"] = overrides
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal launch body with overrides: %v", err)
+	}
+	return encoded
+}
+
+func validRunLaunchMap() map[string]any {
+	return map[string]any{
 		"operator_id": "user_127",
 		"intake_id":   "intake_127",
 		"title":       "Launch Hive issue 127",
@@ -606,11 +687,7 @@ func validRunLaunchBody(t *testing.T) []byte {
 			"max_cost_usd":   12.5,
 		},
 		"target_repos": []string{"transpara-ai/hive"},
-	})
-	if err != nil {
-		t.Fatalf("marshal valid launch body: %v", err)
 	}
-	return body
 }
 
 func assertNoRunLaunchEvents(t *testing.T, s store.Store) {
