@@ -124,13 +124,14 @@ type RunLaunchBudget struct {
 	MaxCostUSD    float64 `json:"max_cost_usd"`
 }
 
-// RunLaunchModelOverride records an explicit per-run role model/profile
-// override after validation through modelconfig.ResolutionInput.TaskOverride.
+// RunLaunchModelOverride records explicit per-run role model/profile override
+// metadata after validation through modelconfig.ResolutionInput.TaskOverride.
 type RunLaunchModelOverride struct {
 	Role                 string   `json:"role"`
 	Model                string   `json:"model,omitempty"`
 	Provider             string   `json:"provider,omitempty"`
 	Profile              string   `json:"profile,omitempty"`
+	RequestedAuthMode    string   `json:"requested_auth_mode,omitempty"`
 	PreferredTier        string   `json:"preferred_tier,omitempty"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`

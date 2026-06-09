@@ -128,7 +128,10 @@ func (m *OperatorModelSelectionManager) ReloadIfChanged(now time.Time) (bool, er
 		m.recordReloadError(now, err)
 		return false, err
 	}
-	if !m.lastModTime.IsZero() && !info.ModTime().After(m.lastModTime) {
+	m.mu.RLock()
+	lastModTime := m.lastModTime
+	m.mu.RUnlock()
+	if !lastModTime.IsZero() && !info.ModTime().After(lastModTime) {
 		return false, nil
 	}
 	return true, m.reload(now, info.ModTime())

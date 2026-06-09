@@ -349,14 +349,14 @@ func TestOperatorRunLaunchEndpointRecordsCausalEvents(t *testing.T) {
 	}
 }
 
-func TestOperatorRunLaunchEndpointRecordsValidatedModelOverride(t *testing.T) {
+func TestOperatorRunLaunchEndpointRecordsValidatedMeteredModelOverrideWithOptIn(t *testing.T) {
 	s, factory, signer, human, conv := newDecisionTestStore(t)
 	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	body := validRunLaunchBodyWithOverrides(t, []map[string]any{
-		{"role": "guardian", "model": "api-sonnet"},
+		{"role": "guardian", "model": "api-sonnet", "auth_mode": "api-key"},
 	})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -382,9 +382,35 @@ func TestOperatorRunLaunchEndpointRecordsValidatedModelOverride(t *testing.T) {
 	if override.Role != "guardian" || override.Model != "api-sonnet" {
 		t.Fatalf("recorded override = %+v, want guardian api-sonnet", override)
 	}
+	if override.RequestedAuthMode != "api-key" {
+		t.Fatalf("requested auth mode = %q, want api-key", override.RequestedAuthMode)
+	}
 	if override.ResolvedProvider != "anthropic" || override.AuthMode != "api-key" || override.ResolvedModel == "" {
 		t.Fatalf("resolved override = %+v, want explicit anthropic api-key", override)
 	}
+}
+
+func TestOperatorRunLaunchEndpointRejectsMeteredModelOverrideWithoutOptInBeforeWriting(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := validRunLaunchBodyWithOverrides(t, []map[string]any{
+		{"role": "guardian", "model": "api-sonnet"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post run launch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	assertNoRunLaunchEvents(t, s)
 }
 
 func TestOperatorRunLaunchEndpointRejectsUnsafeCanOperateModelOverrideBeforeWriting(t *testing.T) {
@@ -394,7 +420,7 @@ func TestOperatorRunLaunchEndpointRejectsUnsafeCanOperateModelOverrideBeforeWrit
 	defer ts.Close()
 
 	body := validRunLaunchBodyWithOverrides(t, []map[string]any{
-		{"role": "implementer", "model": "api-sonnet"},
+		{"role": "implementer", "model": "api-sonnet", "auth_mode": "api-key"},
 	})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")

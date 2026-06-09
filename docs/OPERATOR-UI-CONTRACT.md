@@ -69,6 +69,7 @@ POST /api/hive/approvals/{id}/resolve
     {
       "role": "guardian",
       "model": "api-sonnet",
+      "auth_mode": "api-key",
       "max_cost_per_call_usd": 3.5
     }
   ],
@@ -136,19 +137,21 @@ Important boundaries:
 - Runtime reload affects future resolver reads and future dynamic spawns. It does not silently rebind provider instances already running inside an agent loop.
 - The projection is not an edit/write API.
 
-## Per-run model overrides
+## Launch-record model override metadata
 
-`POST /api/hive/runs` may include `model_overrides`, a list of explicit per-run role overrides.
+`POST /api/hive/runs` may include `model_overrides`, a list of explicit role model/profile override metadata for the queued run request.
 Hive validates each override before appending any launch events by resolving it through `modelconfig.ResolutionInput.TaskOverride`.
+The launch API records durable request evidence only; it does not start agents, rebind running providers, or mutate global role policy.
 
 Rules:
 
 - `role` is required and must name a starter civic role.
 - At least one of `model`, `profile`, `provider`, `preferred_tier`, `required_capabilities`, or `max_cost_per_call_usd` must be set.
+- A resolved `api-key` model requires an explicit request `auth_mode: api-key`; otherwise Hive rejects it before any launch events are written.
 - Duplicate role overrides are rejected.
 - Unknown, malformed, over-budget, or `CanOperate`-incompatible overrides are rejected before `source.ingested`, `brief.derived`, or `factory.run.requested` events are written.
-- Accepted overrides are recorded on `factory.run.requested` with requested fields plus resolved model, provider, and auth mode.
-- Overrides are scoped to that run request. They do not mutate global role defaults.
+- Accepted overrides are recorded on `factory.run.requested` with requested fields plus resolved model, provider, and auth mode for downstream launch execution.
+- Overrides are scoped to that run request metadata. They do not mutate global role defaults.
 
 ## Intake/factory event types
 

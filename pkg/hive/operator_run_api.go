@@ -59,6 +59,7 @@ type runLaunchModelOverrideRequest struct {
 	Model                string   `json:"model,omitempty"`
 	Provider             string   `json:"provider,omitempty"`
 	Profile              string   `json:"profile,omitempty"`
+	AuthMode             string   `json:"auth_mode,omitempty"`
 	PreferredTier        string   `json:"preferred_tier,omitempty"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`
@@ -259,6 +260,9 @@ func validateRunLaunchModelOverrides(raw []runLaunchModelOverrideRequest, modelS
 		if err != nil {
 			return nil, fmt.Errorf("model_overrides[%d] for role %q is unsafe: %v", i, role, err)
 		}
+		if err := validateRunLaunchOverrideAuthMode(i, role, recorded.RequestedAuthMode, resolved.AuthMode); err != nil {
+			return nil, err
+		}
 		recorded.Role = role
 		recorded.ResolvedModel = resolved.Model
 		recorded.ResolvedProvider = resolved.Provider
@@ -272,10 +276,14 @@ func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) 
 	model := strings.TrimSpace(override.Model)
 	provider := strings.TrimSpace(override.Provider)
 	profile := strings.TrimSpace(override.Profile)
+	authMode := strings.TrimSpace(override.AuthMode)
 	preferredTier := strings.TrimSpace(override.PreferredTier)
 	caps := trimRunLaunchStrings(override.RequiredCapabilities)
-	if hasControlRune(model) || hasControlRune(provider) || hasControlRune(profile) || hasControlRune(preferredTier) {
+	if hasControlRune(model) || hasControlRune(provider) || hasControlRune(profile) || hasControlRune(authMode) || hasControlRune(preferredTier) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] contains control characters", index)
+	}
+	if authMode != "" && authMode != string(modelconfig.AuthSubscription) && authMode != string(modelconfig.AuthAPIKey) {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].auth_mode must be %q or %q", index, modelconfig.AuthSubscription, modelconfig.AuthAPIKey)
 	}
 	if len(caps) != len(override.RequiredCapabilities) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains empty values", index)
@@ -306,11 +314,22 @@ func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) 
 		Model:                model,
 		Provider:             provider,
 		Profile:              profile,
+		RequestedAuthMode:    authMode,
 		PreferredTier:        preferredTier,
 		RequiredCapabilities: caps,
 		MaxCostPerCallUSD:    override.MaxCostPerCallUSD,
 	}
 	return policy, recorded, nil
+}
+
+func validateRunLaunchOverrideAuthMode(index int, role string, requested string, resolved modelconfig.AuthMode) error {
+	if requested != "" && requested != string(resolved) {
+		return fmt.Errorf("model_overrides[%d] for role %q requested auth_mode %q but resolved auth_mode %q", index, role, requested, resolved)
+	}
+	if resolved == modelconfig.AuthAPIKey && requested != string(modelconfig.AuthAPIKey) {
+		return fmt.Errorf("model_overrides[%d] for role %q resolves to auth_mode %q; set auth_mode to %q to opt in to metered API-key models", index, role, resolved, modelconfig.AuthAPIKey)
+	}
+	return nil
 }
 
 func trimRunLaunchStrings(values []string) []string {
