@@ -116,6 +116,18 @@ type Config struct {
 	// resume when a new event arrives on the bus.
 	Keepalive bool
 
+	// RecheckInterval is the slow periodic re-check for a CanOperate keepalive
+	// agent. The bus wake is an edge signal (onEvent's non-blocking send), so a
+	// wake that fires while the agent is mid-Operate rather than parked is lost,
+	// and an idle implementer can sleep forever even though assignable work
+	// exists (the wakeup race a daemon restart otherwise had to clear). On this
+	// interval waitForEvents re-checks for assignable work and returns if any
+	// exists, converting the lost edge into a recoverable level check. Gated to
+	// hasAssignableWork so an idle agent with nothing to do stays parked.
+	// 0 takes the New() default for CanOperate keepalive agents; <0 disables it;
+	// it has no effect on non-CanOperate (governance) agents.
+	RecheckInterval time.Duration
+
 	// BudgetInstance is an externally-created Budget tracker. When set,
 	// the Loop uses this instead of creating a new one from Budget config.
 	// This allows the Runtime to register the Budget in a shared registry
@@ -218,6 +230,12 @@ func New(cfg Config) (*Loop, error) {
 	}
 	if cfg.QuiescenceDelay <= 0 {
 		cfg.QuiescenceDelay = 5 * time.Second
+	}
+	// Default the keepalive re-check for operating agents so the wakeup race is
+	// covered without every call site setting it: a CanOperate keepalive agent
+	// with an unset interval gets a slow safety-net re-check. <0 disables it.
+	if cfg.CanOperate && cfg.Keepalive && cfg.RecheckInterval == 0 {
+		cfg.RecheckInterval = 30 * time.Second
 	}
 
 	budget := cfg.BudgetInstance
@@ -904,10 +922,34 @@ func (l *Loop) onEvent(ev event.Event) {
 
 // waitForEvents blocks until new events arrive or quiescence timeout.
 // Returns true if events arrived, false if timed out.
-// In keepalive mode, there is no timeout — the agent blocks on the wake
-// channel indefinitely, consuming zero CPU until a bus event arrives.
+// In keepalive mode, there is no quiescence timeout. A CanOperate keepalive agent
+// additionally re-checks for assignable work on Config.RecheckInterval so a
+// dropped wake edge cannot park it forever; other keepalive agents block on the
+// wake channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
 	if l.config.Keepalive {
+		// A CanOperate keepalive agent (the implementer) gets a slow periodic
+		// re-check so a wake edge dropped while it was busy cannot park it forever
+		// (see Config.RecheckInterval). Gated to hasAssignableWork so an idle agent
+		// with nothing to do stays parked — no re-ignition of the wakeup storm the
+		// per-iteration timers were removed to kill.
+		if l.config.CanOperate && l.config.RepoPath != "" && l.config.RecheckInterval > 0 {
+			ticker := time.NewTicker(l.config.RecheckInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-l.wake:
+					return true
+				case <-ticker.C:
+					if l.hasAssignableWork() {
+						return true
+					}
+					// Nothing assignable — stay parked; re-arm on the next tick.
+				case <-ctx.Done():
+					return false
+				}
+			}
+		}
 		select {
 		case <-l.wake:
 			return true
@@ -1032,49 +1074,20 @@ func (l *Loop) processPhaseCommands(response string) {
 // this agent. This lets the Operate path activate without waiting for the LLM
 // to emit a /task assign command via Reason.
 func (l *Loop) autoAssignOpenTask() {
-	if l.config.TaskStore == nil {
+	t, ok := l.firstAssignableOpenTask()
+	if !ok {
 		return
 	}
-	open, err := l.config.TaskStore.ListOpen()
-	if err != nil || len(open) == 0 {
-		return
+	var causes []types.EventID
+	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+		causes = []types.EventID{lastEv}
 	}
-	summaries, sErr := l.config.TaskStore.ListSummaries(100)
-	if sErr != nil {
-		return
-	}
-	assignees := make(map[types.EventID]types.ActorID, len(summaries))
-	for _, s := range summaries {
-		assignees[s.ID] = s.Assignee
-	}
-
-	// ListOpen is store-order dependent. Walk from oldest to newest so the
-	// first canonical leaf task gets executed before newer duplicate chains.
-	for i := len(open) - 1; i >= 0; i-- {
-		t := open[i]
-		if assignees[t.ID] != (types.ActorID{}) {
-			continue
+	if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
+		fmt.Printf("  → auto-assigned canonical leaf: %s — %s\n", t.ID.Value(), t.Title)
+		if l.sink != nil {
+			l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
+			l.lastCheckpointIter = l.iteration
 		}
-		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
-		if childErr != nil || hasChildren {
-			continue
-		}
-		readiness, readyErr := l.config.TaskStore.Readiness(t.ID)
-		if readyErr != nil || !readiness.Ready {
-			continue
-		}
-		var causes []types.EventID
-		if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
-			causes = []types.EventID{lastEv}
-		}
-		if err := l.config.TaskStore.Assign(l.agent.ID(), t.ID, l.agent.ID(), causes, l.config.ConvID); err == nil {
-			fmt.Printf("  → auto-assigned canonical leaf: %s — %s\n", t.ID.Value(), t.Title)
-			if l.sink != nil {
-				l.sink.OnBoundary(checkpoint.TaskAssigned, l.currentSnapshot())
-				l.lastCheckpointIter = l.iteration
-			}
-		}
-		return
 	}
 }
 
@@ -1120,6 +1133,62 @@ func (l *Loop) taskIsOperable(taskID types.EventID) bool {
 		return false
 	}
 	return true
+}
+
+// hasAssignableWork reports whether the loop's next iteration would have operable
+// work to run: a task already assigned to this agent, or an open unassigned ready
+// leaf the auto-assign path would claim. It is the gate for the keepalive
+// re-check timer (see Config.RecheckInterval) — sharing firstAssignableOpenTask
+// with the auto-assign path so the gate can never drift from what the agent
+// actually picks up.
+func (l *Loop) hasAssignableWork() bool {
+	if l.hasAssignedTask() {
+		return true
+	}
+	_, ok := l.firstAssignableOpenTask()
+	return ok
+}
+
+// firstAssignableOpenTask returns the open, unassigned, childless, ready leaf the
+// auto-assign path would claim next, walking oldest→newest so the first canonical
+// leaf wins over newer duplicate chains. ok is false when none exists. Pure (no
+// writes): shared by autoAssignOpenTask (which assigns the result) and
+// hasAssignableWork (the re-check gate).
+func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
+	if l.config.TaskStore == nil {
+		return work.Task{}, false
+	}
+	open, err := l.config.TaskStore.ListOpen()
+	if err != nil || len(open) == 0 {
+		return work.Task{}, false
+	}
+	summaries, sErr := l.config.TaskStore.ListSummaries(100)
+	if sErr != nil {
+		return work.Task{}, false
+	}
+	assignees := make(map[types.EventID]types.ActorID, len(summaries))
+	for _, s := range summaries {
+		assignees[s.ID] = s.Assignee
+	}
+
+	// ListOpen is store-order dependent. Walk from oldest to newest so the
+	// first canonical leaf task gets executed before newer duplicate chains.
+	for i := len(open) - 1; i >= 0; i-- {
+		t := open[i]
+		if assignees[t.ID] != (types.ActorID{}) {
+			continue
+		}
+		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
+		if childErr != nil || hasChildren {
+			continue
+		}
+		readiness, readyErr := l.config.TaskStore.Readiness(t.ID)
+		if readyErr != nil || !readiness.Ready {
+			continue
+		}
+		return t, true
+	}
+	return work.Task{}, false
 }
 
 // hasAssignedTask returns true if the agent has any assigned, operable task.
