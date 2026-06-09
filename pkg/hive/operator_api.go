@@ -20,7 +20,8 @@ const maxDecisionBodyBytes = 64 * 1024
 // operatorServerOptions collects optional dependencies for the operator API.
 // The zero value yields a strictly read-only server (today's behavior).
 type operatorServerOptions struct {
-	writer *operatorDecisionWriter
+	writer    *operatorDecisionWriter
+	runWriter *operatorRunLaunchWriter
 }
 
 // OperatorServerOption configures NewOperatorProjectionServer.
@@ -66,9 +67,9 @@ type operatorDecisionResponse struct {
 
 // NewOperatorProjectionServer returns the HTTP API for Site operator
 // projections. By default it is read-only — it exposes derived EventGraph state
-// only. Passing WithOperatorDecisionWriter additionally registers a single,
-// bearer-protected POST route that records the human's authority decision; the
-// graph itself is only ever written by hive (this process), never by Site.
+// only. Passing writer options additionally registers bearer-protected POST
+// routes that record operator decisions or queued run launches; the graph itself
+// is only ever written by hive (this process), never by Site.
 func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts ...OperatorServerOption) http.Handler {
 	options := operatorServerOptions{}
 	for _, opt := range opts {
@@ -91,6 +92,16 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 				return
 			}
 			handleOperatorDecision(w, r, s, limit, writer)
+		})
+	}
+	if options.runWriter != nil {
+		writer := options.runWriter
+		mux.HandleFunc("POST /api/hive/runs", func(w http.ResponseWriter, r *http.Request) {
+			if !operatorBearerOK(apiKey, r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			handleOperatorRunLaunch(w, r, s, writer)
 		})
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
