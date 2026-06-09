@@ -2,7 +2,9 @@ package hive
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
@@ -11,19 +13,26 @@ import (
 const (
 	operatorModelCatalogSourceEmbedded = "embedded-defaults"
 	operatorModelCatalogReloadMode     = "startup-static"
+	operatorModelCatalogReloadModeHot  = "hot-reload"
 )
 
 var defaultOperatorModelSelectionLoadedAt = time.Now().UTC()
 
+// OperatorModelSelectionSource returns the current model-selection config.
+// Long-running processes use this seam to expose a refreshed catalog without
+// making Site a source of truth.
+type OperatorModelSelectionSource func() OperatorModelSelectionConfig
+
 // OperatorModelSelectionConfig describes the model resolver Hive uses to build
-// the read-only operator projection. The resolver is loaded once by the process;
-// hot reload is deliberately not implied by this phase-1 view.
+// the read-only operator projection.
 type OperatorModelSelectionConfig struct {
-	Resolver      *modelconfig.Resolver
-	CatalogSource string
-	LoadedAt      time.Time
-	ReloadMode    string
-	HotReload     bool
+	Resolver        *modelconfig.Resolver
+	CatalogSource   string
+	LoadedAt        time.Time
+	ReloadMode      string
+	HotReload       bool
+	LastReloadAt    time.Time
+	LastReloadError string
 }
 
 // DefaultOperatorModelSelectionConfig returns the built-in claude-cli resolver
@@ -61,6 +70,118 @@ func OperatorModelSelectionFromCatalogPath(catalogPath string, loadedAt time.Tim
 	}, nil
 }
 
+// OperatorModelSelectionManager owns the Hive model catalog state for a
+// long-running process. Reload failures are recorded for projection, but the
+// previous valid resolver remains active so a bad YAML edit cannot silently
+// corrupt model assignment state.
+type OperatorModelSelectionManager struct {
+	mu          sync.RWMutex
+	catalogPath string
+	config      OperatorModelSelectionConfig
+	lastModTime time.Time
+}
+
+// NewOperatorModelSelectionManager loads the initial catalog. When hotReload is
+// true and catalogPath is non-empty, ReloadIfChanged may refresh the resolver at
+// runtime without restarting the process.
+func NewOperatorModelSelectionManager(catalogPath string, loadedAt time.Time, hotReload bool) (*OperatorModelSelectionManager, error) {
+	config, err := OperatorModelSelectionFromCatalogPath(catalogPath, loadedAt)
+	if err != nil {
+		return nil, err
+	}
+	if hotReload && catalogPath != "" {
+		config.ReloadMode = operatorModelCatalogReloadModeHot
+		config.HotReload = true
+	}
+	manager := &OperatorModelSelectionManager{
+		catalogPath: catalogPath,
+		config:      config,
+	}
+	if catalogPath != "" {
+		if info, err := os.Stat(catalogPath); err == nil {
+			manager.lastModTime = info.ModTime()
+		}
+	}
+	return manager, nil
+}
+
+// Snapshot returns the current catalog config. The resolver is immutable after
+// construction, so sharing its pointer is safe.
+func (m *OperatorModelSelectionManager) Snapshot() OperatorModelSelectionConfig {
+	if m == nil {
+		return DefaultOperatorModelSelectionConfig(time.Time{})
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config
+}
+
+// ReloadIfChanged reloads catalogPath when its mtime advances. A parse/load
+// failure is surfaced in Snapshot().LastReloadError and leaves the previous
+// resolver untouched.
+func (m *OperatorModelSelectionManager) ReloadIfChanged(now time.Time) (bool, error) {
+	if m == nil || m.catalogPath == "" {
+		return false, nil
+	}
+	info, err := os.Stat(m.catalogPath)
+	if err != nil {
+		m.recordReloadError(now, err)
+		return false, err
+	}
+	m.mu.RLock()
+	lastModTime := m.lastModTime
+	m.mu.RUnlock()
+	if !lastModTime.IsZero() && !info.ModTime().After(lastModTime) {
+		return false, nil
+	}
+	return true, m.reload(now, info.ModTime())
+}
+
+// Reload forces a catalog reload even when the file mtime did not change.
+func (m *OperatorModelSelectionManager) Reload(now time.Time) error {
+	if m == nil || m.catalogPath == "" {
+		return nil
+	}
+	info, err := os.Stat(m.catalogPath)
+	if err != nil {
+		m.recordReloadError(now, err)
+		return err
+	}
+	return m.reload(now, info.ModTime())
+}
+
+func (m *OperatorModelSelectionManager) reload(now time.Time, modTime time.Time) error {
+	resolver, err := modelconfig.ResolverFromCatalogFile(m.catalogPath)
+	if err != nil {
+		m.recordReloadError(now, err)
+		return err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.Resolver = resolver
+	m.config.CatalogSource = m.catalogPath
+	m.config.LoadedAt = now.UTC()
+	m.config.ReloadMode = operatorModelCatalogReloadModeHot
+	m.config.HotReload = true
+	m.config.LastReloadAt = now.UTC()
+	m.config.LastReloadError = ""
+	m.lastModTime = modTime
+	return nil
+}
+
+func (m *OperatorModelSelectionManager) recordReloadError(now time.Time, err error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.LastReloadAt = now.UTC()
+	m.config.LastReloadError = err.Error()
+}
+
 // OperatorModelSelection is the Site-facing, read-only model catalog and role
 // assignment projection. Site may render it, but Hive remains the source of
 // truth.
@@ -70,6 +191,7 @@ type OperatorModelSelection struct {
 	LoadedAt      time.Time                     `json:"loaded_at"`
 	ReloadMode    string                        `json:"reload_mode"`
 	HotReload     bool                          `json:"hot_reload"`
+	LastReloadAt  *time.Time                    `json:"last_reload_at,omitempty"`
 	Models        []OperatorModelCatalogEntry   `json:"models"`
 	Assignments   []OperatorModelRoleAssignment `json:"assignments"`
 	Errors        []string                      `json:"errors,omitempty"`
@@ -125,6 +247,13 @@ func BuildOperatorModelSelection(config OperatorModelSelectionConfig) OperatorMo
 		LoadedAt:      config.LoadedAt,
 		ReloadMode:    config.ReloadMode,
 		HotReload:     config.HotReload,
+	}
+	if !config.LastReloadAt.IsZero() {
+		lastReloadAt := config.LastReloadAt
+		projection.LastReloadAt = &lastReloadAt
+	}
+	if config.LastReloadError != "" {
+		projection.Errors = append(projection.Errors, "catalog reload: "+config.LastReloadError)
 	}
 
 	catalog := config.Resolver.Catalog()

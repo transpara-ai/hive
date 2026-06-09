@@ -124,6 +124,22 @@ type RunLaunchBudget struct {
 	MaxCostUSD    float64 `json:"max_cost_usd"`
 }
 
+// RunLaunchModelOverride records explicit per-run role model/profile override
+// metadata after validation through modelconfig.ResolutionInput.TaskOverride.
+type RunLaunchModelOverride struct {
+	Role                 string   `json:"role"`
+	Model                string   `json:"model,omitempty"`
+	Provider             string   `json:"provider,omitempty"`
+	Profile              string   `json:"profile,omitempty"`
+	RequestedAuthMode    string   `json:"requested_auth_mode,omitempty"`
+	PreferredTier        string   `json:"preferred_tier,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`
+	ResolvedModel        string   `json:"resolved_model"`
+	ResolvedProvider     string   `json:"resolved_provider"`
+	AuthMode             string   `json:"auth_mode"`
+}
+
 // SourceIngestedContent records the source payload anchoring an operator run
 // launch request.
 type SourceIngestedContent struct {
@@ -155,18 +171,19 @@ func (c BriefDerivedContent) EventTypeName() string { return "brief.derived" }
 // started.
 type FactoryRunRequestedContent struct {
 	hiveContent
-	RunID         string             `json:"run_id"`
-	IntakeID      string             `json:"intake_id"`
-	OperatorID    string             `json:"operator_id"`
-	Title         string             `json:"title"`
-	Status        string             `json:"status"`
-	Authority     RunLaunchAuthority `json:"authority"`
-	Budget        RunLaunchBudget    `json:"budget"`
-	TargetRepos   []string           `json:"target_repos"`
-	SourceEventID types.EventID      `json:"source_event_id"`
-	BriefEventID  types.EventID      `json:"brief_event_id"`
-	Sources       []RunLaunchSource  `json:"sources"`
-	Brief         json.RawMessage    `json:"brief"`
+	RunID          string                   `json:"run_id"`
+	IntakeID       string                   `json:"intake_id"`
+	OperatorID     string                   `json:"operator_id"`
+	Title          string                   `json:"title"`
+	Status         string                   `json:"status"`
+	Authority      RunLaunchAuthority       `json:"authority"`
+	Budget         RunLaunchBudget          `json:"budget"`
+	ModelOverrides []RunLaunchModelOverride `json:"model_overrides,omitempty"`
+	TargetRepos    []string                 `json:"target_repos"`
+	SourceEventID  types.EventID            `json:"source_event_id"`
+	BriefEventID   types.EventID            `json:"brief_event_id"`
+	Sources        []RunLaunchSource        `json:"sources"`
+	Brief          json.RawMessage          `json:"brief"`
 }
 
 func (c FactoryRunRequestedContent) EventTypeName() string { return "factory.run.requested" }

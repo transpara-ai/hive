@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -21,7 +22,8 @@ func main() {
 	addr := flag.String("addr", envOrDefault("HIVE_OPS_API_ADDR", "127.0.0.1:8083"), "listen address")
 	apiKey := flag.String("api-key", envOrDefault("HIVE_OPS_API_KEY", "dev"), "bearer token for Site operator projection reads")
 	limit := flag.Int("limit", 50, "maximum records per projection section")
-	catalog := flag.String("catalog", envOrDefault("HIVE_OPS_CATALOG", ""), "custom YAML model catalog for operator projection (loaded once at startup)")
+	catalog := flag.String("catalog", envOrDefault("HIVE_OPS_CATALOG", ""), "custom YAML model catalog for operator projection")
+	catalogReloadInterval := flag.Duration("catalog-reload-interval", durationEnvOrDefault("HIVE_OPS_CATALOG_RELOAD_INTERVAL", 0), "model catalog reload interval; 0 disables runtime reload")
 	flag.Parse()
 
 	dsn := envOrDefault("HIVE_OPS_DATABASE_URL", os.Getenv("DATABASE_URL"))
@@ -44,22 +46,47 @@ func main() {
 
 	hive.RegisterEventTypes()
 
-	modelSelection, err := hive.OperatorModelSelectionFromCatalogPath(*catalog, types.Now().Value())
+	modelSelectionManager, err := hive.NewOperatorModelSelectionManager(*catalog, types.Now().Value(), *catalogReloadInterval > 0)
 	if err != nil {
 		log.Fatalf("load model catalog: %v", err)
 	}
+	if *catalogReloadInterval > 0 && *catalog != "" {
+		go runCatalogReloadLoop(ctx, modelSelectionManager, *catalogReloadInterval)
+	}
 
 	opts, writeMode := opsWriterOptions()
-	opts = append(opts, hive.WithOperatorProjectionModelSelection(modelSelection))
+	opts = append(opts, hive.WithOperatorProjectionModelSelectionSource(modelSelectionManager.Snapshot))
 	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
+	modelSelection := modelSelectionManager.Snapshot()
 
 	authMode := "disabled"
 	if *apiKey != "" {
 		authMode = "bearer"
 	}
-	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, writes=%s, model_catalog=%s, reload=static)\n", *addr, authMode, *limit, writeMode, modelSelection.CatalogSource)
+	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, writes=%s, model_catalog=%s, reload=%s)\n", *addr, authMode, *limit, writeMode, modelSelection.CatalogSource, modelSelection.ReloadMode)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
+	}
+}
+
+func runCatalogReloadLoop(ctx context.Context, manager *hive.OperatorModelSelectionManager, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, err := manager.ReloadIfChanged(types.Now().Value())
+			if err != nil {
+				log.Printf("model catalog reload failed: %v", err)
+				continue
+			}
+			if changed {
+				snapshot := manager.Snapshot()
+				log.Printf("model catalog reloaded: %s", snapshot.CatalogSource)
+			}
+		}
 	}
 }
 
@@ -123,4 +150,17 @@ func envOrDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func durationEnvOrDefault(name string, fallback time.Duration) time.Duration {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		log.Printf("%s invalid duration %q: %v; using %s", name, value, err, fallback)
+		return fallback
+	}
+	return d
 }

@@ -1,6 +1,9 @@
 package hive
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,6 +287,65 @@ func TestBuildOperatorProjectionModelSelectionRequiresExplicitAPIKeyOptIn(t *tes
 	}
 }
 
+func TestOperatorModelSelectionManagerReloadUpdatesProjection(t *testing.T) {
+	catalogPath := writeRoleDefaultCatalog(t, "guardian", "api-sonnet")
+	manager, err := NewOperatorModelSelectionManager(catalogPath, time.Unix(1_700_000_000, 0).UTC(), true)
+	if err != nil {
+		t.Fatalf("NewOperatorModelSelectionManager: %v", err)
+	}
+	first := BuildOperatorModelSelection(manager.Snapshot())
+	firstGuardian := requireModelAssignment(t, first, "guardian")
+	if first.ReloadMode != operatorModelCatalogReloadModeHot || !first.HotReload {
+		t.Fatalf("reload metadata = %q/%v, want hot-reload true", first.ReloadMode, first.HotReload)
+	}
+	if firstGuardian.AuthMode != string(modelconfig.AuthAPIKey) {
+		t.Fatalf("initial guardian auth = %q, want api-key", firstGuardian.AuthMode)
+	}
+
+	writeRoleDefaultCatalogAt(t, catalogPath, "guardian", "haiku")
+	if err := manager.Reload(time.Unix(1_700_000_100, 0).UTC()); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	reloaded := BuildOperatorModelSelection(manager.Snapshot())
+	reloadedGuardian := requireModelAssignment(t, reloaded, "guardian")
+	if reloaded.LastReloadAt == nil {
+		t.Fatal("last_reload_at is nil after reload")
+	}
+	if reloadedGuardian.AuthMode != string(modelconfig.AuthSubscription) {
+		t.Fatalf("reloaded guardian auth = %q, want subscription", reloadedGuardian.AuthMode)
+	}
+	if reloadedGuardian.Model == firstGuardian.Model {
+		t.Fatalf("guardian model did not change after reload: %q", reloadedGuardian.Model)
+	}
+}
+
+func TestOperatorModelSelectionManagerReloadFailureIsVisibleAndKeepsPreviousResolver(t *testing.T) {
+	catalogPath := writeRoleDefaultCatalog(t, "guardian", "api-sonnet")
+	manager, err := NewOperatorModelSelectionManager(catalogPath, time.Unix(1_700_000_000, 0).UTC(), true)
+	if err != nil {
+		t.Fatalf("NewOperatorModelSelectionManager: %v", err)
+	}
+	before := requireModelAssignment(t, BuildOperatorModelSelection(manager.Snapshot()), "guardian")
+	if before.AuthMode != string(modelconfig.AuthAPIKey) {
+		t.Fatalf("initial guardian auth = %q, want api-key", before.AuthMode)
+	}
+
+	if err := os.WriteFile(catalogPath, []byte("models: [\n"), 0o644); err != nil {
+		t.Fatalf("write invalid catalog: %v", err)
+	}
+	if err := manager.Reload(time.Unix(1_700_000_100, 0).UTC()); err == nil {
+		t.Fatal("Reload invalid catalog succeeded, want error")
+	}
+	afterProjection := BuildOperatorModelSelection(manager.Snapshot())
+	after := requireModelAssignment(t, afterProjection, "guardian")
+	if after.AuthMode != string(modelconfig.AuthAPIKey) || after.Model != before.Model {
+		t.Fatalf("reload failure corrupted active assignment: before=%+v after=%+v", before, after)
+	}
+	if len(afterProjection.Errors) == 0 || !strings.Contains(afterProjection.Errors[0], "catalog reload") {
+		t.Fatalf("projection errors = %+v, want catalog reload error", afterProjection.Errors)
+	}
+}
+
 func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.ActorID, func(types.EventType, event.EventContent) event.Event) {
 	t.Helper()
 	RegisterEventTypes()
@@ -364,4 +426,19 @@ func containsModelProjectionString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func writeRoleDefaultCatalog(t *testing.T, role, model string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "catalog.yaml")
+	writeRoleDefaultCatalogAt(t, path, role, model)
+	return path
+}
+
+func writeRoleDefaultCatalogAt(t *testing.T, path, role, model string) {
+	t.Helper()
+	body := "role_defaults:\n  " + role + ": " + model + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
 }

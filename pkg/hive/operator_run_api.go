@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
@@ -41,14 +43,26 @@ func WithOperatorRunLaunchWriter(factory *event.EventFactory, signer event.Signe
 }
 
 type operatorRunLaunchRequest struct {
-	OperatorID  string                 `json:"operator_id"`
-	IntakeID    string                 `json:"intake_id"`
-	Title       string                 `json:"title"`
-	Brief       json.RawMessage        `json:"brief"`
-	Sources     []RunLaunchSource      `json:"sources"`
-	Authority   RunLaunchAuthority     `json:"authority"`
-	Budget      runLaunchBudgetRequest `json:"budget"`
-	TargetRepos []string               `json:"target_repos"`
+	OperatorID     string                          `json:"operator_id"`
+	IntakeID       string                          `json:"intake_id"`
+	Title          string                          `json:"title"`
+	Brief          json.RawMessage                 `json:"brief"`
+	Sources        []RunLaunchSource               `json:"sources"`
+	Authority      RunLaunchAuthority              `json:"authority"`
+	Budget         runLaunchBudgetRequest          `json:"budget"`
+	ModelOverrides []runLaunchModelOverrideRequest `json:"model_overrides,omitempty"`
+	TargetRepos    []string                        `json:"target_repos"`
+}
+
+type runLaunchModelOverrideRequest struct {
+	Role                 string   `json:"role"`
+	Model                string   `json:"model,omitempty"`
+	Provider             string   `json:"provider,omitempty"`
+	Profile              string   `json:"profile,omitempty"`
+	AuthMode             string   `json:"auth_mode,omitempty"`
+	PreferredTier        string   `json:"preferred_tier,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`
 }
 
 type runLaunchBudgetRequest struct {
@@ -57,14 +71,15 @@ type runLaunchBudgetRequest struct {
 }
 
 type validatedRunLaunchRequest struct {
-	OperatorID  string
-	IntakeID    string
-	Title       string
-	Brief       json.RawMessage
-	Sources     []RunLaunchSource
-	Authority   RunLaunchAuthority
-	Budget      RunLaunchBudget
-	TargetRepos []string
+	OperatorID     string
+	IntakeID       string
+	Title          string
+	Brief          json.RawMessage
+	Sources        []RunLaunchSource
+	Authority      RunLaunchAuthority
+	Budget         RunLaunchBudget
+	ModelOverrides []RunLaunchModelOverride
+	TargetRepos    []string
 }
 
 type operatorRunLaunchResponse struct {
@@ -78,7 +93,7 @@ type runLaunchAppendResult struct {
 	FirstEventID types.EventID
 }
 
-func handleOperatorRunLaunch(w http.ResponseWriter, r *http.Request, s store.Store, writer *operatorRunLaunchWriter) {
+func handleOperatorRunLaunch(w http.ResponseWriter, r *http.Request, s store.Store, writer *operatorRunLaunchWriter, modelSelection OperatorModelSelectionSource) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRunLaunchBodyBytes)
 	var raw operatorRunLaunchRequest
 	decoder := json.NewDecoder(r.Body)
@@ -97,7 +112,7 @@ func handleOperatorRunLaunch(w http.ResponseWriter, r *http.Request, s store.Sto
 		return
 	}
 
-	launch, err := validateRunLaunchRequest(raw)
+	launch, err := validateRunLaunchRequest(raw, modelSelection)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -118,7 +133,7 @@ func handleOperatorRunLaunch(w http.ResponseWriter, r *http.Request, s store.Sto
 	})
 }
 
-func validateRunLaunchRequest(raw operatorRunLaunchRequest) (validatedRunLaunchRequest, error) {
+func validateRunLaunchRequest(raw operatorRunLaunchRequest, modelSelection OperatorModelSelectionSource) (validatedRunLaunchRequest, error) {
 	launch := validatedRunLaunchRequest{
 		OperatorID:  strings.TrimSpace(raw.OperatorID),
 		IntakeID:    strings.TrimSpace(raw.IntakeID),
@@ -186,6 +201,11 @@ func validateRunLaunchRequest(raw operatorRunLaunchRequest) (validatedRunLaunchR
 	if launch.Budget.MaxCostUSD < 0 {
 		return validatedRunLaunchRequest{}, fmt.Errorf("budget.max_cost_usd must be zero or greater")
 	}
+	overrides, err := validateRunLaunchModelOverrides(raw.ModelOverrides, modelSelection)
+	if err != nil {
+		return validatedRunLaunchRequest{}, err
+	}
+	launch.ModelOverrides = overrides
 	if len(launch.TargetRepos) == 0 {
 		return validatedRunLaunchRequest{}, fmt.Errorf("target_repos is required")
 	}
@@ -196,6 +216,138 @@ func validateRunLaunchRequest(raw operatorRunLaunchRequest) (validatedRunLaunchR
 	}
 
 	return launch, nil
+}
+
+func validateRunLaunchModelOverrides(raw []runLaunchModelOverrideRequest, modelSelection OperatorModelSelectionSource) ([]RunLaunchModelOverride, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	config := DefaultOperatorModelSelectionConfig(time.Time{})
+	if modelSelection != nil {
+		config = normalizeOperatorModelSelectionConfig(modelSelection())
+	}
+	resolver := config.Resolver
+	roles := StarterRoleDefinitions()
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]RunLaunchModelOverride, 0, len(raw))
+	for i, override := range raw {
+		role := strings.TrimSpace(override.Role)
+		if role == "" {
+			return nil, fmt.Errorf("model_overrides[%d].role is required", i)
+		}
+		if hasControlRune(role) {
+			return nil, fmt.Errorf("model_overrides[%d].role contains control characters", i)
+		}
+		roleDef, ok := roles[role]
+		if !ok {
+			return nil, fmt.Errorf("model_overrides[%d].role %q is not a starter civic role", i, role)
+		}
+		if _, duplicate := seen[role]; duplicate {
+			return nil, fmt.Errorf("model_overrides[%d].role %q is duplicated", i, role)
+		}
+		seen[role] = struct{}{}
+
+		policy, recorded, err := runLaunchOverridePolicy(i, override)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := resolver.Resolve(modelconfig.ResolutionInput{
+			Role:         role,
+			Policy:       roleDef.ModelPolicy,
+			TaskOverride: policy,
+			CanOperate:   roleDef.CanOperate,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("model_overrides[%d] for role %q is unsafe: %v", i, role, err)
+		}
+		if err := validateRunLaunchOverrideResolvedConfig(i, role, recorded.RequestedAuthMode, resolved); err != nil {
+			return nil, err
+		}
+		recorded.Role = role
+		recorded.ResolvedModel = resolved.Model
+		recorded.ResolvedProvider = resolved.Provider
+		recorded.AuthMode = string(resolved.AuthMode)
+		out = append(out, recorded)
+	}
+	return out, nil
+}
+
+func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) (*modelconfig.RoleModelPolicy, RunLaunchModelOverride, error) {
+	model := strings.TrimSpace(override.Model)
+	provider := strings.TrimSpace(override.Provider)
+	profile := strings.TrimSpace(override.Profile)
+	authMode := strings.TrimSpace(override.AuthMode)
+	preferredTier := strings.TrimSpace(override.PreferredTier)
+	caps := trimRunLaunchStrings(override.RequiredCapabilities)
+	if hasControlRune(model) || hasControlRune(provider) || hasControlRune(profile) || hasControlRune(authMode) || hasControlRune(preferredTier) {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] contains control characters", index)
+	}
+	if authMode != "" && authMode != string(modelconfig.AuthSubscription) && authMode != string(modelconfig.AuthAPIKey) && authMode != string(modelconfig.AuthLocal) {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].auth_mode must be %q, %q, or %q", index, modelconfig.AuthSubscription, modelconfig.AuthAPIKey, modelconfig.AuthLocal)
+	}
+	if len(caps) != len(override.RequiredCapabilities) {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains empty values", index)
+	}
+	hasOverride := model != "" || provider != "" || profile != "" || preferredTier != "" || len(caps) > 0 || override.MaxCostPerCallUSD != nil
+	if !hasOverride {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] must set model, profile, provider, preferred_tier, required_capabilities, or max_cost_per_call_usd", index)
+	}
+	if override.MaxCostPerCallUSD != nil && *override.MaxCostPerCallUSD < 0 {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].max_cost_per_call_usd must be zero or greater", index)
+	}
+	capabilities := make([]modelconfig.Capability, 0, len(caps))
+	for _, cap := range caps {
+		if hasControlRune(cap) {
+			return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains control characters", index)
+		}
+		capabilities = append(capabilities, modelconfig.Capability(cap))
+	}
+	policy := &modelconfig.RoleModelPolicy{
+		Model:                model,
+		Provider:             provider,
+		Profile:              profile,
+		PreferredTier:        modelconfig.ModelTier(preferredTier),
+		RequiredCapabilities: capabilities,
+		MaxCostPerCallUSD:    override.MaxCostPerCallUSD,
+	}
+	recorded := RunLaunchModelOverride{
+		Model:                model,
+		Provider:             provider,
+		Profile:              profile,
+		RequestedAuthMode:    authMode,
+		PreferredTier:        preferredTier,
+		RequiredCapabilities: caps,
+		MaxCostPerCallUSD:    override.MaxCostPerCallUSD,
+	}
+	return policy, recorded, nil
+}
+
+func validateRunLaunchOverrideResolvedConfig(index int, role string, requested string, resolved modelconfig.ResolvedConfig) error {
+	if resolved.Provider != "" && resolved.Entry.Provider != "" && resolved.Provider != resolved.Entry.Provider {
+		return fmt.Errorf("model_overrides[%d] for role %q resolved provider %q but model %q belongs to provider %q", index, role, resolved.Provider, resolved.Model, resolved.Entry.Provider)
+	}
+	if requested != "" && requested != string(resolved.AuthMode) {
+		return fmt.Errorf("model_overrides[%d] for role %q requested auth_mode %q but resolved auth_mode %q", index, role, requested, resolved.AuthMode)
+	}
+	if resolved.AuthMode == modelconfig.AuthAPIKey && requested != string(modelconfig.AuthAPIKey) {
+		return fmt.Errorf("model_overrides[%d] for role %q resolves to auth_mode %q; set auth_mode to %q to opt in to metered API-key models", index, role, resolved.AuthMode, modelconfig.AuthAPIKey)
+	}
+	return nil
+}
+
+func trimRunLaunchStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return out
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func normalizeRunLaunchSources(sources []RunLaunchSource) []RunLaunchSource {
@@ -331,18 +483,19 @@ func appendRunLaunchEvents(s store.Store, writer *operatorRunLaunchWriter, launc
 	}
 
 	requestContent := FactoryRunRequestedContent{
-		RunID:         runID,
-		IntakeID:      launch.IntakeID,
-		OperatorID:    launch.OperatorID,
-		Title:         launch.Title,
-		Status:        "queued",
-		Authority:     launch.Authority,
-		Budget:        launch.Budget,
-		TargetRepos:   append([]string(nil), launch.TargetRepos...),
-		SourceEventID: source.ID(),
-		BriefEventID:  brief.ID(),
-		Sources:       append([]RunLaunchSource(nil), launch.Sources...),
-		Brief:         append(json.RawMessage(nil), launch.Brief...),
+		RunID:          runID,
+		IntakeID:       launch.IntakeID,
+		OperatorID:     launch.OperatorID,
+		Title:          launch.Title,
+		Status:         "queued",
+		Authority:      launch.Authority,
+		Budget:         launch.Budget,
+		ModelOverrides: append([]RunLaunchModelOverride(nil), launch.ModelOverrides...),
+		TargetRepos:    append([]string(nil), launch.TargetRepos...),
+		SourceEventID:  source.ID(),
+		BriefEventID:   brief.ID(),
+		Sources:        append([]RunLaunchSource(nil), launch.Sources...),
+		Brief:          append(json.RawMessage(nil), launch.Brief...),
 	}
 	if _, err := createAndAppendRunLaunchEvent(s, writer, EventTypeFactoryRunRequested, requestContent, []types.EventID{source.ID(), brief.ID()}, conv); err != nil {
 		return runLaunchAppendResult{}, fmt.Errorf("append factory.run.requested: %w", err)
