@@ -260,7 +260,7 @@ func validateRunLaunchModelOverrides(raw []runLaunchModelOverrideRequest, modelS
 		if err != nil {
 			return nil, fmt.Errorf("model_overrides[%d] for role %q is unsafe: %v", i, role, err)
 		}
-		if err := validateRunLaunchOverrideAuthMode(i, role, recorded.RequestedAuthMode, resolved.AuthMode); err != nil {
+		if err := validateRunLaunchOverrideResolvedConfig(i, role, recorded.RequestedAuthMode, resolved); err != nil {
 			return nil, err
 		}
 		recorded.Role = role
@@ -282,8 +282,8 @@ func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) 
 	if hasControlRune(model) || hasControlRune(provider) || hasControlRune(profile) || hasControlRune(authMode) || hasControlRune(preferredTier) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] contains control characters", index)
 	}
-	if authMode != "" && authMode != string(modelconfig.AuthSubscription) && authMode != string(modelconfig.AuthAPIKey) {
-		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].auth_mode must be %q or %q", index, modelconfig.AuthSubscription, modelconfig.AuthAPIKey)
+	if authMode != "" && authMode != string(modelconfig.AuthSubscription) && authMode != string(modelconfig.AuthAPIKey) && authMode != string(modelconfig.AuthLocal) {
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].auth_mode must be %q, %q, or %q", index, modelconfig.AuthSubscription, modelconfig.AuthAPIKey, modelconfig.AuthLocal)
 	}
 	if len(caps) != len(override.RequiredCapabilities) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains empty values", index)
@@ -322,12 +322,15 @@ func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) 
 	return policy, recorded, nil
 }
 
-func validateRunLaunchOverrideAuthMode(index int, role string, requested string, resolved modelconfig.AuthMode) error {
-	if requested != "" && requested != string(resolved) {
-		return fmt.Errorf("model_overrides[%d] for role %q requested auth_mode %q but resolved auth_mode %q", index, role, requested, resolved)
+func validateRunLaunchOverrideResolvedConfig(index int, role string, requested string, resolved modelconfig.ResolvedConfig) error {
+	if resolved.Provider != "" && resolved.Entry.Provider != "" && resolved.Provider != resolved.Entry.Provider {
+		return fmt.Errorf("model_overrides[%d] for role %q resolved provider %q but model %q belongs to provider %q", index, role, resolved.Provider, resolved.Model, resolved.Entry.Provider)
 	}
-	if resolved == modelconfig.AuthAPIKey && requested != string(modelconfig.AuthAPIKey) {
-		return fmt.Errorf("model_overrides[%d] for role %q resolves to auth_mode %q; set auth_mode to %q to opt in to metered API-key models", index, role, resolved, modelconfig.AuthAPIKey)
+	if requested != "" && requested != string(resolved.AuthMode) {
+		return fmt.Errorf("model_overrides[%d] for role %q requested auth_mode %q but resolved auth_mode %q", index, role, requested, resolved.AuthMode)
+	}
+	if resolved.AuthMode == modelconfig.AuthAPIKey && requested != string(modelconfig.AuthAPIKey) {
+		return fmt.Errorf("model_overrides[%d] for role %q resolves to auth_mode %q; set auth_mode to %q to opt in to metered API-key models", index, role, resolved.AuthMode, modelconfig.AuthAPIKey)
 	}
 	return nil
 }

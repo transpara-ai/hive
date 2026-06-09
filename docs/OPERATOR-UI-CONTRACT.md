@@ -147,6 +147,7 @@ Rules:
 
 - `role` is required and must name a starter civic role.
 - At least one of `model`, `profile`, `provider`, `preferred_tier`, `required_capabilities`, or `max_cost_per_call_usd` must be set.
+- Provider/model/auth selections must resolve to a coherent catalog tuple; a provider override cannot relabel a subscription model as a metered provider.
 - A resolved `api-key` model requires an explicit request `auth_mode: api-key`; otherwise Hive rejects it before any launch events are written.
 - Duplicate role overrides are rejected.
 - Unknown, malformed, over-budget, or `CanOperate`-incompatible overrides are rejected before `source.ingested`, `brief.derived`, or `factory.run.requested` events are written.
