@@ -208,8 +208,9 @@ func latestModelRolePolicyUpdates(p *OperatorProjection, s store.Store, limit in
 		if !ok {
 			continue
 		}
-		current, exists := out[role]
-		if exists && !policy.UpdatedAt.After(current.UpdatedAt) {
+		// Store pagination is newest-first by append/chain position. First valid
+		// policy per role wins; wall-clock timestamps are not policy authority.
+		if _, exists := out[role]; exists {
 			continue
 		}
 		out[role] = policy
@@ -234,16 +235,19 @@ func latestModelRolePolicyUpdateForRole(s store.Store, role string, limit int) (
 	for _, item := range page.Items() {
 		eventRole, policy, ok, err := modelRolePolicyUpdateFromEvent(item)
 		if err != nil {
-			return OperatorModelRolePolicy{}, false, err
+			if eventRole == canonicalRole {
+				return OperatorModelRolePolicy{}, false, err
+			}
+			continue
 		}
 		if !ok || eventRole != canonicalRole {
 			continue
 		}
-		if found && !policy.UpdatedAt.After(latest.UpdatedAt) {
-			continue
-		}
+		// ByType is newest-first by append/chain position, so the first matching
+		// role is the active policy even if wall-clock timestamps moved backward.
 		latest = policy
 		found = true
+		break
 	}
 	return latest, found, nil
 }
@@ -253,9 +257,10 @@ func modelRolePolicyUpdateFromEvent(ev event.Event) (string, OperatorModelRolePo
 	if !ok {
 		return "", OperatorModelRolePolicy{}, false, errors.New(contentTypeError(ev, "ModelRolePolicyUpdatedContent"))
 	}
-	role, _, ok := canonicalStarterRole(content.Role)
+	rawRole := strings.TrimSpace(content.Role)
+	role, _, ok := canonicalStarterRole(rawRole)
 	if !ok {
-		return "", OperatorModelRolePolicy{}, false, fmt.Errorf("model policy event %s has unknown role %q", ev.ID().Value(), content.Role)
+		return rawRole, OperatorModelRolePolicy{}, false, fmt.Errorf("model policy event %s has unknown role %q", ev.ID().Value(), content.Role)
 	}
 	return role, OperatorModelRolePolicy{
 		Policy:            modelRolePolicyFromUpdate(content),
