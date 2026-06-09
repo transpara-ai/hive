@@ -20,8 +20,9 @@ const maxDecisionBodyBytes = 64 * 1024
 // operatorServerOptions collects optional dependencies for the operator API.
 // The zero value yields a strictly read-only server (today's behavior).
 type operatorServerOptions struct {
-	writer    *operatorDecisionWriter
-	runWriter *operatorRunLaunchWriter
+	writer            *operatorDecisionWriter
+	runWriter         *operatorRunLaunchWriter
+	projectionOptions []OperatorProjectionOption
 }
 
 // OperatorServerOption configures NewOperatorProjectionServer.
@@ -46,6 +47,14 @@ type operatorDecisionWriter struct {
 func WithOperatorDecisionWriter(factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID) OperatorServerOption {
 	return func(o *operatorServerOptions) {
 		o.writer = &operatorDecisionWriter{factory: factory, signer: signer, human: human, conv: conv}
+	}
+}
+
+// WithOperatorProjectionModelSelection configures the read-only model-selection
+// slice returned by GET /api/hive/operator-projection.
+func WithOperatorProjectionModelSelection(config OperatorModelSelectionConfig) OperatorServerOption {
+	return func(o *operatorServerOptions) {
+		o.projectionOptions = append(o.projectionOptions, WithOperatorModelSelection(config))
 	}
 }
 
@@ -82,7 +91,7 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		writeOperatorProjectionJSON(w, BuildOperatorProjection(s, limit))
+		writeOperatorProjectionJSON(w, BuildOperatorProjection(s, limit, options.projectionOptions...))
 	})
 	if options.writer != nil {
 		writer := options.writer
