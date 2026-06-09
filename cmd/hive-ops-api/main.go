@@ -43,38 +43,38 @@ func main() {
 
 	hive.RegisterEventTypes()
 
-	opts, decisionMode := decisionWriterOptions()
+	opts, writeMode := opsWriterOptions()
 	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
 
 	authMode := "disabled"
 	if *apiKey != "" {
 		authMode = "bearer"
 	}
-	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, decisions=%s)\n", *addr, authMode, *limit, decisionMode)
+	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, writes=%s)\n", *addr, authMode, *limit, writeMode)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
 }
 
-// decisionWriterOptions provisions the optional operator-decision writer from
-// the environment. The writer is enabled only when HIVE_OPS_HUMAN_ACTOR is set;
+// opsWriterOptions provisions optional operator write routes from the
+// environment. Writers are enabled only when HIVE_OPS_HUMAN_ACTOR is set;
 // otherwise the server stays strictly read-only (today's behavior), so an
 // unconfigured ops-api must not fail. The graph is still only ever written by
 // hive — this process — never by Site.
 //
 //   - HIVE_OPS_HUMAN_ACTOR : the human actor id recorded as the approver/signer
-//     of the decision. Required to enable the write path.
+//     of operator decisions and launch requests. Required to enable write paths.
 //   - HIVE_OPS_SIGNING_KEY : optional explicit signing seed. When unset, the
 //     signer is derived deterministically from the human actor id, matching the
 //     hive runtime identity scheme (sha256("signer:"+id)).
-func decisionWriterOptions() ([]hive.OperatorServerOption, string) {
+func opsWriterOptions() ([]hive.OperatorServerOption, string) {
 	human := os.Getenv("HIVE_OPS_HUMAN_ACTOR")
 	if human == "" {
 		return nil, "read-only"
 	}
 	humanID, err := types.NewActorID(human)
 	if err != nil {
-		log.Printf("HIVE_OPS_HUMAN_ACTOR invalid (%v); operator decisions disabled, server read-only", err)
+		log.Printf("HIVE_OPS_HUMAN_ACTOR invalid (%v); operator writes disabled, server read-only", err)
 		return nil, "read-only"
 	}
 
@@ -91,6 +91,7 @@ func decisionWriterOptions() ([]hive.OperatorServerOption, string) {
 
 	return []hive.OperatorServerOption{
 		hive.WithOperatorDecisionWriter(factory, signer, humanID, conv),
+		hive.WithOperatorRunLaunchWriter(factory, signer, humanID, conv),
 	}, "enabled"
 }
 

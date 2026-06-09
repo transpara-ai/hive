@@ -1,6 +1,8 @@
 package hive
 
 import (
+	"encoding/json"
+
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
@@ -16,6 +18,9 @@ var (
 	EventTypeProgress                = types.MustEventType("hive.progress")
 	EventTypeRoleDefinition          = types.MustEventType("hive.role.definition")
 	EventTypeAgentIdentityRegistered = types.MustEventType("agent.identity.registered")
+	EventTypeSourceIngested          = types.MustEventType("source.ingested")
+	EventTypeBriefDerived            = types.MustEventType("brief.derived")
+	EventTypeFactoryRunRequested     = types.MustEventType("factory.run.requested")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -24,6 +29,8 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeAgentSpawned, EventTypeAgentStopped,
 		EventTypeProgress, EventTypeRoleDefinition,
 		EventTypeAgentIdentityRegistered,
+		EventTypeSourceIngested, EventTypeBriefDerived,
+		EventTypeFactoryRunRequested,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
@@ -92,6 +99,78 @@ func (c AgentIdentityRegisteredContent) EventTypeName() string {
 	return "agent.identity.registered"
 }
 
+// RunLaunchSource identifies an operator-supplied source that caused a Hive run
+// launch request.
+type RunLaunchSource struct {
+	ID    string `json:"id,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Ref   string `json:"ref"`
+	Title string `json:"title,omitempty"`
+}
+
+// RunLaunchAuthority records the authority envelope the operator supplied when
+// requesting a run launch.
+type RunLaunchAuthority struct {
+	InitialLevel event.AuthorityLevel `json:"initial_level"`
+	Scope        string               `json:"scope,omitempty"`
+	PolicyRef    string               `json:"policy_ref,omitempty"`
+	Rationale    string               `json:"rationale,omitempty"`
+}
+
+// RunLaunchBudget records the bounded launch budget the operator supplied when
+// requesting a run launch.
+type RunLaunchBudget struct {
+	MaxIterations int     `json:"max_iterations"`
+	MaxCostUSD    float64 `json:"max_cost_usd"`
+}
+
+// SourceIngestedContent records the source payload anchoring an operator run
+// launch request.
+type SourceIngestedContent struct {
+	hiveContent
+	RunID      string            `json:"run_id"`
+	IntakeID   string            `json:"intake_id"`
+	OperatorID string            `json:"operator_id"`
+	Title      string            `json:"title"`
+	Sources    []RunLaunchSource `json:"sources"`
+}
+
+func (c SourceIngestedContent) EventTypeName() string { return "source.ingested" }
+
+// BriefDerivedContent records the brief that was accepted for a launch request.
+type BriefDerivedContent struct {
+	hiveContent
+	RunID         string          `json:"run_id"`
+	IntakeID      string          `json:"intake_id"`
+	OperatorID    string          `json:"operator_id"`
+	Title         string          `json:"title"`
+	Brief         json.RawMessage `json:"brief"`
+	SourceEventID types.EventID   `json:"source_event_id"`
+}
+
+func (c BriefDerivedContent) EventTypeName() string { return "brief.derived" }
+
+// FactoryRunRequestedContent records the queued Hive run launch request. It is
+// intentionally a request/queue event, not proof that runtime execution has
+// started.
+type FactoryRunRequestedContent struct {
+	hiveContent
+	RunID         string             `json:"run_id"`
+	IntakeID      string             `json:"intake_id"`
+	OperatorID    string             `json:"operator_id"`
+	Title         string             `json:"title"`
+	Status        string             `json:"status"`
+	Authority     RunLaunchAuthority `json:"authority"`
+	Budget        RunLaunchBudget    `json:"budget"`
+	TargetRepos   []string           `json:"target_repos"`
+	SourceEventID types.EventID      `json:"source_event_id"`
+	BriefEventID  types.EventID      `json:"brief_event_id"`
+	Sources       []RunLaunchSource  `json:"sources"`
+	Brief         json.RawMessage    `json:"brief"`
+}
+
+func (c FactoryRunRequestedContent) EventTypeName() string { return "factory.run.requested" }
+
 // AgentStoppedContent is emitted when an agent's loop ends.
 type AgentStoppedContent struct {
 	hiveContent
@@ -137,6 +216,9 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.progress", event.Unmarshal[ProgressContent])
 	event.RegisterContentUnmarshaler("hive.role.definition", event.Unmarshal[RoleDefinitionContent])
 	event.RegisterContentUnmarshaler("agent.identity.registered", event.Unmarshal[AgentIdentityRegisteredContent])
+	event.RegisterContentUnmarshaler("source.ingested", event.Unmarshal[SourceIngestedContent])
+	event.RegisterContentUnmarshaler("brief.derived", event.Unmarshal[BriefDerivedContent])
+	event.RegisterContentUnmarshaler("factory.run.requested", event.Unmarshal[FactoryRunRequestedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }

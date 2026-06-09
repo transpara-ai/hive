@@ -180,6 +180,150 @@ func TestOperatorDecisionEndpointRequiresBearer(t *testing.T) {
 	}
 }
 
+func TestOperatorRunLaunchEndpointRequiresBearer(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(validRunLaunchBody(t)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post run launch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated POST status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+	assertNoRunLaunchEvents(t, s)
+}
+
+func TestOperatorRunLaunchEndpointValidation(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	doPost := func(t *testing.T, rawBody string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewBufferString(rawBody))
+		req.Header.Set("Authorization", "Bearer secret")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post run launch: %v", err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "malformed JSON body", body: `{not valid json`},
+		{name: "missing operator_id", body: `{"intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"required"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/hive"]}`},
+		{name: "missing sources", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"authority":{"initial_level":"required"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/hive"]}`},
+		{name: "missing authority", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/hive"]}`},
+		{name: "missing budget field", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"required"},"budget":{"max_iterations":4},"target_repos":["transpara-ai/hive"]}`},
+		{name: "unsafe target repo", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"required"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["../site"]}`},
+		{name: "dot target repo component", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"required"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/.git"]}`},
+		{name: "unknown authority level", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":{},"sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"owner"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/hive"]}`},
+		{name: "brief not object", body: `{"operator_id":"user_127","intake_id":"intake_127","title":"Launch","brief":"do it","sources":[{"type":"issue","ref":"https://github.com/transpara-ai/hive/issues/127"}],"authority":{"initial_level":"required"},"budget":{"max_iterations":4,"max_cost_usd":12.5},"target_repos":["transpara-ai/hive"]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := doPost(t, tt.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("%s: status = %d, want %d", tt.name, resp.StatusCode, http.StatusBadRequest)
+			}
+			assertNoRunLaunchEvents(t, s)
+		})
+	}
+}
+
+func TestOperatorRunLaunchEndpointRecordsCausalEvents(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorRunLaunchWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/runs", bytes.NewReader(validRunLaunchBody(t)))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post run launch: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	var response operatorRunLaunchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.RunID == "" || response.FirstEventID == "" {
+		t.Fatalf("response identifiers must be set, got %+v", response)
+	}
+	if response.Status != "queued" {
+		t.Fatalf("status = %q, want queued", response.Status)
+	}
+
+	sourceEvents := requireRunLaunchEvents(t, s, EventTypeSourceIngested, 1)
+	briefEvents := requireRunLaunchEvents(t, s, EventTypeBriefDerived, 1)
+	runEvents := requireRunLaunchEvents(t, s, EventTypeFactoryRunRequested, 1)
+	sourceEvent, briefEvent, runEvent := sourceEvents[0], briefEvents[0], runEvents[0]
+
+	if response.FirstEventID != sourceEvent.ID().Value() {
+		t.Fatalf("first_event_id = %q, want source event %q", response.FirstEventID, sourceEvent.ID().Value())
+	}
+	if got := briefEvent.Causes(); len(got) != 1 || got[0] != sourceEvent.ID() {
+		t.Fatalf("brief causes = %+v, want only source event %s", got, sourceEvent.ID())
+	}
+	if got := runEvent.Causes(); len(got) != 2 || got[0] != sourceEvent.ID() || got[1] != briefEvent.ID() {
+		t.Fatalf("run request causes = %+v, want source %s and brief %s", got, sourceEvent.ID(), briefEvent.ID())
+	}
+
+	sourceContent, ok := sourceEvent.Content().(SourceIngestedContent)
+	if !ok {
+		t.Fatalf("source content type = %T", sourceEvent.Content())
+	}
+	briefContent, ok := briefEvent.Content().(BriefDerivedContent)
+	if !ok {
+		t.Fatalf("brief content type = %T", briefEvent.Content())
+	}
+	runContent, ok := runEvent.Content().(FactoryRunRequestedContent)
+	if !ok {
+		t.Fatalf("run content type = %T", runEvent.Content())
+	}
+	if sourceContent.RunID != response.RunID || briefContent.RunID != response.RunID || runContent.RunID != response.RunID {
+		t.Fatalf("run ids not propagated: source=%q brief=%q run=%q response=%q", sourceContent.RunID, briefContent.RunID, runContent.RunID, response.RunID)
+	}
+	if briefContent.SourceEventID != sourceEvent.ID() {
+		t.Fatalf("brief source_event_id = %s, want %s", briefContent.SourceEventID, sourceEvent.ID())
+	}
+	if runContent.SourceEventID != sourceEvent.ID() || runContent.BriefEventID != briefEvent.ID() {
+		t.Fatalf("run event links source=%s brief=%s, want source=%s brief=%s", runContent.SourceEventID, runContent.BriefEventID, sourceEvent.ID(), briefEvent.ID())
+	}
+	if runContent.Authority.InitialLevel != event.AuthorityLevelRequired || runContent.Authority.Scope != "operator-launch" {
+		t.Fatalf("authority not recorded: %+v", runContent.Authority)
+	}
+	if runContent.Budget.MaxIterations != 4 || runContent.Budget.MaxCostUSD != 12.5 {
+		t.Fatalf("budget not recorded: %+v", runContent.Budget)
+	}
+	if len(runContent.TargetRepos) != 1 || runContent.TargetRepos[0] != "transpara-ai/hive" {
+		t.Fatalf("target repos not recorded: %+v", runContent.TargetRepos)
+	}
+	if len(runContent.Sources) != 1 || runContent.Sources[0].Ref != "https://github.com/transpara-ai/hive/issues/127" {
+		t.Fatalf("sources not recorded: %+v", runContent.Sources)
+	}
+	if !bytes.Contains(runContent.Brief, []byte(`"goal"`)) {
+		t.Fatalf("brief not recorded: %s", string(runContent.Brief))
+	}
+}
+
 // TestOperatorDecisionEndpointValidation exercises all negative-case input
 // validation branches of POST /api/hive/operator-decision. Each sub-test
 // asserts the correct 4xx status AND that no decision event was written to the
@@ -406,6 +550,62 @@ func seedPendingActionRequest(t *testing.T, s store.Store, factory *event.EventF
 		t.Fatalf("append authority.request.recorded: %v", err)
 	}
 	return requestID
+}
+
+func validRunLaunchBody(t *testing.T) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"operator_id": "user_127",
+		"intake_id":   "intake_127",
+		"title":       "Launch Hive issue 127",
+		"brief": map[string]any{
+			"goal":  "complete Hive run launch API",
+			"issue": "https://github.com/transpara-ai/hive/issues/127",
+		},
+		"sources": []map[string]string{
+			{
+				"id":    "issue_127",
+				"type":  "issue",
+				"ref":   "https://github.com/transpara-ai/hive/issues/127",
+				"title": "Hive run launch API",
+			},
+		},
+		"authority": map[string]string{
+			"initial_level": "required",
+			"scope":         "operator-launch",
+			"policy_ref":    "dark-factory/operator-ui-contract-v0.1.2",
+			"rationale":     "operator initiated queued launch only",
+		},
+		"budget": map[string]any{
+			"max_iterations": 4,
+			"max_cost_usd":   12.5,
+		},
+		"target_repos": []string{"transpara-ai/hive"},
+	})
+	if err != nil {
+		t.Fatalf("marshal valid launch body: %v", err)
+	}
+	return body
+}
+
+func assertNoRunLaunchEvents(t *testing.T, s store.Store) {
+	t.Helper()
+	requireRunLaunchEvents(t, s, EventTypeSourceIngested, 0)
+	requireRunLaunchEvents(t, s, EventTypeBriefDerived, 0)
+	requireRunLaunchEvents(t, s, EventTypeFactoryRunRequested, 0)
+}
+
+func requireRunLaunchEvents(t *testing.T, s store.Store, eventType types.EventType, want int) []event.Event {
+	t.Helper()
+	page, err := s.ByType(eventType, 50, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query %s: %v", eventType, err)
+	}
+	items := page.Items()
+	if len(items) != want {
+		t.Fatalf("%s event count = %d, want %d: %+v", eventType, len(items), want, items)
+	}
+	return items
 }
 
 // TestOperatorDecisionEndpointRejectsNonDraftPR verifies the decision endpoint
