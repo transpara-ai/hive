@@ -128,6 +128,7 @@ func opsWriterOptions() ([]hive.OperatorServerOption, string) {
 	return []hive.OperatorServerOption{
 		hive.WithOperatorDecisionWriter(factory, signer, humanID, conv),
 		hive.WithOperatorRunLaunchWriter(factory, signer, humanID, conv),
+		hive.WithOperatorModelRolePolicyWriter(factory, signer, humanID, conv),
 	}, "enabled"
 }
 

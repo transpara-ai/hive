@@ -22,6 +22,7 @@ const maxDecisionBodyBytes = 64 * 1024
 type operatorServerOptions struct {
 	writer            *operatorDecisionWriter
 	runWriter         *operatorRunLaunchWriter
+	modelPolicyWriter *operatorModelRolePolicyWriter
 	projectionOptions []OperatorProjectionOption
 	modelSelection    OperatorModelSelectionSource
 }
@@ -116,12 +117,23 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 	}
 	if options.runWriter != nil {
 		writer := options.runWriter
+		modelSelection := modelSelectionSourceWithRolePolicyUpdates(s, options.modelSelection, limit)
 		mux.HandleFunc("POST /api/hive/runs", func(w http.ResponseWriter, r *http.Request) {
 			if !operatorBearerOK(apiKey, r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			handleOperatorRunLaunch(w, r, s, writer, options.modelSelection)
+			handleOperatorRunLaunch(w, r, s, writer, modelSelection)
+		})
+	}
+	if options.modelPolicyWriter != nil {
+		writer := options.modelPolicyWriter
+		mux.HandleFunc("POST /api/hive/model-selection/role-policy", func(w http.ResponseWriter, r *http.Request) {
+			if !operatorBearerOK(apiKey, r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			handleOperatorModelRolePolicyUpdate(w, r, s, writer, options.modelSelection)
 		})
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

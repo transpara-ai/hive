@@ -33,6 +33,20 @@ type OperatorModelSelectionConfig struct {
 	HotReload       bool
 	LastReloadAt    time.Time
 	LastReloadError string
+	RolePolicyError string
+	RolePolicies    map[string]OperatorModelRolePolicy
+}
+
+// OperatorModelRolePolicy is Hive-owned durable role policy layered over the
+// static starter role policy for projection and execution planning.
+type OperatorModelRolePolicy struct {
+	Policy            *modelconfig.RoleModelPolicy
+	RequestedAuthMode string
+	ResolvedModel     string
+	ResolvedProvider  string
+	AuthMode          string
+	EventID           string
+	UpdatedAt         time.Time
 }
 
 // DefaultOperatorModelSelectionConfig returns the built-in claude-cli resolver
@@ -231,8 +245,10 @@ type OperatorModelRoleAssignment struct {
 	PolicyProvider       string   `json:"policy_provider,omitempty"`
 	PreferredTier        string   `json:"preferred_tier,omitempty"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`
 	SelectionStrategy    string   `json:"selection_strategy,omitempty"`
 	Source               string   `json:"source"`
+	PolicyEventID        string   `json:"policy_event_id,omitempty"`
 	Trace                []string `json:"trace,omitempty"`
 	Error                string   `json:"error,omitempty"`
 }
@@ -255,6 +271,9 @@ func BuildOperatorModelSelection(config OperatorModelSelectionConfig) OperatorMo
 	if config.LastReloadError != "" {
 		projection.Errors = append(projection.Errors, "catalog reload: "+config.LastReloadError)
 	}
+	if config.RolePolicyError != "" {
+		projection.Errors = append(projection.Errors, "role policy: "+config.RolePolicyError)
+	}
 
 	catalog := config.Resolver.Catalog()
 	for _, entry := range catalog.All() {
@@ -272,7 +291,7 @@ func BuildOperatorModelSelection(config OperatorModelSelectionConfig) OperatorMo
 	sort.Strings(roleNames)
 	for _, name := range roleNames {
 		roleDef := roles[name]
-		assignment := operatorModelRoleAssignment(config.Resolver, roleDef)
+		assignment := operatorModelRoleAssignment(config.Resolver, roleDef, config.RolePolicies[name])
 		if assignment.Error != "" {
 			projection.Errors = append(projection.Errors, fmt.Sprintf("%s: %s", assignment.Role, assignment.Error))
 		}
@@ -319,35 +338,133 @@ func operatorModelCatalogEntry(entry modelconfig.ModelCatalogEntry) OperatorMode
 	}
 }
 
-func operatorModelRoleAssignment(resolver *modelconfig.Resolver, role *modelconfig.RoleDefinition) OperatorModelRoleAssignment {
-	assignment := OperatorModelRoleAssignment{
-		Role:       role.Name,
-		Tier:       role.Tier,
-		CanOperate: role.CanOperate,
-		Source:     "starter-role-definition",
+func operatorModelRoleAssignment(resolver *modelconfig.Resolver, role *modelconfig.RoleDefinition, storedPolicy OperatorModelRolePolicy) OperatorModelRoleAssignment {
+	policy := role.ModelPolicy
+	source := "starter-role-definition"
+	if storedPolicy.Policy != nil {
+		policy = mergeRoleModelPolicy(role.ModelPolicy, storedPolicy.Policy)
+		source = "hive-model-policy-event"
 	}
-	if role.ModelPolicy != nil {
-		assignment.Profile = role.ModelPolicy.Profile
-		assignment.PolicyModel = role.ModelPolicy.Model
-		assignment.PolicyProvider = role.ModelPolicy.Provider
-		assignment.PreferredTier = string(role.ModelPolicy.PreferredTier)
-		assignment.RequiredCapabilities = capabilityStrings(role.ModelPolicy.RequiredCapabilities)
-		assignment.SelectionStrategy = role.ModelPolicy.SelectionStrategy
+	assignment := OperatorModelRoleAssignment{
+		Role:          role.Name,
+		Tier:          role.Tier,
+		CanOperate:    role.CanOperate,
+		Source:        source,
+		PolicyEventID: storedPolicy.EventID,
+	}
+	if policy != nil {
+		assignment.Profile = policy.Profile
+		assignment.PolicyModel = policy.Model
+		assignment.PolicyProvider = policy.Provider
+		assignment.PreferredTier = string(policy.PreferredTier)
+		assignment.RequiredCapabilities = capabilityStrings(policy.RequiredCapabilities)
+		assignment.MaxCostPerCallUSD = cloneModelPolicyFloat64Ptr(policy.MaxCostPerCallUSD)
+		assignment.SelectionStrategy = policy.SelectionStrategy
 	}
 	resolved, err := resolver.Resolve(modelconfig.ResolutionInput{
 		Role:       role.Name,
-		Policy:     role.ModelPolicy,
+		Policy:     policy,
 		CanOperate: role.CanOperate,
 	})
 	if err != nil {
 		assignment.Error = err.Error()
 		return assignment
 	}
+	if storedPolicy.Policy != nil {
+		if err := validateRunLaunchOverrideResolvedConfig(0, role.Name, storedPolicy.RequestedAuthMode, resolved); err != nil {
+			assignment.Error = err.Error()
+			return assignment
+		}
+		if err := validateStoredModelRolePolicyResolution(role.Name, storedPolicy, resolved); err != nil {
+			assignment.Error = err.Error()
+			return assignment
+		}
+	}
 	assignment.Model = resolved.Model
 	assignment.Provider = resolved.Provider
 	assignment.AuthMode = string(resolved.AuthMode)
 	assignment.Trace = append([]string(nil), resolved.Trace...)
 	return assignment
+}
+
+func mergeRoleModelPolicy(base, overlay *modelconfig.RoleModelPolicy) *modelconfig.RoleModelPolicy {
+	if base == nil && overlay == nil {
+		return nil
+	}
+	out := &modelconfig.RoleModelPolicy{}
+	if base != nil {
+		*out = *base
+		out.RequiredCapabilities = append([]modelconfig.Capability(nil), base.RequiredCapabilities...)
+		out.MaxCostPerCallUSD = cloneModelPolicyFloat64Ptr(base.MaxCostPerCallUSD)
+	}
+	if overlay == nil {
+		return out
+	}
+	if overlay.Model != "" {
+		out.Model = overlay.Model
+	}
+	if overlay.Provider != "" {
+		out.Provider = overlay.Provider
+	}
+	if overlay.Profile != "" {
+		out.Profile = overlay.Profile
+	}
+	if overlay.PreferredTier != "" {
+		out.PreferredTier = overlay.PreferredTier
+	}
+	if len(overlay.RequiredCapabilities) > 0 {
+		out.RequiredCapabilities = mergeCapabilities(out.RequiredCapabilities, overlay.RequiredCapabilities)
+	}
+	if overlay.MaxCostPerCallUSD != nil {
+		out.MaxCostPerCallUSD = cloneModelPolicyFloat64Ptr(overlay.MaxCostPerCallUSD)
+	}
+	if overlay.AllowDowngrade {
+		out.AllowDowngrade = true
+	}
+	if overlay.SelectionStrategy != "" {
+		out.SelectionStrategy = overlay.SelectionStrategy
+	}
+	return out
+}
+
+func mergeCapabilities(a, b []modelconfig.Capability) []modelconfig.Capability {
+	if len(a) == 0 {
+		return append([]modelconfig.Capability(nil), b...)
+	}
+	out := append([]modelconfig.Capability(nil), a...)
+	seen := make(map[modelconfig.Capability]struct{}, len(out)+len(b))
+	for _, cap := range out {
+		seen[cap] = struct{}{}
+	}
+	for _, cap := range b {
+		if _, ok := seen[cap]; ok {
+			continue
+		}
+		seen[cap] = struct{}{}
+		out = append(out, cap)
+	}
+	return out
+}
+
+func validateStoredModelRolePolicyResolution(role string, stored OperatorModelRolePolicy, resolved modelconfig.ResolvedConfig) error {
+	if stored.ResolvedModel != "" && stored.ResolvedModel != resolved.Model {
+		return fmt.Errorf("model policy for role %q stored resolved_model %q but current resolver produced %q", role, stored.ResolvedModel, resolved.Model)
+	}
+	if stored.ResolvedProvider != "" && stored.ResolvedProvider != resolved.Provider {
+		return fmt.Errorf("model policy for role %q stored resolved_provider %q but current resolver produced %q", role, stored.ResolvedProvider, resolved.Provider)
+	}
+	if stored.AuthMode != "" && stored.AuthMode != string(resolved.AuthMode) {
+		return fmt.Errorf("model policy for role %q stored auth_mode %q but current resolver produced %q", role, stored.AuthMode, resolved.AuthMode)
+	}
+	return nil
+}
+
+func cloneModelPolicyFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func capabilityStrings(capabilities []modelconfig.Capability) []string {

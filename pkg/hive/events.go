@@ -21,6 +21,7 @@ var (
 	EventTypeSourceIngested          = types.MustEventType("source.ingested")
 	EventTypeBriefDerived            = types.MustEventType("brief.derived")
 	EventTypeFactoryRunRequested     = types.MustEventType("factory.run.requested")
+	EventTypeModelRolePolicyUpdated  = types.MustEventType("hive.model.role.policy.updated")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -31,6 +32,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeAgentIdentityRegistered,
 		EventTypeSourceIngested, EventTypeBriefDerived,
 		EventTypeFactoryRunRequested,
+		EventTypeModelRolePolicyUpdated,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
@@ -188,6 +190,30 @@ type FactoryRunRequestedContent struct {
 
 func (c FactoryRunRequestedContent) EventTypeName() string { return "factory.run.requested" }
 
+// ModelRolePolicyUpdatedContent records Hive-owned durable model policy for one
+// civic role. Site may request this write through Hive's ops API, but Hive
+// validates, resolves, records, and later projects the policy.
+type ModelRolePolicyUpdatedContent struct {
+	hiveContent
+	Role                 string   `json:"role"`
+	Model                string   `json:"model,omitempty"`
+	Provider             string   `json:"provider,omitempty"`
+	Profile              string   `json:"profile,omitempty"`
+	RequestedAuthMode    string   `json:"requested_auth_mode,omitempty"`
+	PreferredTier        string   `json:"preferred_tier,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	MaxCostPerCallUSD    *float64 `json:"max_cost_per_call_usd,omitempty"`
+	ResolvedModel        string   `json:"resolved_model"`
+	ResolvedProvider     string   `json:"resolved_provider"`
+	AuthMode             string   `json:"auth_mode"`
+	OperatorID           string   `json:"operator_id,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
+}
+
+func (c ModelRolePolicyUpdatedContent) EventTypeName() string {
+	return "hive.model.role.policy.updated"
+}
+
 // AgentStoppedContent is emitted when an agent's loop ends.
 type AgentStoppedContent struct {
 	hiveContent
@@ -236,6 +262,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("source.ingested", event.Unmarshal[SourceIngestedContent])
 	event.RegisterContentUnmarshaler("brief.derived", event.Unmarshal[BriefDerivedContent])
 	event.RegisterContentUnmarshaler("factory.run.requested", event.Unmarshal[FactoryRunRequestedContent])
+	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }

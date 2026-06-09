@@ -3,11 +3,13 @@ package hive
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/safety"
@@ -459,6 +461,95 @@ func TestOperatorRunLaunchEndpointRejectsUnsafeCanOperateModelOverrideBeforeWrit
 	assertNoRunLaunchEvents(t, s)
 }
 
+func TestOperatorModelRolePolicyEndpointRecordsHiveOwnedPolicy(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorModelRolePolicyWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	maxCost := 2.75
+	body, _ := json.Marshal(map[string]any{
+		"operator_id":           "user_139",
+		"reason":                "operator selected metered guardian model",
+		"role":                  "guardian",
+		"model":                 "api-sonnet",
+		"auth_mode":             "api-key",
+		"max_cost_per_call_usd": maxCost,
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/model-selection/role-policy", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post model role policy: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", resp.StatusCode, http.StatusOK, respBody(t, resp))
+	}
+
+	var response operatorModelRolePolicyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Role != "guardian" || response.AuthMode != string(modelconfig.AuthAPIKey) || response.ResolvedProvider != "anthropic" || response.EventID == "" {
+		t.Fatalf("response = %+v, want recorded guardian anthropic api-key policy", response)
+	}
+
+	events := requireModelRolePolicyEvents(t, s, 1)
+	content, ok := events[0].Content().(ModelRolePolicyUpdatedContent)
+	if !ok {
+		t.Fatalf("policy content type = %T", events[0].Content())
+	}
+	if content.Role != "guardian" || content.Model != "api-sonnet" || content.RequestedAuthMode != "api-key" {
+		t.Fatalf("recorded policy = %+v, want guardian api-sonnet api-key request", content)
+	}
+	if content.MaxCostPerCallUSD == nil || *content.MaxCostPerCallUSD != maxCost {
+		t.Fatalf("recorded max cost = %v, want %v", content.MaxCostPerCallUSD, maxCost)
+	}
+	if content.OperatorID != "user_139" || content.Reason == "" {
+		t.Fatalf("operator metadata = %+v, want recorded operator and reason", content)
+	}
+
+	projection := BuildOperatorProjection(s, 50)
+	guardian := requireModelAssignment(t, projection.ModelSelection, "guardian")
+	if guardian.Source != "hive-model-policy-event" || guardian.PolicyEventID != events[0].ID().Value() {
+		t.Fatalf("guardian assignment source/event = %q/%q, want hive policy event %s", guardian.Source, guardian.PolicyEventID, events[0].ID())
+	}
+	if guardian.Model != "api-claude-sonnet-4-6" || guardian.Provider != "anthropic" || guardian.AuthMode != "api-key" {
+		t.Fatalf("guardian assignment = %+v, want projected metered model", guardian)
+	}
+	if guardian.MaxCostPerCallUSD == nil || *guardian.MaxCostPerCallUSD != maxCost {
+		t.Fatalf("guardian projected max cost = %v, want %v", guardian.MaxCostPerCallUSD, maxCost)
+	}
+}
+
+func TestOperatorModelRolePolicyEndpointRejectsUnsafeCanOperatePolicyBeforeWriting(t *testing.T) {
+	s, factory, signer, human, conv := newDecisionTestStore(t)
+	srv := NewOperatorProjectionServer(s, "secret", 50, WithOperatorModelRolePolicyWriter(factory, signer, human, conv))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"operator_id": "user_139",
+		"role":        "implementer",
+		"model":       "api-sonnet",
+		"auth_mode":   "api-key",
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/hive/model-selection/role-policy", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post model role policy: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	requireModelRolePolicyEvents(t, s, 0)
+}
+
 // TestOperatorDecisionEndpointValidation exercises all negative-case input
 // validation branches of POST /api/hive/operator-decision. Each sub-test
 // asserts the correct 4xx status AND that no decision event was written to the
@@ -757,6 +848,28 @@ func requireRunLaunchEvents(t *testing.T, s store.Store, eventType types.EventTy
 		t.Fatalf("%s event count = %d, want %d: %+v", eventType, len(items), want, items)
 	}
 	return items
+}
+
+func requireModelRolePolicyEvents(t *testing.T, s store.Store, want int) []event.Event {
+	t.Helper()
+	page, err := s.ByType(EventTypeModelRolePolicyUpdated, 50, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query %s: %v", EventTypeModelRolePolicyUpdated, err)
+	}
+	items := page.Items()
+	if len(items) != want {
+		t.Fatalf("%s event count = %d, want %d: %+v", EventTypeModelRolePolicyUpdated, len(items), want, items)
+	}
+	return items
+}
+
+func respBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	return string(body)
 }
 
 // TestOperatorDecisionEndpointRejectsNonDraftPR verifies the decision endpoint

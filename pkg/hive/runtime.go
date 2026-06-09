@@ -601,14 +601,9 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		return nil, "", err
 	}
 
-	// Resolve model/provider through the precedence chain.
-	input := modelconfig.ResolutionInput{
-		Role:          def.Role,
-		AgentDefModel: def.Model,
-		Policy:        def.EffectiveModelPolicy(),
-		CanOperate:    def.CanOperate,
-	}
-	resolved, err := r.currentResolver().Resolve(input)
+	// Resolve model/provider through the precedence chain, including any
+	// Hive-owned durable role policy recorded through the ops API.
+	resolved, err := r.resolveAgentModel(def)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
 	}
