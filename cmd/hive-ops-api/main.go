@@ -16,6 +16,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/work"
 )
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 	defer store.Close()
 
 	hive.RegisterEventTypes()
+	work.RegisterEventTypes()
 
 	modelSelectionManager, err := hive.NewOperatorModelSelectionManager(*catalog, types.Now().Value(), *catalogReloadInterval > 0)
 	if err != nil {
