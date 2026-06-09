@@ -229,3 +229,89 @@ func TestResolveTaskModelOverrideRejectsAPIKeyWithoutExplicitOptIn(t *testing.T)
 		t.Fatalf("error = %q, want explicit api-key opt-in failure", err.Error())
 	}
 }
+
+func TestResolveAgentModelUsesHiveOwnedRolePolicyEvent(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeModelRolePolicyUpdated, ModelRolePolicyUpdatedContent{
+		Role:              "guardian",
+		Model:             "api-sonnet",
+		RequestedAuthMode: "api-key",
+		ResolvedModel:     "api-claude-sonnet-4-6",
+		ResolvedProvider:  "anthropic",
+		AuthMode:          "api-key",
+	})
+	r := &Runtime{store: s}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Role:           "guardian",
+		CanOperate:     false,
+		RoleDefinition: StarterRoleDefinitions()["guardian"],
+	}
+
+	resolved, err := r.resolveAgentModel(def)
+	if err != nil {
+		t.Fatalf("resolveAgentModel: %v", err)
+	}
+	if resolved.Provider != "anthropic" || resolved.Model != "api-claude-sonnet-4-6" || resolved.AuthMode != modelconfig.AuthAPIKey {
+		t.Fatalf("resolved = %s/%s [%s], want anthropic/api-claude-sonnet-4-6 [api-key]", resolved.Provider, resolved.Model, resolved.AuthMode)
+	}
+}
+
+func TestResolveAgentModelRejectsHiveOwnedRolePolicyWithoutAPIKeyOptIn(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeModelRolePolicyUpdated, ModelRolePolicyUpdatedContent{
+		Role:             "guardian",
+		Model:            "api-sonnet",
+		ResolvedModel:    "api-claude-sonnet-4-6",
+		ResolvedProvider: "anthropic",
+		AuthMode:         "api-key",
+	})
+	r := &Runtime{store: s}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Role:           "guardian",
+		CanOperate:     false,
+		RoleDefinition: StarterRoleDefinitions()["guardian"],
+	}
+
+	_, err := r.resolveAgentModel(def)
+	if err == nil {
+		t.Fatal("resolveAgentModel error = nil, want api-key opt-in failure")
+	}
+	if !strings.Contains(err.Error(), "set auth_mode to \"api-key\"") {
+		t.Fatalf("error = %q, want explicit api-key opt-in failure", err.Error())
+	}
+}
+
+func TestResolveTaskModelOverrideUsesHiveOwnedRolePolicyWithoutFactoryOverride(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeModelRolePolicyUpdated, ModelRolePolicyUpdatedContent{
+		Role:              "implementer",
+		Model:             "sonnet",
+		RequestedAuthMode: "subscription",
+		ResolvedModel:     "claude-sonnet-4-6",
+		ResolvedProvider:  "claude-cli",
+		AuthMode:          "subscription",
+	})
+	r := &Runtime{store: s}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Role:           "implementer",
+		CanOperate:     true,
+		RoleDefinition: StarterRoleDefinitions()["implementer"],
+	}
+
+	resolved, override, applied, err := r.resolveTaskModelOverride(work.Task{}, def, "implementer")
+	if err != nil {
+		t.Fatalf("resolveTaskModelOverride: %v", err)
+	}
+	if !applied {
+		t.Fatal("applied = false, want active role policy to apply")
+	}
+	if override.Role != "" {
+		t.Fatalf("override = %+v, want no FactoryOrder override payload", override)
+	}
+	if resolved.Provider != "claude-cli" || resolved.Model != "claude-sonnet-4-6" || resolved.AuthMode != modelconfig.AuthSubscription {
+		t.Fatalf("resolved = %s/%s [%s], want claude-cli/claude-sonnet-4-6 [subscription]", resolved.Provider, resolved.Model, resolved.AuthMode)
+	}
+}

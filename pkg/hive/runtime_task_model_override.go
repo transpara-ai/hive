@@ -53,8 +53,16 @@ func (r *Runtime) resolveTaskModelOverride(task work.Task, def AgentDef, role st
 	if !sameRole(def.Role, canonicalRole) {
 		return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, nil
 	}
+	basePolicy, storedPolicy, hasStoredPolicy, err := r.activeRoleModelPolicy(canonicalRole, def.EffectiveModelPolicy())
+	if err != nil {
+		return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, fmt.Errorf("load active model policy for role %q: %w", canonicalRole, err)
+	}
 	if r.tasks == nil {
-		return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, nil
+		if !hasStoredPolicy {
+			return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, nil
+		}
+		resolved, err := r.resolveActiveRoleModelPolicy(def, canonicalRole, basePolicy, storedPolicy)
+		return resolved, work.FactoryOrderModelOverride{}, true, err
 	}
 
 	projection, err := r.tasks.ProjectTask(task.ID)
@@ -63,7 +71,11 @@ func (r *Runtime) resolveTaskModelOverride(task work.Task, def AgentDef, role st
 	}
 	override, ok := factoryOrderModelOverrideForRole(projection.ModelOverrides, canonicalRole)
 	if !ok {
-		return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, nil
+		if !hasStoredPolicy {
+			return modelconfig.ResolvedConfig{}, work.FactoryOrderModelOverride{}, false, nil
+		}
+		resolved, err := r.resolveActiveRoleModelPolicy(def, canonicalRole, basePolicy, storedPolicy)
+		return resolved, work.FactoryOrderModelOverride{}, true, err
 	}
 
 	request := modelOverrideRequestFromFactoryOrder(override)
@@ -73,7 +85,7 @@ func (r *Runtime) resolveTaskModelOverride(task work.Task, def AgentDef, role st
 	}
 	resolved, err := r.currentResolver().Resolve(modelconfig.ResolutionInput{
 		Role:         canonicalRole,
-		Policy:       def.EffectiveModelPolicy(),
+		Policy:       basePolicy,
 		TaskOverride: policy,
 		CanOperate:   def.CanOperate,
 	})

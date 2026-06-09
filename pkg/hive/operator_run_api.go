@@ -231,6 +231,9 @@ func ValidateModelOverrides(raw []ModelOverrideRequest, modelSelection OperatorM
 	if modelSelection != nil {
 		config = normalizeOperatorModelSelectionConfig(modelSelection())
 	}
+	if config.RolePolicyError != "" {
+		return nil, fmt.Errorf("model role policy state is unavailable: %s", config.RolePolicyError)
+	}
 	resolver := config.Resolver
 	roles := StarterRoleDefinitions()
 	seen := make(map[string]struct{}, len(raw))
@@ -256,9 +259,13 @@ func ValidateModelOverrides(raw []ModelOverrideRequest, modelSelection OperatorM
 		if err != nil {
 			return nil, err
 		}
+		basePolicy := roleDef.ModelPolicy
+		if storedPolicy := config.RolePolicies[role]; storedPolicy.Policy != nil {
+			basePolicy = mergeRoleModelPolicy(basePolicy, storedPolicy.Policy)
+		}
 		resolved, err := resolver.Resolve(modelconfig.ResolutionInput{
 			Role:         role,
-			Policy:       roleDef.ModelPolicy,
+			Policy:       basePolicy,
 			TaskOverride: policy,
 			CanOperate:   roleDef.CanOperate,
 		})

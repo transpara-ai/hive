@@ -138,10 +138,11 @@ func BuildOperatorProjection(s store.Store, limit int, opts ...OperatorProjectio
 		modelSelection = options.modelSelectionSource()
 	}
 	p := OperatorProjection{
-		GeneratedAt:    time.Now().UTC(),
-		Source:         "eventgraph",
-		ModelSelection: BuildOperatorModelSelection(modelSelection),
+		GeneratedAt: time.Now().UTC(),
+		Source:      "eventgraph",
 	}
+	modelSelection = applyModelRolePolicyUpdates(&p, s, modelSelection, limit)
+	p.ModelSelection = BuildOperatorModelSelection(modelSelection)
 
 	requestEvents := readProjectionEvents(&p, s, EventTypeAuthorityRequestRecorded, limit)
 	decisionEvents := readProjectionEvents(&p, s, EventTypeAuthorityDecisionRecorded, limit)

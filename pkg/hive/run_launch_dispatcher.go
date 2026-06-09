@@ -202,7 +202,7 @@ func (r *Runtime) validateRunLaunchDispatchModelOverrides(content FactoryRunRequ
 			MaxCostPerCallUSD:    cloneRunLaunchFloat64Ptr(override.MaxCostPerCallUSD),
 		})
 	}
-	validated, err := ValidateModelOverrides(raw, func() OperatorModelSelectionConfig {
+	source := modelSelectionSourceWithRolePolicyUpdates(r.store, func() OperatorModelSelectionConfig {
 		return OperatorModelSelectionConfig{
 			Resolver:      r.currentResolver(),
 			CatalogSource: "runtime-dispatcher",
@@ -210,7 +210,8 @@ func (r *Runtime) validateRunLaunchDispatchModelOverrides(content FactoryRunRequ
 			ReloadMode:    operatorModelCatalogReloadMode,
 			HotReload:     r.catalogReloadInterval > 0,
 		}
-	})
+	}, defaultOperatorProjectionLimit)
+	validated, err := ValidateModelOverrides(raw, source)
 	if err != nil {
 		return fmt.Errorf("model overrides failed dispatch-time validation: %w", err)
 	}
