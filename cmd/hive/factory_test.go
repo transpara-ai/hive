@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/transpara-ai/hive/pkg/hive"
 )
 
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
@@ -21,6 +23,76 @@ func TestFactoryOrderRequiresHuman(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "order", "--spec", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
 		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestParseFactoryOrderModelOverrideFlags(t *testing.T) {
+	flags := factoryOrderModelOverrideFlags{}
+	if err := flags.models.Set("guardian=api-sonnet"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if err := flags.authModes.Set("guardian=api-key"); err != nil {
+		t.Fatalf("set auth-mode: %v", err)
+	}
+	if err := flags.requiredCapabilities.Set("guardian=reasoning,coding"); err != nil {
+		t.Fatalf("set required capability: %v", err)
+	}
+	if err := flags.maxCosts.Set("guardian=0.25"); err != nil {
+		t.Fatalf("set max cost: %v", err)
+	}
+
+	overrides, err := parseFactoryOrderModelOverrideFlags(flags)
+	if err != nil {
+		t.Fatalf("parseFactoryOrderModelOverrideFlags: %v", err)
+	}
+	if len(overrides) != 1 {
+		t.Fatalf("overrides = %+v, want one", overrides)
+	}
+	override := overrides[0]
+	if override.Role != "guardian" || override.Model != "api-sonnet" || override.AuthMode != "api-key" {
+		t.Fatalf("override = %+v, want guardian api-sonnet api-key", override)
+	}
+	if got := strings.Join(override.RequiredCapabilities, ","); got != "reasoning,coding" {
+		t.Fatalf("required capabilities = %q, want reasoning,coding", got)
+	}
+	if override.MaxCostPerCallUSD == nil || *override.MaxCostPerCallUSD != 0.25 {
+		t.Fatalf("max cost = %v, want 0.25", override.MaxCostPerCallUSD)
+	}
+}
+
+func TestParseFactoryOrderModelOverrideFlagsRejectsDuplicateScalar(t *testing.T) {
+	flags := factoryOrderModelOverrideFlags{}
+	_ = flags.models.Set("guardian=sonnet")
+	_ = flags.models.Set("guardian=opus")
+
+	_, err := parseFactoryOrderModelOverrideFlags(flags)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("expected duplicate scalar error, got %v", err)
+	}
+}
+
+func TestValidateFactoryOrderModelOverridesPreservesCanOperateGuardrail(t *testing.T) {
+	_, err := validateFactoryOrderModelOverrides("", []hive.ModelOverrideRequest{
+		{Role: "implementer", Model: "api-sonnet", AuthMode: "api-key"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "CanOperate") {
+		t.Fatalf("expected CanOperate guardrail error, got %v", err)
+	}
+}
+
+func TestValidateFactoryOrderModelOverridesAcceptsAuthModeOnlyOverride(t *testing.T) {
+	overrides, err := validateFactoryOrderModelOverrides("", []hive.ModelOverrideRequest{
+		{Role: "guardian", AuthMode: "subscription"},
+	})
+	if err != nil {
+		t.Fatalf("validateFactoryOrderModelOverrides: %v", err)
+	}
+	if len(overrides) != 1 {
+		t.Fatalf("overrides = %+v, want one", overrides)
+	}
+	override := overrides[0]
+	if override.Role != "guardian" || override.RequestedAuthMode != "subscription" || override.AuthMode != "subscription" {
+		t.Fatalf("override = %+v, want guardian subscription auth-mode", override)
 	}
 }
 

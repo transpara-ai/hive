@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -108,6 +110,15 @@ func cmdFactoryOrder(args []string) error {
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	id := fs.String("id", "", "Factory order ID (fo_ prefix; derived from spec name if empty)")
 	title := fs.String("title", "", "Order title (defaults to the order ID)")
+	catalog := fs.String("catalog", "", "Custom YAML model catalog used once to validate model override flags; does not reload a running daemon")
+	modelOverrideFlags := factoryOrderModelOverrideFlags{}
+	fs.Var(&modelOverrideFlags.models, "model", "Role-scoped model override role=model (repeatable)")
+	fs.Var(&modelOverrideFlags.providers, "provider", "Role-scoped provider override role=provider (repeatable)")
+	fs.Var(&modelOverrideFlags.profiles, "profile", "Role-scoped profile override role=profile (repeatable)")
+	fs.Var(&modelOverrideFlags.authModes, "auth-mode", "Role-scoped auth-mode opt-in role=subscription|api-key|local (repeatable)")
+	fs.Var(&modelOverrideFlags.preferredTiers, "preferred-tier", "Role-scoped preferred tier role=tier (repeatable)")
+	fs.Var(&modelOverrideFlags.requiredCapabilities, "required-capability", "Role-scoped required capability role=capability[,capability...] (repeatable)")
+	fs.Var(&modelOverrideFlags.maxCosts, "max-cost-per-call-usd", "Role-scoped per-call cost cap role=amount (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -116,6 +127,14 @@ func cmdFactoryOrder(args []string) error {
 	}
 	if *spec == "" {
 		return fmt.Errorf("--spec is required")
+	}
+	modelOverrides, err := parseFactoryOrderModelOverrideFlags(modelOverrideFlags)
+	if err != nil {
+		return err
+	}
+	validatedModelOverrides, err := validateFactoryOrderModelOverrides(*catalog, modelOverrides)
+	if err != nil {
+		return err
 	}
 	intent, err := os.ReadFile(*spec)
 	if err != nil {
@@ -162,12 +181,193 @@ func cmdFactoryOrder(args []string) error {
 		DefinitionOfDone:   dod,
 		AcceptanceCriteria: ac,
 		TestPlan:           testPlan,
+		ModelOverrides:     workFactoryOrderModelOverrides(validatedModelOverrides),
 	}, causes, conv)
 	if err != nil {
 		return fmt.Errorf("seed factory order: %w", err)
 	}
 	fmt.Printf("seeded factory order %s as work task %s (conversation %s)\n", orderID, task.ID, conv)
 	return nil
+}
+
+type repeatedStringFlag []string
+
+func (f *repeatedStringFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatedStringFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
+type factoryOrderModelOverrideFlags struct {
+	models               repeatedStringFlag
+	providers            repeatedStringFlag
+	profiles             repeatedStringFlag
+	authModes            repeatedStringFlag
+	preferredTiers       repeatedStringFlag
+	requiredCapabilities repeatedStringFlag
+	maxCosts             repeatedStringFlag
+}
+
+func parseFactoryOrderModelOverrideFlags(flags factoryOrderModelOverrideFlags) ([]hive.ModelOverrideRequest, error) {
+	byRole := map[string]*hive.ModelOverrideRequest{}
+	var roles []string
+	seenFields := map[string]map[string]struct{}{}
+	ensure := func(role string) *hive.ModelOverrideRequest {
+		if override, ok := byRole[role]; ok {
+			return override
+		}
+		roles = append(roles, role)
+		byRole[role] = &hive.ModelOverrideRequest{Role: role}
+		return byRole[role]
+	}
+	markScalar := func(role, field string) error {
+		if seenFields[role] == nil {
+			seenFields[role] = map[string]struct{}{}
+		}
+		if _, exists := seenFields[role][field]; exists {
+			return fmt.Errorf("--%s set more than once for role %q", field, role)
+		}
+		seenFields[role][field] = struct{}{}
+		return nil
+	}
+	setScalar := func(flagName string, values repeatedStringFlag, set func(*hive.ModelOverrideRequest, string)) error {
+		for _, raw := range values {
+			role, value, err := parseFactoryOrderRoleValue(flagName, raw)
+			if err != nil {
+				return err
+			}
+			if err := markScalar(role, flagName); err != nil {
+				return err
+			}
+			set(ensure(role), value)
+		}
+		return nil
+	}
+	if err := setScalar("model", flags.models, func(o *hive.ModelOverrideRequest, value string) { o.Model = value }); err != nil {
+		return nil, err
+	}
+	if err := setScalar("provider", flags.providers, func(o *hive.ModelOverrideRequest, value string) { o.Provider = value }); err != nil {
+		return nil, err
+	}
+	if err := setScalar("profile", flags.profiles, func(o *hive.ModelOverrideRequest, value string) { o.Profile = value }); err != nil {
+		return nil, err
+	}
+	if err := setScalar("auth-mode", flags.authModes, func(o *hive.ModelOverrideRequest, value string) { o.AuthMode = value }); err != nil {
+		return nil, err
+	}
+	if err := setScalar("preferred-tier", flags.preferredTiers, func(o *hive.ModelOverrideRequest, value string) { o.PreferredTier = value }); err != nil {
+		return nil, err
+	}
+	for _, raw := range flags.requiredCapabilities {
+		role, value, err := parseFactoryOrderRoleValue("required-capability", raw)
+		if err != nil {
+			return nil, err
+		}
+		caps := splitFactoryOrderCapabilities(value)
+		if len(caps) == 0 {
+			return nil, fmt.Errorf("--required-capability for role %q must include at least one capability", role)
+		}
+		override := ensure(role)
+		override.RequiredCapabilities = append(override.RequiredCapabilities, caps...)
+	}
+	for _, raw := range flags.maxCosts {
+		role, value, err := parseFactoryOrderRoleValue("max-cost-per-call-usd", raw)
+		if err != nil {
+			return nil, err
+		}
+		if err := markScalar(role, "max-cost-per-call-usd"); err != nil {
+			return nil, err
+		}
+		amount, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("--max-cost-per-call-usd for role %q must be a number: %w", role, err)
+		}
+		override := ensure(role)
+		override.MaxCostPerCallUSD = &amount
+	}
+	out := make([]hive.ModelOverrideRequest, 0, len(roles))
+	for _, role := range roles {
+		out = append(out, *byRole[role])
+	}
+	return out, nil
+}
+
+func parseFactoryOrderRoleValue(flagName, raw string) (string, string, error) {
+	role, value, ok := strings.Cut(raw, "=")
+	role = strings.TrimSpace(role)
+	value = strings.TrimSpace(value)
+	if !ok || role == "" || value == "" {
+		return "", "", fmt.Errorf("--%s must use role=value", flagName)
+	}
+	return role, value, nil
+}
+
+func splitFactoryOrderCapabilities(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func validateFactoryOrderModelOverrides(catalogPath string, overrides []hive.ModelOverrideRequest) ([]hive.RunLaunchModelOverride, error) {
+	if len(overrides) == 0 {
+		return nil, nil
+	}
+	var source hive.OperatorModelSelectionSource
+	if catalogPath != "" {
+		config, err := hive.OperatorModelSelectionFromCatalogPath(catalogPath, time.Time{})
+		if err != nil {
+			return nil, fmt.Errorf("load catalog for model overrides: %w", err)
+		}
+		source = func() hive.OperatorModelSelectionConfig { return config }
+	}
+	validated, err := hive.ValidateModelOverrides(overrides, source)
+	if err != nil {
+		return nil, fmt.Errorf("validate model overrides: %w", err)
+	}
+	return validated, nil
+}
+
+func workFactoryOrderModelOverrides(overrides []hive.RunLaunchModelOverride) []work.FactoryOrderModelOverride {
+	if len(overrides) == 0 {
+		return nil
+	}
+	out := make([]work.FactoryOrderModelOverride, 0, len(overrides))
+	for _, override := range overrides {
+		out = append(out, work.FactoryOrderModelOverride{
+			Role:                 override.Role,
+			Model:                override.Model,
+			Provider:             override.Provider,
+			Profile:              override.Profile,
+			RequestedAuthMode:    override.RequestedAuthMode,
+			PreferredTier:        override.PreferredTier,
+			RequiredCapabilities: append([]string(nil), override.RequiredCapabilities...),
+			MaxCostPerCallUSD:    cloneFloat64Ptr(override.MaxCostPerCallUSD),
+			ResolvedModel:        override.ResolvedModel,
+			ResolvedProvider:     override.ResolvedProvider,
+			AuthMode:             override.AuthMode,
+		})
+	}
+	return out
+}
+
+func cloneFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 // cmdFactoryRequestPR raises the draft-PR authority request carrying the target

@@ -43,18 +43,21 @@ func WithOperatorRunLaunchWriter(factory *event.EventFactory, signer event.Signe
 }
 
 type operatorRunLaunchRequest struct {
-	OperatorID     string                          `json:"operator_id"`
-	IntakeID       string                          `json:"intake_id"`
-	Title          string                          `json:"title"`
-	Brief          json.RawMessage                 `json:"brief"`
-	Sources        []RunLaunchSource               `json:"sources"`
-	Authority      RunLaunchAuthority              `json:"authority"`
-	Budget         runLaunchBudgetRequest          `json:"budget"`
-	ModelOverrides []runLaunchModelOverrideRequest `json:"model_overrides,omitempty"`
-	TargetRepos    []string                        `json:"target_repos"`
+	OperatorID     string                 `json:"operator_id"`
+	IntakeID       string                 `json:"intake_id"`
+	Title          string                 `json:"title"`
+	Brief          json.RawMessage        `json:"brief"`
+	Sources        []RunLaunchSource      `json:"sources"`
+	Authority      RunLaunchAuthority     `json:"authority"`
+	Budget         runLaunchBudgetRequest `json:"budget"`
+	ModelOverrides []ModelOverrideRequest `json:"model_overrides,omitempty"`
+	TargetRepos    []string               `json:"target_repos"`
 }
 
-type runLaunchModelOverrideRequest struct {
+// ModelOverrideRequest is a role-scoped model/profile override request. It is
+// shared by the run-launch API and the factory-order CLI so both paths use the
+// same validation and resolution guardrails.
+type ModelOverrideRequest struct {
 	Role                 string   `json:"role"`
 	Model                string   `json:"model,omitempty"`
 	Provider             string   `json:"provider,omitempty"`
@@ -201,7 +204,7 @@ func validateRunLaunchRequest(raw operatorRunLaunchRequest, modelSelection Opera
 	if launch.Budget.MaxCostUSD < 0 {
 		return validatedRunLaunchRequest{}, fmt.Errorf("budget.max_cost_usd must be zero or greater")
 	}
-	overrides, err := validateRunLaunchModelOverrides(raw.ModelOverrides, modelSelection)
+	overrides, err := ValidateModelOverrides(raw.ModelOverrides, modelSelection)
 	if err != nil {
 		return validatedRunLaunchRequest{}, err
 	}
@@ -218,7 +221,9 @@ func validateRunLaunchRequest(raw operatorRunLaunchRequest, modelSelection Opera
 	return launch, nil
 }
 
-func validateRunLaunchModelOverrides(raw []runLaunchModelOverrideRequest, modelSelection OperatorModelSelectionSource) ([]RunLaunchModelOverride, error) {
+// ValidateModelOverrides validates and resolves role-scoped model override
+// requests through the active Hive model-selection source.
+func ValidateModelOverrides(raw []ModelOverrideRequest, modelSelection OperatorModelSelectionSource) ([]RunLaunchModelOverride, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -272,7 +277,7 @@ func validateRunLaunchModelOverrides(raw []runLaunchModelOverrideRequest, modelS
 	return out, nil
 }
 
-func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) (*modelconfig.RoleModelPolicy, RunLaunchModelOverride, error) {
+func runLaunchOverridePolicy(index int, override ModelOverrideRequest) (*modelconfig.RoleModelPolicy, RunLaunchModelOverride, error) {
 	model := strings.TrimSpace(override.Model)
 	provider := strings.TrimSpace(override.Provider)
 	profile := strings.TrimSpace(override.Profile)
@@ -288,9 +293,9 @@ func runLaunchOverridePolicy(index int, override runLaunchModelOverrideRequest) 
 	if len(caps) != len(override.RequiredCapabilities) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains empty values", index)
 	}
-	hasOverride := model != "" || provider != "" || profile != "" || preferredTier != "" || len(caps) > 0 || override.MaxCostPerCallUSD != nil
+	hasOverride := model != "" || provider != "" || profile != "" || authMode != "" || preferredTier != "" || len(caps) > 0 || override.MaxCostPerCallUSD != nil
 	if !hasOverride {
-		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] must set model, profile, provider, preferred_tier, required_capabilities, or max_cost_per_call_usd", index)
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] must set model, profile, provider, auth_mode, preferred_tier, required_capabilities, or max_cost_per_call_usd", index)
 	}
 	if override.MaxCostPerCallUSD != nil && *override.MaxCostPerCallUSD < 0 {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].max_cost_per_call_usd must be zero or greater", index)
