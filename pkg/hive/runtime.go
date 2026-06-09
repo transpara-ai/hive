@@ -75,10 +75,12 @@ type Runtime struct {
 	// Model resolver for agent provider/model selection. Runtime catalog reloads
 	// replace this resolver for future spawns/reads; already-created providers are
 	// not silently swapped mid-loop.
-	resolverMu            sync.RWMutex
-	resolver              *modelconfig.Resolver
-	modelSelectionManager *OperatorModelSelectionManager
-	providerFactory       func(intelligence.Config) (intelligence.Provider, error)
+	resolverMu                sync.RWMutex
+	resolver                  *modelconfig.Resolver
+	modelSelectionManager     *OperatorModelSelectionManager
+	runLaunchDispatchMu       sync.Mutex
+	runLaunchDispatchInterval time.Duration
+	providerFactory           func(intelligence.Config) (intelligence.Provider, error)
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -102,15 +104,16 @@ type Runtime struct {
 
 // Config holds the configuration needed to create a Runtime.
 type Config struct {
-	Store                 store.Store
-	Actors                actor.IActorStore
-	HumanID               types.ActorID
-	ApproveRequests       bool          // --approve-requests: auto-approve authority requests
-	ApproveRoles          bool          // --approve-roles: auto-approve role proposals
-	RepoPath              string        // --repo: path to repo for Operate
-	Loop                  bool          // --loop: agents block on bus instead of quiescing
-	CatalogPath           string        // --catalog: custom YAML catalog file (merged with defaults)
-	CatalogReloadInterval time.Duration // reload --catalog for future spawns; 0 disables
+	Store                     store.Store
+	Actors                    actor.IActorStore
+	HumanID                   types.ActorID
+	ApproveRequests           bool          // --approve-requests: auto-approve authority requests
+	ApproveRoles              bool          // --approve-roles: auto-approve role proposals
+	RepoPath                  string        // --repo: path to repo for Operate
+	Loop                      bool          // --loop: agents block on bus instead of quiescing
+	CatalogPath               string        // --catalog: custom YAML catalog file (merged with defaults)
+	CatalogReloadInterval     time.Duration // reload --catalog for future spawns; 0 disables
+	RunLaunchDispatchInterval time.Duration // dispatch queued run-launch requests; <0 disables
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -157,25 +160,26 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	phaseGates := work.NewPhaseGateStore(cfg.Store, factory, signer)
 
 	return &Runtime{
-		store:                 cfg.Store,
-		actors:                cfg.Actors,
-		graph:                 g,
-		humanID:               cfg.HumanID,
-		systemID:              systemID,
-		signer:                signer,
-		factory:               factory,
-		convID:                convID,
-		tasks:                 tasks,
-		phaseGates:            phaseGates,
-		approveRequests:       cfg.ApproveRequests,
-		approveRoles:          cfg.ApproveRoles,
-		repoPath:              cfg.RepoPath,
-		loop:                  cfg.Loop,
-		catalogPath:           cfg.CatalogPath,
-		catalogReloadInterval: cfg.CatalogReloadInterval,
-		telemetryWriter:       cfg.TelemetryWriter,
-		apiClient:             cfg.APIClient,
-		providerFactory:       intelligence.New,
+		store:                     cfg.Store,
+		actors:                    cfg.Actors,
+		graph:                     g,
+		humanID:                   cfg.HumanID,
+		systemID:                  systemID,
+		signer:                    signer,
+		factory:                   factory,
+		convID:                    convID,
+		tasks:                     tasks,
+		phaseGates:                phaseGates,
+		approveRequests:           cfg.ApproveRequests,
+		approveRoles:              cfg.ApproveRoles,
+		repoPath:                  cfg.RepoPath,
+		loop:                      cfg.Loop,
+		catalogPath:               cfg.CatalogPath,
+		catalogReloadInterval:     cfg.CatalogReloadInterval,
+		runLaunchDispatchInterval: cfg.RunLaunchDispatchInterval,
+		telemetryWriter:           cfg.TelemetryWriter,
+		apiClient:                 cfg.APIClient,
+		providerFactory:           intelligence.New,
 	}, nil
 }
 
@@ -300,6 +304,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	if r.catalogPath != "" && r.catalogReloadInterval > 0 {
 		go r.runCatalogReloadLoop(ctx, r.catalogReloadInterval)
 	}
+	if result, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: initial run-launch dispatch failed closed: %v\n", err)
+	} else if result.Dispatched > 0 {
+		fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d queued FactoryOrder task(s)\n", result.Dispatched)
+	}
+	go r.runRunLaunchDispatchLoop(ctx, effectiveRunLaunchDispatchInterval(r.runLaunchDispatchInterval))
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
