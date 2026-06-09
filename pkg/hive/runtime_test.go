@@ -1,9 +1,16 @@
 package hive
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 // TestApplyPerCallBudgetFloor verifies the per-call budget floor: the default
@@ -51,5 +58,174 @@ func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 				t.Errorf("canOperateMismatch returned %v; want %v", emitWarning, tt.expectWarning)
 			}
 		})
+	}
+}
+
+type runtimeOverrideTestProvider struct {
+	name  string
+	model string
+}
+
+func (p runtimeOverrideTestProvider) Name() string  { return p.name }
+func (p runtimeOverrideTestProvider) Model() string { return p.model }
+func (p runtimeOverrideTestProvider) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	score, _ := types.NewScore(0.8)
+	return decision.NewResponse("ok", score, decision.TokenUsage{}), nil
+}
+func (p runtimeOverrideTestProvider) Operate(_ context.Context, _ decision.OperateTask) (decision.OperateResult, error) {
+	return decision.OperateResult{Summary: "ok"}, nil
+}
+
+var (
+	_ intelligence.Provider = (*runtimeOverrideTestProvider)(nil)
+	_ decision.IOperator    = (*runtimeOverrideTestProvider)(nil)
+)
+
+func TestTaskOperateProviderForUsesFactoryOrderOverride(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	maxCost := 4.5
+	task, err := work.SeedFactoryOrder(ts, source, work.FactoryOrder{
+		ID:                 "fo_model_override",
+		Title:              "Use override",
+		Intent:             "Exercise the override path",
+		DefinitionOfDone:   "done",
+		AcceptanceCriteria: "accepted",
+		TestPlan:           "go test",
+		ModelOverrides: []work.FactoryOrderModelOverride{
+			{
+				Role:              "implementer",
+				Model:             "sonnet",
+				RequestedAuthMode: "subscription",
+				MaxCostPerCallUSD: &maxCost,
+				ResolvedModel:     "claude-sonnet-4-6",
+				ResolvedProvider:  "claude-cli",
+				AuthMode:          "subscription",
+			},
+		},
+	}, []types.EventID{cause}, conv)
+	if err != nil {
+		t.Fatalf("SeedFactoryOrder: %v", err)
+	}
+
+	var captured intelligence.Config
+	r := &Runtime{
+		tasks: ts,
+		providerFactory: func(cfg intelligence.Config) (intelligence.Provider, error) {
+			captured = cfg
+			return &runtimeOverrideTestProvider{name: cfg.Provider, model: cfg.Model}, nil
+		},
+	}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Name:           "implementer",
+		Role:           "implementer",
+		SystemPrompt:   "system prompt",
+		CanOperate:     true,
+		RoleDefinition: StarterRoleDefinitions()["implementer"],
+	}
+
+	got, err := r.taskOperateProviderFor(def)(context.Background(), task, "implementer")
+	if err != nil {
+		t.Fatalf("taskOperateProviderFor: %v", err)
+	}
+	if !got.Applied {
+		t.Fatal("TaskOperateProvider applied = false, want true")
+	}
+	if _, ok := got.Provider.(decision.IOperator); !ok {
+		t.Fatal("selected provider does not implement IOperator")
+	}
+	if captured.Provider != "claude-cli" || captured.Model != "claude-sonnet-4-6" {
+		t.Fatalf("captured provider/model = %s/%s, want claude-cli/claude-sonnet-4-6", captured.Provider, captured.Model)
+	}
+	if captured.MaxBudgetUSD != maxCost {
+		t.Fatalf("captured MaxBudgetUSD = %v, want override cap %v", captured.MaxBudgetUSD, maxCost)
+	}
+	if captured.SystemPrompt != "system prompt" {
+		t.Fatalf("captured SystemPrompt = %q, want runtime def prompt", captured.SystemPrompt)
+	}
+}
+
+func TestResolveTaskModelOverrideRejectsStoredResolutionDrift(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	task, err := work.SeedFactoryOrder(ts, source, work.FactoryOrder{
+		ID:                 "fo_model_drift",
+		Title:              "Use override",
+		Intent:             "Exercise drift detection",
+		DefinitionOfDone:   "done",
+		AcceptanceCriteria: "accepted",
+		TestPlan:           "go test",
+		ModelOverrides: []work.FactoryOrderModelOverride{
+			{
+				Role:              "implementer",
+				Model:             "sonnet",
+				RequestedAuthMode: "subscription",
+				ResolvedModel:     "claude-opus-4-6",
+				ResolvedProvider:  "claude-cli",
+				AuthMode:          "subscription",
+			},
+		},
+	}, []types.EventID{cause}, conv)
+	if err != nil {
+		t.Fatalf("SeedFactoryOrder: %v", err)
+	}
+	r := &Runtime{tasks: ts}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Role:           "implementer",
+		CanOperate:     true,
+		RoleDefinition: StarterRoleDefinitions()["implementer"],
+	}
+
+	_, _, applied, err := r.resolveTaskModelOverride(task, def, "implementer")
+	if err == nil {
+		t.Fatal("resolveTaskModelOverride error = nil, want stored resolution drift failure")
+	}
+	if !applied {
+		t.Fatal("applied = false, want true because the matching override must fail closed")
+	}
+	if !strings.Contains(err.Error(), "stored resolved_model") {
+		t.Fatalf("error = %q, want stored resolved_model drift", err.Error())
+	}
+}
+
+func TestResolveTaskModelOverrideRejectsAPIKeyWithoutExplicitOptIn(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	task, err := work.SeedFactoryOrder(ts, source, work.FactoryOrder{
+		ID:                 "fo_api_key_opt_in",
+		Title:              "Use API model",
+		Intent:             "Exercise api-key opt-in",
+		DefinitionOfDone:   "done",
+		AcceptanceCriteria: "accepted",
+		TestPlan:           "go test",
+		ModelOverrides: []work.FactoryOrderModelOverride{
+			{
+				Role:             "guardian",
+				Model:            "api-sonnet",
+				ResolvedModel:    "api-claude-sonnet-4-6",
+				ResolvedProvider: "anthropic",
+				AuthMode:         "api-key",
+			},
+		},
+	}, []types.EventID{cause}, conv)
+	if err != nil {
+		t.Fatalf("SeedFactoryOrder: %v", err)
+	}
+	r := &Runtime{tasks: ts}
+	r.setResolver(modelconfig.DefaultResolver())
+	def := AgentDef{
+		Role:           "guardian",
+		CanOperate:     false,
+		RoleDefinition: StarterRoleDefinitions()["guardian"],
+	}
+
+	_, _, applied, err := r.resolveTaskModelOverride(task, def, "guardian")
+	if err == nil {
+		t.Fatal("resolveTaskModelOverride error = nil, want api-key opt-in failure")
+	}
+	if !applied {
+		t.Fatal("applied = false, want true because the matching override must fail closed")
+	}
+	if !strings.Contains(err.Error(), "set auth_mode to \"api-key\"") {
+		t.Fatalf("error = %q, want explicit api-key opt-in failure", err.Error())
 	}
 }
