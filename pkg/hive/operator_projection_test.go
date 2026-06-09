@@ -2,8 +2,10 @@ package hive
 
 import (
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
@@ -215,6 +217,73 @@ func TestBuildOperatorProjectionLifecycleAndKeyAudit(t *testing.T) {
 	}
 }
 
+func TestBuildOperatorProjectionIncludesStaticModelSelection(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+
+	projection := BuildOperatorProjection(s, 50)
+	models := projection.ModelSelection
+
+	if models.Source != "hive" {
+		t.Fatalf("model selection source = %q, want hive", models.Source)
+	}
+	if models.CatalogSource != operatorModelCatalogSourceEmbedded {
+		t.Fatalf("catalog source = %q, want %q", models.CatalogSource, operatorModelCatalogSourceEmbedded)
+	}
+	if models.ReloadMode != operatorModelCatalogReloadMode || models.HotReload {
+		t.Fatalf("reload metadata = mode %q hot_reload %v, want startup-static false", models.ReloadMode, models.HotReload)
+	}
+	if models.LoadedAt.IsZero() {
+		t.Fatal("model catalog loaded_at is zero")
+	}
+	if len(models.Models) == 0 {
+		t.Fatal("expected projected model catalog entries")
+	}
+	if len(models.Errors) != 0 {
+		t.Fatalf("default role assignments produced errors: %+v", models.Errors)
+	}
+
+	implementer := requireModelAssignment(t, models, "implementer")
+	if !implementer.CanOperate {
+		t.Fatalf("implementer can_operate = false, want true")
+	}
+	if implementer.Provider != "claude-cli" || implementer.AuthMode != string(modelconfig.AuthSubscription) {
+		t.Fatalf("implementer assignment = %+v, want claude-cli subscription", implementer)
+	}
+	if !containsModelProjectionString(implementer.RequiredCapabilities, string(modelconfig.CapOperate)) {
+		t.Fatalf("implementer required capabilities = %+v, want operate", implementer.RequiredCapabilities)
+	}
+
+	for _, assignment := range models.Assignments {
+		if assignment.Model == "" {
+			t.Fatalf("empty model assignment for %s: %+v", assignment.Role, assignment)
+		}
+		if assignment.AuthMode != string(modelconfig.AuthSubscription) {
+			t.Fatalf("default role %s auth_mode = %q, want subscription (no silent API-key default): %+v", assignment.Role, assignment.AuthMode, assignment)
+		}
+	}
+}
+
+func TestBuildOperatorProjectionModelSelectionRequiresExplicitAPIKeyOptIn(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+
+	defaultProjection := BuildOperatorProjection(s, 50)
+	if got := requireModelAssignment(t, defaultProjection.ModelSelection, "guardian").AuthMode; got != string(modelconfig.AuthSubscription) {
+		t.Fatalf("default guardian auth_mode = %q, want subscription", got)
+	}
+
+	config := testModelSelectionConfigWithRoleDefault("guardian", "api-sonnet")
+	projection := BuildOperatorProjection(s, 50, WithOperatorModelSelection(config))
+	guardian := requireModelAssignment(t, projection.ModelSelection, "guardian")
+	if guardian.Model != "api-claude-sonnet-4-6" || guardian.Provider != "anthropic" || guardian.AuthMode != string(modelconfig.AuthAPIKey) {
+		t.Fatalf("guardian explicit API-key opt-in assignment = %+v", guardian)
+	}
+
+	implementer := requireModelAssignment(t, projection.ModelSelection, "implementer")
+	if implementer.Provider != "claude-cli" || implementer.AuthMode != string(modelconfig.AuthSubscription) {
+		t.Fatalf("explicit guardian API-key opt-in leaked to implementer: %+v", implementer)
+	}
+}
+
 func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.ActorID, func(types.EventType, event.EventContent) event.Event) {
 	t.Helper()
 	RegisterEventTypes()
@@ -252,4 +321,47 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 	}
 
 	return s, actorID, appendEvent
+}
+
+func testModelSelectionConfigWithRoleDefault(role, model string) OperatorModelSelectionConfig {
+	base := modelconfig.DefaultResolver()
+	defaults := base.Defaults()
+	tierModels := make(map[modelconfig.ModelTier]string, len(defaults.TierModels))
+	for tier, model := range defaults.TierModels {
+		tierModels[tier] = model
+	}
+	roleModels := make(map[string]string, len(defaults.RoleModels)+1)
+	for role, model := range defaults.RoleModels {
+		roleModels[role] = model
+	}
+	roleModels[role] = model
+	defaults.TierModels = tierModels
+	defaults.RoleModels = roleModels
+	return OperatorModelSelectionConfig{
+		Resolver:      modelconfig.NewResolver(base.Catalog(), nil, defaults),
+		CatalogSource: "test-explicit-role-default",
+		LoadedAt:      time.Unix(1_700_000_000, 0).UTC(),
+		ReloadMode:    operatorModelCatalogReloadMode,
+		HotReload:     false,
+	}
+}
+
+func requireModelAssignment(t *testing.T, projection OperatorModelSelection, role string) OperatorModelRoleAssignment {
+	t.Helper()
+	for _, assignment := range projection.Assignments {
+		if assignment.Role == role {
+			return assignment
+		}
+	}
+	t.Fatalf("missing model assignment for role %q in %+v", role, projection.Assignments)
+	return OperatorModelRoleAssignment{}
+}
+
+func containsModelProjectionString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

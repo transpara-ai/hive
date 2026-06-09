@@ -70,6 +70,31 @@ func TestOperatorProjectionServerReturnsProjectionJSON(t *testing.T) {
 	}
 }
 
+func TestOperatorProjectionServerReturnsConfiguredModelSelection(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+	modelSelection := testModelSelectionConfigWithRoleDefault("guardian", "api-sonnet")
+	handler := NewOperatorProjectionServer(s, "", 50, WithOperatorProjectionModelSelection(modelSelection))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/hive/operator-projection", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	var projection OperatorProjection
+	if err := json.Unmarshal(resp.Body.Bytes(), &projection); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if projection.ModelSelection.CatalogSource != "test-explicit-role-default" {
+		t.Fatalf("catalog source = %q, want test-explicit-role-default", projection.ModelSelection.CatalogSource)
+	}
+	guardian := requireModelAssignment(t, projection.ModelSelection, "guardian")
+	if guardian.AuthMode != "api-key" || guardian.Provider != "anthropic" {
+		t.Fatalf("guardian assignment = %+v, want explicit anthropic api-key", guardian)
+	}
+}
+
 func TestOperatorProjectionServerHealth(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	handler := NewOperatorProjectionServer(s, "secret", 50)

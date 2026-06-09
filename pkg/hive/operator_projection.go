@@ -17,6 +17,7 @@ const defaultOperatorProjectionLimit = 50
 type OperatorProjection struct {
 	GeneratedAt        time.Time                     `json:"generated_at"`
 	Source             string                        `json:"source"`
+	ModelSelection     OperatorModelSelection        `json:"model_selection"`
 	PendingApprovals   []OperatorApprovalProjection  `json:"pending_approvals"`
 	AuthorityDecisions []OperatorDecisionProjection  `json:"authority_decisions"`
 	Lifecycle          []OperatorLifecycleProjection `json:"lifecycle"`
@@ -94,15 +95,37 @@ type projectionEvent struct {
 	event event.Event
 }
 
+type operatorProjectionOptions struct {
+	modelSelection OperatorModelSelectionConfig
+}
+
+// OperatorProjectionOption configures BuildOperatorProjection.
+type OperatorProjectionOption func(*operatorProjectionOptions)
+
+// WithOperatorModelSelection uses config to build the read-only model-selection
+// slice of the Site-facing operator projection.
+func WithOperatorModelSelection(config OperatorModelSelectionConfig) OperatorProjectionOption {
+	return func(o *operatorProjectionOptions) {
+		o.modelSelection = config
+	}
+}
+
 // BuildOperatorProjection reads Hive Phase 3 records and returns bounded,
 // display-ready operator state. It never appends or mutates EventGraph.
-func BuildOperatorProjection(s store.Store, limit int) OperatorProjection {
+func BuildOperatorProjection(s store.Store, limit int, opts ...OperatorProjectionOption) OperatorProjection {
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
 	}
+	options := operatorProjectionOptions{
+		modelSelection: DefaultOperatorModelSelectionConfig(time.Time{}),
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
 	p := OperatorProjection{
-		GeneratedAt: time.Now().UTC(),
-		Source:      "eventgraph",
+		GeneratedAt:    time.Now().UTC(),
+		Source:         "eventgraph",
+		ModelSelection: BuildOperatorModelSelection(options.modelSelection),
 	}
 
 	requestEvents := readProjectionEvents(&p, s, EventTypeAuthorityRequestRecorded, limit)

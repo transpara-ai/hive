@@ -21,6 +21,7 @@ func main() {
 	addr := flag.String("addr", envOrDefault("HIVE_OPS_API_ADDR", "127.0.0.1:8083"), "listen address")
 	apiKey := flag.String("api-key", envOrDefault("HIVE_OPS_API_KEY", "dev"), "bearer token for Site operator projection reads")
 	limit := flag.Int("limit", 50, "maximum records per projection section")
+	catalog := flag.String("catalog", envOrDefault("HIVE_OPS_CATALOG", ""), "custom YAML model catalog for operator projection (loaded once at startup)")
 	flag.Parse()
 
 	dsn := envOrDefault("HIVE_OPS_DATABASE_URL", os.Getenv("DATABASE_URL"))
@@ -43,14 +44,20 @@ func main() {
 
 	hive.RegisterEventTypes()
 
+	modelSelection, err := hive.OperatorModelSelectionFromCatalogPath(*catalog, types.Now().Value())
+	if err != nil {
+		log.Fatalf("load model catalog: %v", err)
+	}
+
 	opts, writeMode := opsWriterOptions()
+	opts = append(opts, hive.WithOperatorProjectionModelSelection(modelSelection))
 	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
 
 	authMode := "disabled"
 	if *apiKey != "" {
 		authMode = "bearer"
 	}
-	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, writes=%s)\n", *addr, authMode, *limit, writeMode)
+	fmt.Printf("hive ops api listening on %s (auth=%s, limit=%d, writes=%s, model_catalog=%s, reload=static)\n", *addr, authMode, *limit, writeMode, modelSelection.CatalogSource)
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
