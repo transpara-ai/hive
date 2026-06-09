@@ -78,6 +78,7 @@ type Runtime struct {
 	resolverMu            sync.RWMutex
 	resolver              *modelconfig.Resolver
 	modelSelectionManager *OperatorModelSelectionManager
+	providerFactory       func(intelligence.Config) (intelligence.Provider, error)
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -174,6 +175,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		catalogReloadInterval: cfg.CatalogReloadInterval,
 		telemetryWriter:       cfg.TelemetryWriter,
 		apiClient:             cfg.APIClient,
+		providerFactory:       intelligence.New,
 	}, nil
 }
 
@@ -213,6 +215,13 @@ func (r *Runtime) setResolver(resolver *modelconfig.Resolver) {
 	r.resolverMu.Lock()
 	defer r.resolverMu.Unlock()
 	r.resolver = resolver
+}
+
+func (r *Runtime) newProvider(cfg intelligence.Config) (intelligence.Provider, error) {
+	if r.providerFactory == nil {
+		return intelligence.New(cfg)
+	}
+	return r.providerFactory(cfg)
 }
 
 func (r *Runtime) runCatalogReloadLoop(ctx context.Context, interval time.Duration) {
@@ -447,14 +456,15 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			Task:           seedIdea,
 
 			// Task coordination.
-			TaskStore:       r.tasks,
-			PhaseGateStore:  r.phaseGates,
-			ConvID:          r.convID,
-			OnTaskCompleted: r.mirrorTaskCompletion,
-			CanOperate:      def.CanOperate,
-			RepoPath:        r.repoPath,
-			Keepalive:       r.loop,
-			KnowledgeStore:  r.knowledgeStore,
+			TaskStore:           r.tasks,
+			PhaseGateStore:      r.phaseGates,
+			ConvID:              r.convID,
+			OnTaskCompleted:     r.mirrorTaskCompletion,
+			CanOperate:          def.CanOperate,
+			RepoPath:            r.repoPath,
+			TaskOperateProvider: r.taskOperateProviderFor(def),
+			Keepalive:           r.loop,
+			KnowledgeStore:      r.knowledgeStore,
 			CostSummaryFunc: func() string {
 				resolver := r.currentResolver()
 				entries := r.budgetRegistry.Snapshot()
@@ -599,7 +609,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	// the subprocess exits non-zero mid-task). Apply a sane floor so Operate can
 	// complete; an explicit catalog budget still wins.
 	cfg = applyPerCallBudgetFloor(cfg, defaultPerCallBudgetUSD)
-	provider, err := intelligence.New(cfg)
+	provider, err := r.newProvider(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)
 	}

@@ -13,6 +13,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/bus"
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	hiveagent "github.com/transpara-ai/agent"
@@ -53,6 +55,19 @@ type Result struct {
 	Budget     resources.BudgetSnapshot
 	Detail     string // human-readable explanation
 }
+
+// TaskOperateProviderResult is the optional per-task provider selected for one
+// Operate call. Applied=false means the loop should use the agent's default
+// provider.
+type TaskOperateProviderResult struct {
+	Applied  bool
+	Provider intelligence.Provider
+}
+
+// TaskOperateProviderFunc resolves a task-scoped provider for one Operate call.
+// The callback must fail closed: returning an error stops the operation instead
+// of falling back to the agent's default provider.
+type TaskOperateProviderFunc func(ctx context.Context, task work.Task, role string) (TaskOperateProviderResult, error)
 
 // Config configures an agentic loop.
 type Config struct {
@@ -109,6 +124,10 @@ type Config struct {
 	// RepoPath is the working directory for Operate() calls.
 	// Required when CanOperate is true.
 	RepoPath string
+
+	// TaskOperateProvider optionally selects a provider for this exact Work task.
+	// Used for structured FactoryOrder model overrides. Errors fail closed.
+	TaskOperateProvider TaskOperateProviderFunc
 
 	// Keepalive prevents agents from exiting on quiescence. When true,
 	// waitForEvents blocks indefinitely on the bus wake channel instead
@@ -383,8 +402,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// for a clean "first commit").
 			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
 
-			result, opErr := l.agent.Operate(ctx, l.config.RepoPath, instruction)
+			result, opErr := l.operateTask(ctx, task, instruction)
 			if opErr != nil {
+				if errors.Is(opErr, errTaskOperateProvider) {
+					return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", opErr))
+				}
 				return l.result(StopError, iteration, fmt.Sprintf("operate: %v", opErr))
 			}
 			response = result.Summary
@@ -689,6 +711,24 @@ Every response MUST end with exactly one /signal line.
 `)
 
 	return sb.String()
+}
+
+var errTaskOperateProvider = errors.New("task operate provider")
+
+func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction string) (decision.OperateResult, error) {
+	if l.config.TaskOperateProvider != nil {
+		selected, err := l.config.TaskOperateProvider(ctx, task, string(l.agent.Role()))
+		if err != nil {
+			return decision.OperateResult{}, fmt.Errorf("%w: %v", errTaskOperateProvider, err)
+		}
+		if selected.Applied {
+			if selected.Provider == nil {
+				return decision.OperateResult{}, fmt.Errorf("%w: selected provider is nil", errTaskOperateProvider)
+			}
+			return l.agent.OperateWithProvider(ctx, selected.Provider, l.config.RepoPath, instruction)
+		}
+	}
+	return l.agent.Operate(ctx, l.config.RepoPath, instruction)
 }
 
 // reason calls the agent's LLM and returns the response text and token usage.

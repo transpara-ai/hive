@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -780,7 +781,138 @@ func TestRun_FailedVerificationRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestRun_TaskOperateProviderUsesSelectedProvider(t *testing.T) {
+	repo := newTempGitRepo(t)
+	base := newMockProvider(`/signal {"signal":"IDLE"}`)
+	override := &committingOperator{t: t, filename: "override.txt"}
+	agent, g := agentWithGraph(t, base)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_task_provider")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write through override", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	l, err := New(Config{
+		Agent:      agent,
+		HumanID:    humanID(),
+		RepoPath:   repo,
+		TaskStore:  ts,
+		CanOperate: true,
+		ConvID:     convID,
+		Budget:     resources.BudgetConfig{MaxIterations: 1},
+		TaskOperateProvider: func(_ context.Context, got work.Task, role string) (TaskOperateProviderResult, error) {
+			if got.ID != task.ID {
+				t.Fatalf("TaskOperateProvider task = %s, want %s", got.ID.Value(), task.ID.Value())
+			}
+			if role != string(agent.Role()) {
+				t.Fatalf("TaskOperateProvider role = %q, want %q", role, agent.Role())
+			}
+			return TaskOperateProviderResult{Applied: true, Provider: override}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := l.Run(context.Background())
+	if res.Reason != StopBudget {
+		t.Fatalf("reason = %s, want StopBudget after one successful override-backed iteration (detail=%q)", res.Reason, res.Detail)
+	}
+	if override.calls != 1 {
+		t.Fatalf("override calls = %d, want 1", override.calls)
+	}
+	if base.callCount.Load() != 0 {
+		t.Fatalf("base provider Reason calls = %d, want 0", base.callCount.Load())
+	}
+	if !taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("override-backed Operate did not complete the assigned task")
+	}
+}
+
+func TestRun_TaskOperateProviderErrorEscalatesWithoutFallback(t *testing.T) {
+	repo := newTempGitRepo(t)
+	base := &countingOperator{reasonResp: `/signal {"signal":"IDLE"}`, operateSummary: "base should not run"}
+	agent, g := agentWithGraph(t, base)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_task_provider_error")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write through override", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	l, err := New(Config{
+		Agent:      agent,
+		HumanID:    humanID(),
+		RepoPath:   repo,
+		TaskStore:  ts,
+		CanOperate: true,
+		ConvID:     convID,
+		Budget:     resources.BudgetConfig{MaxIterations: 5},
+		TaskOperateProvider: func(context.Context, work.Task, string) (TaskOperateProviderResult, error) {
+			return TaskOperateProviderResult{}, errors.New("override policy refused")
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := l.Run(context.Background())
+	if res.Reason != StopEscalation {
+		t.Fatalf("reason = %s, want StopEscalation (detail=%q)", res.Reason, res.Detail)
+	}
+	if base.operateCalls != 0 {
+		t.Fatalf("base operate calls = %d, want 0; override errors must not fall back", base.operateCalls)
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("task completed despite override provider error")
+	}
+}
+
 // ── helpers ──
+
+type committingOperator struct {
+	t        *testing.T
+	filename string
+	calls    int
+}
+
+func (m *committingOperator) Name() string  { return "commitop" }
+func (m *committingOperator) Model() string { return "commitop-model" }
+func (m *committingOperator) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	c, _ := types.NewScore(0.8)
+	return decision.NewResponse(`/signal {"signal":"IDLE"}`, c, decision.TokenUsage{}), nil
+}
+func (m *committingOperator) Operate(_ context.Context, task decision.OperateTask) (decision.OperateResult, error) {
+	m.calls++
+	commitFile(m.t, task.WorkDir, m.filename, "done\n", "test override commit")
+	head := gitCommand(task.WorkDir, "rev-parse", "HEAD")
+	return decision.OperateResult{
+		Summary: "committed " + head,
+		Usage:   decision.TokenUsage{InputTokens: 10, OutputTokens: 10},
+	}, nil
+}
+
+var (
+	_ intelligence.Provider = (*committingOperator)(nil)
+	_ decision.IOperator    = (*committingOperator)(nil)
+)
 
 // countingOperator records how many times Operate is invoked, to prove the loop
 // does not Operate a blocked task.
