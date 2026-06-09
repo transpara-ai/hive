@@ -293,9 +293,9 @@ func runLaunchOverridePolicy(index int, override ModelOverrideRequest) (*modelco
 	if len(caps) != len(override.RequiredCapabilities) {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].required_capabilities contains empty values", index)
 	}
-	hasOverride := model != "" || provider != "" || profile != "" || preferredTier != "" || len(caps) > 0 || override.MaxCostPerCallUSD != nil
+	hasOverride := model != "" || provider != "" || profile != "" || authMode != "" || preferredTier != "" || len(caps) > 0 || override.MaxCostPerCallUSD != nil
 	if !hasOverride {
-		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] must set model, profile, provider, preferred_tier, required_capabilities, or max_cost_per_call_usd", index)
+		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d] must set model, profile, provider, auth_mode, preferred_tier, required_capabilities, or max_cost_per_call_usd", index)
 	}
 	if override.MaxCostPerCallUSD != nil && *override.MaxCostPerCallUSD < 0 {
 		return nil, RunLaunchModelOverride{}, fmt.Errorf("model_overrides[%d].max_cost_per_call_usd must be zero or greater", index)

@@ -80,6 +80,22 @@ func TestValidateFactoryOrderModelOverridesPreservesCanOperateGuardrail(t *testi
 	}
 }
 
+func TestValidateFactoryOrderModelOverridesAcceptsAuthModeOnlyOverride(t *testing.T) {
+	overrides, err := validateFactoryOrderModelOverrides("", []hive.ModelOverrideRequest{
+		{Role: "guardian", AuthMode: "subscription"},
+	})
+	if err != nil {
+		t.Fatalf("validateFactoryOrderModelOverrides: %v", err)
+	}
+	if len(overrides) != 1 {
+		t.Fatalf("overrides = %+v, want one", overrides)
+	}
+	override := overrides[0]
+	if override.Role != "guardian" || override.RequestedAuthMode != "subscription" || override.AuthMode != "subscription" {
+		t.Fatalf("override = %+v, want guardian subscription auth-mode", override)
+	}
+}
+
 // TestFactoryUnknownSubverb asserts an unrecognized subcommand is reported.
 func TestFactoryUnknownSubverb(t *testing.T) {
 	err := cmdFactory([]string{"frob"})

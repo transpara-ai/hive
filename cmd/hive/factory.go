@@ -110,7 +110,7 @@ func cmdFactoryOrder(args []string) error {
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	id := fs.String("id", "", "Factory order ID (fo_ prefix; derived from spec name if empty)")
 	title := fs.String("title", "", "Order title (defaults to the order ID)")
-	catalog := fs.String("catalog", "", "Custom YAML model catalog for validating model override flags")
+	catalog := fs.String("catalog", "", "Custom YAML model catalog used once to validate model override flags; does not reload a running daemon")
 	modelOverrideFlags := factoryOrderModelOverrideFlags{}
 	fs.Var(&modelOverrideFlags.models, "model", "Role-scoped model override role=model (repeatable)")
 	fs.Var(&modelOverrideFlags.providers, "provider", "Role-scoped provider override role=provider (repeatable)")
