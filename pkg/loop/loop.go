@@ -135,16 +135,23 @@ type Config struct {
 	// resume when a new event arrives on the bus.
 	Keepalive bool
 
-	// RecheckInterval is the slow periodic re-check for a CanOperate keepalive
-	// agent. The bus wake is an edge signal (onEvent's non-blocking send), so a
-	// wake that fires while the agent is mid-Operate rather than parked is lost,
-	// and an idle implementer can sleep forever even though assignable work
-	// exists (the wakeup race a daemon restart otherwise had to clear). On this
-	// interval waitForEvents re-checks for assignable work and returns if any
-	// exists, converting the lost edge into a recoverable level check. Gated to
-	// hasAssignableWork so an idle agent with nothing to do stays parked.
-	// 0 takes the New() default for CanOperate keepalive agents; <0 disables it;
-	// it has no effect on non-CanOperate (governance) agents.
+	// RecheckInterval is the slow periodic re-check for keepalive agents whose
+	// duty can be recovered from durable state. The bus wake is an edge signal
+	// (onEvent's non-blocking send): a wake that fires while the agent is busy
+	// rather than parked is lost, and an event persisted by a PRIOR daemon
+	// instance never fires at all — so an idle agent can sleep forever even
+	// though its work exists (the race/stranding a daemon restart otherwise had
+	// to clear). On this interval waitForEvents re-checks durable state and
+	// returns if actionable work exists, converting lost edges into a
+	// recoverable level check. Exactly two duties carry the re-check, each with
+	// its own gate so an idle agent stays parked:
+	//   - a CanOperate keepalive agent (the implementer), gated to
+	//     hasAssignableWork (the hive#135 wakeup race);
+	//   - a keepalive agent with a review duty (the reviewer), gated to
+	//     hasReviewableWork, so a completion that became historical across a
+	//     restart still engages the review→fix loop (run findings F8).
+	// 0 takes the New() default for those two duties; <0 disables it; it has
+	// no effect on keepalive agents with neither duty.
 	RecheckInterval time.Duration
 
 	// BudgetInstance is an externally-created Budget tracker. When set,
@@ -250,10 +257,15 @@ func New(cfg Config) (*Loop, error) {
 	if cfg.QuiescenceDelay <= 0 {
 		cfg.QuiescenceDelay = 5 * time.Second
 	}
-	// Default the keepalive re-check for operating agents so the wakeup race is
+	// Default the keepalive re-check for the two re-check duties so both are
 	// covered without every call site setting it: a CanOperate keepalive agent
-	// with an unset interval gets a slow safety-net re-check. <0 disables it.
-	if cfg.CanOperate && cfg.Keepalive && cfg.RecheckInterval == 0 {
+	// (the implementer wakeup race, hive#135) and a keepalive reviewer (the
+	// historical-completion stranding, run findings F8) with an unset interval
+	// get a slow safety-net re-check. <0 disables it. Keepalive agents with
+	// neither duty get no default — the re-check stays disabled for agents
+	// with no governance review duty, so no idle ticker is added anywhere else.
+	if cfg.Keepalive && cfg.RecheckInterval == 0 &&
+		(cfg.CanOperate || string(cfg.Agent.Role()) == "reviewer") {
 		cfg.RecheckInterval = 30 * time.Second
 	}
 
@@ -962,18 +974,27 @@ func (l *Loop) onEvent(ev event.Event) {
 
 // waitForEvents blocks until new events arrive or quiescence timeout.
 // Returns true if events arrived, false if timed out.
-// In keepalive mode, there is no quiescence timeout. A CanOperate keepalive agent
-// additionally re-checks for assignable work on Config.RecheckInterval so a
-// dropped wake edge cannot park it forever; other keepalive agents block on the
-// wake channel indefinitely, consuming zero CPU until a bus event arrives.
+// In keepalive mode, there is no quiescence timeout. A CanOperate keepalive
+// agent (the implementer) and a keepalive agent with a review duty (the
+// reviewer) additionally re-check durable state on Config.RecheckInterval so a
+// dropped wake edge — or an event that became historical across a daemon
+// restart — cannot park them forever; every other keepalive agent blocks on
+// the wake channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
 	if l.config.Keepalive {
-		// A CanOperate keepalive agent (the implementer) gets a slow periodic
-		// re-check so a wake edge dropped while it was busy cannot park it forever
-		// (see Config.RecheckInterval). Gated to hasAssignableWork so an idle agent
-		// with nothing to do stays parked — no re-ignition of the wakeup storm the
-		// per-iteration timers were removed to kill.
-		if l.config.CanOperate && l.config.RepoPath != "" && l.config.RecheckInterval > 0 {
+		// Re-check eligibility is an ALLOWLIST of exactly two duties, each with
+		// its own "work exists" gate so an idle agent stays parked — no
+		// re-ignition of the wakeup storm the per-iteration timers were removed
+		// to kill:
+		//   - implementer: a wake edge dropped while it was mid-Operate cannot
+		//     park it forever (hive#135), gated to hasAssignableWork;
+		//   - reviewer: a completion persisted by a prior daemon instance never
+		//     fires a fresh wake, stranding the review→fix loop (run findings
+		//     F8), gated to hasReviewableWork.
+		// Keepalive agents with neither duty keep pure wake-blocking.
+		operateRecheck := l.config.CanOperate && l.config.RepoPath != ""
+		reviewRecheck := l.reviewerState != nil
+		if l.config.RecheckInterval > 0 && (operateRecheck || reviewRecheck) {
 			ticker := time.NewTicker(l.config.RecheckInterval)
 			defer ticker.Stop()
 			for {
@@ -981,10 +1002,13 @@ func (l *Loop) waitForEvents(ctx context.Context) bool {
 				case <-l.wake:
 					return true
 				case <-ticker.C:
-					if l.hasAssignableWork() {
+					if operateRecheck && l.hasAssignableWork() {
 						return true
 					}
-					// Nothing assignable — stay parked; re-arm on the next tick.
+					if reviewRecheck && l.hasReviewableWork() {
+						return true
+					}
+					// Nothing actionable — stay parked; re-arm on the next tick.
 				case <-ctx.Done():
 					return false
 				}

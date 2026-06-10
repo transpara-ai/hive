@@ -134,6 +134,85 @@ func (s *reviewerState) shouldEscalate(taskID string) bool {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Governance re-check gate (slice-1 finding F8)
+// ────────────────────────────────────────────────────────────────────
+
+// hasReviewableWork reports whether the Reviewer has completed-but-unreviewed
+// work to pick up — the governance analog of hasAssignableWork, and the gate
+// for the keepalive re-check timer (slice-1 finding F8). Like that gate it
+// treats store read errors as "nothing to do": the wake path stays available,
+// and an erroring store must not spin the ticker awake.
+func (l *Loop) hasReviewableWork() bool {
+	if l.reviewerState == nil {
+		return false
+	}
+	l.seedHistoricalCompletions()
+	return len(l.reviewerState.findPendingReviews()) > 0
+}
+
+// historicalScanLimit bounds the store scans behind the governance re-check
+// (invariant BOUNDED). Completions older than the newest historicalScanLimit
+// events of their type are not recovered by the re-check — the same windowing
+// trade-off the operator projection makes with defaultOperatorProjectionLimit.
+const historicalScanLimit = 256
+
+// seedHistoricalCompletions merges store-persisted completions that have no
+// recorded review into reviewerState.completedTasks. The bus only delivers
+// events fired while THIS loop instance is alive: a completion persisted by a
+// prior daemon instance is invisible to reviewerState.update forever — the
+// restart that beat the implementer wakeup race made the completion
+// historical, so the review→fix loop could not engage (finding F8). The store
+// is the durable source; this seeding converts those lost edges into level
+// state, and it is what makes the re-check wake productive: the seeded entry
+// is what enrichReviewObservation renders on the next observation.
+//
+// Already-reviewed completions are excluded by pairing against
+// code.review.submitted events from ANY actor — a prior reviewer instance has
+// a different ephemeral identity, and a restart must not re-review its work
+// (a re-review storm would be the wakeup storm reborn at LLM-call cost).
+// Reviews are scanned before completions so a review landing between the two
+// scans is never missed. On any scan error nothing is seeded — fail toward
+// parked, mirroring hasAssignableWork's error handling.
+func (l *Loop) seedHistoricalCompletions() {
+	g := l.agent.Graph()
+	if g == nil {
+		return
+	}
+	st := g.Store()
+	if st == nil {
+		return
+	}
+	reviews, err := st.ByType(event.EventTypeCodeReviewSubmitted, historicalScanLimit, types.None[types.Cursor]())
+	if err != nil {
+		return
+	}
+	reviewed := make(map[string]bool)
+	for _, ev := range reviews.Items() {
+		if c, ok := ev.Content().(event.CodeReviewContent); ok {
+			reviewed[c.TaskID] = true
+		}
+	}
+	completions, err := st.ByType(work.EventTypeTaskCompleted, historicalScanLimit, types.None[types.Cursor]())
+	if err != nil {
+		return
+	}
+	for _, ev := range completions.Items() {
+		c, ok := ev.Content().(work.TaskCompletedContent)
+		if !ok {
+			continue
+		}
+		id := c.TaskID.Value()
+		if reviewed[id] {
+			continue
+		}
+		if _, seen := l.reviewerState.completedTasks[id]; seen {
+			continue
+		}
+		l.reviewerState.completedTasks[id] = c
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Parsing
 // ────────────────────────────────────────────────────────────────────
 
