@@ -46,6 +46,13 @@ type reviewerState struct {
 	// boot-time replay has not happened yet (or the store was empty at boot).
 	// catchUpReviewProjection advances it; nothing else writes it.
 	replayHead types.EventID
+
+	// projectionStale is true while the last chain catch-up failed: the
+	// projection may be behind the chain, so a pending entry might already be
+	// settled. While stale, the review observation declares it instead of
+	// rendering pendings, and emitCodeReview refuses — a verdict from stale
+	// state could re-review settled work. A successful catch-up clears it.
+	projectionStale bool
 }
 
 // taskReviewRecord tracks review history for a single task.
@@ -54,7 +61,6 @@ type taskReviewRecord struct {
 	reviewCount int
 	lastVerdict string
 	lastIssues  []string
-	iterations  []int
 }
 
 // newReviewerState initialises a zeroed reviewerState.
@@ -124,7 +130,7 @@ func (s *reviewerState) findPendingReviews() []string {
 // forever — an always-on reviewer over a long-lived store is a parked gate,
 // not a full-history in-memory projection. A re-completion re-enters via the
 // chain fold.
-func (s *reviewerState) recordReview(taskID, verdict string, issues []string, iteration int) {
+func (s *reviewerState) recordReview(taskID, verdict string, issues []string) {
 	rec, ok := s.reviewHistory[taskID]
 	if !ok {
 		rec = &taskReviewRecord{taskID: taskID}
@@ -133,7 +139,6 @@ func (s *reviewerState) recordReview(taskID, verdict string, issues []string, it
 	rec.reviewCount++
 	rec.lastVerdict = verdict
 	rec.lastIssues = issues
-	rec.iterations = append(rec.iterations, iteration)
 
 	if verdict == "approve" || verdict == "reject" {
 		delete(s.completedTasks, taskID)
@@ -208,7 +213,7 @@ func (s *reviewerState) foldChainEvent(ev event.Event, selfID types.ActorID) {
 		if ev.Source() == selfID {
 			return
 		}
-		s.recordReview(c.TaskID, c.Verdict, c.Issues, s.iteration)
+		s.recordReview(c.TaskID, c.Verdict, c.Issues)
 	}
 }
 
@@ -280,7 +285,16 @@ func replayChainPrefix(st store.Store, head types.EventID, pageSize int) ([]even
 // request_changes pends (round-1 B-1); a task whose latest verdict is
 // approve/reject does not pend, no matter who reviewed it (AC-2 — settled
 // work is never re-reviewed), and leaves the projection entirely.
+// Success clears projectionStale; any failure sets it (the projection may be
+// behind the chain), and the watermark stays exactly at the last FOLDED page
+// so the next catch-up resumes without re-folding anything.
 func (l *Loop) catchUpReviewProjection() bool {
+	ok := l.catchUpReviewProjectionStep()
+	l.reviewerState.projectionStale = !ok
+	return ok
+}
+
+func (l *Loop) catchUpReviewProjectionStep() bool {
 	g := l.agent.Graph()
 	if g == nil {
 		return false
@@ -307,6 +321,8 @@ func (l *Loop) catchUpReviewProjection() bool {
 		if !ok {
 			return false
 		}
+		// The prefix was COLLECTED in full before any fold, so a failed walk
+		// folds nothing and the whole replay retries — never a partial prefix.
 		for _, ev := range events {
 			s.foldChainEvent(ev, selfID)
 		}
@@ -314,26 +330,26 @@ func (l *Loop) catchUpReviewProjection() bool {
 		return true
 	}
 
-	cur := s.replayHead
 	for {
-		page, err := st.Since(cur, scanPageSize)
+		page, err := st.Since(s.replayHead, scanPageSize)
 		if err != nil {
 			return false
 		}
 		items := page.Items()
 		if len(items) == 0 {
-			break
+			return true
 		}
 		for _, ev := range items {
 			s.foldChainEvent(ev, selfID)
 		}
-		cur = items[len(items)-1].ID()
+		// Commit the watermark PER FOLDED PAGE: a failure on a later page must
+		// resume from here, not from the walk's start — re-folding an earlier
+		// page would double-count its peer reviews (round-4 finding B-1).
+		s.replayHead = items[len(items)-1].ID()
 		if !page.HasMore() {
-			break
+			return true
 		}
 	}
-	s.replayHead = cur
-	return true
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -410,7 +426,14 @@ func validateReviewCommand(cmd *ReviewCommand, iteration int) error {
 
 // emitCodeReview constructs a CodeReviewContent from the validated
 // ReviewCommand and records it on the event chain via agent.EmitCodeReview.
+// It is the single emission chokepoint, so the stale-projection guard lives
+// here: a verdict computed from a projection that is behind the chain could
+// re-review already-settled work — refuse mechanically rather than trust the
+// prompt to notice.
 func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
+	if l.reviewerState != nil && l.reviewerState.projectionStale {
+		return fmt.Errorf("review emission blocked: projection stale (chain catch-up failing); verdicts are fail-closed until it recovers")
+	}
 	content := event.CodeReviewContent{
 		TaskID:     cmd.TaskID,
 		Verdict:    cmd.Verdict,
@@ -436,6 +459,13 @@ func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
 func (l *Loop) enrichReviewObservation(obs string) string {
 	if l.reviewerState == nil {
 		return obs
+	}
+
+	// A stale projection must not be presented as reviewable state: pendings
+	// computed from it may already be settled on the chain. Declare the
+	// staleness; emitCodeReview independently refuses while it lasts.
+	if l.reviewerState.projectionStale {
+		return obs + "\n\n=== CODE REVIEW CONTEXT ===\nPROJECTION STALE: the chain catch-up is failing, so this view may be behind the store. Verdicts are disabled until it recovers — do not issue /review this iteration.\n===\n"
 	}
 
 	pending := l.reviewerState.findPendingReviews()

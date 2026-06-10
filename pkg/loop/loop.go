@@ -548,11 +548,12 @@ func (l *Loop) Run(ctx context.Context) Result {
 					if err := l.emitCodeReview(cmd); err != nil {
 						fmt.Printf("[%s] /review emit failed: %v\n", l.agent.Name(), err)
 					} else {
-						// Record directly — own events are filtered by onEvent()
-						// (ev.Source() == l.agent.ID() → skip), so the bus-driven
-						// update() path never sees our own reviews.
+						// Record directly at emission time. The chain fold
+						// (foldChainEvent) skips source == self for exactly
+						// this reason — recording own reviews twice would
+						// inflate the escalation cap.
 						l.reviewerState.recordReview(
-							cmd.TaskID, cmd.Verdict, cmd.Issues, l.iteration)
+							cmd.TaskID, cmd.Verdict, cmd.Issues)
 						if l.sink != nil {
 							l.captureBoundary(checkpoint.ReviewCompleted, response)
 							l.lastCheckpointIter = l.iteration

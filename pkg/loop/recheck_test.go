@@ -415,7 +415,7 @@ func TestHasReviewableWork(t *testing.T) {
 	}
 
 	// A review recorded THIS session clears the pending state.
-	l.reviewerState.recordReview(taskID.Value(), "approve", []string{}, 1)
+	l.reviewerState.recordReview(taskID.Value(), "approve", []string{})
 	if l.hasReviewableWork() {
 		t.Fatal("hasReviewableWork = true after this session reviewed the only pending task; want false")
 	}
@@ -526,6 +526,132 @@ func TestReplayBoundary_ReviewCountedExactlyOnce(t *testing.T) {
 	l.hasReviewableWork()
 	if got := l.reviewerState.getReviewCount(taskID.Value()); got != 1 {
 		t.Fatalf("review counted %d times after a second catch-up; want exactly 1", got)
+	}
+}
+
+// flakySinceStore wraps a store to force tiny Since pages and inject
+// failures mid-walk — the only way to prove the catch-up's per-page watermark
+// commit and the stale-projection fail-closed behavior.
+type flakySinceStore struct {
+	store.Store
+	pageLimit          int  // overrides the limit passed by the caller
+	armFailAfterReview bool // arm: fail the NEXT Since call after a page served a review
+	failNext           bool
+	failAll            bool
+}
+
+func (f *flakySinceStore) Since(afterID types.EventID, limit int) (types.Page[event.Event], error) {
+	if f.failAll || f.failNext {
+		f.failNext = false
+		return types.Page[event.Event]{}, fmt.Errorf("injected Since failure")
+	}
+	pageLimit := limit
+	if f.pageLimit > 0 {
+		pageLimit = f.pageLimit
+	}
+	page, err := f.Store.Since(afterID, pageLimit)
+	if err == nil && f.armFailAfterReview {
+		for _, ev := range page.Items() {
+			if _, ok := ev.Content().(event.CodeReviewContent); ok {
+				f.failNext = true
+				f.armFailAfterReview = false
+			}
+		}
+	}
+	return page, err
+}
+
+// TestCatchUp_PerPageWatermarkCommit is the round-4 B-1 pin: the incremental
+// Since walk must commit the watermark per folded page, so a failure on a
+// LATER page never replays the folds of an earlier one. The wrapper serves
+// one event per page and fails the call right after the page that carried the
+// peer review; if the watermark only commits at the end of a full walk, the
+// retry re-folds that review and the escalation count inflates to 2.
+func TestCatchUp_PerPageWatermarkCommit(t *testing.T) {
+	base := store.NewInMemoryStore()
+	flaky := &flakySinceStore{Store: base, pageLimit: 1}
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, flaky, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+	externalReviewer := generationAgent(t, gen, "reviewer")
+
+	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
+	if l.hasReviewableWork() { // boot replay over the pre-fixture history
+		t.Fatal("hasReviewableWork = true before any completion; want false")
+	}
+
+	// Post-watermark fixtures: a completion, a peer request_changes review,
+	// and a second task ensuring more pages exist AFTER the review's page.
+	t1 := completeNewTaskWithCommit(t, gen, completer, repo, "page-a.md", "implement page a")
+	reviewAs(t, externalReviewer, t1, "request_changes")
+	completeNewTaskWithCommit(t, gen, completer, repo, "page-b.md", "implement page b")
+
+	flaky.armFailAfterReview = true
+	l.hasReviewableWork() // walk dies on the page after the review folded
+
+	if !l.hasReviewableWork() { // healed: catch-up resumes and completes
+		t.Fatal("recovered catch-up found nothing pending; want the request_changes task to pend")
+	}
+	if got := l.reviewerState.getReviewCount(t1.Value()); got != 1 {
+		t.Fatalf("peer review folded %d times across a failed walk; want exactly 1 (per-page watermark commit)", got)
+	}
+}
+
+// TestStaleProjection_FailsClosed is the round-4 B-2 pin: when the chain
+// catch-up fails, the projection is STALE — the observation must say so
+// instead of rendering possibly-settled work as pending, and review emission
+// must refuse mechanically (a verdict from stale state could re-review
+// settled work). Recovery clears the staleness.
+func TestStaleProjection_FailsClosed(t *testing.T) {
+	base := store.NewInMemoryStore()
+	flaky := &flakySinceStore{Store: base}
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, flaky, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "stale.md", "implement stale target")
+
+	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
+	if !l.hasReviewableWork() { // healthy boot replay
+		t.Fatal("fixture: the completion should pend after a healthy replay")
+	}
+	if l.reviewerState.projectionStale {
+		t.Fatal("healthy projection marked stale")
+	}
+
+	flaky.failAll = true
+	if l.catchUpReviewProjection() {
+		t.Fatal("catch-up reported success while the store fails")
+	}
+	if !l.reviewerState.projectionStale {
+		t.Fatal("failed catch-up did not mark the projection stale")
+	}
+
+	// Mechanical fail-closed at the emission chokepoint.
+	err := l.emitCodeReview(&ReviewCommand{TaskID: taskID.Value(), Verdict: "approve", Summary: "s", Issues: []string{}, Confidence: 0.9})
+	if err == nil {
+		t.Fatal("emitCodeReview succeeded on a stale projection; verdicts must fail closed")
+	}
+	// The observation declares the staleness instead of rendering stale pendings.
+	obs := l.enrichReviewObservation("base obs")
+	if !strings.Contains(obs, "PROJECTION STALE") {
+		t.Fatal("stale projection not declared in the review observation")
+	}
+	if strings.Contains(obs, "TASK UNDER REVIEW") {
+		t.Fatal("stale observation still renders a task under review; stale pendings must not be presented for verdicts")
+	}
+
+	// Recovery clears the staleness and emission works again.
+	flaky.failAll = false
+	if !l.catchUpReviewProjection() {
+		t.Fatal("catch-up failed after the store healed")
+	}
+	if l.reviewerState.projectionStale {
+		t.Fatal("staleness not cleared by a successful catch-up")
+	}
+	if err := l.emitCodeReview(&ReviewCommand{TaskID: taskID.Value(), Verdict: "approve", Summary: "s", Issues: []string{}, Confidence: 0.9}); err != nil {
+		t.Fatalf("emitCodeReview failed on a healthy projection: %v", err)
 	}
 }
 
