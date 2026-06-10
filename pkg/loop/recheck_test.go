@@ -383,30 +383,35 @@ func TestHasReviewableWork(t *testing.T) {
 		t.Fatal("hasReviewableWork = false with an unreviewed historical completion; want true")
 	}
 
-	// The seeding that backs the gate must make the completion visible AND
+	// The replay that backs the gate must make the completion visible AND
 	// reviewable on the next observation — otherwise the wake would be a
 	// no-op: the agent wakes, renders "No tasks pending review", and parks.
 	c, ok := l.reviewerState.completedTasks[taskID.Value()]
 	if !ok {
-		t.Fatal("historical completion not seeded into reviewerState.completedTasks")
+		t.Fatal("historical completion not replayed into reviewerState.completedTasks")
 	}
 	if c.CompletedBy != completer.ID() {
-		t.Fatalf("seeded completion lost CompletedBy: got %s, want %s", c.CompletedBy.Value(), completer.ID().Value())
+		t.Fatalf("replayed completion lost CompletedBy: got %s, want %s", c.CompletedBy.Value(), completer.ID().Value())
 	}
 	if c.ArtifactRef.IsZero() {
-		t.Fatal("seeded completion lost ArtifactRef; review git context would degrade to heuristics")
+		t.Fatal("replayed completion lost ArtifactRef; review git context would degrade to heuristics")
 	}
 	obs := l.enrichReviewObservation("base obs")
 	if !strings.Contains(obs, "TASK UNDER REVIEW") || !strings.Contains(obs, taskID.Value()) {
-		t.Fatal("review observation does not render the seeded historical task")
+		t.Fatal("review observation does not render the replayed historical task")
 	}
 	if strings.Contains(obs, "RECENT COMMIT:\n  (unavailable)") {
-		t.Fatal("seeded completion's commit did not resolve; the completion is not actually reviewable")
+		t.Fatal("replayed completion's commit did not resolve; the completion is not actually reviewable")
 	}
 
-	// The already-reviewed historical task must NOT be seeded as pending.
-	if _, ok := l.reviewerState.completedTasks[reviewedID.Value()]; ok {
-		t.Fatal("historically-reviewed completion was seeded; a restart would re-review it")
+	// The already-reviewed historical task must NOT be pending — its latest
+	// verdict was replayed into reviewHistory exactly as a live bus review
+	// would have been recorded, so the uniform findPendingReviews rule
+	// excludes it (a restart never re-reviews settled work).
+	for _, id := range l.reviewerState.findPendingReviews() {
+		if id == reviewedID.Value() {
+			t.Fatal("historically-reviewed completion is pending; a restart would re-review settled work")
+		}
 	}
 
 	// A review recorded THIS session clears the pending state.
@@ -422,6 +427,72 @@ func TestHasReviewableWork(t *testing.T) {
 	l2 := newReviewerRecheckLoop(t, genEmpty, repo, 10*time.Millisecond)
 	if l2.hasReviewableWork() {
 		t.Fatal("hasReviewableWork = true on an empty store; want false")
+	}
+}
+
+// TestUpdate_ExternalReviewSettlesPending pins the live half of round-2
+// finding B-2: a code.review.submitted event from ANOTHER actor arriving on
+// the bus (own events never reach update — onEvent filters source == self)
+// must settle the task in reviewerState, so a stale local completion stops
+// pending and the reviewer never re-reviews work a peer instance settled.
+func TestUpdate_ExternalReviewSettlesPending(t *testing.T) {
+	s := store.NewInMemoryStore()
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, s, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+	externalReviewer := generationAgent(t, gen, "reviewer")
+	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "settle.md", "implement settle target")
+	reviewAs(t, externalReviewer, taskID, "approve")
+
+	// Fetch the persisted review event so update() receives the exact shape
+	// the bus would deliver.
+	page, err := s.ByType(event.EventTypeCodeReviewSubmitted, 1, types.None[types.Cursor]())
+	if err != nil || len(page.Items()) != 1 {
+		t.Fatalf("fetch review event: err=%v items=%d", err, len(page.Items()))
+	}
+	reviewEv := page.Items()[0]
+
+	st := newReviewerState()
+	st.completedTasks[taskID.Value()] = work.TaskCompletedContent{TaskID: taskID, CompletedBy: completer.ID()}
+	if len(st.findPendingReviews()) != 1 {
+		t.Fatal("fixture: task should be pending before the external review arrives")
+	}
+
+	st.update([]event.Event{reviewEv})
+
+	if pending := st.findPendingReviews(); len(pending) != 0 {
+		t.Fatalf("external approve did not settle the task; still pending: %v", pending)
+	}
+}
+
+// TestHasReviewableWork_QueuedCompletionWakes covers the dropped-wake-edge
+// window after the one-time replay: a completion queued in pendingEvents (the
+// bus delivered it while the loop was busy; the wake edge was lost) must make
+// the gate fire even though observe() has not folded it yet — per-tick work
+// stays in-memory (round-2 finding M-1), but queued events still count.
+func TestHasReviewableWork_QueuedCompletionWakes(t *testing.T) {
+	s := store.NewInMemoryStore()
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, s, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+
+	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
+	if l.hasReviewableWork() { // performs the one-time replay over an empty history
+		t.Fatal("hasReviewableWork = true on an empty store; want false")
+	}
+
+	// A completion lands AFTER the replay, delivered the way the bus would.
+	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "queued.md", "implement queued target")
+	page, err := s.ByType(work.EventTypeTaskCompleted, 1, types.None[types.Cursor]())
+	if err != nil || len(page.Items()) != 1 {
+		t.Fatalf("fetch completion event: err=%v items=%d", err, len(page.Items()))
+	}
+	l.onEvent(page.Items()[0])
+
+	if !l.hasReviewableWork() {
+		t.Fatalf("hasReviewableWork = false for a queued completion (task %s); the dropped-edge window is uncovered", taskID.Value())
 	}
 }
 
@@ -486,28 +557,44 @@ func TestFindPendingReviews_RecoveredCountWithoutVerdictPends(t *testing.T) {
 	}
 }
 
-// TestPaginateAllByType_FollowsCursors pins full pagination behind the
-// historical scans (round-1 finding B-2): every page is walked via the cursor,
-// so reviewable completions older than one page are never silently ignored.
-func TestPaginateAllByType_FollowsCursors(t *testing.T) {
+// TestReplayReviewState_FollowsCursors pins the one-time cold-start replay
+// (round-1 finding B-2; round-2 findings B-1/M-1): the replay walks EVERY page
+// of the store's globally-ordered Recent feed via cursors — chain position,
+// not wall-clock timestamps, decides which of a task's completion/review is
+// causally latest — so reviewable completions older than one page are never
+// silently ignored, and the full walk happens exactly once rather than per
+// tick. A tiny page size forces many pages over the interleaved event history.
+func TestReplayReviewState_FollowsCursors(t *testing.T) {
 	s := store.NewInMemoryStore()
 	as := actor.NewInMemoryActorStore()
 	repo := newTempGitRepo(t)
 
 	gen1 := newStoreGeneration(t, s, as, 1)
 	completer := generationAgent(t, gen1, "implementer")
+	gen1Reviewer := generationAgent(t, gen1, "reviewer")
 	const total = 7
+	ids := make([]types.EventID, 0, total)
 	for i := 0; i < total; i++ {
-		completeNewTaskWithCommit(t, gen1, completer, repo,
-			fmt.Sprintf("page-%d.md", i), fmt.Sprintf("implement page %d", i))
+		ids = append(ids, completeNewTaskWithCommit(t, gen1, completer, repo,
+			fmt.Sprintf("page-%d.md", i), fmt.Sprintf("implement page %d", i)))
 	}
+	reviewAs(t, gen1Reviewer, ids[0], "approve")
 
-	events, err := paginateAllByType(s, work.EventTypeTaskCompleted, 2)
-	if err != nil {
-		t.Fatalf("paginateAllByType: %v", err)
+	completions, history, ok := replayReviewState(s, 3)
+	if !ok {
+		t.Fatal("replayReviewState reported failure on a healthy store")
 	}
-	if len(events) != total {
-		t.Fatalf("paginateAllByType returned %d completions across pages; want %d (pagination must follow cursors)", len(events), total)
+	if len(completions) != total {
+		t.Fatalf("replay found %d completions across pages; want %d (cursors must be followed)", len(completions), total)
+	}
+	rec, reviewed := history[ids[0].Value()]
+	if !reviewed || rec.lastVerdict != "approve" {
+		t.Fatalf("replay did not reconstruct the review verdict for %s (got %+v)", ids[0].Value(), rec)
+	}
+	for i := 1; i < total; i++ {
+		if _, reviewed := history[ids[i].Value()]; reviewed {
+			t.Fatalf("replay invented a review record for unreviewed task %s", ids[i].Value())
+		}
 	}
 }
 
