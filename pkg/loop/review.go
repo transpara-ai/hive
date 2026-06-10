@@ -41,11 +41,11 @@ type reviewerState struct {
 	reviewHistory  map[string]*taskReviewRecord
 	completedTasks map[string]work.TaskCompletedContent // keyed by TaskID string
 
-	// historicalSeeded marks the one-time cold-start replay of the durable
-	// store into this projection (seedHistoricalFromStore) as done. After it,
-	// the state is maintained incrementally by live bus deliveries via
-	// update() — the per-tick re-check gate does no store I/O.
-	historicalSeeded bool
+	// replayHead is the chain watermark: the ID of the newest event already
+	// folded into this projection from the durable store. Zero means the
+	// boot-time replay has not happened yet (or the store was empty at boot).
+	// catchUpReviewProjection advances it; nothing else writes it.
+	replayHead types.EventID
 }
 
 // taskReviewRecord tracks review history for a single task.
@@ -77,27 +77,19 @@ func (s *reviewerState) InitReviewerFromRecovery(state *checkpoint.ReviewerRecov
 	}
 }
 
-// update processes the current batch of pending events and tracks completed
-// tasks and peer review verdicts. Called once per loop iteration with the
-// pending events from the bus.
+// update advances the reviewer's iteration counter. Called once per loop
+// iteration with the pending events from the bus.
+//
+// Deliberately NO projection mutation happens here: an event can be visible
+// to the chain replay AND still sit in the bus queue (Graph.Record appends to
+// the store before the bus publishes asynchronously), so folding bus payloads
+// would double-count across the replay/live boundary and inflate the
+// escalation cap. The chain watermark walk (catchUpReviewProjection) is the
+// projection's single mutation source; bus deliveries wake the loop and
+// decorate the observation text, nothing more.
 func (s *reviewerState) update(events []event.Event) {
 	s.iteration++
-
-	for _, ev := range events {
-		if c, ok := ev.Content().(work.TaskCompletedContent); ok {
-			taskID := c.TaskID.Value()
-			s.completedTasks[taskID] = c
-		}
-		if c, ok := ev.Content().(event.CodeReviewContent); ok {
-			// A peer's review verdict — OWN events never arrive here (onEvent
-			// filters source == self; own reviews are recorded directly in the
-			// Run loop after emitCodeReview). Recording the peer verdict
-			// settles the task so a completion another reviewer instance
-			// already reviewed stops pending (never re-review settled work),
-			// and the peer's rounds count toward the escalation cap.
-			s.recordReview(c.TaskID, c.Verdict, c.Issues, s.iteration)
-		}
-	}
+	_ = events
 }
 
 // findPendingReviews returns task IDs that have been completed but not yet
@@ -126,7 +118,12 @@ func (s *reviewerState) findPendingReviews() []string {
 	return pending
 }
 
-// recordReview records a review verdict for a task.
+// recordReview records a review verdict for a task. A settling verdict
+// (approve/reject) also evicts the task's completion from the projection:
+// settled work cannot pend (findPendingReviews) and must not stay resident
+// forever — an always-on reviewer over a long-lived store is a parked gate,
+// not a full-history in-memory projection. A re-completion re-enters via the
+// chain fold.
 func (s *reviewerState) recordReview(taskID, verdict string, issues []string, iteration int) {
 	rec, ok := s.reviewHistory[taskID]
 	if !ok {
@@ -137,6 +134,10 @@ func (s *reviewerState) recordReview(taskID, verdict string, issues []string, it
 	rec.lastVerdict = verdict
 	rec.lastIssues = issues
 	rec.iterations = append(rec.iterations, iteration)
+
+	if verdict == "approve" || verdict == "reject" {
+		delete(s.completedTasks, taskID)
+	}
 }
 
 // getReviewCount returns the number of times a task has been reviewed.
@@ -162,87 +163,90 @@ func (s *reviewerState) shouldEscalate(taskID string) bool {
 // work to pick up — the governance analog of hasAssignableWork, and the gate
 // for the keepalive re-check timer (slice-1 finding F8).
 //
-// Cost shape (round-2 finding M-1): the durable store is replayed into the
-// reviewerState projection exactly ONCE, at the first gate evaluation after
-// boot (the same moment-and-meaning as pkg/checkpoint's replay); after that,
-// live bus deliveries maintain the projection via update(), and every tick is
-// pure in-memory work plus a peek at the queued bus buffer for the
-// dropped-wake-edge window. This assumes the single-writer architecture: the
-// daemon process is the only writer of work.task.completed and
-// code.review.submitted (the bus is in-process by design) — a multi-writer
-// durable store is Phase-2 territory and would need replay invalidation.
+// The reviewer projection (completedTasks + reviewHistory) is maintained from
+// the chain alone: a one-time replay of the prefix up to the boot-time head,
+// then an incremental Since(watermark) catch-up on every evaluation. This
+// makes the gate writer-agnostic (round-3 finding B-1: Work's HTTP server and
+// CLI complete tasks through the shared store from separate binaries — no
+// in-process bus delivery ever reaches this loop for those writes), bounded
+// per tick by the actual event delta (round-2 finding M-1), and immune to
+// the replay/bus double-count boundary by construction: the chain walk is the
+// projection's ONLY mutation source, each event folds exactly once in chain
+// order, and bus payloads merely wake the loop and decorate observations
+// (round-3 finding B-2).
 //
-// Failure direction: a store error during the one-time replay leaves the gate
-// returning false (fail toward parked, mirroring hasAssignableWork's error
-// handling) and the replay is retried on the next tick — never half-seeded.
+// Failure direction: any store error leaves the gate returning false (fail
+// toward parked, mirroring hasAssignableWork's error handling) with the
+// watermark unadvanced — the catch-up resumes from the same position on the
+// next tick, never half-applied.
 func (l *Loop) hasReviewableWork() bool {
 	if l.reviewerState == nil {
 		return false
 	}
-	if !l.reviewerState.historicalSeeded {
-		if !l.seedHistoricalFromStore() {
-			return false
-		}
-		l.reviewerState.historicalSeeded = true
-	}
-	if l.peekQueuedCompletions() {
-		return true
+	if !l.catchUpReviewProjection() {
+		return false
 	}
 	return len(l.reviewerState.findPendingReviews()) > 0
 }
 
-// scanPageSize is the per-page size for the one-time cold-start replay walk,
+// scanPageSize is the per-page size for the chain replay and catch-up walks,
 // matching pkg/checkpoint's replay paginator.
 const scanPageSize = 1000
 
-// replayReviewState reconstructs the reviewer projection from the durable
-// store: the latest completion content per task, and a review record carrying
-// each task's latest verdict and total review count. It walks EVERY page of
-// the store's globally-ordered Recent feed via cursors (round-1 finding B-2 —
-// no bounded window), newest first. Chain position decides recency — the
-// FIRST completion/review seen per task in the walk is its causally latest —
-// so no wall-clock timestamp is ever compared (round-2 finding B-1: clock
-// skew, steps, or ties cannot reorder the chain).
+// foldChainEvent folds one chain event into the reviewer projection, in chain
+// order (callers iterate oldest→newest). The chain walk is the projection's
+// only mutation source, so each event folds exactly once: latest-wins for
+// completion contents, recordReview for peer verdicts. Own review events are
+// skipped — they were recorded directly at emission time (the Run loop's
+// recordReview after emitCodeReview) and folding them again would inflate the
+// escalation cap.
+func (s *reviewerState) foldChainEvent(ev event.Event, selfID types.ActorID) {
+	switch c := ev.Content().(type) {
+	case work.TaskCompletedContent:
+		s.completedTasks[c.TaskID.Value()] = c
+	case event.CodeReviewContent:
+		if ev.Source() == selfID {
+			return
+		}
+		s.recordReview(c.TaskID, c.Verdict, c.Issues, s.iteration)
+	}
+}
+
+// replayChainPrefix collects the chain's completion and review events up to
+// and including the given head, returned oldest-first for folding. The walk
+// pages the store's globally-ordered Recent feed newest-first via cursors
+// (round-1 finding B-2 — no bounded window) and IGNORES anything newer than
+// head: events appended mid-walk belong to the catch-up's (head, ∞) range, so
+// replay and catch-up partition the chain exactly and no event can ever fold
+// twice (round-3 finding B-2). Chain position alone decides order — no
+// wall-clock timestamp is compared anywhere (round-2 finding B-1).
 //
-// The projection deliberately mirrors what live bus delivery would have built:
-// completedTasks gets every task's latest completion; reviewHistory gets the
-// latest verdict exactly as update()/recordReview would have recorded it. The
-// pending decision then lives in ONE place — findPendingReviews — so a
-// restarted reviewer behaves identically to one that never restarted: an
-// unreviewed completion pends (F8 closed); a re-completion after
-// request_changes pends (round-1 B-1); a task whose latest verdict is
-// approve/reject does not pend, no matter who reviewed it (AC-2: settled work
-// is never re-reviewed).
-//
-// ok=false means a page read failed; callers must treat the replay as not
-// having happened (fail toward parked) rather than trust a partial walk.
-func replayReviewState(st store.Store, pageSize int) (map[string]work.TaskCompletedContent, map[string]*taskReviewRecord, bool) {
-	completions := make(map[string]work.TaskCompletedContent)
-	history := make(map[string]*taskReviewRecord)
+// ok=false means a page read failed or the head was never encountered on the
+// walk; callers must treat the replay as not having happened (fail toward
+// parked) rather than trust a partial prefix.
+func replayChainPrefix(st store.Store, head types.EventID, pageSize int) ([]event.Event, bool) {
+	var collected []event.Event
 	cursor := types.None[types.Cursor]()
+	seenHead := false
 	for {
 		page, err := st.Recent(pageSize, cursor)
 		if err != nil {
-			return nil, nil, false
+			return nil, false
 		}
 		items := page.Items()
 		if len(items) == 0 {
 			break
 		}
 		for _, ev := range items {
-			switch c := ev.Content().(type) {
-			case work.TaskCompletedContent:
-				id := c.TaskID.Value()
-				if _, seen := completions[id]; !seen {
-					completions[id] = c // newest-first: first seen is causally latest
+			if !seenHead {
+				if ev.ID() != head {
+					continue // newer than the watermark: the catch-up's range
 				}
-			case event.CodeReviewContent:
-				rec, seen := history[c.TaskID]
-				if !seen {
-					rec = &taskReviewRecord{taskID: c.TaskID, lastVerdict: c.Verdict, lastIssues: c.Issues}
-					history[c.TaskID] = rec
-				}
-				rec.reviewCount++
+				seenHead = true
+			}
+			switch ev.Content().(type) {
+			case work.TaskCompletedContent, event.CodeReviewContent:
+				collected = append(collected, ev)
 			}
 		}
 		if !page.HasMore() {
@@ -250,23 +254,33 @@ func replayReviewState(st store.Store, pageSize int) (map[string]work.TaskComple
 		}
 		cursor = page.Cursor()
 	}
-	return completions, history, true
+	if !seenHead {
+		return nil, false
+	}
+	for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
+		collected[i], collected[j] = collected[j], collected[i]
+	}
+	return collected, true
 }
 
-// seedHistoricalFromStore merges the replayed projection into reviewerState.
-// The bus only delivers events fired while THIS loop instance is alive: a
-// completion persisted by a prior daemon instance is invisible to update()
-// forever — the restart that beat the implementer wakeup race made the
-// completion historical, so the review→fix loop could not engage (finding
-// F8). The replay is what makes the re-check wake productive: the merged
-// entry is what enrichReviewObservation renders on the next observation.
+// catchUpReviewProjection advances the reviewer projection to the current
+// chain head. First call (or empty-store boot): replay the chain prefix up to
+// the boot-time head — the same moment-and-meaning as pkg/checkpoint's replay
+// — which is what makes a historical completion visible at all: the bus only
+// delivers events fired while THIS loop instance is alive, so the restart
+// that beat the implementer wakeup race stranded the review→fix loop on
+// exactly those events (finding F8). Every later call: fold the Since
+// (watermark) delta, which is bounded by the events actually appended since
+// the last evaluation and catches every writer — in-process or not.
 //
-// Merge semantics: the chain is authoritative. Completion contents overwrite
-// (the chain contains everything the bus delivered, so its latest is at least
-// as new); the latest verdict overwrites (a session-recorded review is also
-// on the chain); counts take the max, because chain counts include every
-// emitted review while recovery- or session-seeded counts are a subset.
-func (l *Loop) seedHistoricalFromStore() bool {
+// The projection deliberately mirrors what uninterrupted live delivery would
+// have built, so the pending decision lives in ONE place (findPendingReviews)
+// and a restarted reviewer behaves identically to one that never restarted:
+// an unreviewed completion pends (F8 closed); a re-completion after
+// request_changes pends (round-1 B-1); a task whose latest verdict is
+// approve/reject does not pend, no matter who reviewed it (AC-2 — settled
+// work is never re-reviewed), and leaves the projection entirely.
+func (l *Loop) catchUpReviewProjection() bool {
 	g := l.agent.Graph()
 	if g == nil {
 		return false
@@ -275,44 +289,51 @@ func (l *Loop) seedHistoricalFromStore() bool {
 	if st == nil {
 		return false
 	}
-	completions, history, ok := replayReviewState(st, scanPageSize)
-	if !ok {
-		return false
-	}
-	for id, c := range completions {
-		l.reviewerState.completedTasks[id] = c
-	}
-	for id, rec := range history {
-		existing, seen := l.reviewerState.reviewHistory[id]
-		if !seen {
-			l.reviewerState.reviewHistory[id] = rec
-			continue
-		}
-		existing.lastVerdict = rec.lastVerdict
-		existing.lastIssues = rec.lastIssues
-		if rec.reviewCount > existing.reviewCount {
-			existing.reviewCount = rec.reviewCount
-		}
-	}
-	return true
-}
+	s := l.reviewerState
+	selfID := l.agent.ID()
 
-// peekQueuedCompletions reports whether the pending bus buffer holds a task
-// completion observe() has not folded yet — the dropped-wake-edge window: the
-// bus queued the event while the loop was busy, the non-blocking wake send
-// was lost, and the loop parked before its next observation. Read-only under
-// the buffer mutex (onEvent appends from the bus goroutine); the wake this
-// triggers leads to a normal observe()/update() fold, which is where the
-// projection actually mutates.
-func (l *Loop) peekQueuedCompletions() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, ev := range l.pendingEvents {
-		if _, ok := ev.Content().(work.TaskCompletedContent); ok {
+	if s.replayHead.IsZero() {
+		headOpt, err := st.Head()
+		if err != nil {
+			return false
+		}
+		if headOpt.IsNone() {
+			// Empty store: trivially up to date. The watermark stays zero so
+			// the next evaluation re-checks for a first head.
 			return true
 		}
+		head := headOpt.Unwrap().ID()
+		events, ok := replayChainPrefix(st, head, scanPageSize)
+		if !ok {
+			return false
+		}
+		for _, ev := range events {
+			s.foldChainEvent(ev, selfID)
+		}
+		s.replayHead = head
+		return true
 	}
-	return false
+
+	cur := s.replayHead
+	for {
+		page, err := st.Since(cur, scanPageSize)
+		if err != nil {
+			return false
+		}
+		items := page.Items()
+		if len(items) == 0 {
+			break
+		}
+		for _, ev := range items {
+			s.foldChainEvent(ev, selfID)
+		}
+		cur = items[len(items)-1].ID()
+		if !page.HasMore() {
+			break
+		}
+	}
+	s.replayHead = cur
+	return true
 }
 
 // ────────────────────────────────────────────────────────────────────

@@ -430,12 +430,12 @@ func TestHasReviewableWork(t *testing.T) {
 	}
 }
 
-// TestUpdate_ExternalReviewSettlesPending pins the live half of round-2
-// finding B-2: a code.review.submitted event from ANOTHER actor arriving on
-// the bus (own events never reach update — onEvent filters source == self)
-// must settle the task in reviewerState, so a stale local completion stops
-// pending and the reviewer never re-reviews work a peer instance settled.
-func TestUpdate_ExternalReviewSettlesPending(t *testing.T) {
+// TestCatchUp_ExternalReviewSettlesPending pins the settle half of round-2/3
+// finding B-2: a code.review.submitted event from ANOTHER actor that reaches
+// the chain after the replay must settle the task via the watermark catch-up,
+// so a stale local completion stops pending and the reviewer never re-reviews
+// work a peer instance settled — regardless of whether the bus delivered it.
+func TestCatchUp_ExternalReviewSettlesPending(t *testing.T) {
 	s := store.NewInMemoryStore()
 	as := actor.NewInMemoryActorStore()
 	repo := newTempGitRepo(t)
@@ -443,35 +443,26 @@ func TestUpdate_ExternalReviewSettlesPending(t *testing.T) {
 	completer := generationAgent(t, gen, "implementer")
 	externalReviewer := generationAgent(t, gen, "reviewer")
 	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "settle.md", "implement settle target")
-	reviewAs(t, externalReviewer, taskID, "approve")
 
-	// Fetch the persisted review event so update() receives the exact shape
-	// the bus would deliver.
-	page, err := s.ByType(event.EventTypeCodeReviewSubmitted, 1, types.None[types.Cursor]())
-	if err != nil || len(page.Items()) != 1 {
-		t.Fatalf("fetch review event: err=%v items=%d", err, len(page.Items()))
-	}
-	reviewEv := page.Items()[0]
-
-	st := newReviewerState()
-	st.completedTasks[taskID.Value()] = work.TaskCompletedContent{TaskID: taskID, CompletedBy: completer.ID()}
-	if len(st.findPendingReviews()) != 1 {
+	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
+	if !l.hasReviewableWork() { // replay: the completion pends
 		t.Fatal("fixture: task should be pending before the external review arrives")
 	}
 
-	st.update([]event.Event{reviewEv})
+	// The external review lands on the chain AFTER the replay.
+	reviewAs(t, externalReviewer, taskID, "approve")
 
-	if pending := st.findPendingReviews(); len(pending) != 0 {
-		t.Fatalf("external approve did not settle the task; still pending: %v", pending)
+	if l.hasReviewableWork() {
+		t.Fatalf("external approve on the chain did not settle the task; still pending: %v", l.reviewerState.findPendingReviews())
 	}
 }
 
-// TestHasReviewableWork_QueuedCompletionWakes covers the dropped-wake-edge
-// window after the one-time replay: a completion queued in pendingEvents (the
-// bus delivered it while the loop was busy; the wake edge was lost) must make
-// the gate fire even though observe() has not folded it yet — per-tick work
-// stays in-memory (round-2 finding M-1), but queued events still count.
-func TestHasReviewableWork_QueuedCompletionWakes(t *testing.T) {
+// TestHasReviewableWork_PostSeedStoreOnlyCompletion is the round-3 B-1 pin:
+// Work's HTTP server and CLI complete tasks through the SHARED STORE from
+// separate binaries — no in-process bus delivery ever reaches the Hive loop
+// for those writes. A completion appended after the one-time replay, with no
+// onEvent call at all, must still fire the gate via the watermark catch-up.
+func TestHasReviewableWork_PostSeedStoreOnlyCompletion(t *testing.T) {
 	s := store.NewInMemoryStore()
 	as := actor.NewInMemoryActorStore()
 	repo := newTempGitRepo(t)
@@ -483,16 +474,96 @@ func TestHasReviewableWork_QueuedCompletionWakes(t *testing.T) {
 		t.Fatal("hasReviewableWork = true on an empty store; want false")
 	}
 
-	// A completion lands AFTER the replay, delivered the way the bus would.
-	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "queued.md", "implement queued target")
-	page, err := s.ByType(work.EventTypeTaskCompleted, 1, types.None[types.Cursor]())
-	if err != nil || len(page.Items()) != 1 {
-		t.Fatalf("fetch completion event: err=%v items=%d", err, len(page.Items()))
-	}
-	l.onEvent(page.Items()[0])
+	// A completion lands in the STORE ONLY — the work-server/CLI writer shape.
+	// Deliberately no onEvent: the bus never hears about it.
+	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "external.md", "implement external target")
 
 	if !l.hasReviewableWork() {
-		t.Fatalf("hasReviewableWork = false for a queued completion (task %s); the dropped-edge window is uncovered", taskID.Value())
+		t.Fatalf("hasReviewableWork = false for a store-only post-seed completion (task %s); external writers are invisible (B-1)", taskID.Value())
+	}
+	if _, ok := l.reviewerState.completedTasks[taskID.Value()]; !ok {
+		t.Fatal("store-only completion not folded into the projection for the next observation")
+	}
+}
+
+// TestReplayBoundary_ReviewCountedExactlyOnce is the round-3 B-2 pin: an
+// event can be visible to the replay walk AND still sit in pendingEvents
+// (Graph.Record appends to the store before the bus publishes), so the
+// projection must fold each chain event exactly once. The chain watermark is
+// the single mutation source — bus payloads never mutate the projection — so
+// a review reaching both paths cannot inflate the escalation cap.
+func TestReplayBoundary_ReviewCountedExactlyOnce(t *testing.T) {
+	s := store.NewInMemoryStore()
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, s, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+	externalReviewer := generationAgent(t, gen, "reviewer")
+	taskID := completeNewTaskWithCommit(t, gen, completer, repo, "boundary.md", "implement boundary target")
+	reviewAs(t, externalReviewer, taskID, "request_changes")
+
+	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
+	if !l.hasReviewableWork() { // replay folds the completion AND the request_changes review
+		t.Fatal("fixture: request_changes task should be pending after replay")
+	}
+	if got := l.reviewerState.getReviewCount(taskID.Value()); got != 1 {
+		t.Fatalf("replay folded the review %d times; want exactly 1", got)
+	}
+
+	// The same review event also arrives via the bus path (it was appended
+	// before the bus published — the replay/live boundary). update() must not
+	// count it again.
+	page, err := s.ByType(event.EventTypeCodeReviewSubmitted, 1, types.None[types.Cursor]())
+	if err != nil || len(page.Items()) != 1 {
+		t.Fatalf("fetch review event: err=%v items=%d", err, len(page.Items()))
+	}
+	l.reviewerState.update([]event.Event{page.Items()[0]})
+
+	if got := l.reviewerState.getReviewCount(taskID.Value()); got != 1 {
+		t.Fatalf("review counted %d times across the replay/bus boundary; want exactly 1 (escalation cap inflation)", got)
+	}
+	// And a second catch-up must not re-fold it either.
+	l.hasReviewableWork()
+	if got := l.reviewerState.getReviewCount(taskID.Value()); got != 1 {
+		t.Fatalf("review counted %d times after a second catch-up; want exactly 1", got)
+	}
+}
+
+// TestSettledTasksLeaveTheProjection is the round-3 M-1 pin: the projection
+// holds only reviewable state, not full history. A task whose latest verdict
+// is approve (or reject) leaves completedTasks — an always-on reviewer over a
+// long-lived store must not become a permanent full-history in-memory
+// projection — and a re-completion brings it back.
+func TestSettledTasksLeaveTheProjection(t *testing.T) {
+	s := store.NewInMemoryStore()
+	as := actor.NewInMemoryActorStore()
+	repo := newTempGitRepo(t)
+	gen := newStoreGeneration(t, s, as, 1)
+	completer := generationAgent(t, gen, "implementer")
+	gen1Reviewer := generationAgent(t, gen, "reviewer")
+	settledID := completeNewTaskWithCommit(t, gen, completer, repo, "settled.md", "implement settled target")
+	reviewAs(t, gen1Reviewer, settledID, "approve")
+	pendingID := completeNewTaskWithCommit(t, gen, completer, repo, "pending.md", "implement pending target")
+
+	gen2 := newStoreGeneration(t, s, as, 2)
+	l := newReviewerRecheckLoop(t, gen2, repo, 10*time.Millisecond)
+	if !l.hasReviewableWork() {
+		t.Fatal("fixture: the unreviewed completion should pend")
+	}
+	if _, resident := l.reviewerState.completedTasks[settledID.Value()]; resident {
+		t.Fatal("settled (approved) task is resident in the projection; full history would accumulate unbounded (M-1)")
+	}
+	if _, resident := l.reviewerState.completedTasks[pendingID.Value()]; !resident {
+		t.Fatal("pending task missing from the projection")
+	}
+
+	// A re-completion of the settled task re-enters the projection. It does
+	// not re-pend (latest verdict approve — the pre-existing live rule), but
+	// the projection must reflect the latest completion again.
+	completeExistingTaskWithCommit(t, gen, completer, repo, "settled-round2.md", settledID)
+	l.hasReviewableWork()
+	if _, resident := l.reviewerState.completedTasks[settledID.Value()]; !resident {
+		t.Fatal("re-completed task did not re-enter the projection")
 	}
 }
 
@@ -557,14 +628,13 @@ func TestFindPendingReviews_RecoveredCountWithoutVerdictPends(t *testing.T) {
 	}
 }
 
-// TestReplayReviewState_FollowsCursors pins the one-time cold-start replay
-// (round-1 finding B-2; round-2 findings B-1/M-1): the replay walks EVERY page
-// of the store's globally-ordered Recent feed via cursors — chain position,
-// not wall-clock timestamps, decides which of a task's completion/review is
-// causally latest — so reviewable completions older than one page are never
-// silently ignored, and the full walk happens exactly once rather than per
-// tick. A tiny page size forces many pages over the interleaved event history.
-func TestReplayReviewState_FollowsCursors(t *testing.T) {
+// TestReplayChainPrefix_FollowsCursors pins the boot-time replay walk
+// (round-1 finding B-2; round-2 finding B-1): every page of the store's
+// globally-ordered Recent feed is walked via cursors — chain position, not
+// wall-clock timestamps, decides order — and the collected prefix comes back
+// oldest-first, ready to fold exactly as live delivery would have. A tiny
+// page size forces many pages over the interleaved event history.
+func TestReplayChainPrefix_FollowsCursors(t *testing.T) {
 	s := store.NewInMemoryStore()
 	as := actor.NewInMemoryActorStore()
 	repo := newTempGitRepo(t)
@@ -580,20 +650,47 @@ func TestReplayReviewState_FollowsCursors(t *testing.T) {
 	}
 	reviewAs(t, gen1Reviewer, ids[0], "approve")
 
-	completions, history, ok := replayReviewState(s, 3)
+	headOpt, err := s.Head()
+	if err != nil || headOpt.IsNone() {
+		t.Fatalf("Head: err=%v none=%v", err, headOpt.IsNone())
+	}
+	events, ok := replayChainPrefix(s, headOpt.Unwrap().ID(), 3)
 	if !ok {
-		t.Fatal("replayReviewState reported failure on a healthy store")
+		t.Fatal("replayChainPrefix reported failure on a healthy store")
 	}
-	if len(completions) != total {
-		t.Fatalf("replay found %d completions across pages; want %d (cursors must be followed)", len(completions), total)
+
+	var completions, reviews int
+	for _, ev := range events {
+		switch ev.Content().(type) {
+		case work.TaskCompletedContent:
+			completions++
+		case event.CodeReviewContent:
+			reviews++
+		}
 	}
-	rec, reviewed := history[ids[0].Value()]
-	if !reviewed || rec.lastVerdict != "approve" {
-		t.Fatalf("replay did not reconstruct the review verdict for %s (got %+v)", ids[0].Value(), rec)
+	if completions != total || reviews != 1 {
+		t.Fatalf("replay collected %d completions and %d reviews across pages; want %d and 1 (cursors must be followed)", completions, reviews, total)
 	}
-	for i := 1; i < total; i++ {
-		if _, reviewed := history[ids[i].Value()]; reviewed {
-			t.Fatalf("replay invented a review record for unreviewed task %s", ids[i].Value())
+	// Oldest-first: the first collected completion is the chain-oldest task.
+	first, isCompletion := events[0].Content().(work.TaskCompletedContent)
+	if !isCompletion || first.TaskID != ids[0] {
+		t.Fatalf("replay prefix is not oldest-first: first event is %T for %v, want completion of %s", events[0].Content(), events[0].ID().Value(), ids[0].Value())
+	}
+
+	// The watermark partition: a head older than the newest event excludes
+	// everything newer than it, so replay and catch-up never overlap.
+	page, err := s.ByType(work.EventTypeTaskCompleted, 1, types.None[types.Cursor]())
+	if err != nil || len(page.Items()) != 1 {
+		t.Fatalf("fetch newest completion: err=%v", err)
+	}
+	newestCompletion := page.Items()[0]
+	older, ok := replayChainPrefix(s, newestCompletion.ID(), 3)
+	if !ok {
+		t.Fatal("replayChainPrefix failed for an interior watermark")
+	}
+	for _, ev := range older {
+		if _, isReview := ev.Content().(event.CodeReviewContent); isReview {
+			t.Fatal("replay prefix included the review appended after the interior watermark; the partition leaks")
 		}
 	}
 }

@@ -629,9 +629,15 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	if l.spawnerState != nil {
 		l.spawnerState.update(pending)
 	}
-	// Update reviewer cross-iteration state from this iteration's events.
+	// Update reviewer cross-iteration state from this iteration's events, then
+	// advance the projection from the chain watermark so the review context
+	// reflects everything persisted up to now — including completions written
+	// by external processes (work-server/CLI) the bus never delivers. Best
+	// effort: on a store error the observation renders the previous projection
+	// and the next evaluation resumes from the unadvanced watermark.
 	if l.reviewerState != nil {
 		l.reviewerState.update(pending)
+		l.catchUpReviewProjection()
 	}
 
 	var sb strings.Builder
