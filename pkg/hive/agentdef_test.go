@@ -353,3 +353,43 @@ func TestNonOperateOutputConvention(t *testing.T) {
 		t.Error("combined prompt must contain OUTPUT CONVENTION header")
 	}
 }
+
+// TestContractsEnforceCompletionDiscipline guards the v9 run's binding finding
+// (v9-F2, = v8-F4 widened): the strategist completed the order task as
+// decomposition bookkeeping, the spawner completed the SAME task three seconds
+// later claiming a deliverable that existed only as prose in a task comment,
+// the store accepted both, and the reviewer needed four review cycles and a
+// constitutional HALT to stop it. The shared mission contract must bind EVERY
+// civic agent to completion discipline — complete only what is assigned to
+// you, and never claim a deliverable that does not exist in the form the task
+// demands — and the two observed offenders carry explicit reinforcement.
+func TestContractsEnforceCompletionDiscipline(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	promptFor := func(name string) string {
+		for i := range agents {
+			if agents[i].Name == name {
+				return agents[i].SystemPrompt
+			}
+		}
+		t.Fatalf("agent %q not found in StarterAgents", name)
+		return ""
+	}
+
+	// The class: every civic agent carries the shared discipline block.
+	for i := range agents {
+		p := agents[i].SystemPrompt
+		for _, phrase := range []string{"COMPLETION DISCIPLINE", "only complete a task that is assigned to YOU"} {
+			if !strings.Contains(p, phrase) {
+				t.Errorf("agent %q mission preamble missing completion-discipline clause %q", agents[i].Name, phrase)
+			}
+		}
+	}
+
+	// The observed offenders carry explicit reinforcement.
+	if !strings.Contains(promptFor("spawner"), "comment is not a deliverable") {
+		t.Error("spawner contract must state that a comment is not a deliverable")
+	}
+	if !strings.Contains(promptFor("strategist"), "Decomposing a task is not completing it") {
+		t.Error("strategist contract must state that decomposing a task is not completing it")
+	}
+}
