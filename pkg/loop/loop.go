@@ -236,6 +236,16 @@ type Loop struct {
 	// accessed from the Run() goroutine — no mutex needed.
 	reviewerState *reviewerState
 
+	// parkAfterEscalation arms the keepalive raise-and-park path (slice-1 v8
+	// run, finding v8-F2): a keepalive agent's ESCALATE raises agent.escalated
+	// for the human and PARKS the loop instead of returning StopEscalation —
+	// terminal escalation permanently removed civic agents from an always-on
+	// daemon over transient conditions, and spawned replacements cannot
+	// operate. Set by checkResponse/checkResponseText, consumed by Run().
+	// Only accessed from the Run() goroutine.
+	parkAfterEscalation    bool
+	parkedEscalationReason string
+
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
 	sink checkpoint.CheckpointSink
 
@@ -587,6 +597,28 @@ func (l *Loop) Run(ctx context.Context) Result {
 			return *stop
 		}
 
+		// 3.5. A keepalive escalation RAISES and PARKS (v8-F2): the escalation
+		// event is already on the chain for the human; the loop waits for the
+		// next wake or gated re-check and re-evaluates with fresh context —
+		// iterating immediately would re-prompt into the same blocked state at
+		// LLM-call cost. Without a bus there is no wake source, so parking is
+		// impossible and the escalation stays terminal (fail closed to the
+		// pre-fix semantics rather than spinning).
+		if l.parkAfterEscalation {
+			reason := l.parkedEscalationReason
+			l.parkAfterEscalation = false
+			l.parkedEscalationReason = ""
+			if l.config.Bus == nil {
+				return l.result(StopEscalation, iteration, reason)
+			}
+			fmt.Printf("[%s] escalation raised; keepalive loop parked pending wake/re-check\n", l.agent.Name())
+			if l.waitForEvents(ctx) {
+				consecutiveEmpty = 0
+				continue
+			}
+			return l.result(StopEscalation, iteration, reason)
+		}
+
 		// 4. Check for quiescence — agent said nothing useful, no new events.
 		if l.isQuiescent(response) {
 			consecutiveEmpty++
@@ -870,6 +902,13 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 			l.captureBoundary(checkpoint.TaskBlocked, response)
 			l.lastCheckpointIter = l.iteration
 		}
+		// Keepalive: raise-and-park (v8-F2). The escalation is on the chain;
+		// the loop parks in Run() and re-evaluates on the next wake/re-check.
+		if l.config.Keepalive {
+			l.parkAfterEscalation = true
+			l.parkedEscalationReason = sig.Reason
+			return nil
+		}
 		r := l.result(StopEscalation, iteration, sig.Reason)
 		return &r
 	case SignalTaskDone:
@@ -906,6 +945,12 @@ func (l *Loop) checkResponseText(ctx context.Context, response string, iteration
 		if err := l.agent.Escalate(ctx, l.humanID,
 			fmt.Sprintf("loop iteration %d: %s", iteration, response)); err != nil {
 			fmt.Printf("warning: escalation event failed: %v\n", err)
+		}
+		// Keepalive: raise-and-park (v8-F2), same semantics as the /signal path.
+		if l.config.Keepalive {
+			l.parkAfterEscalation = true
+			l.parkedEscalationReason = response
+			return nil
 		}
 		r := l.result(StopEscalation, iteration, response)
 		return &r
