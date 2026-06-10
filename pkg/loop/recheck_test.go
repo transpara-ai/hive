@@ -576,9 +576,21 @@ func TestCatchUp_PerPageWatermarkCommit(t *testing.T) {
 	completer := generationAgent(t, gen, "implementer")
 	externalReviewer := generationAgent(t, gen, "reviewer")
 
+	// Establish a NONZERO watermark first (round-5 finding): a boot replay
+	// over an EMPTY store returns success with a zero watermark, and every
+	// later evaluation then takes the boot-replay path (Recent) — the armed
+	// Since wrapper would never fire and this test would be a false negative
+	// for the exact regression it pins. A settled pre-watermark task makes
+	// the boot replay run and pin the watermark at the chain head.
+	preID := completeNewTaskWithCommit(t, gen, completer, repo, "pre.md", "implement pre-watermark task")
+	reviewAs(t, externalReviewer, preID, "approve")
+
 	l := newReviewerRecheckLoop(t, gen, repo, 10*time.Millisecond)
-	if l.hasReviewableWork() { // boot replay over the pre-fixture history
-		t.Fatal("hasReviewableWork = true before any completion; want false")
+	if l.hasReviewableWork() { // boot replay folds the settled prefix
+		t.Fatal("hasReviewableWork = true over a fully settled prefix; want false")
+	}
+	if l.reviewerState.replayHead.IsZero() {
+		t.Fatal("fixture: boot replay left a zero watermark; the incremental Since path would never be exercised")
 	}
 
 	// Post-watermark fixtures: a completion, a peer request_changes review,
@@ -588,9 +600,14 @@ func TestCatchUp_PerPageWatermarkCommit(t *testing.T) {
 	completeNewTaskWithCommit(t, gen, completer, repo, "page-b.md", "implement page b")
 
 	flaky.armFailAfterReview = true
-	l.hasReviewableWork() // walk dies on the page after the review folded
+	if l.hasReviewableWork() { // the armed walk must die on the page after the review folded
+		t.Fatal("catch-up reported reviewable work although the armed Since walk must fail mid-delta")
+	}
+	if !l.reviewerState.projectionStale {
+		t.Fatal("failed incremental walk did not mark the projection stale; the injected failure never fired")
+	}
 
-	if !l.hasReviewableWork() { // healed: catch-up resumes and completes
+	if !l.hasReviewableWork() { // healed: resumes from the per-page watermark
 		t.Fatal("recovered catch-up found nothing pending; want the request_changes task to pend")
 	}
 	if got := l.reviewerState.getReviewCount(t1.Value()); got != 1 {
