@@ -212,7 +212,7 @@ func TestValidateReviewCommand_NilIssues(t *testing.T) {
 func TestReviewerState_TrackReview(t *testing.T) {
 	s := newReviewerState()
 
-	s.recordReview("task-1", "approve", []string{}, 10)
+	s.recordReview("task-1", "approve", []string{})
 
 	rec, ok := s.reviewHistory["task-1"]
 	if !ok {
@@ -224,9 +224,6 @@ func TestReviewerState_TrackReview(t *testing.T) {
 	if rec.lastVerdict != "approve" {
 		t.Errorf("lastVerdict = %q, want %q", rec.lastVerdict, "approve")
 	}
-	if len(rec.iterations) != 1 || rec.iterations[0] != 10 {
-		t.Errorf("iterations = %v, want [10]", rec.iterations)
-	}
 }
 
 func TestReviewerState_ReviewCount(t *testing.T) {
@@ -236,8 +233,8 @@ func TestReviewerState_ReviewCount(t *testing.T) {
 		t.Error("expected 0 for unknown task")
 	}
 
-	s.recordReview("task-1", "request_changes", []string{"issue 1"}, 10)
-	s.recordReview("task-1", "approve", []string{}, 15)
+	s.recordReview("task-1", "request_changes", []string{"issue 1"})
+	s.recordReview("task-1", "approve", []string{})
 
 	if s.getReviewCount("task-1") != 2 {
 		t.Errorf("reviewCount = %d, want 2", s.getReviewCount("task-1"))
@@ -254,14 +251,14 @@ func TestReviewerState_CycleLimit(t *testing.T) {
 	s := newReviewerState()
 
 	// 2 reviews: not yet escalation-worthy.
-	s.recordReview("task-1", "request_changes", []string{"fix A"}, 10)
-	s.recordReview("task-1", "request_changes", []string{"fix B"}, 15)
+	s.recordReview("task-1", "request_changes", []string{"fix A"})
+	s.recordReview("task-1", "request_changes", []string{"fix B"})
 	if s.shouldEscalate("task-1") {
 		t.Error("should not escalate after 2 reviews")
 	}
 
 	// 3rd review: escalation threshold reached.
-	s.recordReview("task-1", "request_changes", []string{"fix C"}, 20)
+	s.recordReview("task-1", "request_changes", []string{"fix C"})
 	if !s.shouldEscalate("task-1") {
 		t.Error("should escalate after 3 reviews")
 	}
