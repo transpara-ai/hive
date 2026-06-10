@@ -139,6 +139,27 @@ To deliver findings, documents, or any structured output, attach them as a
 Reference what you produced in your /task complete summary.
 `
 
+// nonOperateCompletionDiscipline binds spawned CanOperate=false agents to the
+// same completion discipline the starter civic agents carry in missionTemplate
+// (v9-F2): the output convention legitimizes comment deliverables, so without
+// this block a spawned agent keeps the exact under-blocking path the v9 run
+// halted on — comment-as-deliverable completion of a task demanding a
+// repository file.
+const nonOperateCompletionDiscipline = `
+
+== COMPLETION DISCIPLINE ==
+/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands. You cannot write repository files, so a task demanding a repository artifact can NEVER be completed by you — a /task comment is not a deliverable for such a task. Comment your contribution and leave the task open for an agent that can produce it. If you cannot SEE what a task demands (its demand line, expected outputs, gates, or description), you must not complete it. Never re-complete a task a reviewer has rejected.
+`
+
+// composeSpawnedPrompt assembles the full system prompt for a dynamically
+// spawned agent: the Guardian-approved proposal prompt plus the structural
+// conventions every spawned (always CanOperate=false) agent must carry. The
+// composition lives here — next to the constants it concatenates — so the
+// contract text and its tests cannot drift from the spawn path in watch.go.
+func composeSpawnedPrompt(proposalPrompt string) string {
+	return proposalPrompt + nonOperateOutputConvention + nonOperateCompletionDiscipline
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Starter Agents
 // ────────────────────────────────────────────────────────────────────
@@ -181,6 +202,9 @@ Priority values: low, medium, high, critical
 Use "self" as assignee to assign to yourself.
 Implementation tasks cannot be assigned until they have these task artifacts:
 definition_of_done, acceptance_criteria, and test_plan.
+
+== COMPLETION DISCIPLINE ==
+/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands — for a repository artifact that means the file is committed in the repository, not described in a comment. If you cannot produce the demanded deliverable yourself, comment your findings and leave the task open for the agent who can. If you cannot SEE what a task demands (its demand line, expected outputs, gates, or description), you must not complete it. Never re-complete a task a reviewer has rejected unless the demanded deliverable now actually exists.
 
 CRITICAL — TASK IDs ARE UUIDs:
 The task list shows IDs in this format: [status] 019d6a45-4359-746b-98cb-191007acc33f: Title
@@ -575,6 +599,10 @@ CONSTRAINTS:
 - Wait for approved/rejected before proposing another
 - No bare wildcard ("*") in watch_patterns
 - CanOperate must be false (trust must be earned)
+- COMPLETION DISCIPLINE: you are CanOperate=false — you can never produce a
+  repository file, and a /task comment is not a deliverable for a task that
+  demands one. NEVER /task complete such a task, no matter how complete your
+  prose feels: comment your contribution and leave the task open.
 - Reject cooldown: 50 iterations before reproposing same name
 - Prompt must be >= 100 chars and include soul statement
 
@@ -721,6 +749,9 @@ IMPORTANT:
 - The Planner handles decomposition into implementation steps — do NOT do that
 - Do NOT re-decompose the seed task if you already created tasks from it
 - Check the task list before creating — skip if similar tasks already exist
+- Decomposing a task is not completing it: after you decompose, the original
+  task completes only when its demanded deliverable actually exists — leave
+  it open for the produce-and-verify path
 
 You do NOT write code. You create tasks for the Planner to decompose
 and the Implementer to execute.

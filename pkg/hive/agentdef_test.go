@@ -342,14 +342,88 @@ func TestNonOperateOutputConvention(t *testing.T) {
 		}
 	}
 
-	// Simulate the concatenation done in spawnDynamicAgent (watch.go).
+	// The exact composition spawnDynamicAgent (watch.go) uses.
 	proposalPrompt := "You are the analyst. Investigate metrics."
-	result := proposalPrompt + nonOperateOutputConvention
+	result := composeSpawnedPrompt(proposalPrompt)
 
 	if !strings.HasPrefix(result, proposalPrompt) {
 		t.Error("original proposal prompt must be preserved as prefix")
 	}
 	if !strings.Contains(result, "OUTPUT CONVENTION") {
 		t.Error("combined prompt must contain OUTPUT CONVENTION header")
+	}
+}
+
+// TestContractsEnforceCompletionDiscipline guards the v9 run's binding finding
+// (v9-F2, = v8-F4 widened): the strategist completed the order task as
+// decomposition bookkeeping, the spawner completed the SAME task three seconds
+// later claiming a deliverable that existed only as prose in a task comment,
+// the store accepted both, and the reviewer needed four review cycles and a
+// constitutional HALT to stop it. The shared mission contract must bind EVERY
+// civic agent to completion discipline — complete only what is assigned to
+// you, and never claim a deliverable that does not exist in the form the task
+// demands — and the two observed offenders carry explicit reinforcement.
+func TestContractsEnforceCompletionDiscipline(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	promptFor := func(name string) string {
+		for i := range agents {
+			if agents[i].Name == name {
+				return agents[i].SystemPrompt
+			}
+		}
+		t.Fatalf("agent %q not found in StarterAgents", name)
+		return ""
+	}
+
+	// The class: every civic agent carries the shared discipline block.
+	for i := range agents {
+		p := agents[i].SystemPrompt
+		for _, phrase := range []string{
+			"COMPLETION DISCIPLINE",
+			"only complete a task that is assigned to YOU",
+			"committed in the repository",
+			"leave the task open",
+			"Never re-complete",
+			"cannot SEE what a task demands",
+		} {
+			if !strings.Contains(p, phrase) {
+				t.Errorf("agent %q mission preamble missing completion-discipline clause %q", agents[i].Name, phrase)
+			}
+		}
+	}
+
+	// The observed offenders carry explicit reinforcement.
+	if !strings.Contains(promptFor("spawner"), "comment is not a deliverable") {
+		t.Error("spawner contract must state that a comment is not a deliverable")
+	}
+	if !strings.Contains(promptFor("strategist"), "Decomposing a task is not completing it") {
+		t.Error("strategist contract must state that decomposing a task is not completing it")
+	}
+}
+
+// TestComposeSpawnedPromptCarriesCompletionDiscipline guards the codex finding
+// on #150: spawnDynamicAgent composed spawned prompts as
+// proposal.Prompt + nonOperateOutputConvention, so dynamic CanOperate=false
+// agents kept the unqualified comment-as-deliverable convention with none of
+// the completion discipline the starter agents gained — the same class of
+// under-blocking one spawn away. The composition is now a shared function so
+// the contract and this test cannot drift apart.
+func TestComposeSpawnedPromptCarriesCompletionDiscipline(t *testing.T) {
+	proposalPrompt := "You are the analyst. Investigate metrics."
+	result := composeSpawnedPrompt(proposalPrompt)
+
+	if !strings.HasPrefix(result, proposalPrompt) {
+		t.Error("original proposal prompt must be preserved as prefix")
+	}
+	for _, phrase := range []string{
+		"OUTPUT CONVENTION",
+		"COMPLETION DISCIPLINE",
+		"can NEVER be completed by you",
+		"cannot SEE what a task demands",
+		"Never re-complete",
+	} {
+		if !strings.Contains(result, phrase) {
+			t.Errorf("spawned prompt missing required phrase %q", phrase)
+		}
 	}
 }

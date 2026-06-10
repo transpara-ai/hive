@@ -1171,9 +1171,56 @@ func (l *Loop) buildTaskContext() string {
 		}
 		sb.WriteString(fmt.Sprintf("- [%s] %s: %s%s%s\n",
 			status, t.ID.Value(), t.Title, assignee, createdBy))
+
+		// Render what the task DEMANDS, bounded. The completion-discipline
+		// contract binds agents to "the form the task demands"; with only
+		// [status] UUID: Title rendered, that criterion was unevaluable from a
+		// reasoning prompt — the v8 strategist truthfully escalated "seed task
+		// has no description" about a task carrying a 6287-char spec, and the
+		// v9 spawner could not see the order demanded a repository file.
+		demand := taskDemandExcerpt(t.Description, 240)
+		if len(t.ExpectedOutputs) > 0 {
+			// The structured demand outranks the prose excerpt: an order's
+			// artifact paths must stay visible even when the description
+			// excerpt truncates before naming them.
+			outputs := "expected outputs: " + strings.Join(t.ExpectedOutputs, ", ")
+			if demand != "" {
+				demand = outputs + " — " + demand
+			} else {
+				demand = outputs
+			}
+		}
+		readiness := ""
+		if !t.Ready {
+			if len(t.MissingGates) > 0 {
+				readiness += fmt.Sprintf(" [missing gates: %s]", strings.Join(t.MissingGates, ", "))
+			}
+			if len(t.MissingFacts) > 0 {
+				readiness += fmt.Sprintf(" [missing facts: %s]", strings.Join(t.MissingFacts, ", "))
+			}
+		}
+		if demand != "" || readiness != "" {
+			sb.WriteString(fmt.Sprintf("  demand: %s%s\n", demand, readiness))
+		}
 	}
 
 	return sb.String()
+}
+
+// taskDemandExcerpt renders a one-line, rune-safe excerpt of a task
+// description for the task list. Newlines collapse to spaces so the excerpt
+// stays one line; truncation counts RUNES, never bytes — a byte cut can split
+// a multibyte sequence and produce invalid UTF-8 (the v9-F1 telemetry class).
+func taskDemandExcerpt(desc string, maxRunes int) string {
+	desc = strings.Join(strings.Fields(desc), " ")
+	if desc == "" {
+		return ""
+	}
+	runes := []rune(desc)
+	if len(runes) <= maxRunes {
+		return desc
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 // processTaskCommands extracts and executes /task commands from the response.

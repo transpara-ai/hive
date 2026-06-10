@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	hiveagent "github.com/transpara-ai/agent"
 	"github.com/transpara-ai/eventgraph/go/pkg/actor"
@@ -997,5 +998,59 @@ func TestWaitForEvents_ReviewerWakeSignalReturnsUnderTicker(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("waitForEvents did not return after a wake signal under the reviewer re-check branch")
+	}
+}
+
+// TestBuildTaskContextRendersDemand guards the codex finding on #150: the
+// completion-discipline contract binds agents to "the form the task demands",
+// but buildTaskContext rendered only [status] UUID: Title — descriptions and
+// readiness gates were invisible, so the criterion was unevaluable from a
+// reasoning prompt (and the v8 strategist truthfully escalated "seed task has
+// no description" about a task carrying a 6287-char spec). The task list must
+// render a bounded, rune-safe demand excerpt and the readiness state.
+func TestBuildTaskContextRendersDemand(t *testing.T) {
+	l, ts, agent, convID := newRecheckLoop(t, true, time.Hour)
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+
+	// Long multibyte description: truncation must never split a rune.
+	longDesc := strings.Repeat("é", 300) + " produce dark-factory/fo_roles_catalog.md in the repository"
+	if _, err := ts.Create(agent.ID(), "authoritative roles catalog", longDesc, causes, convID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	ctx := l.buildTaskContext()
+	if !strings.Contains(ctx, "demand:") {
+		t.Fatal("task context renders no demand excerpt; the completion-discipline criterion is unevaluable")
+	}
+	if !strings.Contains(ctx, "é") {
+		t.Fatal("demand excerpt lost the description content")
+	}
+	if strings.Contains(ctx, "fo_roles_catalog.md") {
+		t.Fatal("demand excerpt not truncated (300-rune prefix should have cut the tail)")
+	}
+	if !utf8.ValidString(ctx) {
+		t.Fatal("task context is not valid UTF-8; truncation split a rune (the v9-F1 class)")
+	}
+	if !strings.Contains(ctx, "missing gates:") {
+		t.Fatal("task context does not render readiness state for a gateless implementation task")
+	}
+
+	// Structured demand (codex re-review of #150): ExpectedOutputs is the
+	// precise artifact demand when the order carries one — it must render even
+	// though the description excerpt may truncate before naming the file. A
+	// fact requirement must surface as missing facts, not vanish.
+	if _, err := ts.CreateV39(agent.ID(), work.TaskCreateOptions{
+		Title:           "catalog with structured outputs",
+		Description:     "short",
+		ExpectedOutputs: []string{"dark-factory/fo_roles_catalog.md"},
+	}, causes, convID); err != nil {
+		t.Fatalf("CreateWithOptions: %v", err)
+	}
+	ctx = l.buildTaskContext()
+	if !strings.Contains(ctx, "expected outputs: dark-factory/fo_roles_catalog.md") {
+		t.Fatal("task context does not render ExpectedOutputs; the structured demand stays invisible")
 	}
 }
