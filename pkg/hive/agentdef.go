@@ -148,7 +148,7 @@ Reference what you produced in your /task complete summary.
 const nonOperateCompletionDiscipline = `
 
 == COMPLETION DISCIPLINE ==
-/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands. You cannot write repository files, so a task demanding a repository artifact can NEVER be completed by you — a /task comment is not a deliverable for such a task. Comment your contribution and leave the task open for an agent that can produce it. Never re-complete a task a reviewer has rejected.
+/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands. You cannot write repository files, so a task demanding a repository artifact can NEVER be completed by you — a /task comment is not a deliverable for such a task. Comment your contribution and leave the task open for an agent that can produce it. If you cannot SEE what a task demands (its demand line, expected outputs, gates, or description), you must not complete it. Never re-complete a task a reviewer has rejected.
 `
 
 // composeSpawnedPrompt assembles the full system prompt for a dynamically
@@ -204,7 +204,7 @@ Implementation tasks cannot be assigned until they have these task artifacts:
 definition_of_done, acceptance_criteria, and test_plan.
 
 == COMPLETION DISCIPLINE ==
-/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands — for a repository artifact that means the file is committed in the repository, not described in a comment. If you cannot produce the demanded deliverable yourself, comment your findings and leave the task open for the agent who can. Never re-complete a task a reviewer has rejected unless the demanded deliverable now actually exists.
+/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands — for a repository artifact that means the file is committed in the repository, not described in a comment. If you cannot produce the demanded deliverable yourself, comment your findings and leave the task open for the agent who can. If you cannot SEE what a task demands (its demand line, expected outputs, gates, or description), you must not complete it. Never re-complete a task a reviewer has rejected unless the demanded deliverable now actually exists.
 
 CRITICAL — TASK IDs ARE UUIDs:
 The task list shows IDs in this format: [status] 019d6a45-4359-746b-98cb-191007acc33f: Title

@@ -1179,12 +1179,28 @@ func (l *Loop) buildTaskContext() string {
 		// has no description" about a task carrying a 6287-char spec, and the
 		// v9 spawner could not see the order demanded a repository file.
 		demand := taskDemandExcerpt(t.Description, 240)
-		gates := ""
-		if !t.Ready && len(t.MissingGates) > 0 {
-			gates = fmt.Sprintf(" [missing gates: %s]", strings.Join(t.MissingGates, ", "))
+		if len(t.ExpectedOutputs) > 0 {
+			// The structured demand outranks the prose excerpt: an order's
+			// artifact paths must stay visible even when the description
+			// excerpt truncates before naming them.
+			outputs := "expected outputs: " + strings.Join(t.ExpectedOutputs, ", ")
+			if demand != "" {
+				demand = outputs + " — " + demand
+			} else {
+				demand = outputs
+			}
 		}
-		if demand != "" || gates != "" {
-			sb.WriteString(fmt.Sprintf("  demand: %s%s\n", demand, gates))
+		readiness := ""
+		if !t.Ready {
+			if len(t.MissingGates) > 0 {
+				readiness += fmt.Sprintf(" [missing gates: %s]", strings.Join(t.MissingGates, ", "))
+			}
+			if len(t.MissingFacts) > 0 {
+				readiness += fmt.Sprintf(" [missing facts: %s]", strings.Join(t.MissingFacts, ", "))
+			}
+		}
+		if demand != "" || readiness != "" {
+			sb.WriteString(fmt.Sprintf("  demand: %s%s\n", demand, readiness))
 		}
 	}
 

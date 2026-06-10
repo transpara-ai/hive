@@ -384,6 +384,7 @@ func TestContractsEnforceCompletionDiscipline(t *testing.T) {
 			"committed in the repository",
 			"leave the task open",
 			"Never re-complete",
+			"cannot SEE what a task demands",
 		} {
 			if !strings.Contains(p, phrase) {
 				t.Errorf("agent %q mission preamble missing completion-discipline clause %q", agents[i].Name, phrase)
@@ -418,6 +419,7 @@ func TestComposeSpawnedPromptCarriesCompletionDiscipline(t *testing.T) {
 		"OUTPUT CONVENTION",
 		"COMPLETION DISCIPLINE",
 		"can NEVER be completed by you",
+		"cannot SEE what a task demands",
 		"Never re-complete",
 	} {
 		if !strings.Contains(result, phrase) {

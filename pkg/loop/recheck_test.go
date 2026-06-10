@@ -1037,4 +1037,20 @@ func TestBuildTaskContextRendersDemand(t *testing.T) {
 	if !strings.Contains(ctx, "missing gates:") {
 		t.Fatal("task context does not render readiness state for a gateless implementation task")
 	}
+
+	// Structured demand (codex re-review of #150): ExpectedOutputs is the
+	// precise artifact demand when the order carries one — it must render even
+	// though the description excerpt may truncate before naming the file. A
+	// fact requirement must surface as missing facts, not vanish.
+	if _, err := ts.CreateV39(agent.ID(), work.TaskCreateOptions{
+		Title:           "catalog with structured outputs",
+		Description:     "short",
+		ExpectedOutputs: []string{"dark-factory/fo_roles_catalog.md"},
+	}, causes, convID); err != nil {
+		t.Fatalf("CreateWithOptions: %v", err)
+	}
+	ctx = l.buildTaskContext()
+	if !strings.Contains(ctx, "expected outputs: dark-factory/fo_roles_catalog.md") {
+		t.Fatal("task context does not render ExpectedOutputs; the structured demand stays invisible")
+	}
 }
