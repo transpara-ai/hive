@@ -251,9 +251,11 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		maxIter = budgetEv.NewBudget
 	}
 
-	// Inject output convention for non-operate agents. The Spawner's prompt
-	// tells it to include this, but LLMs forget — enforce it structurally.
-	prompt := proposal.Prompt + nonOperateOutputConvention
+	// Inject the structural conventions for non-operate agents. The Spawner's
+	// prompt tells it to include the output convention, but LLMs forget —
+	// enforce it structurally, together with the completion discipline every
+	// CanOperate=false agent must carry (v9-F2).
+	prompt := composeSpawnedPrompt(proposal.Prompt)
 
 	resolver := r.currentResolver()
 	modelID, err := mapModelName(proposal.Model, resolver.Catalog())

@@ -139,6 +139,27 @@ To deliver findings, documents, or any structured output, attach them as a
 Reference what you produced in your /task complete summary.
 `
 
+// nonOperateCompletionDiscipline binds spawned CanOperate=false agents to the
+// same completion discipline the starter civic agents carry in missionTemplate
+// (v9-F2): the output convention legitimizes comment deliverables, so without
+// this block a spawned agent keeps the exact under-blocking path the v9 run
+// halted on — comment-as-deliverable completion of a task demanding a
+// repository file.
+const nonOperateCompletionDiscipline = `
+
+== COMPLETION DISCIPLINE ==
+/task complete is a FACTUAL CLAIM, not a status update. You may only complete a task that is assigned to YOU. Completing a task claims its deliverable EXISTS in the form the task demands. You cannot write repository files, so a task demanding a repository artifact can NEVER be completed by you — a /task comment is not a deliverable for such a task. Comment your contribution and leave the task open for an agent that can produce it. Never re-complete a task a reviewer has rejected.
+`
+
+// composeSpawnedPrompt assembles the full system prompt for a dynamically
+// spawned agent: the Guardian-approved proposal prompt plus the structural
+// conventions every spawned (always CanOperate=false) agent must carry. The
+// composition lives here — next to the constants it concatenates — so the
+// contract text and its tests cannot drift from the spawn path in watch.go.
+func composeSpawnedPrompt(proposalPrompt string) string {
+	return proposalPrompt + nonOperateOutputConvention + nonOperateCompletionDiscipline
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Starter Agents
 // ────────────────────────────────────────────────────────────────────

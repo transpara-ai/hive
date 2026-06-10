@@ -342,9 +342,9 @@ func TestNonOperateOutputConvention(t *testing.T) {
 		}
 	}
 
-	// Simulate the concatenation done in spawnDynamicAgent (watch.go).
+	// The exact composition spawnDynamicAgent (watch.go) uses.
 	proposalPrompt := "You are the analyst. Investigate metrics."
-	result := proposalPrompt + nonOperateOutputConvention
+	result := composeSpawnedPrompt(proposalPrompt)
 
 	if !strings.HasPrefix(result, proposalPrompt) {
 		t.Error("original proposal prompt must be preserved as prefix")
@@ -378,7 +378,13 @@ func TestContractsEnforceCompletionDiscipline(t *testing.T) {
 	// The class: every civic agent carries the shared discipline block.
 	for i := range agents {
 		p := agents[i].SystemPrompt
-		for _, phrase := range []string{"COMPLETION DISCIPLINE", "only complete a task that is assigned to YOU"} {
+		for _, phrase := range []string{
+			"COMPLETION DISCIPLINE",
+			"only complete a task that is assigned to YOU",
+			"committed in the repository",
+			"leave the task open",
+			"Never re-complete",
+		} {
 			if !strings.Contains(p, phrase) {
 				t.Errorf("agent %q mission preamble missing completion-discipline clause %q", agents[i].Name, phrase)
 			}
@@ -391,5 +397,31 @@ func TestContractsEnforceCompletionDiscipline(t *testing.T) {
 	}
 	if !strings.Contains(promptFor("strategist"), "Decomposing a task is not completing it") {
 		t.Error("strategist contract must state that decomposing a task is not completing it")
+	}
+}
+
+// TestComposeSpawnedPromptCarriesCompletionDiscipline guards the codex finding
+// on #150: spawnDynamicAgent composed spawned prompts as
+// proposal.Prompt + nonOperateOutputConvention, so dynamic CanOperate=false
+// agents kept the unqualified comment-as-deliverable convention with none of
+// the completion discipline the starter agents gained — the same class of
+// under-blocking one spawn away. The composition is now a shared function so
+// the contract and this test cannot drift apart.
+func TestComposeSpawnedPromptCarriesCompletionDiscipline(t *testing.T) {
+	proposalPrompt := "You are the analyst. Investigate metrics."
+	result := composeSpawnedPrompt(proposalPrompt)
+
+	if !strings.HasPrefix(result, proposalPrompt) {
+		t.Error("original proposal prompt must be preserved as prefix")
+	}
+	for _, phrase := range []string{
+		"OUTPUT CONVENTION",
+		"COMPLETION DISCIPLINE",
+		"can NEVER be completed by you",
+		"Never re-complete",
+	} {
+		if !strings.Contains(result, phrase) {
+			t.Errorf("spawned prompt missing required phrase %q", phrase)
+		}
 	}
 }
