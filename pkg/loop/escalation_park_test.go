@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +135,75 @@ func TestRun_KeepaliveTextEscalationAlsoParks(t *testing.T) {
 	cancel()
 	select {
 	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+}
+
+// TestRun_KeepaliveMixedHaltEscalateStaysTerminal pins the constitutional
+// gate across the park (codex review of #149, finding 1): parseSignal returns
+// the LAST /signal line, so a response carrying a HALT directive — textual or
+// an earlier /signal JSON line — plus a final structured ESCALATE never
+// reaches checkResponseText's HALT check. Parking that response would convert
+// a pre-fix stop into continued execution: HALT is constitutional and must
+// never be masked. A HALT-bearing escalation must stay terminal.
+func TestRun_KeepaliveMixedHaltEscalateStaysTerminal(t *testing.T) {
+	cases := []struct {
+		name     string
+		response string
+	}{
+		{"textual HALT + JSON ESCALATE", "HALT: constitutional violation observed\n/signal {\"signal\":\"ESCALATE\",\"reason\":\"also blocked\"}"},
+		{"JSON HALT + JSON ESCALATE", "/signal {\"signal\":\"HALT\",\"reason\":\"violation\"}\nfurther narration\n/signal {\"signal\":\"ESCALATE\",\"reason\":\"also blocked\"}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l, _, _ := escalationParkLoop(t, tc.response)
+
+			done := make(chan Result, 1)
+			go func() { done <- l.Run(context.Background()) }()
+
+			select {
+			case r := <-done:
+				if r.Reason != StopEscalation && r.Reason != StopHalt {
+					t.Fatalf("mixed HALT/ESCALATE returned %s (%s); want a terminal stop", r.Reason, r.Detail)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Run did not return for a HALT-bearing response; the keepalive park masked a constitutional HALT")
+			}
+		})
+	}
+}
+
+// TestRun_ParkedEscalationShutdownResult pins the shutdown shape (codex
+// review of #149, finding 2): cancelling a loop parked on an escalation
+// returns StopEscalation — the outstanding, unanswered escalation stays
+// visible in RunConcurrent results, mirroring how the quiescence branch
+// reports its wait context — with a detail that names the shutdown so it
+// cannot read as a live terminal escalation.
+func TestRun_ParkedEscalationShutdownResult(t *testing.T) {
+	l, _, _ := escalationParkLoop(t,
+		`/signal {"signal":"ESCALATE","reason":"awaiting human"}`,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	select {
+	case r := <-done:
+		t.Fatalf("Run returned %s (%s) before cancellation; want parked", r.Reason, r.Detail)
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+
+	select {
+	case r := <-done:
+		if r.Reason != StopEscalation {
+			t.Fatalf("shutdown while parked returned %s; want %s with the outstanding escalation on record", r.Reason, StopEscalation)
+		}
+		if !strings.Contains(r.Detail, "shutdown while parked") || !strings.Contains(r.Detail, "awaiting human") {
+			t.Fatalf("shutdown detail %q; want it to name the shutdown and carry the outstanding escalation reason", r.Detail)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancellation")
 	}

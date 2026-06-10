@@ -3,8 +3,12 @@
 // An agent doesn't just respond to a prompt — it observes the world,
 // decides what to do, acts, and observes again. The loop runs until:
 //   - Quiescence — no new events, nothing to do
-//   - Escalation — the agent needs human approval
-//   - HALT — the Guardian stopped the agent
+//   - Escalation — the agent needs human approval. Terminal for one-shot
+//     loops; a KEEPALIVE loop raises the escalation and PARKS instead
+//     (waitForEvents), so an always-on daemon never loses a civic agent
+//     to a transient condition (v8-F2).
+//   - HALT — the Guardian stopped the agent (constitutional; terminal
+//     everywhere, never masked)
 //   - Budget — token/cost/iteration/time limit reached
 //
 // The loop transforms the hive from a pipeline into a society.
@@ -616,7 +620,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 				consecutiveEmpty = 0
 				continue
 			}
-			return l.result(StopEscalation, iteration, reason)
+			// waitForEvents returns false only on cancellation for keepalive
+			// loops: retire with the outstanding, unanswered escalation on
+			// record (mirroring the quiescence branch's wait-context result),
+			// named as a shutdown so it cannot read as a live terminal stop.
+			return l.result(StopEscalation, iteration, "shutdown while parked on escalation: "+reason)
 		}
 
 		// 4. Check for quiescence — agent said nothing useful, no new events.
@@ -873,6 +881,30 @@ func ContainsSignal(response, signal string) bool {
 	return false
 }
 
+// containsHaltDirective reports whether a HALT directive appears ANYWHERE in
+// the response — as a line-start text directive or on ANY /signal JSON line,
+// not just the last one parseSignal returns. HALT is constitutional and must
+// never be masked: the keepalive escalation park consults this so a mixed
+// HALT+ESCALATE response keeps its terminal stop instead of parking past the
+// HALT (codex review of #149, finding 1).
+func containsHaltDirective(response string) bool {
+	if ContainsSignal(response, SignalHalt) {
+		return true
+	}
+	for _, line := range strings.Split(response, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "/signal ") {
+			continue
+		}
+		var sig Signal
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(trimmed, "/signal ")), &sig); err == nil &&
+			strings.ToUpper(sig.Signal) == SignalHalt {
+			return true
+		}
+	}
+	return false
+}
+
 // checkResponse examines the LLM response for stopping signals.
 // Priority: HALT > ESCALATE > TASK_DONE (HALT is constitutional, must never be masked).
 //
@@ -902,9 +934,12 @@ func (l *Loop) checkResponse(ctx context.Context, response string, iteration int
 			l.captureBoundary(checkpoint.TaskBlocked, response)
 			l.lastCheckpointIter = l.iteration
 		}
-		// Keepalive: raise-and-park (v8-F2). The escalation is on the chain;
-		// the loop parks in Run() and re-evaluates on the next wake/re-check.
-		if l.config.Keepalive {
+		// Keepalive: raise-and-park (v8-F2) — UNLESS the response also carries
+		// a HALT directive anywhere. parseSignal returns only the LAST /signal
+		// line and suppresses the text fallback, so a HALT earlier in the
+		// response would otherwise be parked past; HALT is constitutional and
+		// keeps its terminal stop.
+		if l.config.Keepalive && !containsHaltDirective(response) {
 			l.parkAfterEscalation = true
 			l.parkedEscalationReason = sig.Reason
 			return nil
