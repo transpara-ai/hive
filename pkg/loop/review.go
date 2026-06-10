@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/work"
@@ -100,6 +102,14 @@ func (s *reviewerState) findPendingReviews() []string {
 		// Re-review if last verdict was request_changes (implementer may have fixed).
 		if rec.lastVerdict == "request_changes" {
 			pending = append(pending, taskID)
+			continue
+		}
+		// A record with no verdict is the recovery shape: InitReviewerFromRecovery
+		// seeds review COUNTS only, never verdicts. An unknown last verdict with a
+		// known completion fails toward review — bounded by shouldEscalate's cycle
+		// cap — instead of silently dropping the task out of the review→fix loop.
+		if rec.lastVerdict == "" {
+			pending = append(pending, taskID)
 		}
 	}
 	return pending
@@ -150,64 +160,130 @@ func (l *Loop) hasReviewableWork() bool {
 	return len(l.reviewerState.findPendingReviews()) > 0
 }
 
-// historicalScanLimit bounds the store scans behind the governance re-check
-// (invariant BOUNDED). Completions older than the newest historicalScanLimit
-// events of their type are not recovered by the re-check — the same windowing
-// trade-off the operator projection makes with defaultOperatorProjectionLimit.
-const historicalScanLimit = 256
+// scanPageSize is the per-page size for the historical store scans, matching
+// pkg/checkpoint's replay paginator. The scans walk EVERY page via the cursor
+// (review round-1 finding B-2): a reviewable completion must be recovered no
+// matter how deep in history it sits — a bounded single-page window silently
+// ignored older parked work and could pair completions against the wrong
+// review set.
+const scanPageSize = 1000
 
-// seedHistoricalCompletions merges store-persisted completions that have no
-// recorded review into reviewerState.completedTasks. The bus only delivers
-// events fired while THIS loop instance is alive: a completion persisted by a
-// prior daemon instance is invisible to reviewerState.update forever — the
-// restart that beat the implementer wakeup race made the completion
-// historical, so the review→fix loop could not engage (finding F8). The store
-// is the durable source; this seeding converts those lost edges into level
-// state, and it is what makes the re-check wake productive: the seeded entry
-// is what enrichReviewObservation renders on the next observation.
+// paginateAllByType walks every page of ByType for the given event type,
+// following cursors until exhaustion — the same full-history semantics as
+// pkg/checkpoint's replay (fetchAllByType). Returns events in the store's
+// ByType order (newest first by chain position).
+func paginateAllByType(st store.Store, et types.EventType, pageSize int) ([]event.Event, error) {
+	var all []event.Event
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := st.ByType(et, pageSize, cursor)
+		if err != nil {
+			return nil, err
+		}
+		items := page.Items()
+		if len(items) == 0 {
+			break
+		}
+		all = append(all, items...)
+		if !page.HasMore() {
+			break
+		}
+		cursor = page.Cursor()
+	}
+	return all, nil
+}
+
+// pendingReviewsFromStore computes, from the durable store alone, the tasks
+// whose causally-latest completion has no review at or after it — the
+// historical reviewable work the bus can never deliver to this loop instance.
+// A completion persisted by a prior daemon instance never fires onEvent, so
+// reviewerState.update is blind to it and the review→fix loop strands
+// (finding F8). The store is the durable source; this converts those lost
+// edges into level state.
 //
-// Already-reviewed completions are excluded by pairing against
-// code.review.submitted events from ANY actor — a prior reviewer instance has
-// a different ephemeral identity, and a restart must not re-review its work
-// (a re-review storm would be the wakeup storm reborn at LLM-call cost).
-// Reviews are scanned before completions so a review landing between the two
-// scans is never missed. On any scan error nothing is seeded — fail toward
-// parked, mirroring hasAssignableWork's error handling.
-func (l *Loop) seedHistoricalCompletions() {
+// The pairing is ORDER-AWARE per task, not task-ID-only (round-1 finding
+// B-1): a re-completion newer than a prior request_changes (or stale approve)
+// review re-pends, because the latest completion postdates the latest review
+// — that re-engagement IS the review→fix loop. Reviews from ANY actor count
+// (a prior reviewer instance has a different ephemeral identity), so a
+// restart never re-reviews settled work.
+//
+// Cross-type recency is compared by event timestamp, the same ordering the
+// checkpoint replay layer uses (sortChronological); within one type the scan
+// keeps the newest-per-task. A timestamp tie counts as reviewed — fail toward
+// parked. Scan interleaving (round-1 finding M-1, stated honestly):
+// completions are scanned FIRST, reviews second, so a review emitted between
+// the two scans is seen and can only SUPPRESS a pending entry, never create a
+// false one; a completion landing between the scans is simply picked up on
+// the next tick. On any scan error nothing is pending — fail toward parked,
+// mirroring hasAssignableWork's error handling.
+//
+// Cost: two full ByType paginations per call, invoked only from the parked
+// keepalive ticker (default 30s). Acceptable at slice-1 store scale; the
+// durable-store-scale answer (incremental scanning) belongs to Phase 2.
+func (l *Loop) pendingReviewsFromStore() map[string]work.TaskCompletedContent {
 	g := l.agent.Graph()
 	if g == nil {
-		return
+		return nil
 	}
 	st := g.Store()
 	if st == nil {
-		return
+		return nil
 	}
-	reviews, err := st.ByType(event.EventTypeCodeReviewSubmitted, historicalScanLimit, types.None[types.Cursor]())
+	completions, err := paginateAllByType(st, work.EventTypeTaskCompleted, scanPageSize)
 	if err != nil {
-		return
+		return nil
 	}
-	reviewed := make(map[string]bool)
-	for _, ev := range reviews.Items() {
-		if c, ok := ev.Content().(event.CodeReviewContent); ok {
-			reviewed[c.TaskID] = true
-		}
-	}
-	completions, err := st.ByType(work.EventTypeTaskCompleted, historicalScanLimit, types.None[types.Cursor]())
+	reviews, err := paginateAllByType(st, event.EventTypeCodeReviewSubmitted, scanPageSize)
 	if err != nil {
-		return
+		return nil
 	}
-	for _, ev := range completions.Items() {
+
+	latestCompletion := make(map[string]work.TaskCompletedContent)
+	latestCompletionAt := make(map[string]time.Time)
+	for _, ev := range completions {
 		c, ok := ev.Content().(work.TaskCompletedContent)
 		if !ok {
 			continue
 		}
 		id := c.TaskID.Value()
-		if reviewed[id] {
+		at := ev.Timestamp().Value()
+		if prev, seen := latestCompletionAt[id]; !seen || at.After(prev) {
+			latestCompletion[id] = c
+			latestCompletionAt[id] = at
+		}
+	}
+
+	latestReviewAt := make(map[string]time.Time)
+	for _, ev := range reviews {
+		c, ok := ev.Content().(event.CodeReviewContent)
+		if !ok {
 			continue
 		}
-		if _, seen := l.reviewerState.completedTasks[id]; seen {
+		at := ev.Timestamp().Value()
+		if prev, seen := latestReviewAt[c.TaskID]; !seen || at.After(prev) {
+			latestReviewAt[c.TaskID] = at
+		}
+	}
+
+	pending := make(map[string]work.TaskCompletedContent)
+	for id, c := range latestCompletion {
+		if revAt, reviewed := latestReviewAt[id]; reviewed && !latestCompletionAt[id].After(revAt) {
 			continue
 		}
+		pending[id] = c
+	}
+	return pending
+}
+
+// seedHistoricalCompletions merges the store-pending completions into
+// reviewerState.completedTasks so the re-check wake is productive: the seeded
+// entry is what enrichReviewObservation renders on the next observation —
+// without it the agent would wake, render "No tasks pending review", and park
+// again. Assignment overwrites: for a re-completed task the store's latest
+// completion content (with its current ArtifactRef) is authoritative.
+func (l *Loop) seedHistoricalCompletions() {
+	for id, c := range l.pendingReviewsFromStore() {
 		l.reviewerState.completedTasks[id] = c
 	}
 }
