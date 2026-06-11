@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/work"
 )
 
@@ -284,5 +286,113 @@ func TestVerifyOperateContainmentUnreadablePostFailsClosed(t *testing.T) {
 	}
 	if taskHasCompletedEvent(t, g, task.ID) {
 		t.Fatal("an unverifiable containment state produced a work.task.completed event")
+	}
+}
+
+// A child that MIGHT be a checkout but whose .git cannot be statted
+// (permissions, IO, broken worktree metadata) must fail the snapshot closed
+// — only a definitively absent .git (ENOENT) may be skipped as a
+// non-checkout. Proceeding would launch the subprocess with that child
+// unwatched (codex review of this PR, blocker 1).
+func TestSnapshotContainmentUnreadableChildCheckoutFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based unreadability cannot be simulated as root")
+	}
+	parent := t.TempDir()
+	ws := initGitRepoAt(t, parent, "workspace")
+	locked := initGitRepoAt(t, parent, "locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	if _, ok := snapshotContainment([]string{parent}, ws); ok {
+		t.Fatal("snapshotContainment must fail closed when a child checkout's .git cannot be statted")
+	}
+}
+
+// escapingOperator mutates a sibling checkout during Operate and then claims
+// completed, committed work — the v10 round-3 shape end to end.
+type escapingOperator struct {
+	mockOperator
+	escape func()
+}
+
+func (e *escapingOperator) Operate(_ context.Context, _ decision.OperateTask) (decision.OperateResult, error) {
+	e.escape()
+	return decision.OperateResult{
+		Summary: "Wrote the catalog and committed it.",
+		Usage:   decision.TokenUsage{InputTokens: 10, OutputTokens: 10},
+	}, nil
+}
+
+// Run-level regression (codex review of this PR): the veto must hold through
+// the full loop wiring — budget recorded, no completion processed, and the
+// loop stops on escalation. A future refactor that moves the veto after
+// handleOperateResult, skips budget accounting, or lets the hostile summary
+// drive command processing fails here.
+func TestRunOperateSiblingMutationEscalatesWithoutCompletion(t *testing.T) {
+	parent := t.TempDir()
+	ws := initGitRepoAt(t, parent, "workspace")
+	sibling := initGitRepoAt(t, parent, "sibling")
+
+	op := &escapingOperator{escape: func() {
+		// The Operate walks into the sibling checkout and commits there.
+		if err := os.WriteFile(filepath.Join(sibling, "escape.md"), []byte("escaped\n"), 0o644); err != nil {
+			t.Errorf("escape write: %v", err)
+			return
+		}
+		cmds := [][]string{{"add", "escape.md"}, {"commit", "-q", "-m", "escaped work"}}
+		for _, args := range cmds {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = sibling
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("escape git %v: %v\n%s", args, err, out)
+			}
+		}
+	}}
+
+	agent, g := agentWithGraph(t, op)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_containment_run_test")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write the catalog", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	l, err := New(Config{
+		Agent:      agent,
+		HumanID:    humanID(),
+		Budget:     resources.BudgetConfig{MaxIterations: 3},
+		CanOperate: true,
+		RepoPath:   ws,
+		TaskStore:  ts,
+		ConvID:     convID,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopEscalation {
+		t.Fatalf("Run reason = %s (%s), want %s", result.Reason, result.Detail, StopEscalation)
+	}
+	if !strings.Contains(result.Detail, "containment") {
+		t.Fatalf("Run detail %q does not name the containment veto", result.Detail)
+	}
+	if taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("a sibling-mutating Operate produced a work.task.completed event through the full Run wiring")
+	}
+	if result.Budget.TokensUsed == 0 {
+		t.Fatal("budget accounting was skipped for the violating Operate (BUDGET invariant)")
 	}
 }

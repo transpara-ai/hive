@@ -14,20 +14,28 @@ import (
 // Workspace containment (v10-F2 / Finding 18): the -repo workspace assignment
 // alone does not contain a filesystem-capable Operate — the v10 round-3
 // implementer simply walked to the sibling main checkout. This tripwire
-// snapshots every watched sibling checkout around the Operate and fails the
-// run on ANY mutation outside the assigned workspace.
+// snapshots the watched sibling checkouts around the Operate and fails the
+// run on any observed checkout-state delta — HEAD, current branch,
+// working-tree status, checkout presence — in the immediate-child checkouts
+// of the watch roots.
 //
 // SCOPE / THREAT MODEL — detection with run-failing teeth, NOT prevention and
 // NOT an OS sandbox. A Bash-capable subprocess can still write anywhere its
-// uid can; what it can no longer do is have that work accepted: a sibling
-// mutation fails the task, halts the implementer, and escalates to the human
-// BEFORE the untrusted summary can drive anything. The hard boundary
-// (separate uid / container / namespace, credential-less run workspaces)
-// remains routed to G-2.x/G-8.2, unchanged. Complements eventgraph#50
-// (credential isolation: the subprocess cannot push) and hive#151 (contract
-// layer: gates must not demand pushes) — this is the runtime ring between
-// them, per the take-3 mechanism: every layer bars the behavior again at its
-// own altitude.
+// uid can; what it can no longer do is have work accepted after mutating a
+// WATCHED state vector: that fails the task, halts the implementer, and
+// escalates to the human BEFORE the untrusted summary can drive anything.
+// Explicitly OUTSIDE the watched vectors (out of scope here, routed with the
+// hard boundary to G-2.x/G-8.2): checkouts nested deeper than one level under
+// a watch root, bare repos, repos reached by absolute path outside every
+// watch root, non-git files in sibling directories, .git internals invisible
+// to the watched vectors (remote-tracking refs, tags, refs created without a
+// checkout, config), and mutations restored to the same observable state
+// before the post-snapshot. The hard boundary (separate uid / container /
+// namespace, credential-less run workspaces) remains routed to G-2.x/G-8.2,
+// unchanged. Complements eventgraph#50 (credential isolation: the subprocess
+// cannot push) and hive#151 (contract layer: gates must not demand pushes) —
+// this is the runtime ring between them, per the take-3 mechanism: every
+// layer bars the behavior again at its own altitude.
 //
 // PARALLELISM HONESTY: the tripwire attributes any watched-sibling delta to
 // THIS loop's Operate. Two concurrent Operates in sibling workspaces would
@@ -102,7 +110,15 @@ func snapshotContainment(roots []string, workspace string) (containmentBaseline,
 			}
 			dir := filepath.Join(root, e.Name())
 			if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-				continue // not a git checkout
+				if os.IsNotExist(err) {
+					continue // definitively not a git checkout
+				}
+				// Permission, IO, or broken-worktree-metadata errors mean a
+				// child that MIGHT be a checkout cannot be read. Proceeding
+				// would launch the subprocess with that child unwatched —
+				// fail closed instead (the same contract as an unreadable
+				// root: unreadable watched state verifies nothing).
+				return nil, false
 			}
 			resolved, ok := resolvePath(dir)
 			if !ok {
@@ -182,7 +198,7 @@ func (l *Loop) verifyOperateContainment(ctx context.Context, task work.Task, pre
 	}
 	if violations := diffContainment(pre, post); len(violations) > 0 {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
-			"workspace containment violated (v10-F2 tripwire) — the Operate mutated state outside its assigned workspace %s:\n  %s\nThe run's outputs are untrusted; the operator must inspect and restore the listed checkouts.",
+			"workspace containment violated (v10-F2 tripwire) — the Operate produced checkout-state deltas outside its assigned workspace %s:\n  %s\nThe run's outputs are untrusted; the operator must inspect and restore the listed checkouts.",
 			l.config.RepoPath, strings.Join(violations, "\n  ")))
 		return false
 	}
