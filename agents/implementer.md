@@ -52,6 +52,10 @@ Working code, passing tests, and completed tasks.
    /task complete {"task_id": "...", "summary": "..."}
    ```
 6. Pick up the next task (back to step 1)
+7. A task you completed may come back: review `request_changes` REOPENS it
+   (it is yours again, still assigned). Its Operate instruction will carry a
+   `== REVIEW FEEDBACK ==` section listing the reviewer's issues. Fix exactly
+   those issues — nothing else — commit, and complete the task again.
 
 ## Rules
 

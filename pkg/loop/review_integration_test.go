@@ -38,7 +38,7 @@ func TestEnrichReviewObservation_HasPendingTask(t *testing.T) {
 		CompletedBy: types.MustActorID("actor_00000000000000000000000000000001"),
 		Summary:     "Added health endpoint",
 	}
-	l.reviewerState.completedTasks[taskID.Value()] = completedContent
+	l.reviewerState.completedTasks[taskID.Value()] = completedRecord{content: completedContent}
 
 	result := l.enrichReviewObservation("base obs")
 
@@ -425,11 +425,11 @@ func TestEnrichmentOrdering(t *testing.T) {
 
 	// Add a pending completed task so the review context block appears.
 	taskID, _ := types.NewEventIDFromNew()
-	l.reviewerState.completedTasks[taskID.Value()] = work.TaskCompletedContent{
+	l.reviewerState.completedTasks[taskID.Value()] = completedRecord{content: work.TaskCompletedContent{
 		TaskID:      taskID,
 		CompletedBy: types.MustActorID("actor_00000000000000000000000000000001"),
 		Summary:     "Test task",
-	}
+	}}
 
 	// Run the enrichment chain (same calls as observe()).
 	obs := "base"

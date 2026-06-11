@@ -36,6 +36,12 @@ type SpawnerRecoveredState struct {
 type ReviewerRecoveredState struct {
 	ReviewCounts   map[string]int  // task ID -> round count
 	CompletedTasks map[string]bool // task ID -> completed
+	// LastVerdicts/LastIssues carry each task's chronologically-last verdict
+	// so a restarted reviewer honours settled work (approve/reject does not
+	// re-pend) and a recovered cap escalation can cite the outstanding issues
+	// instead of an empty list (v12-F1 review, findings B1/N3).
+	LastVerdicts map[string]string   // task ID -> last verdict
+	LastIssues   map[string][]string // task ID -> last verdict's issues
 }
 
 // ReplayBudgetFromStore replays agent.budget.adjusted events to reconstruct
@@ -164,6 +170,8 @@ func ReplayReviewerFromStore(s store.Store) (*ReviewerRecoveredState, error) {
 	state := &ReviewerRecoveredState{
 		ReviewCounts:   make(map[string]int),
 		CompletedTasks: make(map[string]bool),
+		LastVerdicts:   make(map[string]string),
+		LastIssues:     make(map[string][]string),
 	}
 	if s == nil {
 		return state, nil
@@ -189,6 +197,10 @@ func ReplayReviewerFromStore(s store.Store) (*ReviewerRecoveredState, error) {
 			state.CompletedTasks[taskID] = true
 		case event.CodeReviewContent:
 			state.ReviewCounts[c.TaskID]++
+			// Chronological walk: the last fold wins, mirroring what the
+			// live recordReview would have left in memory.
+			state.LastVerdicts[c.TaskID] = c.Verdict
+			state.LastIssues[c.TaskID] = c.Issues
 		}
 	}
 

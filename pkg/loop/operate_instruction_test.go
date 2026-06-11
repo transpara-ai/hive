@@ -16,10 +16,18 @@ func (f failingArtifactLister) ListArtifacts(types.EventID) ([]work.ArtifactEven
 	return nil, f.err
 }
 
+func (failingArtifactLister) ListReopens(types.EventID) ([]work.ReopenEvent, error) {
+	return nil, nil
+}
+
 // emptyArtifactLister returns no artifacts successfully (a task with no gates).
 type emptyArtifactLister struct{}
 
 func (emptyArtifactLister) ListArtifacts(types.EventID) ([]work.ArtifactEvent, error) {
+	return nil, nil
+}
+
+func (emptyArtifactLister) ListReopens(types.EventID) ([]work.ReopenEvent, error) {
 	return nil, nil
 }
 
@@ -73,7 +81,7 @@ func TestComposeOperateInstruction(t *testing.T) {
 		{Label: work.GateAcceptanceCriteria, Body: "Enumerate EVERY role the cited source lists; remove unsourced roles."},
 	}
 
-	got := composeOperateInstruction(task, artifacts)
+	got := composeOperateInstruction(task, artifacts, nil)
 
 	if !strings.Contains(got, "Task: Research and write the roles catalog") {
 		t.Errorf("instruction missing title; got:\n%s", got)
@@ -110,7 +118,7 @@ func TestComposeOperateInstruction(t *testing.T) {
 // readiness contract behaves exactly as before.
 func TestComposeOperateInstruction_NoGatesBackwardCompatible(t *testing.T) {
 	task := work.Task{Title: "T", Description: "D"}
-	if got := composeOperateInstruction(task, nil); got != "Task: T\n\nD" {
+	if got := composeOperateInstruction(task, nil, nil); got != "Task: T\n\nD" {
 		t.Errorf("no-gate instruction must equal the original form %q, got %q", "Task: T\n\nD", got)
 	}
 }
@@ -127,7 +135,7 @@ func TestComposeOperateInstruction_NormalizesGateLabels(t *testing.T) {
 		{Label: "acceptance-criteria", Body: "AC_BODY"},
 		{Label: "  Test Plan  ", Body: "TP_BODY"},
 	}
-	got := composeOperateInstruction(task, artifacts)
+	got := composeOperateInstruction(task, artifacts, nil)
 	for _, want := range []string{"DOD_BODY", "AC_BODY", "TP_BODY"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gate body %q missing — spaced/hyphenated/cased labels must match like Work readiness; got:\n%s", want, got)

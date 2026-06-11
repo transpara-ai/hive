@@ -17,7 +17,7 @@ import (
 // are emitted in canonical order; non-readiness artifacts (e.g. the post-Operate
 // "Operate result") are ignored. With no gates the output is byte-identical to the
 // original title+description form (backward compatible).
-func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent) string {
+func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent, reopens []work.ReopenEvent) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s\n\n%s", task.Title, task.Description)
 
@@ -37,6 +37,22 @@ func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent) s
 	if contract.Len() > 0 {
 		b.WriteString("\n\n== READINESS CONTRACT (your deliverable MUST satisfy ALL of the following) ==")
 		b.WriteString(contract.String())
+	}
+
+	// Review feedback (run findings v12-F1): a reopened task arrives with the
+	// reviewer's fix list — without it the producer would re-Operate on the
+	// original instruction alone, blind to WHY its completion was rejected.
+	// Bounded by the reviewer's per-task verdict cap; cumulative so a second
+	// fix round still sees the first round's findings. With no reopens the
+	// output is byte-identical to the prior form (backward compatible).
+	if len(reopens) > 0 {
+		b.WriteString("\n\n== REVIEW FEEDBACK (this task was REOPENED after review — your previous work on it was rejected; fix the issues below, then complete it again) ==")
+		for i, r := range reopens {
+			fmt.Fprintf(&b, "\n\nReopen %d — %s", i+1, r.Reason)
+			for _, issue := range r.Issues {
+				fmt.Fprintf(&b, "\n- %s", issue)
+			}
+		}
 	}
 	return b.String()
 }
@@ -68,29 +84,38 @@ func normalizeGateLabel(label string) string {
 	return label
 }
 
-// artifactLister loads a task's readiness artifacts. *work.TaskStore satisfies it;
-// tests substitute a failing implementation to exercise the fail-closed path.
-type artifactLister interface {
+// taskContextLister loads a task's readiness artifacts and reopen feedback.
+// *work.TaskStore satisfies it; tests substitute failing implementations to
+// exercise the fail-closed paths.
+type taskContextLister interface {
 	ListArtifacts(taskID types.EventID) ([]work.ArtifactEvent, error)
+	ListReopens(taskID types.EventID) ([]work.ReopenEvent, error)
 }
 
 // operateInstructionFrom builds the Operate prompt for task, loading its readiness
-// artifacts via lister. A nil lister (no task store configured) yields the
-// title+description form. If the lister returns an error, it FAILS CLOSED: a store
-// exists but its readiness contract cannot be loaded, so we cannot prove whether the
-// task carries gates — Operating on title+description alone would let the implementer
-// build blind to its acceptance_criteria (the exact failure the operate-instruction
-// fold closes). Refuse and let the caller escalate rather than silently degrade.
-func operateInstructionFrom(lister artifactLister, task work.Task) (string, error) {
+// artifacts and reopen feedback via lister. A nil lister (no task store configured)
+// yields the title+description form. If the lister returns an error, it FAILS
+// CLOSED: a store exists but the task's context cannot be loaded, so we cannot
+// prove whether the task carries gates or review feedback — Operating blind would
+// let the implementer build past its acceptance_criteria, or re-do rejected work
+// with no idea why it was rejected (run findings v12-F1). Refuse and let the
+// caller escalate rather than silently degrade.
+func operateInstructionFrom(lister taskContextLister, task work.Task) (string, error) {
 	var artifacts []work.ArtifactEvent
+	var reopens []work.ReopenEvent
 	if lister != nil {
 		a, err := lister.ListArtifacts(task.ID)
 		if err != nil {
 			return "", fmt.Errorf("load readiness artifacts for task %s: %w", task.ID, err)
 		}
 		artifacts = a
+		r, err := lister.ListReopens(task.ID)
+		if err != nil {
+			return "", fmt.Errorf("load reopen feedback for task %s: %w", task.ID, err)
+		}
+		reopens = r
 	}
-	return composeOperateInstruction(task, artifacts), nil
+	return composeOperateInstruction(task, artifacts, reopens), nil
 }
 
 // operateInstruction composes the Operate prompt for task, pulling its readiness

@@ -584,8 +584,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if err := validateReviewCommand(cmd, l.iteration); err != nil {
 					fmt.Printf("[%s] /review rejected: %v\n", l.agent.Name(), err)
 				} else if l.reviewerState.shouldEscalate(cmd.TaskID) {
+					// The cap blocks every further verdict for this task —
+					// including approve — so the escalation must reach the
+					// chain: a log line is observable by no other agent
+					// (run findings v12-F1).
 					fmt.Printf("[%s] review cycle limit reached for %s, escalating\n",
 						l.agent.Name(), cmd.TaskID)
+					l.emitReviewEscalationOnce(cmd.TaskID, cmd.Issues)
 				} else {
 					if err := l.emitCodeReview(cmd); err != nil {
 						fmt.Printf("[%s] /review emit failed: %v\n", l.agent.Name(), err)
@@ -596,6 +601,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 						// inflate the escalation cap.
 						l.reviewerState.recordReview(
 							cmd.TaskID, cmd.Verdict, cmd.Issues)
+						// The review→fix return edge (run findings v12-F1):
+						// request_changes reopens the task for its producer,
+						// or escalates when this verdict consumed the cap.
+						l.routeReviewVerdict(cmd)
 						if l.sink != nil {
 							l.captureBoundary(checkpoint.ReviewCompleted, response)
 							l.lastCheckpointIter = l.iteration
