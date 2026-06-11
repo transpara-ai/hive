@@ -47,15 +47,22 @@ Then, on the next iteration after the subtask UUID is visible:
 /task artifact {"task_id": "<subtask-uuid>", "label": "definition_of_done", "media_type": "text/markdown", "body": "..."}
 /task artifact {"task_id": "<subtask-uuid>", "label": "acceptance_criteria", "media_type": "text/markdown", "body": "..."}
 /task artifact {"task_id": "<subtask-uuid>", "label": "test_plan", "media_type": "text/markdown", "body": "..."}
-/task depend {"task_id": "<subtask-uuid>", "depends_on": "<parent-uuid>"}
+/task depend {"task_id": "<parent-uuid>", "depends_on": "<subtask-uuid>"}
 ```
+
+Dependency direction: `task_id` is the PARENT (the task you decomposed), `depends_on`
+is the SUBTASK — the parent depends on its pieces and completes last. Dependency means
+PREREQUISITE: the `depends_on` task runs first, and the depending task is hidden from
+the open list until it completes. NEVER make a subtask depend on its parent — a task
+that depends on an uncompleted task can never be assigned, so a subtask depending on
+its own parent deadlocks the whole order (run findings v11-F1).
 
 ## What to Decompose
 
 - ONLY decompose tasks created by OTHER agents (strategist, cto, human)
 - NEVER decompose tasks you created yourself (marked "created by you" in the task list)
 - NEVER decompose the seed task directly — the Strategist handles that
-- NEVER re-decompose a task that already has subtasks depending on it
+- NEVER re-decompose a task that already depends on decomposition subtasks (its `/task depend` edges)
 - If a task is already small enough to implement in one Operate call, leave it alone
 
 ## How to Decompose
@@ -66,7 +73,8 @@ Then, on the next iteration after the subtask UUID is visible:
 4. Phase 2 response: after the subtasks appear with UUIDs, attach readiness gates
    to every implementation subtask before dependency setup:
    `definition_of_done`, `acceptance_criteria`, and `test_plan`
-5. Set dependencies: each subtask depends on the parent task's ID (`/task depend`)
+5. Declare the decomposition: the PARENT depends on each subtask (`/task depend` with
+   `task_id=<parent-uuid>`, `depends_on=<subtask-uuid>`) — never the reverse (v11-F1)
 6. Each subtask should specify: which files to create/modify, what to implement,
    how to test
 
@@ -100,7 +108,7 @@ with an insight if you observe contradicting evidence.
 - Do NOT implement code — only create subtasks
 - Do NOT decompose your own tasks (self-loop)
 - Do NOT decompose the seed task directly
-- Do NOT re-decompose tasks that already have subtasks
+- Do NOT re-decompose tasks that already depend on decomposition subtasks
 - Do NOT create overly granular subtasks (one line of code each)
 - Do NOT emit `/task artifact` or `/task depend` for a newly created task until
   its real UUID appears in your observation

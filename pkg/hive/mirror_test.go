@@ -149,6 +149,57 @@ func TestFindSiteMirrorTargetUsesAncestorTask(t *testing.T) {
 	}
 }
 
+// TestFindSiteMirrorTargetUsesAncestorTask_CorrectedDirection covers the
+// v11-F1 decomposition direction: the PARENT depends on its subtask, so the
+// completed subtask's parent is found among its DEPENDENTS, not its
+// dependencies. Subtask completions must still mirror to the parent's node.
+func TestFindSiteMirrorTargetUsesAncestorTask_CorrectedDirection(t *testing.T) {
+	ctx := context.Background()
+	rt := testRuntime(t, nil)
+	op := runner.OpEvent{
+		ID:        "site-op-parent-corrected",
+		SpaceID:   "journey-test",
+		NodeID:    "site-node-parent-corrected",
+		NodeTitle: "Parent",
+		Actor:     "operator",
+		ActorID:   "operator-1",
+		ActorKind: "human",
+		Op:        "intend",
+		Payload:   json.RawMessage(`{"description":"parent"}`),
+		CreatedAt: time.Now().UTC(),
+	}
+	anchorID, err := rt.AnchorSiteOp(ctx, op)
+	if err != nil {
+		t.Fatalf("AnchorSiteOp: %v", err)
+	}
+	if err := rt.EmitSiteOp(ctx, op, anchorID); err != nil {
+		t.Fatalf("EmitSiteOp: %v", err)
+	}
+	parentID := translatedTaskID(t, rt)
+	child, err := rt.tasks.Create(rt.humanID, "Child", "child", []types.EventID{parentID}, rt.convID)
+	if err != nil {
+		t.Fatalf("Create child: %v", err)
+	}
+	// Corrected decomposition direction: the PARENT depends on the child.
+	if err := rt.tasks.AddDependency(rt.humanID, parentID, child.ID, []types.EventID{child.ID}, rt.convID); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+
+	target, ok, err := rt.findSiteMirrorTarget(child.ID)
+	if err != nil {
+		t.Fatalf("findSiteMirrorTarget: %v", err)
+	}
+	if !ok {
+		t.Fatal("ancestor target not found via the corrected (parent depends_on subtask) direction")
+	}
+	if target.nodeID != "site-node-parent-corrected" {
+		t.Errorf("nodeID = %q, want site-node-parent-corrected", target.nodeID)
+	}
+	if target.siteOpID != "site-op-parent-corrected" {
+		t.Errorf("siteOpID = %q, want site-op-parent-corrected", target.siteOpID)
+	}
+}
+
 func testRuntime(t *testing.T, client *api.Client) *Runtime {
 	t.Helper()
 	s := store.NewInMemoryStore()

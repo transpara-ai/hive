@@ -1375,9 +1375,24 @@ func (l *Loop) hasAssignableWork() bool {
 	return ok
 }
 
-// firstAssignableOpenTask returns the open, unassigned, childless, ready leaf the
-// auto-assign path would claim next, walking oldest→newest so the first canonical
-// leaf wins over newer duplicate chains. ok is false when none exists. Pure (no
+// firstAssignableOpenTask returns the open, unassigned, non-aggregate, ready
+// task the auto-assign path would claim next, walking oldest→newest so the
+// first canonical task wins over newer duplicate chains. An AGGREGATE — a task
+// that declares dependencies — is never auto-assigned: it waits on its pieces
+// (ListOpen hides it while any is uncompleted), and auto-assignment is never
+// how it closes. Stated plainly: raw /task complete refuses readiness-gated
+// tasks and the factory PR terminal path does not complete the order task, so
+// the only remaining close-out for a gated aggregate is a CanOperate agent
+// MANUALLY /task assign-ing it once unblocked (the command path does not apply
+// this aggregate skip — the same command/auto predicate divergence as v9's
+// blocked-state gap) and completing through the verified-Operate path. The
+// aggregate lifecycle design — and unifying the command/auto predicates — is
+// routed to G-2.x; the invariant THIS predicate owns is only "never
+// auto-assign an aggregate". Skipping on dependents instead (the old
+// childless-leaf rule) deadlocked against ListOpen's prerequisite semantics:
+// a subtask depending on its parent was hidden as blocked while the parent was
+// skipped for having a dependent — zero assignable tasks in either edge
+// direction (run findings v11-F1). ok is false when none exists. Pure (no
 // writes): shared by autoAssignOpenTask (which assigns the result) and
 // hasAssignableWork (the re-check gate).
 func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
@@ -1398,14 +1413,14 @@ func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
 	}
 
 	// ListOpen is store-order dependent. Walk from oldest to newest so the
-	// first canonical leaf task gets executed before newer duplicate chains.
+	// first canonical task gets executed before newer duplicate chains.
 	for i := len(open) - 1; i >= 0; i-- {
 		t := open[i]
 		if assignees[t.ID] != (types.ActorID{}) {
 			continue
 		}
-		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
-		if childErr != nil || hasChildren {
+		deps, depErr := l.config.TaskStore.GetDependencies(t.ID)
+		if depErr != nil || len(deps) > 0 {
 			continue
 		}
 		readiness, readyErr := l.config.TaskStore.Readiness(t.ID)

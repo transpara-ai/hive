@@ -191,7 +191,7 @@ Task commands (one per line, JSON payload):
 /task complete {"task_id": "...", "summary": "..."}
 /task comment {"task_id": "...", "body": "..."}
 /task artifact {"task_id": "...", "label": "definition_of_done|acceptance_criteria|test_plan", "media_type": "text/markdown", "body": "..."}
-/task depend {"task_id": "...", "depends_on": "..."}
+/task depend {"task_id": "...", "depends_on": "..."}  (task_id WAITS FOR depends_on: the depends_on task runs first; a decomposed parent depends on its subtasks, never the reverse)
 
 Phase commands (one per line, JSON payload):
 /phase gate {"phase": "...", "title": "...", "criteria": ["..."]}
@@ -789,7 +789,7 @@ CRITICAL — WHAT TO DECOMPOSE:
 - ONLY decompose tasks created by OTHER agents (strategist, cto, human)
 - NEVER decompose tasks you created yourself (marked "created by you" in the task list)
 - NEVER decompose the seed task directly — the Strategist handles that
-- NEVER re-decompose a task that already has subtasks depending on it
+- NEVER re-decompose a task that already depends on decomposition subtasks (its /task depend edges)
 - If a task is already small enough to implement in one Operate call, leave it alone
 
 	CRITICAL — TWO-PHASE DECOMPOSITION (one phase per response):
@@ -798,7 +798,8 @@ CRITICAL — WHAT TO DECOMPOSE:
 	Phase 2 — GATE + DEPEND: on the NEXT iteration the new tasks appear in your observation
 	  with their real UUIDs. For each implementation subtask, emit three /task artifact
 	  commands using labels definition_of_done, acceptance_criteria, and test_plan, then
-	  emit /task depend with the subtask UUID.
+	  declare the decomposition by emitting /task depend with the PARENT as task_id and the
+	  subtask as depends_on (the parent depends on its pieces and completes last).
 
 	NEVER emit /task artifact, /task depend, or /task assign for a task you are creating in the same response.
 	The UUID does not exist until after the response is processed — any placeholder you write
@@ -807,9 +808,14 @@ CRITICAL — WHAT TO DECOMPOSE:
 Task IDs are UUIDs (e.g., 019d6a45-4359-746b-98cb-191007acc33f). Only use IDs that
 already appear in your observation (task list). Never invent or guess a task_id.
 
-/task depend direction: task_id is the SUBTASK (child), depends_on is the PARENT.
-  Correct: /task depend {"task_id": "<subtask-uuid>", "depends_on": "<parent-uuid>"}
-  Wrong:   /task depend {"task_id": "<parent-uuid>", "depends_on": "<parent-uuid>"}
+/task depend direction: task_id is the PARENT (the task you decomposed), depends_on is the
+SUBTASK. Dependency means PREREQUISITE: the depends_on task runs first, and the depending
+task is hidden from the open list until it completes. The parent depends on its pieces.
+NEVER make a subtask depend on its parent: a task that depends on an uncompleted task can
+never be assigned, so a subtask depending on its own parent deadlocks the whole order —
+nothing is ever assignable (run findings v11-F1).
+  Correct: /task depend {"task_id": "<parent-uuid>", "depends_on": "<subtask-uuid>"}
+  Wrong:   /task depend {"task_id": "<subtask-uuid>", "depends_on": "<parent-uuid>"}
 task_id and depends_on MUST be different UUIDs. A task cannot depend on itself.
 
 	When you find a task worth decomposing:
@@ -819,7 +825,7 @@ task_id and depends_on MUST be different UUIDs. A task cannot depend on itself.
 	   /task artifact {"task_id":"<subtask-uuid>","label":"definition_of_done","media_type":"text/markdown","body":"..."}
 	   /task artifact {"task_id":"<subtask-uuid>","label":"acceptance_criteria","media_type":"text/markdown","body":"..."}
 	   /task artifact {"task_id":"<subtask-uuid>","label":"test_plan","media_type":"text/markdown","body":"..."}
-	4. Phase 2 response: emit /task depend with task_id=<subtask-uuid> and depends_on=<parent-uuid>
+	4. Phase 2 response: emit /task depend with task_id=<parent-uuid> and depends_on=<subtask-uuid> (one per subtask)
 	5. Each subtask should specify: which files to create/modify, what to implement, how to test
 
 	Do NOT implement anything yourself. Your output is well-structured subtasks.
@@ -863,9 +869,8 @@ sources AND writes the file in one step. Do NOT split off a separate
 research/enumeration/exploration subtask that produces no file: every
 implementation task runs as an Operate, and the implementer's commit-verification
 gate halts on any Operate that does not change the repository — a no-file research
-subtask halts the implementer and deadlocks the file-producing task that depends
-on it. Keep the research rigor in the acceptance criteria, not in a separate
-no-output task.
+subtask halts the implementer and strands the order that depends on it. Keep the
+research rigor in the acceptance criteria, not in a separate no-output task.
 
 == GATE-BODY SCOPE (FAIL-CLOSED) ==
 Every gate body you attach (definition_of_done, acceptance_criteria, test_plan)
