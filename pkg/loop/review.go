@@ -33,6 +33,20 @@ var validVerdicts = map[string]bool{
 	"reject":          true,
 }
 
+// reviewCycleLimit is the per-task verdict cap: at most this many reviews may
+// ever be emitted for one task. The cap binding blocks EVERY further verdict
+// — including approve — so the last request_changes slot escalates instead of
+// reopening: a fix that could never be re-approved must not be requested
+// (run findings v12-F1).
+const reviewCycleLimit = 3
+
+// reviewEscalationMarker prefixes the reviewer's cap-trip escalation comment.
+// The escalation IS the comment: stdout is invisible to every other agent, so
+// an escalation that is not on the chain did not happen (run findings
+// v12-F1). The chain fold matches this prefix on the reviewer's own comments
+// to recover emit-once state across restarts.
+const reviewEscalationMarker = "REVIEW ESCALATION:"
+
 // reviewerState tracks cross-iteration state for the Reviewer agent.
 // Created in New() when role == "reviewer". Only accessed from the
 // Run() goroutine — no mutex needed.
@@ -61,6 +75,7 @@ type taskReviewRecord struct {
 	reviewCount int
 	lastVerdict string
 	lastIssues  []string
+	escalated   bool // the cap-trip chain comment for this task has been posted
 }
 
 // newReviewerState initialises a zeroed reviewerState.
@@ -103,6 +118,15 @@ func (s *reviewerState) update(events []event.Event) {
 func (s *reviewerState) findPendingReviews() []string {
 	var pending []string
 	for taskID := range s.completedTasks {
+		if s.shouldEscalate(taskID) {
+			// Capped: no further verdict — including approve — can ever be
+			// emitted for this task, so pending it would only re-burn
+			// iterations re-reviewing work the reviewer cannot settle (the
+			// v12-F1 burn consumed the reviewer's whole duration budget).
+			// The cap trip posts a chain escalation; the task is human-owned
+			// from there. Covers recovery-seeded counts too.
+			continue
+		}
 		rec, reviewed := s.reviewHistory[taskID]
 		if !reviewed {
 			pending = append(pending, taskID)
@@ -154,10 +178,12 @@ func (s *reviewerState) getReviewCount(taskID string) int {
 	return rec.reviewCount
 }
 
-// shouldEscalate returns true if a task has been reviewed 3+ times,
-// indicating a review cycle that needs human or CTO intervention.
+// shouldEscalate returns true once a task has consumed its verdict cap,
+// indicating a review cycle that needs human or CTO intervention. The
+// intervention request must reach the chain (emitReviewEscalationOnce) — the
+// log line alone is observable by nobody (run findings v12-F1).
 func (s *reviewerState) shouldEscalate(taskID string) bool {
-	return s.getReviewCount(taskID) >= 3
+	return s.getReviewCount(taskID) >= reviewCycleLimit
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -214,6 +240,24 @@ func (s *reviewerState) foldChainEvent(ev event.Event, selfID types.ActorID) {
 			return
 		}
 		s.recordReview(c.TaskID, c.Verdict, c.Issues)
+	case work.TaskReopenedContent:
+		// The review→fix return edge (run findings v12-F1): a reopened task
+		// is being fixed, so its superseded completion must not pend review.
+		// The re-completion re-enters via its own fold.
+		delete(s.completedTasks, c.TaskID.Value())
+	case work.CommentContent:
+		// Only the reviewer's OWN cap-trip escalation comment matters here:
+		// folding it re-arms emit-once state after a restart, so a recovered
+		// reviewer neither re-posts nor forgets a posted escalation.
+		if ev.Source() != selfID || !strings.HasPrefix(c.Body, reviewEscalationMarker) {
+			return
+		}
+		rec, ok := s.reviewHistory[c.TaskID.Value()]
+		if !ok {
+			rec = &taskReviewRecord{taskID: c.TaskID.Value()}
+			s.reviewHistory[c.TaskID.Value()] = rec
+		}
+		rec.escalated = true
 	}
 }
 
@@ -250,7 +294,8 @@ func replayChainPrefix(st store.Store, head types.EventID, pageSize int) ([]even
 				seenHead = true
 			}
 			switch ev.Content().(type) {
-			case work.TaskCompletedContent, event.CodeReviewContent:
+			case work.TaskCompletedContent, event.CodeReviewContent,
+				work.TaskReopenedContent, work.CommentContent:
 				collected = append(collected, ev)
 			}
 		}
@@ -447,6 +492,102 @@ func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
 	fmt.Printf("[%s] emitted code.review.submitted (task=%s verdict=%s confidence=%.2f)\n",
 		l.agent.Name(), cmd.TaskID, cmd.Verdict, cmd.Confidence)
 	return nil
+}
+
+// routeReviewVerdict applies the review→fix return edge after a verdict is
+// emitted and recorded (run findings v12-F1). A request_changes REOPENS the
+// task: the completion is superseded, the still-assigned producer's keepalive
+// re-check finds operable work again within one tick, and the next Operate
+// instruction carries the fix list — but only while a future verdict slot
+// remains under the cycle cap. The request_changes that consumes the last
+// slot escalates instead: a fix that could never be re-approved must not be
+// requested, and the deliverable stays completed for the human to judge.
+//
+// Reopen failures are logged, never fatal: the verdict already stands on the
+// chain, and the cap bounds how often this path can repeat.
+func (l *Loop) routeReviewVerdict(cmd *ReviewCommand) {
+	if cmd.Verdict != "request_changes" {
+		return
+	}
+	if l.reviewerState.shouldEscalate(cmd.TaskID) {
+		l.emitReviewEscalationOnce(cmd.TaskID, cmd.Issues)
+		return
+	}
+	if l.config.TaskStore == nil {
+		return
+	}
+	taskID, err := types.NewEventID(cmd.TaskID)
+	if err != nil {
+		fmt.Printf("[%s] review return edge: invalid task id %q: %v\n",
+			l.agent.Name(), cmd.TaskID, err)
+		return
+	}
+	reason := fmt.Sprintf("request_changes (review %d of %d): %s",
+		l.reviewerState.getReviewCount(cmd.TaskID), reviewCycleLimit, cmd.Summary)
+	var causes []types.EventID
+	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+		causes = []types.EventID{lastEv}
+	}
+	if err := l.config.TaskStore.Reopen(l.agent.ID(), taskID, reason, cmd.Issues, causes, l.config.ConvID); err != nil {
+		fmt.Printf("[%s] review return edge: reopen %s failed: %v\n",
+			l.agent.Name(), cmd.TaskID, err)
+		return
+	}
+	fmt.Printf("[%s] reopened task %s for fixes (review %d of %d)\n",
+		l.agent.Name(), cmd.TaskID, l.reviewerState.getReviewCount(cmd.TaskID), reviewCycleLimit)
+}
+
+// emitReviewEscalationOnce posts the cap-trip escalation as a
+// work.task.comment — once per task, restart-proof: the in-memory flag covers
+// this process, and the chain fold of the reviewer's own marker comment
+// re-arms the flag on recovery. The comment IS the escalation's existence —
+// stdout is observable by no other agent (run findings v12-F1: the CTO
+// assessed "system healthy" while the burn ran). Emission failure leaves the
+// flag unset so the next cap trip retries rather than silently dropping the
+// only intervention request.
+func (l *Loop) emitReviewEscalationOnce(taskIDStr string, issues []string) {
+	s := l.reviewerState
+	rec, ok := s.reviewHistory[taskIDStr]
+	if !ok {
+		rec = &taskReviewRecord{taskID: taskIDStr}
+		s.reviewHistory[taskIDStr] = rec
+	}
+	if rec.escalated {
+		return
+	}
+	if l.config.TaskStore == nil {
+		return
+	}
+	taskID, err := types.NewEventID(taskIDStr)
+	if err != nil {
+		fmt.Printf("[%s] review escalation: invalid task id %q: %v\n",
+			l.agent.Name(), taskIDStr, err)
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s review cycle limit (%d) reached for task %s with verdict request_changes — further reviewer verdicts are blocked for this task; human/CTO intervention required.",
+		reviewEscalationMarker, reviewCycleLimit, taskIDStr)
+	if len(issues) > 0 {
+		b.WriteString("\nOutstanding issues:")
+		for _, issue := range issues {
+			fmt.Fprintf(&b, "\n- %s", issue)
+		}
+	}
+	var causes []types.EventID
+	if lastEv := l.agent.LastEvent(); !lastEv.IsZero() {
+		causes = []types.EventID{lastEv}
+	}
+	if err := l.config.TaskStore.AddComment(taskID, b.String(), l.agent.ID(), causes, l.config.ConvID); err != nil {
+		fmt.Printf("[%s] review escalation comment failed for %s: %v\n",
+			l.agent.Name(), taskIDStr, err)
+		return
+	}
+	rec.escalated = true
+	// Settled for the reviewer — humans own it now. The pending skip on the
+	// cap makes this redundant for the pending decision; the delete keeps the
+	// projection a parked gate, not a graveyard.
+	delete(s.completedTasks, taskIDStr)
+	fmt.Printf("[%s] emitted review escalation comment for %s\n", l.agent.Name(), taskIDStr)
 }
 
 // ────────────────────────────────────────────────────────────────────

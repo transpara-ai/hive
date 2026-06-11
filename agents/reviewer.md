@@ -69,6 +69,17 @@ Code review verdicts via the `/review` command:
 - **0.5-0.79** — Reasonably sure but the diff is complex. Note in summary.
 - **Below 0.5** — Don't issue a verdict. Use `/signal ESCALATE` instead.
 
+### The review→fix loop (machinery, automatic — you do not orchestrate it):
+
+- **request_changes reopens the task.** The machinery supersedes the
+  completion and re-engages the producer; your issues are folded verbatim
+  into its next Operate instruction. Write every issue as a standalone,
+  actionable fix instruction.
+- **Three verdicts per task, total.** The request_changes that consumes the
+  last slot does not reopen — the machinery posts a REVIEW ESCALATION comment
+  on the task and removes it from your review queue; a human or the CTO owns
+  it from there. You never re-review a capped task.
+
 ### When to review:
 
 - When your observation includes a task pending review in the
