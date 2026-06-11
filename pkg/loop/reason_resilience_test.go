@@ -516,6 +516,75 @@ func TestRun_SuspendedAgentStaysSuspendedAndTerminal(t *testing.T) {
 	}
 }
 
+// cleanupRejectingStore rejects EVERY Processing→Idle state append — the
+// persistent-stranding shape (codex r3 finding 1): each failed attempt's
+// cleanup write dies, so the agent is stranded at the moment of exhaustion.
+// Shape-specific: Escalate's own transitions (Idle→Processing,
+// Processing→Escalating, Escalating→Idle) must pass, or the test would
+// prove nothing about the raise.
+type cleanupRejectingStore struct {
+	store.Store
+}
+
+func (s cleanupRejectingStore) Append(ev event.Event) (event.Event, error) {
+	if c, ok := ev.Content().(event.AgentStateChangedContent); ok {
+		if c.Previous == "Processing" && c.Current == "Idle" {
+			return event.Event{}, errors.New("injected: cleanup append rejected")
+		}
+	}
+	return s.Store.Append(ev)
+}
+
+// TestReasonExhaustion_StrandedFinalAttemptStillRaises (codex r3 finding 1):
+// the FINAL failed attempt has no post-backoff heal behind it — if its
+// cleanup write failed too, the agent reaches the exhaustion path stranded
+// in Processing, and Escalate's own Idle→Processing transition would refuse:
+// the one escalation the contract guarantees would never reach the chain.
+// The raise must heal the stranded state first (gated — authority states
+// still untouchable).
+func TestReasonExhaustion_StrandedFinalAttemptStillRaises(t *testing.T) {
+	provider := &flakyProvider{steps: []flakyStep{{err: err529}}}
+	s := cleanupRejectingStore{Store: store.NewInMemoryStore()}
+	as := actor.NewInMemoryActorStore()
+	g := graph.New(s, as)
+	if err := g.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close() })
+	agent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:     hiveagent.Role("builder"),
+		Name:     "stranded-final-test",
+		Graph:    g,
+		Provider: provider,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+		Task:    "build a widget",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	l.reasonRetryBackoff = fastBackoff
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopEscalation {
+		t.Fatalf("reason = %s (%s), want %s", result.Reason, result.Detail, StopEscalation)
+	}
+	if got := countEscalations(t, g); got != 1 {
+		t.Fatalf("escalations = %d, want 1 — the raise must survive a stranded final attempt (codex r3)", got)
+	}
+	if !l.reasonFailureEscalated {
+		t.Error("reasonFailureEscalated unset after a successful raise")
+	}
+}
+
 // TestFormatLoopExit pins the immediate per-agent exit line RunConcurrent
 // prints the moment any loop returns (v13-F1: a Result buried until daemon
 // shutdown made a dead agent invisible to the operator and the sentinel).

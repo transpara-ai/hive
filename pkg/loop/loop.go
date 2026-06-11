@@ -534,6 +534,13 @@ func (l *Loop) Run(ctx context.Context) Result {
 				detail := fmt.Sprintf("reason failed after %d attempts (iteration %d): %v",
 					len(l.reasonRetryBackoff)+1, iteration, reasonErr)
 				fmt.Printf("[%s] %s\n", l.agent.Name(), detail)
+				// The FINAL failed attempt has no post-backoff heal behind
+				// it: if its cleanup write failed too, the agent arrives
+				// here stranded in Processing and Escalate's own
+				// Idle→Processing transition would refuse — the one raise
+				// the contract guarantees would be lost (codex r3). Heal
+				// first; gated, so authority states stay untouchable.
+				l.agent.ResetIfStuckProcessing()
 				if !l.reasonFailureEscalated {
 					if err := l.agent.Escalate(ctx, l.humanID, detail); err != nil {
 						// Flag stays UNSET on a failed chain write: the next
