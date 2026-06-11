@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -257,6 +258,20 @@ type Loop struct {
 	parkAfterEscalation    bool
 	parkedEscalationReason string
 
+	// reasonRetryBackoff is the wait schedule between Reason attempts inside
+	// one iteration (slice-1 v13 run, finding v13-F1): a transient provider
+	// error — API 529 during the 2026-06-11 opus incident — killed the loop
+	// on its first failure, silently. Attempts = len()+1; waits are
+	// context-aware and jittered. Only accessed from the Run() goroutine;
+	// tests shrink the schedule.
+	reasonRetryBackoff []time.Duration
+
+	// reasonFailureEscalated dedupes the on-chain raise to ONE per
+	// consecutive-failure episode (a parked loop that wakes, retries, and
+	// fails again must not re-page the human); any successful Reason resets
+	// it. Only accessed from the Run() goroutine.
+	reasonFailureEscalated bool
+
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
 	sink checkpoint.CheckpointSink
 
@@ -301,6 +316,9 @@ func New(cfg Config) (*Loop, error) {
 		budget:  budget,
 		config:  cfg,
 		wake:    make(chan struct{}, 1),
+		// Two retries absorb provider blips; outages longer than ~80s land on
+		// the raise-and-park path, where wake/re-check carries the long haul.
+		reasonRetryBackoff: []time.Duration{20 * time.Second, 60 * time.Second},
 	}
 
 	if cfg.Sink != nil {
@@ -492,10 +510,40 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// Reason path: standard observe-reason loop.
 			prompt := l.buildPrompt(observation, iteration)
 			var reasonErr error
-			response, usage, reasonErr = l.reason(ctx, prompt)
+			response, usage, reasonErr = l.reasonWithRecovery(ctx, prompt)
 			if reasonErr != nil {
-				return l.result(StopError, iteration, fmt.Sprintf("reason: %v", reasonErr))
+				if ctx.Err() != nil {
+					return l.result(StopCancelled, iteration, "context cancelled during reason")
+				}
+				// v13-F1: a Reason failure must NEVER kill the loop silently —
+				// the v13 run lost its only CanOperate agent to one transient
+				// API 529 and froze, healthy-looking, at the
+				// decomposition→assignment boundary. Raise on-chain ONCE per
+				// failure episode, then mirror v8-F2: keepalive parks for
+				// wake/re-check (the recovery horizon for outages that outlast
+				// the in-iteration retries); one-shot loops stop terminally
+				// but VISIBLY.
+				detail := fmt.Sprintf("reason failed after %d attempts (iteration %d): %v",
+					len(l.reasonRetryBackoff)+1, iteration, reasonErr)
+				fmt.Printf("[%s] %s\n", l.agent.Name(), detail)
+				if !l.reasonFailureEscalated {
+					if err := l.agent.Escalate(ctx, l.humanID, detail); err != nil {
+						fmt.Printf("warning: escalation event failed: %v\n", err)
+					}
+					l.reasonFailureEscalated = true
+				}
+				if l.config.Keepalive && l.config.Bus != nil {
+					fmt.Printf("[%s] parked pending wake/re-check after reason failure\n", l.agent.Name())
+					if l.waitForEvents(ctx) {
+						consecutiveEmpty = 0
+						continue
+					}
+					return l.result(StopEscalation, iteration,
+						"shutdown while parked on reason failure: "+detail)
+				}
+				return l.result(StopEscalation, iteration, detail)
 			}
+			l.reasonFailureEscalated = false
 			// Record the reason call's usage. (The Operate branch records its own
 			// above, before its gate, so neither path can skip budget accounting.)
 			l.budget.RecordUsage(usage)
@@ -861,6 +909,43 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.Toke
 	}
 	// Unreachable, but satisfies the compiler.
 	return "", decision.TokenUsage{}, fmt.Errorf("reason: exhausted retries")
+}
+
+// reasonWithRecovery wraps reason with the v13-F1 retry schedule: a failed
+// Reason call waits out reasonRetryBackoff[attempt] (jittered, context-aware)
+// and tries again within the same iteration, absorbing transient provider
+// errors — the 529 family — that previously killed the loop on first contact.
+// ResetToIdle before each retry mirrors the chain-integrity recovery path: a
+// failed call can strand the agent in Processing, and the next Reason would
+// then die on Processing → Processing instead of surfacing the real error.
+func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, decision.TokenUsage, error) {
+	attempts := len(l.reasonRetryBackoff) + 1
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		content, usage, err := l.reason(ctx, prompt)
+		if err == nil {
+			return content, usage, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || attempt >= attempts {
+			return "", decision.TokenUsage{}, lastErr
+		}
+		delay := l.reasonRetryBackoff[attempt-1]
+		if delay > 0 {
+			// Jitter de-synchronizes a whole-society retry herd: a provider
+			// incident hits all nine agents at once, and identical schedules
+			// would re-aggregate their retries into the same overloaded second.
+			delay += rand.N(delay/2 + 1)
+		}
+		fmt.Printf("[%s] reason attempt %d/%d failed: %v — retrying in %s\n",
+			l.agent.Name(), attempt, attempts, err, delay.Round(time.Second))
+		l.agent.ResetToIdle()
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return "", decision.TokenUsage{}, lastErr
+		}
+	}
 }
 
 // Signal is the structured JSON signal emitted by agents at the end of each response.
@@ -1577,6 +1662,15 @@ type AgentResult struct {
 }
 
 // RunConcurrent runs multiple agent loops concurrently and returns when all stop.
+// formatLoopExit renders the one-line obituary RunConcurrent prints the
+// moment any loop returns (v13-F1: results were invisible until every loop
+// finished — a dead agent looked exactly like an idle one for the daemon's
+// whole lifetime).
+func formatLoopExit(r AgentResult) string {
+	return fmt.Sprintf("[%s] loop exited: %s after %d iterations — %s",
+		r.Name, r.Result.Reason, r.Result.Iterations, r.Result.Detail)
+}
+
 // Each loop runs in its own goroutine. Returns one result per agent.
 func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 	results := make([]AgentResult, len(configs))
@@ -1594,6 +1688,7 @@ func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 					Name:   c.Agent.Name(),
 					Result: Result{Reason: StopError, Detail: err.Error()},
 				}
+				fmt.Println(formatLoopExit(results[idx]))
 				return
 			}
 
@@ -1602,6 +1697,7 @@ func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 				Name:   c.Agent.Name(),
 				Result: l.Run(ctx),
 			}
+			fmt.Println(formatLoopExit(results[idx]))
 		}(i, cfg)
 	}
 
