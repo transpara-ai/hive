@@ -13,6 +13,8 @@ type Config struct {
 	GlobalCooldown       int     // iterations: between any adjustments
 	BudgetFloor          int     // minimum iterations per agent
 	BudgetCeiling        int     // maximum iterations per agent
+	DurationFloorMin     int     // minimum wall-clock budget, minutes (v14-F3c)
+	DurationCeilingMin   int     // maximum wall-clock budget, minutes (v14-F3c)
 	InitialSpawnBudget   int     // default budget for newly spawned agents
 	ConcentrationPct     float64 // single agent consuming > this % triggers review
 	ExhaustionWarningPct float64 // agent at > this % of budget triggers increase
@@ -29,6 +31,8 @@ func DefaultConfig() Config {
 		GlobalCooldown:       5,
 		BudgetFloor:          20,
 		BudgetCeiling:        500,
+		DurationFloorMin:     10,
+		DurationCeilingMin:   720,
 		InitialSpawnBudget:   50,
 		ConcentrationPct:     40,
 		ExhaustionWarningPct: 80,
@@ -47,6 +51,8 @@ func LoadConfig() Config {
 	cfg.GlobalCooldown = envInt("ALLOCATOR_GLOBAL_COOLDOWN", cfg.GlobalCooldown)
 	cfg.BudgetFloor = envInt("ALLOCATOR_BUDGET_FLOOR", cfg.BudgetFloor)
 	cfg.BudgetCeiling = envInt("ALLOCATOR_BUDGET_CEILING", cfg.BudgetCeiling)
+	cfg.DurationFloorMin = envInt("ALLOCATOR_DURATION_FLOOR_MIN", cfg.DurationFloorMin)
+	cfg.DurationCeilingMin = envInt("ALLOCATOR_DURATION_CEILING_MIN", cfg.DurationCeilingMin)
 	cfg.InitialSpawnBudget = envInt("ALLOCATOR_INITIAL_SPAWN_BUDGET", cfg.InitialSpawnBudget)
 	cfg.ConcentrationPct = envFloat("ALLOCATOR_CONCENTRATION_PCT", cfg.ConcentrationPct)
 	cfg.ExhaustionWarningPct = envFloat("ALLOCATOR_EXHAUSTION_WARNING_PCT", cfg.ExhaustionWarningPct)

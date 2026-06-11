@@ -3,6 +3,7 @@ package resources
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // BudgetEntry represents one agent's budget state in the registry.
@@ -86,6 +87,31 @@ func (r *BudgetRegistry) AdjustMaxIterations(name string, delta int, floor int, 
 	e.MaxIterations = newMax
 	e.Budget.SetMaxIterations(newMax)
 	return prev, newMax, nil
+}
+
+// AdjustMaxDuration modifies a specific agent's wall-clock limit by
+// deltaMinutes, clamped to [floorMinutes, ceilingMinutes]. Returns
+// (previousMinutes, newMinutes, error); error only when the agent is
+// unknown — clamps are not errors. The registry holds no duplicate
+// duration state: it reads and writes through the agent's Budget, so the
+// parked loop's own Check() observes the renewal (v14-F3c).
+func (r *BudgetRegistry) AdjustMaxDuration(name string, deltaMinutes, floorMinutes, ceilingMinutes int) (int, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.entries[name]
+	if !ok {
+		return 0, 0, fmt.Errorf("unknown agent: %s", name)
+	}
+	prev := int(e.Budget.MaxDuration() / time.Minute)
+	newMin := prev + deltaMinutes
+	if newMin < floorMinutes {
+		newMin = floorMinutes
+	}
+	if newMin > ceilingMinutes {
+		newMin = ceilingMinutes
+	}
+	e.Budget.SetMaxDuration(time.Duration(newMin) * time.Minute)
+	return prev, newMin, nil
 }
 
 // SetAgentState updates an agent's operational state.

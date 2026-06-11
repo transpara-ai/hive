@@ -115,6 +115,23 @@ func (b *Budget) SetMaxIterations(n int) {
 	b.maxIterations = n
 }
 
+// MaxDuration returns the current wall-clock limit. Safe for concurrent use.
+func (b *Budget) MaxDuration() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.maxDuration
+}
+
+// SetMaxDuration updates the wall-clock limit at runtime. Used by the
+// Allocator to renew a keepalive agent parked on duration exhaustion
+// (v14-F3c): the parked loop re-checks its budget on the next wake or
+// gated re-check and resumes once the limit again exceeds elapsed time.
+func (b *Budget) SetMaxDuration(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maxDuration = d
+}
+
 // Check returns nil if within budget, or an error describing what was exceeded.
 func (b *Budget) Check() error {
 	b.mu.Lock()

@@ -196,6 +196,21 @@ func execTaskAssign(
 	if err != nil {
 		return fmt.Errorf("invalid task_id: %w", err)
 	}
+	// v14-F2: a live-completed task must not re-enter circulation through
+	// the command path. The auto-assign predicate already hides it
+	// (firstAssignableOpenTask → ListOpen), and the v14 resume epoch proved
+	// what the divergence costs: the implementer re-claimed a
+	// completed-and-approved task by command, then sat assigned to work
+	// taskIsOperable refused to run. The only door back in is an explicit
+	// reopen (work.task.reopened, the v12-F1 return edge). Fail closed: an
+	// unreadable completion state refuses too.
+	legacy, err := tasks.GetCompatibilityStatus(taskID)
+	if err != nil {
+		return fmt.Errorf("task %s completion state unreadable (%v) — refusing assignment (fail closed)", p.TaskID, err)
+	}
+	if legacy == work.LegacyStatusCompleted {
+		return fmt.Errorf("task %s is completed — completed work re-enters circulation only via an explicit reopen (request_changes), not reassignment", p.TaskID)
+	}
 	assignee := agentID // "self" or empty defaults to self
 	if p.Assignee != "" && p.Assignee != "self" {
 		assignee, err = types.NewActorID(p.Assignee)
