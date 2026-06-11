@@ -515,6 +515,14 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if ctx.Err() != nil {
 					return l.result(StopCancelled, iteration, "context cancelled during reason")
 				}
+				if strings.Contains(reasonErr.Error(), "invalid transition") {
+					// State-machine refusals keep their pre-v13-F1 terminal
+					// semantics: suspension/retirement is constitutional
+					// authority, not provider weather — neither retried,
+					// escalated, nor parked around (codex r1 finding 1). The
+					// RunConcurrent obituary makes the exit visible.
+					return l.result(StopError, iteration, fmt.Sprintf("reason: %v", reasonErr))
+				}
 				// v13-F1: a Reason failure must NEVER kill the loop silently —
 				// the v13 run lost its only CanOperate agent to one transient
 				// API 529 and froze, healthy-looking, at the
@@ -528,9 +536,14 @@ func (l *Loop) Run(ctx context.Context) Result {
 				fmt.Printf("[%s] %s\n", l.agent.Name(), detail)
 				if !l.reasonFailureEscalated {
 					if err := l.agent.Escalate(ctx, l.humanID, detail); err != nil {
+						// Flag stays UNSET on a failed chain write: the next
+						// exhaustion must retry the raise, or no
+						// agent.escalated ever reaches the chain for this
+						// episode (codex r1 finding 2).
 						fmt.Printf("warning: escalation event failed: %v\n", err)
+					} else {
+						l.reasonFailureEscalated = true
 					}
-					l.reasonFailureEscalated = true
 				}
 				if l.config.Keepalive && l.config.Bus != nil {
 					fmt.Printf("[%s] parked pending wake/re-check after reason failure\n", l.agent.Name())
@@ -915,9 +928,14 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.Toke
 // Reason call waits out reasonRetryBackoff[attempt] (jittered, context-aware)
 // and tries again within the same iteration, absorbing transient provider
 // errors — the 529 family — that previously killed the loop on first contact.
-// ResetToIdle before each retry mirrors the chain-integrity recovery path: a
-// failed call can strand the agent in Processing, and the next Reason would
-// then die on Processing → Processing instead of surfacing the real error.
+//
+// State-machine refusals ("invalid transition") are NOT retryable here:
+// they are authority, not weather. A suspended or retired agent fails the
+// Idle→Processing transition by DESIGN, and a retry loop must neither spin
+// on it nor reset the agent back to Idle — ResetToIdle from Suspended would
+// silently override a Guardian suspension (codex r1 finding 1). The
+// stranded-in-Processing recovery that does warrant a reset lives inside
+// reason()'s chain-integrity retry, where the stranding cause is known.
 func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, decision.TokenUsage, error) {
 	attempts := len(l.reasonRetryBackoff) + 1
 	var lastErr error
@@ -927,6 +945,9 @@ func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, d
 			return content, usage, nil
 		}
 		lastErr = err
+		if strings.Contains(err.Error(), "invalid transition") {
+			return "", decision.TokenUsage{}, lastErr
+		}
 		if ctx.Err() != nil || attempt >= attempts {
 			return "", decision.TokenUsage{}, lastErr
 		}
@@ -939,7 +960,6 @@ func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, d
 		}
 		fmt.Printf("[%s] reason attempt %d/%d failed: %v — retrying in %s\n",
 			l.agent.Name(), attempt, attempts, err, delay.Round(time.Second))
-		l.agent.ResetToIdle()
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():

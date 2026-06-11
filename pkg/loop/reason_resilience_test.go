@@ -8,12 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
+	hiveagent "github.com/transpara-ai/agent"
 	"github.com/transpara-ai/hive/pkg/resources"
 )
 
@@ -275,6 +278,107 @@ func TestReasonRetry_AbortsPromptlyOnShutdown(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Run did not return promptly after cancellation mid-backoff; the retry wait must be context-aware")
+	}
+}
+
+// TestReasonFailure_InvalidTransitionStaysTerminal (codex r1 finding 1): a
+// state-machine refusal is authority, not weather. A suspended or retired
+// agent must not be revived by the retry loop (the round-1 ResetToIdle
+// would have bypassed a Guardian suspension) and must not page the human as
+// a provider outage. Pre-v13-F1 terminal semantics stand — now visible via
+// the RunConcurrent obituary instead of silent.
+func TestReasonFailure_InvalidTransitionStaysTerminal(t *testing.T) {
+	provider := &flakyProvider{steps: []flakyStep{
+		{err: errors.New("invalid transition: cannot transition from Suspended to Processing")},
+	}}
+	agent, g := agentWithGraph(t, provider)
+
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+		Task:    "build a widget",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	l.reasonRetryBackoff = fastBackoff
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopError {
+		t.Fatalf("reason = %s (%s), want %s — state-machine refusals keep terminal semantics", result.Reason, result.Detail, StopError)
+	}
+	if !strings.Contains(result.Detail, "invalid transition") {
+		t.Errorf("detail %q must carry the transition error", result.Detail)
+	}
+	if got := int(provider.callCount.Load()); got != 1 {
+		t.Errorf("provider calls = %d, want 1 — an invalid transition must not be retried (revival risk)", got)
+	}
+	if got := countEscalations(t, g); got != 0 {
+		t.Errorf("escalations = %d, want 0 — suspension is not weather", got)
+	}
+}
+
+// escalationRejectingStore fails exactly the agent.escalated append —
+// surgical injection for the raise-failure path (codex r1 finding 2). The
+// agent's own state bookkeeping still records; only the escalation write
+// dies, mirroring a chain write failing mid-outage.
+type escalationRejectingStore struct {
+	store.Store
+}
+
+func (s escalationRejectingStore) Append(ev event.Event) (event.Event, error) {
+	if ev.Type() == event.EventTypeAgentEscalated {
+		return event.Event{}, errors.New("injected: escalation append rejected")
+	}
+	return s.Store.Append(ev)
+}
+
+// TestReasonFailure_FailedRaiseDoesNotSetEpisodeFlag (codex r1 finding 2): if
+// the on-chain raise itself fails, the episode flag must NOT set — otherwise
+// every future exhaustion in the episode is suppressed and no agent.escalated
+// ever reaches the chain. A failed raise must stay raisable.
+func TestReasonFailure_FailedRaiseDoesNotSetEpisodeFlag(t *testing.T) {
+	provider := &flakyProvider{steps: []flakyStep{{err: err529}}}
+	s := escalationRejectingStore{store.NewInMemoryStore()}
+	as := actor.NewInMemoryActorStore()
+	g := graph.New(s, as)
+	if err := g.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close() })
+	agent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:     hiveagent.Role("builder"),
+		Name:     "raise-fail-test",
+		Graph:    g,
+		Provider: provider,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+		Task:    "build a widget",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	l.reasonRetryBackoff = fastBackoff
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopEscalation {
+		t.Fatalf("reason = %s (%s), want %s — the stop classification stands even when the raise write fails", result.Reason, result.Detail, StopEscalation)
+	}
+	if l.reasonFailureEscalated {
+		t.Error("reasonFailureEscalated set despite a FAILED chain raise; future episodes would be silently suppressed")
+	}
+	if got := countEscalations(t, g); got != 0 {
+		t.Errorf("escalations = %d, want 0 (the append was rejected)", got)
 	}
 }
 
