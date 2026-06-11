@@ -1375,9 +1375,16 @@ func (l *Loop) hasAssignableWork() bool {
 	return ok
 }
 
-// firstAssignableOpenTask returns the open, unassigned, childless, ready leaf the
-// auto-assign path would claim next, walking oldest→newest so the first canonical
-// leaf wins over newer duplicate chains. ok is false when none exists. Pure (no
+// firstAssignableOpenTask returns the open, unassigned, non-aggregate, ready
+// task the auto-assign path would claim next, walking oldest→newest so the
+// first canonical task wins over newer duplicate chains. An AGGREGATE — a task
+// that declares dependencies — is never auto-assigned: it waits on its pieces
+// (ListOpen hides it while any is uncompleted) and is completed through its own
+// path, not another Operate. Skipping on dependents instead (the old
+// childless-leaf rule) deadlocked against ListOpen's prerequisite semantics:
+// a subtask depending on its parent was hidden as blocked while the parent was
+// skipped for having a dependent — zero assignable tasks in either edge
+// direction (run findings v11-F1). ok is false when none exists. Pure (no
 // writes): shared by autoAssignOpenTask (which assigns the result) and
 // hasAssignableWork (the re-check gate).
 func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
@@ -1398,14 +1405,14 @@ func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
 	}
 
 	// ListOpen is store-order dependent. Walk from oldest to newest so the
-	// first canonical leaf task gets executed before newer duplicate chains.
+	// first canonical task gets executed before newer duplicate chains.
 	for i := len(open) - 1; i >= 0; i-- {
 		t := open[i]
 		if assignees[t.ID] != (types.ActorID{}) {
 			continue
 		}
-		hasChildren, childErr := l.config.TaskStore.HasChildren(t.ID)
-		if childErr != nil || hasChildren {
+		deps, depErr := l.config.TaskStore.GetDependencies(t.ID)
+		if depErr != nil || len(deps) > 0 {
 			continue
 		}
 		readiness, readyErr := l.config.TaskStore.Readiness(t.ID)

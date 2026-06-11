@@ -77,10 +77,10 @@ func TestHasAssignableWork(t *testing.T) {
 	}
 }
 
-// TestFirstAssignableOpenTask locks in the shared open-leaf predicate (the single
+// TestFirstAssignableOpenTask locks in the shared open-task predicate (the single
 // source of truth for both auto-assign and the re-check gate): an open task is
-// only assignable once unassigned, childless, AND readiness-gated; assigning it
-// removes it from the open-unassigned set.
+// only assignable once unassigned, non-aggregate (no declared dependencies), AND
+// readiness-gated; assigning it removes it from the open-unassigned set.
 func TestFirstAssignableOpenTask(t *testing.T) {
 	l, ts, agent, convID := newRecheckLoop(t, true, 10*time.Millisecond)
 	var causes []types.EventID
