@@ -129,6 +129,13 @@ type Config struct {
 	// Required when CanOperate is true.
 	RepoPath string
 
+	// ContainmentWatchRoots are directories whose immediate child git
+	// checkouts the workspace-containment tripwire (v10-F2 / Finding 18)
+	// watches around every Operate. Empty = watch the parent directory of
+	// RepoPath (the sibling worktrees a run can walk to). There is no
+	// disable switch: a CanOperate loop is always watched.
+	ContainmentWatchRoots []string
+
 	// TaskOperateProvider optionally selects a provider for this exact Work task.
 	// Used for structured FactoryOrder model overrides. Errors fail closed.
 	TaskOperateProvider TaskOperateProviderFunc
@@ -428,6 +435,17 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// for a clean "first commit").
 			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
 
+			// Workspace-containment baseline (v10-F2 / Finding 18): snapshot the
+			// watched sibling checkouts BEFORE the subprocess exists. Post-hoc
+			// detection cannot undo sibling damage, so an unreadable baseline
+			// refuses the launch outright (fail closed) instead of running
+			// unwatched and apologizing later.
+			preContainment, preContainOK := snapshotContainment(l.containmentRoots(), l.config.RepoPath)
+			if !preContainOK {
+				return l.result(StopEscalation, iteration,
+					"operate: containment baseline unreadable — refusing to launch a filesystem-capable Operate without a verifiable sibling-checkout watch")
+			}
+
 			result, opErr := l.operateTask(ctx, task, instruction)
 			if opErr != nil {
 				if errors.Is(opErr, errTaskOperateProvider) {
@@ -442,6 +460,16 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// passes. The early StopEscalation return on failure must NOT skip
 			// budget accounting (BUDGET invariant) — a failed Operate still costs.
 			l.budget.RecordUsage(usage)
+
+			// Containment tripwire veto (v10-F2) — runs BEFORE commit
+			// verification: a run that mutated a sibling checkout must never
+			// auto-complete, however clean its workspace commit looks (the v10
+			// round-3 escape shape was exactly that). failOperateTask already
+			// escalated; the summary is untrusted and drives nothing further.
+			if !l.verifyOperateContainment(ctx, task, preContainment) {
+				return l.result(StopEscalation, iteration,
+					"workspace containment violated; halting implementer for human review")
+			}
 
 			// Commit-verification gate: never trust the agent's self-report.
 			// handleOperateResult compares HEAD before/after Operate and
