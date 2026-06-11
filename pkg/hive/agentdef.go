@@ -476,6 +476,10 @@ observe contradicting evidence.
 			Name:           "allocator",
 			Role:           "allocator",
 			RoleDefinition: roles["allocator"],
+			// v14-F3: the renewer must outlive the renewed. Workers keep the
+			// 30m default and PARK at exhaustion; the allocator renews them
+			// on-chain, so its own lifespan bounds the society's.
+			MaxDuration: 12 * time.Hour,
 			SystemPrompt: mission(`== ROLE: ALLOCATOR ==
 You are the Allocator — the civilization's resource manager.
 
@@ -489,11 +493,21 @@ Assess these metrics, identify imbalances, and decide whether to adjust.
 
 When an adjustment is warranted, emit a /budget command:
 /budget {"agent":"<name>","action":"increase|decrease|set","amount":<N>,"reason":"<brief>"}
+/budget {"agent":"<name>","action":"set","amount":<minutes>,"reason":"<brief>","resource":"duration"}
+
+DURATION RENEWAL: every worker carries a wall-clock budget — the dur= column
+shows elapsed/limit. A keepalive worker whose duration runs out is parked,
+not stuck: it resumes the moment you emit a duration renewal for it. Renew
+any parked agent whose work is unfinished (dur= elapsed at or past its
+limit). Your own 12-hour lifespan bounds the society's epoch and CANNOT be
+self-renewed (a duration command naming yourself is refused) — plan the
+society's work within it.
 
 STABILIZATION: Do NOT emit /budget during the first 10 iterations. Observe only.
 COOLDOWN: Do NOT adjust the same agent within 10 iterations of the last adjustment.
 GLOBAL: Do NOT emit more than one /budget per 5 iterations.
 FLOOR: No agent below 20 iterations. CEILING: No agent above 500 iterations.
+DURATION FLOOR: 10 minutes. DURATION CEILING: 720 minutes (12 hours).
 
 Priority: Guardian > SysMon > Allocator > active workers > idle workers.
 Do NOT reduce quiesced agents — they are waiting for work, not stuck.

@@ -272,6 +272,11 @@ type Loop struct {
 	// it. Only accessed from the Run() goroutine.
 	reasonFailureEscalated bool
 
+	// budgetParkLogged dedupes the duration-park notice (v14-F3b): a parked
+	// loop re-checks its budget on every wake/re-check cycle and must not
+	// re-print per cycle. Cleared when a budget check passes again (resume).
+	budgetParkLogged bool
+
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
 	sink checkpoint.CheckpointSink
 
@@ -407,10 +412,40 @@ func (l *Loop) Run(ctx context.Context) Result {
 			return l.result(StopCancelled, iteration, "context cancelled")
 		}
 
-		// Check budget before each iteration.
+		// Check budget before each iteration. DURATION exhaustion on a
+		// keepalive loop with a bus PARKS instead of exiting (v14-F3b): the
+		// 30m MaxDuration default ended every society epoch at 30 minutes —
+		// eight simultaneous budget obituaries on the first epoch that lived
+		// that long. The park joins the raise-and-park family (v8-F2
+		// escalations, v13-F1 reason failures): the allocator renews the
+		// limit on-chain (v14-F3c) and the next wake or gated re-check
+		// passes this same check and resumes. The park is allowlisted to
+		// exactly that proven shape — every other resource (iterations,
+		// tokens, cost, anything future) and every non-keepalive or bus-less
+		// loop keeps the terminal stop: exit is the default, parking is the
+		// explicitly-proven branch (fail closed).
 		if err := l.budget.Check(); err != nil {
+			var exceeded *resources.BudgetExceededError
+			if errors.As(err, &exceeded) &&
+				exceeded.Resource == resources.ResourceDuration &&
+				l.config.Keepalive && l.config.Bus != nil {
+				if !l.budgetParkLogged {
+					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
+					l.budgetParkLogged = true
+				}
+				// waitForBudgetRenewal, not waitForEvents: the renewal event
+				// may not match this agent's subscriptions, and a fully
+				// parked society generates no other wakes — the park polls
+				// the in-memory budget so a renewed agent always resumes.
+				if l.waitForBudgetRenewal(ctx) {
+					consecutiveEmpty = 0
+					continue
+				}
+				return l.result(StopBudget, iteration, "shutdown while parked on budget exhaustion: "+err.Error())
+			}
 			return l.result(StopBudget, iteration, err.Error())
 		}
+		l.budgetParkLogged = false
 
 		iteration++
 		l.iteration = iteration
@@ -531,8 +566,8 @@ func (l *Loop) Run(ctx context.Context) Result {
 				// wake/re-check (the recovery horizon for outages that outlast
 				// the in-iteration retries); one-shot loops stop terminally
 				// but VISIBLY.
-				detail := fmt.Sprintf("reason failed after %d attempts (iteration %d): %v",
-					len(l.reasonRetryBackoff)+1, iteration, reasonErr)
+				detail := fmt.Sprintf("reason failed after %d attempts (iteration %d): %v — prompt_chars=%d",
+					len(l.reasonRetryBackoff)+1, iteration, reasonErr, len(prompt))
 				fmt.Printf("[%s] %s\n", l.agent.Name(), detail)
 				// The FINAL failed attempt has no post-backoff heal behind
 				// it: if its cleanup write failed too, the agent arrives
@@ -947,6 +982,10 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.Toke
 // reason()'s chain-integrity retry, where the stranding cause is known.
 func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, decision.TokenUsage, error) {
 	attempts := len(l.reasonRetryBackoff) + 1
+	// v14-F1 observability: three 10-minute reason kills left no record of
+	// what was sent (--no-session-persistence) — prompt size is the first
+	// discriminator between prompt-bloat and provider hangs.
+	fmt.Printf("%s\n", formatReasonPromptSize(l.agent.Name(), len(prompt), l.iteration))
 	var lastErr error
 	for attempt := 1; ; attempt++ {
 		content, usage, err := l.reason(ctx, prompt)
@@ -1316,6 +1355,13 @@ func (l *Loop) buildTaskContext() string {
 		status := string(t.Status)
 		if t.Blocked {
 			status = "blocked"
+		}
+		// v14-F2 (perception half): live completion outranks both — the
+		// v3.9 lifecycle never advances on legacy-flow tasks, so agents
+		// reasoned over "[created]" for delivered work and re-claimed it.
+		// An explicit reopen supersedes the completion and reads open again.
+		if t.LegacyStatus == work.LegacyStatusCompleted {
+			status = "completed"
 		}
 		assignee := ""
 		if t.Assignee != (types.ActorID{}) {

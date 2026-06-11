@@ -64,6 +64,13 @@ func ReplayBudgetFromStore(s store.Store) (map[string]BudgetState, error) {
 		if !ok {
 			continue
 		}
+		// Iteration dimension only (codex r1 on hive#156): a duration
+		// renewal's NewBudget is MINUTES — replayed as CurrentBudget it
+		// would seed a rebooted agent's ITERATION budget with a wall-clock
+		// number.
+		if !c.AdjustsIterations() {
+			continue
+		}
 		state := result[c.AgentName]
 		state.AgentName = c.AgentName
 		state.CurrentBudget = c.NewBudget

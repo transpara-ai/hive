@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -17,6 +18,10 @@ type BudgetCommand struct {
 	Action string `json:"action"` // "increase", "decrease", "set"
 	Amount int    `json:"amount"`
 	Reason string `json:"reason"`
+	// Resource selects the budget dimension: "iterations" (the default when
+	// empty — every pre-v14 command) or "duration", where Amount is MINUTES
+	// of wall-clock budget (v14-F3c renewal of parked agents).
+	Resource string `json:"resource,omitempty"`
 }
 
 // parseBudgetCommand extracts the /budget JSON payload from LLM output.
@@ -75,6 +80,24 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 		return fmt.Errorf("invalid action %q (must be increase, decrease, or set)", cmd.Action)
 	}
 
+	// 4b. Valid resource — an ALLOWLIST (v14-F3c). Empty means iterations
+	// (every pre-v14 command); anything unrecognized is refused rather than
+	// silently applied to iterations.
+	switch cmd.Resource {
+	case "", "iterations", "duration":
+	default:
+		return fmt.Errorf("invalid resource %q (must be iterations or duration)", cmd.Resource)
+	}
+
+	// 4c. Duration self-renewal is refused (codex r1 #3): the allocator's
+	// own lifespan is the society's epoch bound, set by definition at the
+	// duration ceiling — a self-renewal can never extend it and only burns
+	// the global cooldown while looking like an adjustment. Refuse loudly
+	// so the LLM learns the design instead of paying the cooldown tax.
+	if cmd.Resource == "duration" && l.agent != nil && cmd.Agent == l.agent.Name() {
+		return fmt.Errorf("duration self-renewal refused: %s's lifespan bounds the society's epoch and is set by definition, not self-extension", cmd.Agent)
+	}
+
 	// 5. Global cooldown.
 	globalRemaining := budget.GlobalCooldownRemaining(l.adjustmentHistory, iteration, cfg)
 	if globalRemaining > 0 {
@@ -87,8 +110,9 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 		return fmt.Errorf("cooldown active for %s (%d iterations remaining)", cmd.Agent, agentRemaining)
 	}
 
-	// 7. Pool headroom for increases.
-	if cmd.Action == "increase" {
+	// 7. Pool headroom for increases — an ITERATION-pool concept: a duration
+	// increase consumes no iteration headroom (v14-F3c).
+	if cmd.Action == "increase" && cmd.Resource != "duration" {
 		totalPool := reg.TotalPool()
 		totalUsed := reg.TotalUsed()
 		headroom := totalPool - totalUsed
@@ -105,6 +129,17 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	cfg := budget.LoadConfig()
 	reg := l.config.BudgetRegistry
 
+	// Resolve the adjusted dimension: iterations (the default, and every
+	// pre-v14 command) or duration in minutes (v14-F3c renewal).
+	resource := cmd.Resource
+	if resource == "" {
+		resource = "iterations"
+	}
+	floor, ceiling := cfg.BudgetFloor, cfg.BudgetCeiling
+	if resource == "duration" {
+		floor, ceiling = cfg.DurationFloorMin, cfg.DurationCeilingMin
+	}
+
 	// Compute delta based on action.
 	// For "set", we need to find the current value first.
 	var delta int
@@ -117,13 +152,23 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 		// Find current max to compute delta.
 		for _, e := range reg.Snapshot() {
 			if e.Name == cmd.Agent {
-				delta = cmd.Amount - e.MaxIterations
+				if resource == "duration" {
+					delta = cmd.Amount - int(e.Budget.MaxDuration()/time.Minute)
+				} else {
+					delta = cmd.Amount - e.MaxIterations
+				}
 				break
 			}
 		}
 	}
 
-	prev, newMax, err := reg.AdjustMaxIterations(cmd.Agent, delta, cfg.BudgetFloor, cfg.BudgetCeiling)
+	var prev, newMax int
+	var err error
+	if resource == "duration" {
+		prev, newMax, err = reg.AdjustMaxDuration(cmd.Agent, delta, floor, ceiling)
+	} else {
+		prev, newMax, err = reg.AdjustMaxIterations(cmd.Agent, delta, floor, ceiling)
+	}
 	if err != nil {
 		return fmt.Errorf("adjust %s: %w", cmd.Agent, err)
 	}
@@ -132,7 +177,7 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	actualDelta := newMax - prev
 	if actualDelta != delta {
 		fmt.Printf("[%s] budget adjustment clamped: requested delta=%d, actual delta=%d (floor=%d, ceiling=%d)\n",
-			l.agent.Name(), delta, actualDelta, cfg.BudgetFloor, cfg.BudgetCeiling)
+			l.agent.Name(), delta, actualDelta, floor, ceiling)
 	}
 
 	// Emit agent.budget.adjusted event on chain.
@@ -140,6 +185,7 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 		AgentID:        l.agent.ID(),
 		AgentName:      cmd.Agent,
 		Action:         cmd.Action,
+		Resource:       resource,
 		PreviousBudget: prev,
 		NewBudget:      newMax,
 		Delta:          actualDelta,
@@ -161,8 +207,8 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 		Reason:    cmd.Reason,
 	})
 
-	fmt.Printf("[%s] budget adjusted: %s %s %+d (%d→%d) reason=%q\n",
-		l.agent.Name(), cmd.Agent, cmd.Action, actualDelta, prev, newMax, cmd.Reason)
+	fmt.Printf("[%s] budget adjusted: %s %s %s %+d (%d→%d) reason=%q\n",
+		l.agent.Name(), cmd.Agent, resource, cmd.Action, actualDelta, prev, newMax, cmd.Reason)
 	return nil
 }
 
@@ -205,8 +251,11 @@ func (l *Loop) enrichBudgetObservation(obs string, iteration int) string {
 		if e.MaxIterations > 0 {
 			pct = float64(snap.Iterations) * 100.0 / float64(e.MaxIterations)
 		}
-		sb.WriteString(fmt.Sprintf("  %-14s max=%-4d used=%-4d(%.1f%%)  state=%-10s\n",
-			e.Name+":", e.MaxIterations, snap.Iterations, pct, e.AgentState))
+		// dur= elapsed/limit is the renewal signal (v14-F3c): a keepalive
+		// agent past its limit is PARKED pending a duration renewal.
+		sb.WriteString(fmt.Sprintf("  %-14s max=%-4d used=%-4d(%.1f%%)  dur=%s/%s  state=%-10s\n",
+			e.Name+":", e.MaxIterations, snap.Iterations, pct,
+			snap.Elapsed.Round(time.Second), e.Budget.MaxDuration(), e.AgentState))
 	}
 
 	// SysMon summary from recent pending events (extract last health.report).

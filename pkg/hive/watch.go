@@ -136,7 +136,10 @@ func (r *Runtime) findBudgetForRole(name string) (event.AgentBudgetAdjustedConte
 	}
 	for _, ev := range page.Items() {
 		c, ok := ev.Content().(event.AgentBudgetAdjustedContent)
-		if ok && c.AgentName == name {
+		// Iteration grants only (codex r1 on hive#156): a duration renewal
+		// matching the role name would hand the spawned agent MINUTES as
+		// its iteration budget.
+		if ok && c.AdjustsIterations() && c.AgentName == name {
 			return c, true
 		}
 	}

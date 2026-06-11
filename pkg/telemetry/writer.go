@@ -659,6 +659,11 @@ func eventSummary(actorRole, eventType string, content interface{}) string {
 	case event.AgentEscalatedContent:
 		return fmt.Sprintf("ESCALATED: %s", c.Reason)
 	case event.AgentBudgetAdjustedContent:
+		if !c.AdjustsIterations() {
+			// Duration renewals are MINUTES (v14-F3c) — naming them
+			// iterations misreports every renewal on the dashboard.
+			return fmt.Sprintf("%s: %d → %d minutes (%s)", c.AgentName, c.PreviousBudget, c.NewBudget, c.Resource)
+		}
 		return fmt.Sprintf("%s: %d → %d iterations", c.AgentName, c.PreviousBudget, c.NewBudget)
 
 	default:
