@@ -261,6 +261,48 @@ func TestContractsEnforceDraftLifecycleHonesty(t *testing.T) {
 	}
 }
 
+// TestPlannerGateBodiesForbidGovernedTerminalStep guards the v10 run's
+// contract-layer finding (v10-F3, Finding 19 — the contract half of the
+// Finding 17 breach's root cause): the planner attached gate bodies that
+// demanded the governed terminal step (feat branch push / draft PR) from the
+// implementer. The implementer is barred from remote mutations, so such a
+// gate either deadlocks the run or pressures an agent toward ungoverned
+// escape — which is exactly what v10 observed. The planner contract must
+// scope gate bodies to repository-local outcomes and route delivery to the
+// authority-gated terminal path (Gate-E → Epic 11), fail-closed.
+func TestPlannerGateBodiesForbidGovernedTerminalStep(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	var planner string
+	for i := range agents {
+		if agents[i].Name == "planner" {
+			planner = agents[i].SystemPrompt
+		}
+	}
+	if planner == "" {
+		t.Fatal("planner agent not found in StarterAgents")
+	}
+
+	// The constraint block exists and is fail-closed.
+	for _, phrase := range []string{
+		"GATE-BODY SCOPE (FAIL-CLOSED)",
+		"ONLY repository-local outcomes",
+		"must NEVER demand a branch push, draft PR, PR URL, remote mutation, or any publication step",
+		"authority-gated terminal path (Gate-E",
+		"never by an implementer task",
+		"scope it OUT of your gate bodies",
+	} {
+		if !strings.Contains(planner, phrase) {
+			t.Errorf("planner contract missing gate-body scope clause %q", phrase)
+		}
+	}
+
+	// The draft-PR lifecycle bullet must attribute PR delivery to the
+	// order's terminal path, not presuppose the implementer delivers it.
+	if !strings.Contains(planner, "delivered as a draft / unmerged pull request by the order's authority-gated terminal path") {
+		t.Error("planner draft-PR lifecycle clause must attribute PR delivery to the authority-gated terminal path, never the implementer")
+	}
+}
+
 func TestEffectiveModelPolicy(t *testing.T) {
 	rdPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierVolume}
 	defPolicy := &modelconfig.RoleModelPolicy{PreferredTier: modelconfig.TierJudgment}
