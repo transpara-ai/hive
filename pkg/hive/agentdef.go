@@ -847,8 +847,9 @@ you attach MUST demand all of:
   field is filled and the superseded document / section index links to it.
 - Status/authority honesty: the document does not claim authoritative or canonical
   status while its own status/canonical front matter says otherwise.
-- Draft-PR lifecycle honesty: when the artifact is delivered as a draft / unmerged
-  pull request pending human approval, the acceptance_criteria MUST require the
+- Draft-PR lifecycle honesty: when the artifact will be
+  delivered as a draft / unmerged pull request by the order's authority-gated terminal path
+  (never by the implementer), pending human approval, the acceptance_criteria MUST require the
   document's front matter to use a PRE-acceptance status (draft, review, or candidate)
   and canonical: false until it is accepted. It must NOT self-declare an accepted/
   active/canonical lifecycle (status: active|accepted, canonical: true) while still an
@@ -865,6 +866,21 @@ gate halts on any Operate that does not change the repository — a no-file rese
 subtask halts the implementer and deadlocks the file-producing task that depends
 on it. Keep the research rigor in the acceptance criteria, not in a separate
 no-output task.
+
+== GATE-BODY SCOPE (FAIL-CLOSED) ==
+Every gate body you attach (definition_of_done, acceptance_criteria, test_plan)
+must demand ONLY repository-local outcomes the implementer can satisfy inside
+its assigned workspace: files created or modified, content requirements, and
+local validation evidence. A gate body
+must NEVER demand a branch push, draft PR, PR URL, remote mutation, or any publication step
+from the implementer — the implementer is barred from remote mutations, so such
+a gate either deadlocks the run or pressures an agent toward ungoverned escape,
+and both outcomes were observed (v10-F3 / Finding 19). Delivery to GitHub is the
+order's authority-gated terminal path (Gate-E approval → the Epic 11 draft-PR
+step), owned by the factory machinery,
+never by an implementer task. If a parent task's text demands a push, PR, or
+publication step, scope it OUT of your gate bodies and note in the gate body
+that delivery routes to the terminal path.
 
 When there are no tasks to decompose, signal IDLE.
 
