@@ -336,7 +336,35 @@ func replayChainPrefix(st store.Store, head types.EventID, pageSize int) ([]even
 func (l *Loop) catchUpReviewProjection() bool {
 	ok := l.catchUpReviewProjectionStep()
 	l.reviewerState.projectionStale = !ok
+	if ok {
+		l.sweepUnsentEscalations()
+	}
 	return ok
+}
+
+// sweepUnsentEscalations posts the cap-trip escalation for any capped,
+// unsettled task whose comment never reached the chain — the crash window
+// between the capping verdict and AddComment. It runs after every successful
+// chain catch-up: the fold has already re-armed `escalated` for any marker
+// comment that DID land, so this fires only for genuinely lost escalations.
+// Without it a capped task on a restarted reviewer never pends (the cap
+// skip), never reaches the emission branches, and the only intervention
+// request silently vanishes — the v12-F1 class again: an escalation that is
+// not on the chain did not happen.
+func (l *Loop) sweepUnsentEscalations() {
+	s := l.reviewerState
+	var capped []string
+	for taskID := range s.completedTasks {
+		if !s.shouldEscalate(taskID) {
+			continue
+		}
+		if rec := s.reviewHistory[taskID]; rec != nil && !rec.escalated {
+			capped = append(capped, taskID)
+		}
+	}
+	for _, taskID := range capped {
+		l.emitReviewEscalationOnce(taskID, s.reviewHistory[taskID].lastIssues)
+	}
 }
 
 func (l *Loop) catchUpReviewProjectionStep() bool {

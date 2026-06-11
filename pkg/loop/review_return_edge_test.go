@@ -256,6 +256,36 @@ func TestCatchUp_OwnEscalationCommentRearmsOnce(t *testing.T) {
 	}
 }
 
+func TestCatchUp_SweepPostsLostEscalation(t *testing.T) {
+	l, ts, _, _, _, task := newReturnEdgeFixture(t)
+
+	// A prior process recorded 3 verdicts (the cap) but died before its
+	// escalation comment reached the chain. The completion folds back in on
+	// replay; the cap skip means the task will never pend again — the sweep
+	// is the only path left for the intervention request.
+	l.reviewerState.InitReviewerFromRecovery(&checkpoint.ReviewerRecoveredState{
+		ReviewCounts: map[string]int{task.ID.Value(): 3},
+	})
+
+	if !l.catchUpReviewProjection() {
+		t.Fatal("catch-up failed")
+	}
+	if got := escalationComments(t, ts, task.ID); got != 1 {
+		t.Fatalf("a lost escalation must be re-posted after recovery; got %d comments", got)
+	}
+	if got := len(l.reviewerState.findPendingReviews()); got != 0 {
+		t.Fatalf("the capped task must not pend after the sweep; got %d", got)
+	}
+
+	// The next catch-up folds our own marker comment — still exactly one.
+	if !l.catchUpReviewProjection() {
+		t.Fatal("second catch-up failed")
+	}
+	if got := escalationComments(t, ts, task.ID); got != 1 {
+		t.Fatalf("the sweep must be idempotent across catch-ups; got %d comments", got)
+	}
+}
+
 func TestTaskIsOperable_ReopenedAssignedTaskOperableAgain(t *testing.T) {
 	l, ts, agent, convID, causes, task := newReturnEdgeFixture(t)
 
