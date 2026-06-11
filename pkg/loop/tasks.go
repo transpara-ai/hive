@@ -323,16 +323,29 @@ func execTaskDepend(
 	if err != nil {
 		return fmt.Errorf("invalid depends_on: %w", err)
 	}
+	// Fail closed on the one cycle shape the contracts can produce between a
+	// pair: a reverse edge (depends_on already depends on task_id) would make
+	// both tasks aggregates AND both ListOpen-blocked — the v11-F1 deadlock as
+	// a 2-cycle. Refuse on read error too: an unverifiable direction is not a
+	// permitted one. Transitive cycle detection routes to G-2.x.
+	existing, err := tasks.GetDependencies(dependsOnID)
+	if err != nil {
+		return fmt.Errorf("verify dependency direction: %w", err)
+	}
+	for _, dep := range existing {
+		if dep == taskID {
+			return fmt.Errorf("dependency refused: %s already depends on %s — the reverse edge would deadlock both tasks (run findings v11-F1); decomposition direction is parent depends_on subtask", p.DependsOn, p.TaskID)
+		}
+	}
 	if err := tasks.AddDependency(agentID, taskID, dependsOnID, causes, convID); err != nil {
 		return err
 	}
-	superseded, err := tasks.SupersedeDuplicateDirectChildren(dependsOnID, agentID, causes, convID)
-	if err != nil {
-		return fmt.Errorf("canonicalize child chain: %w", err)
-	}
-	for _, dup := range superseded {
-		fmt.Printf("  → task superseded: %s duplicates canonical %s\n", dup.TaskID.Value(), dup.CanonicalID.Value())
-	}
+	// Duplicate-sibling dedup (SupersedeDuplicateDirectChildren) was removed
+	// here: under parent-depends_on-subtask decomposition (v11-F1) its old
+	// pivot resolved to "tasks depending on the subtask" — i.e. PARENTS — and
+	// could waive-and-complete a parent as a "duplicate". Sibling dedup under
+	// the corrected vocabulary routes to G-2.x; the planner's no-re-decompose
+	// guard is the live defense.
 	fmt.Printf("  → task dependency: %s depends on %s\n", p.TaskID, p.DependsOn)
 	return nil
 }

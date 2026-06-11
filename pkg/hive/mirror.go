@@ -103,6 +103,9 @@ func (r *Runtime) findAncestorSiteMirrorTarget(taskID types.EventID, maxDepth in
 	if err != nil {
 		return siteTaskMirrorTarget{}, false, fmt.Errorf("work.task.dependency.added: %w", err)
 	}
+	// Legacy decomposition direction first (child depends_on parent): walking
+	// this task's own dependencies upward is byte-identical to the historical
+	// behavior, so legacy stores resolve exactly as before.
 	for _, ev := range deps.Items() {
 		c, ok := ev.Content().(work.TaskDependencyContent)
 		if !ok || c.TaskID != taskID {
@@ -112,6 +115,21 @@ func (r *Runtime) findAncestorSiteMirrorTarget(taskID types.EventID, maxDepth in
 			return target, ok, err
 		}
 		if target, ok, err := r.findAncestorSiteMirrorTarget(c.DependsOnID, maxDepth-1); err != nil || ok {
+			return target, ok, err
+		}
+	}
+	// Corrected decomposition direction (run findings v11-F1): the PARENT
+	// depends on its subtask, so a completed subtask's parent is found among
+	// its DEPENDENTS. Only consulted when the legacy walk found nothing.
+	for _, ev := range deps.Items() {
+		c, ok := ev.Content().(work.TaskDependencyContent)
+		if !ok || c.DependsOnID != taskID {
+			continue
+		}
+		if target, ok, err := r.findDirectSiteMirrorTarget(c.TaskID); err != nil || ok {
+			return target, ok, err
+		}
+		if target, ok, err := r.findAncestorSiteMirrorTarget(c.TaskID, maxDepth-1); err != nil || ok {
 			return target, ok, err
 		}
 	}

@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,32 @@ func TestFirstAssignableOpenTask_DecomposedGraphLiveness(t *testing.T) {
 		}
 		if got, ok := l.firstAssignableOpenTask(); ok {
 			t.Fatalf("unblocked aggregate auto-assigned: got %s; aggregates must never be auto-assigned", got.ID.Value())
+		}
+	})
+
+	t.Run("reverse_edge_refused_fail_closed", func(t *testing.T) {
+		_, ts, agent, convID, causes, order, sub := newDecomposedGraph(t)
+		// Corrected decomposition: the parent depends on its piece.
+		if err := ts.AddDependency(agent.ID(), order.ID, sub.ID, causes, convID); err != nil {
+			t.Fatalf("AddDependency: %v", err)
+		}
+		// A reverse edge (subtask depends on parent) would make both tasks
+		// aggregates AND both ListOpen-blocked — the v11-F1 deadlock as a
+		// 2-cycle. The command layer must refuse it fail-closed.
+		payload := []byte(`{"task_id":"` + sub.ID.Value() + `","depends_on":"` + order.ID.Value() + `"}`)
+		err := execTaskDepend(payload, ts, agent.ID(), causes, convID)
+		if err == nil {
+			t.Fatal("execTaskDepend accepted a reverse edge; want fail-closed refusal (v11-F1 2-cycle)")
+		}
+		if !strings.Contains(err.Error(), "refused") {
+			t.Fatalf("refusal error = %q; want it to name the refusal", err)
+		}
+		deps, depErr := ts.GetDependencies(sub.ID)
+		if depErr != nil {
+			t.Fatalf("GetDependencies: %v", depErr)
+		}
+		if len(deps) != 0 {
+			t.Fatalf("reverse edge persisted (%d deps on subtask); refusal must leave the store unchanged", len(deps))
 		}
 	})
 

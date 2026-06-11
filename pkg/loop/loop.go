@@ -1379,8 +1379,12 @@ func (l *Loop) hasAssignableWork() bool {
 // task the auto-assign path would claim next, walking oldest→newest so the
 // first canonical task wins over newer duplicate chains. An AGGREGATE — a task
 // that declares dependencies — is never auto-assigned: it waits on its pieces
-// (ListOpen hides it while any is uncompleted) and is completed through its own
-// path, not another Operate. Skipping on dependents instead (the old
+// (ListOpen hides it while any is uncompleted), and auto-assignment is never
+// how it closes. NOTE, stated plainly: no completion path exists today for a
+// readiness-gated aggregate (raw /task complete refuses gated tasks; the
+// factory PR terminal path does not complete the order task) — closing that
+// lifecycle is routed to G-2.x; the invariant THIS predicate owns is only
+// "never auto-assign an aggregate". Skipping on dependents instead (the old
 // childless-leaf rule) deadlocked against ListOpen's prerequisite semantics:
 // a subtask depending on its parent was hidden as blocked while the parent was
 // skipped for having a dependent — zero assignable tasks in either edge
