@@ -433,7 +433,11 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
 					l.budgetParkLogged = true
 				}
-				if l.waitForEvents(ctx) {
+				// waitForBudgetRenewal, not waitForEvents: the renewal event
+				// may not match this agent's subscriptions, and a fully
+				// parked society generates no other wakes — the park polls
+				// the in-memory budget so a renewed agent always resumes.
+				if l.waitForBudgetRenewal(ctx) {
 					consecutiveEmpty = 0
 					continue
 				}

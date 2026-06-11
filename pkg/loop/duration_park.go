@@ -1,6 +1,10 @@
 package loop
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 // v14-F3(b): keepalive agents carried a 30-minute MaxDuration default, so
 // every society epoch self-terminated at 30 minutes — eight simultaneous
@@ -12,6 +16,39 @@ import "fmt"
 // budget resource — iterations, tokens, cost, and any future addition —
 // keeps the terminal stop: parking is the explicitly-proven branch, exit is
 // the default (fail closed).
+
+// waitForBudgetRenewal blocks a duration-parked loop until a wake arrives,
+// the budget passes again, or the context ends. Returns true to resume,
+// false on cancellation.
+//
+// The bare wake channel is NOT sufficient here: only some agents subscribe
+// to budget.* — for the rest, the renewal event never matches their
+// patterns, and a society whose workers are all parked generates no other
+// traffic. That is the v13/v14 silent-wait class (a wake that never comes)
+// at the renewal boundary, so the park polls the IN-MEMORY budget on the
+// recheck tick — zero LLM cost, runs only while parked, and cannot
+// re-ignite the wakeup storm the per-iteration timers were removed to kill:
+// its only action is resuming an agent someone explicitly renewed.
+func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
+	interval := l.config.RecheckInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-l.wake:
+			return true
+		case <-ticker.C:
+			if l.budget.Check() == nil {
+				return true
+			}
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
 
 // formatBudgetPark renders the one-line park notice for a duration-exhausted
 // keepalive loop. The sentinel wake patterns match on "parked pending".

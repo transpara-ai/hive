@@ -93,6 +93,60 @@ func TestRun_KeepaliveDurationExhaustionParksAndRenewalResumes(t *testing.T) {
 	}
 }
 
+// TestRun_KeepaliveDurationParkRenewalResumesWithoutWake: a renewal must
+// resume the parked loop even when NO bus event matches the agent's
+// subscriptions — the renewal event itself may not (only some agents watch
+// budget.*), and a society whose workers are all parked generates no other
+// traffic. The park polls the in-memory budget on the recheck tick; a wake
+// that never comes must not park a renewed agent forever (the v13/v14
+// silent-wait class, again).
+func TestRun_KeepaliveDurationParkRenewalResumesWithoutWake(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-time.Hour))
+	l, err := New(Config{
+		Agent:           agent,
+		HumanID:         humanID(),
+		Bus:             g.Bus(),
+		Keepalive:       true,
+		Budget:          cfg,
+		BudgetInstance:  bi,
+		RecheckInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	select {
+	case r := <-done:
+		t.Fatalf("Run returned %s (%s); want park", r.Reason, r.Detail)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Renew WITHOUT any wake: only the recheck tick can observe this.
+	bi.SetMaxDuration(24 * time.Hour)
+	deadline := time.Now().Add(2 * time.Second)
+	for int(provider.callCount.Load()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := int(provider.callCount.Load()); got < 1 {
+		t.Fatalf("provider calls after no-wake renewal = %d; want >= 1 — a renewed agent must not stay parked waiting for a wake that never comes", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
 // TestRun_KeepaliveDurationParkShutdownNamesThePark: cancellation while
 // parked must return a named StopBudget result, not read as a live stop.
 func TestRun_KeepaliveDurationParkShutdownNamesThePark(t *testing.T) {
