@@ -499,7 +499,9 @@ DURATION RENEWAL: every worker carries a wall-clock budget — the dur= column
 shows elapsed/limit. A keepalive worker whose duration runs out is parked,
 not stuck: it resumes the moment you emit a duration renewal for it. Renew
 any parked agent whose work is unfinished (dur= elapsed at or past its
-limit). Your own 12-hour lifespan bounds the society's — budget it.
+limit). Your own 12-hour lifespan bounds the society's epoch and CANNOT be
+self-renewed (a duration command naming yourself is refused) — plan the
+society's work within it.
 
 STABILIZATION: Do NOT emit /budget during the first 10 iterations. Observe only.
 COOLDOWN: Do NOT adjust the same agent within 10 iterations of the last adjustment.

@@ -213,6 +213,11 @@ func (d *Distiller) detectBudgetEffectiveness() []KnowledgeInsight {
 		if bc.Action != "increase" {
 			continue
 		}
+		// Iteration dimension only: duration renewals (minutes) say nothing
+		// about iteration-budget effectiveness (codex r1 on hive#156).
+		if !bc.AdjustsIterations() {
+			continue
+		}
 		adj := adjustment{
 			agentID:   bc.AgentID,
 			agentName: bc.AgentName,

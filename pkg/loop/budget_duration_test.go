@@ -50,6 +50,37 @@ func TestValidateBudgetCommandResourceAllowlist(t *testing.T) {
 	}
 }
 
+// codex r1 #3: the allocator's lifespan IS the society's epoch bound, set
+// by def at the duration ceiling — a self-renewal can never extend it and
+// only burns the global cooldown while looking like an adjustment. Refuse
+// it loudly at validation so the LLM learns the design, not the cooldown
+// tax.
+func TestValidateBudgetCommandRefusesDurationSelfRenewal(t *testing.T) {
+	provider := newMockProvider("ok")
+	agent, _ := agentWithGraph(t, provider)
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), resources.NewBudget(resources.BudgetConfig{MaxDuration: 12 * time.Hour}), 150, "m")
+	l, err := New(Config{Agent: agent, HumanID: humanID(), BudgetRegistry: reg})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	cmd := &BudgetCommand{Agent: agent.Name(), Action: "set", Amount: 720, Reason: "extend myself", Resource: "duration"}
+	verr := l.validateBudgetCommand(cmd, 50)
+	if verr == nil {
+		t.Fatal("duration self-renewal validated; want refusal — the renewer's lifespan is set by definition, not self-extension")
+	}
+	if !strings.Contains(verr.Error(), "self-renewal") {
+		t.Fatalf("refusal error = %q; must name the self-renewal design", verr.Error())
+	}
+
+	// Iteration self-adjustment keeps its existing semantics.
+	iter := &BudgetCommand{Agent: agent.Name(), Action: "set", Amount: 200, Reason: "more headroom"}
+	if err := l.validateBudgetCommand(iter, 50); err != nil {
+		t.Fatalf("iteration self-adjustment rejected: %v; only DURATION self-renewal is refused", err)
+	}
+}
+
 func TestValidateBudgetCommandDurationSkipsIterationPoolHeadroom(t *testing.T) {
 	// One agent whose iteration pool is fully consumed: an iteration INCREASE
 	// must fail on headroom, but a duration increase has no iteration-pool

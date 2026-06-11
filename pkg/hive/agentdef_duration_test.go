@@ -28,9 +28,9 @@ func TestAllocatorOutlivesWorkers(t *testing.T) {
 	if got := alloc.EffectiveMaxDuration(); got != 12*time.Hour {
 		t.Fatalf("allocator EffectiveMaxDuration = %v; want 12h", got)
 	}
-	for _, want := range []string{`"resource"`, "duration", "parked"} {
+	for _, want := range []string{`"resource"`, "duration", "parked", "self-renew"} {
 		if !strings.Contains(alloc.SystemPrompt, want) {
-			t.Fatalf("allocator prompt must teach duration renewal (missing %q)", want)
+			t.Fatalf("allocator prompt must teach duration renewal and the no-self-renewal design (missing %q)", want)
 		}
 	}
 

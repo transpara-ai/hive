@@ -89,6 +89,15 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 		return fmt.Errorf("invalid resource %q (must be iterations or duration)", cmd.Resource)
 	}
 
+	// 4c. Duration self-renewal is refused (codex r1 #3): the allocator's
+	// own lifespan is the society's epoch bound, set by definition at the
+	// duration ceiling — a self-renewal can never extend it and only burns
+	// the global cooldown while looking like an adjustment. Refuse loudly
+	// so the LLM learns the design instead of paying the cooldown tax.
+	if cmd.Resource == "duration" && l.agent != nil && cmd.Agent == l.agent.Name() {
+		return fmt.Errorf("duration self-renewal refused: %s's lifespan bounds the society's epoch and is set by definition, not self-extension", cmd.Agent)
+	}
+
 	// 5. Global cooldown.
 	globalRemaining := budget.GlobalCooldownRemaining(l.adjustmentHistory, iteration, cfg)
 	if globalRemaining > 0 {
