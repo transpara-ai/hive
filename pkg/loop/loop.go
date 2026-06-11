@@ -911,10 +911,12 @@ func (l *Loop) reason(ctx context.Context, prompt string) (string, decision.Toke
 			return "", decision.TokenUsage{}, err
 		}
 		if strings.Contains(err.Error(), "chain integrity violation") && attempt < maxRetries-1 {
-			// Reset agent state before retry — the failed iteration may have
-			// left the agent in Processing, which would cause the next
-			// Reason() call to fail with Processing → Processing.
-			l.agent.ResetToIdle()
+			// Heal a stranded-Processing state before retry — the failed
+			// iteration may have left the agent mid-transition, which would
+			// fail the next Reason() with Processing → Processing. Gated
+			// (v13-F1 codex r1): only Processing is reset, never an
+			// authority state.
+			l.agent.ResetIfStuckProcessing()
 			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
 			continue
 		}
@@ -946,7 +948,16 @@ func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, d
 		}
 		lastErr = err
 		if strings.Contains(err.Error(), "invalid transition") {
-			return "", decision.TokenUsage{}, lastErr
+			if !l.agent.ResetIfStuckProcessing() {
+				// An invalid transition with the agent NOT stranded in
+				// Processing is authority, not weather — a Suspended or
+				// Retired refusal must be neither retried nor reset around
+				// (codex r1 finding 1). Not retryable.
+				return "", decision.TokenUsage{}, lastErr
+			}
+			// Stranded in Processing by a failed cleanup write — the gated
+			// reset healed exactly that shape (codex r2 finding 1); the
+			// retry below is safe.
 		}
 		if ctx.Err() != nil || attempt >= attempts {
 			return "", decision.TokenUsage{}, lastErr
@@ -965,6 +976,12 @@ func (l *Loop) reasonWithRecovery(ctx context.Context, prompt string) (string, d
 		case <-ctx.Done():
 			return "", decision.TokenUsage{}, lastErr
 		}
+		// A provider error whose Processing→Idle cleanup write failed leaves
+		// the agent stranded with the stranding SWALLOWED (the error text is
+		// the provider's, not the transition's). Heal before the retry so it
+		// does not burn an attempt on Processing → Processing. Gated: only a
+		// provably-stranded Processing state is touched, never authority.
+		l.agent.ResetIfStuckProcessing()
 	}
 }
 

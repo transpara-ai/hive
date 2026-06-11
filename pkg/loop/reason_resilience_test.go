@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	egagent "github.com/transpara-ai/eventgraph/go/pkg/agent"
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
@@ -379,6 +380,139 @@ func TestReasonFailure_FailedRaiseDoesNotSetEpisodeFlag(t *testing.T) {
 	}
 	if got := countEscalations(t, g); got != 0 {
 		t.Errorf("escalations = %d, want 0 (the append was rejected)", got)
+	}
+}
+
+// strandingStore rejects the next agent.state.changed append once armed —
+// modeling the OBSERVABLE rollback that strands an agent in Processing when
+// its error-cleanup transition (Processing → Idle) cannot record
+// (transitionLocked rolls the state back; codex r2 finding 1).
+type strandingStore struct {
+	store.Store
+	arm *atomic.Bool
+}
+
+func (s strandingStore) Append(ev event.Event) (event.Event, error) {
+	if s.arm.Load() && ev.Type() == event.EventTypeAgentStateChanged {
+		s.arm.Store(false)
+		return event.Event{}, errors.New("injected: state-cleanup append rejected")
+	}
+	return s.Store.Append(ev)
+}
+
+// strandingProvider fails its first call AND arms the store at that moment,
+// so the very next state.changed append — the Reason error-cleanup
+// transition — is the one rejected. Second call succeeds.
+type strandingProvider struct {
+	arm   *atomic.Bool
+	calls atomic.Int32
+}
+
+func (p *strandingProvider) Name() string  { return "stranding" }
+func (p *strandingProvider) Model() string { return "stranding-model" }
+
+func (p *strandingProvider) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	if p.calls.Add(1) == 1 {
+		p.arm.Store(true)
+		return decision.Response{}, err529
+	}
+	confidence, _ := types.NewScore(0.8)
+	return decision.NewResponse(`/signal {"signal":"TASK_DONE"}`, confidence, decision.TokenUsage{InputTokens: 30, OutputTokens: 20}), nil
+}
+
+var _ intelligence.Provider = (*strandingProvider)(nil)
+
+// TestReason_StrandedProcessingCleanupRecovers is codex r2 finding 1's exact
+// repro: a 529 whose error-cleanup transition FAILS to record leaves the
+// agent stranded in Processing (OBSERVABLE rollback). The retry loop must
+// heal exactly that shape — gated reset, never an authority override — and
+// complete the iteration. Without the heal, the retry dies on
+// Processing → Processing and a retryable store hiccup becomes a terminal
+// loop death.
+func TestReason_StrandedProcessingCleanupRecovers(t *testing.T) {
+	var arm atomic.Bool
+	provider := &strandingProvider{arm: &arm}
+	s := strandingStore{Store: store.NewInMemoryStore(), arm: &arm}
+	as := actor.NewInMemoryActorStore()
+	g := graph.New(s, as)
+	if err := g.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close() })
+	agent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:     hiveagent.Role("builder"),
+		Name:     "stranded-cleanup-test",
+		Graph:    g,
+		Provider: provider,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+		Task:    "build a widget",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	l.reasonRetryBackoff = fastBackoff
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopTaskDone {
+		t.Fatalf("reason = %s (%s), want %s — a stranded cleanup is a stranded state, not authority; the retry must heal it", result.Reason, result.Detail, StopTaskDone)
+	}
+	if got := int(provider.calls.Load()); got != 2 {
+		t.Errorf("provider calls = %d, want 2 (fail+strand, then heal+succeed)", got)
+	}
+	if got := countEscalations(t, g); got != 0 {
+		t.Errorf("escalations = %d, want 0 — the blip was absorbed", got)
+	}
+}
+
+// TestRun_SuspendedAgentStaysSuspendedAndTerminal pins the end-to-end
+// authority shape codex r2 finding 2 asked for: a REAL Guardian-suspended
+// agent (not a provider-injected error string) refuses at its first
+// state transition, the loop exits terminally, and — the load-bearing
+// assertion — the agent is STILL suspended afterwards: no recovery path
+// in the loop may revive it.
+func TestRun_SuspendedAgentStaysSuspendedAndTerminal(t *testing.T) {
+	provider := &flakyProvider{steps: []flakyStep{{resp: `/signal {"signal":"IDLE"}`}}}
+	agent, g := agentWithGraph(t, provider)
+	if err := agent.Suspend(); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 10},
+		Task:    "build a widget",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	l.reasonRetryBackoff = fastBackoff
+
+	result := l.Run(context.Background())
+
+	if result.Reason != StopError {
+		t.Fatalf("reason = %s (%s), want %s — a suspended agent's loop exits terminally", result.Reason, result.Detail, StopError)
+	}
+	if !strings.Contains(result.Detail, "invalid transition") {
+		t.Errorf("detail %q must carry the refusal", result.Detail)
+	}
+	if got := agent.State(); got != egagent.StateSuspended {
+		t.Fatalf("agent state = %s, want Suspended — nothing in the loop may revive a Guardian suspension", got)
+	}
+	if got := int(provider.callCount.Load()); got != 0 {
+		t.Errorf("provider calls = %d, want 0 — the refusal happens before any provider call", got)
+	}
+	if got := countEscalations(t, g); got != 0 {
+		t.Errorf("escalations = %d, want 0", got)
 	}
 }
 
