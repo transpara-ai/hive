@@ -2,6 +2,7 @@ package loop
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -119,6 +120,56 @@ func TestFirstAssignableOpenTask_DecomposedGraphLiveness(t *testing.T) {
 		}
 		if len(deps) != 0 {
 			t.Fatalf("reverse edge persisted (%d deps on subtask); refusal must leave the store unchanged", len(deps))
+		}
+	})
+
+	t.Run("concurrent_opposite_edges_never_form_cycle", func(t *testing.T) {
+		// Round-2 review blocker: the reverse-edge guard was check-then-append,
+		// so two agent goroutines racing opposite edges could both pass the
+		// check (TOCTOU) and land a 2-cycle. taskDependMu makes the pair
+		// atomic in-process. Race fresh pairs repeatedly: a cycle must never
+		// persist. (Without the mutex this catches the interleave
+		// probabilistically; with it, never.)
+		_, ts, agent, convID, causes, _, _ := newDecomposedGraph(t)
+		for i := 0; i < 50; i++ {
+			a, err := ts.Create(agent.ID(), "pair-a", "race", causes, convID)
+			if err != nil {
+				t.Fatalf("Create a: %v", err)
+			}
+			b, err := ts.Create(agent.ID(), "pair-b", "race", causes, convID)
+			if err != nil {
+				t.Fatalf("Create b: %v", err)
+			}
+			fwd := []byte(`{"task_id":"` + a.ID.Value() + `","depends_on":"` + b.ID.Value() + `"}`)
+			rev := []byte(`{"task_id":"` + b.ID.Value() + `","depends_on":"` + a.ID.Value() + `"}`)
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() { defer wg.Done(); _ = execTaskDepend(fwd, ts, agent.ID(), causes, convID) }()
+			go func() { defer wg.Done(); _ = execTaskDepend(rev, ts, agent.ID(), causes, convID) }()
+			wg.Wait()
+			aDeps, err := ts.GetDependencies(a.ID)
+			if err != nil {
+				t.Fatalf("GetDependencies a: %v", err)
+			}
+			bDeps, err := ts.GetDependencies(b.ID)
+			if err != nil {
+				t.Fatalf("GetDependencies b: %v", err)
+			}
+			aOnB := false
+			for _, d := range aDeps {
+				if d == b.ID {
+					aOnB = true
+				}
+			}
+			bOnA := false
+			for _, d := range bDeps {
+				if d == a.ID {
+					bOnA = true
+				}
+			}
+			if aOnB && bOnA {
+				t.Fatalf("iteration %d: both opposite edges landed — 2-cycle persisted (v11-F1 deadlock)", i)
+			}
 		}
 	})
 

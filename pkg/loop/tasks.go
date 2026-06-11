@@ -4,11 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
 	"github.com/transpara-ai/work"
 )
+
+// taskDependMu serializes the reverse-edge check and the dependency append in
+// execTaskDepend across all agent goroutines in this process. Without it, two
+// agents racing opposite edges (A→B and B→A) can both pass the check before
+// either append lands, recreating the v11-F1 deadlock as a 2-cycle. Agent
+// loops in one daemon are the only concurrent /task depend writers today; a
+// store-level atomic guard for cross-process writers routes to G-2.x.
+var taskDependMu sync.Mutex
 
 // TaskCommand represents a parsed /task command from an agent's response.
 type TaskCommand struct {
@@ -327,7 +336,10 @@ func execTaskDepend(
 	// pair: a reverse edge (depends_on already depends on task_id) would make
 	// both tasks aggregates AND both ListOpen-blocked — the v11-F1 deadlock as
 	// a 2-cycle. Refuse on read error too: an unverifiable direction is not a
-	// permitted one. Transitive cycle detection routes to G-2.x.
+	// permitted one. Transitive cycle detection routes to G-2.x. The mutex
+	// makes check+append atomic within this process (see taskDependMu).
+	taskDependMu.Lock()
+	defer taskDependMu.Unlock()
 	existing, err := tasks.GetDependencies(dependsOnID)
 	if err != nil {
 		return fmt.Errorf("verify dependency direction: %w", err)
