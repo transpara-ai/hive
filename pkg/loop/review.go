@@ -53,7 +53,7 @@ const reviewEscalationMarker = "REVIEW ESCALATION:"
 type reviewerState struct {
 	iteration      int
 	reviewHistory  map[string]*taskReviewRecord
-	completedTasks map[string]work.TaskCompletedContent // keyed by TaskID string
+	completedTasks map[string]completedRecord // keyed by TaskID string
 
 	// replayHead is the chain watermark: the ID of the newest event already
 	// folded into this projection from the durable store. Zero means the
@@ -69,6 +69,17 @@ type reviewerState struct {
 	projectionStale bool
 }
 
+// completedRecord pairs a folded completion's content with its chain event ID
+// so a reopen evicts the pending entry ONLY when it supersedes THIS completion
+// — work's CompletionRefs algebra, mirrored. A reopen referencing only an
+// older duplicate completion must not hide a still-live newer one (v12-F1
+// review, finding B2; duplicate completions are possible at store level
+// pre-G-2.x).
+type completedRecord struct {
+	content work.TaskCompletedContent
+	eventID types.EventID
+}
+
 // taskReviewRecord tracks review history for a single task.
 type taskReviewRecord struct {
 	taskID      string
@@ -82,19 +93,33 @@ type taskReviewRecord struct {
 func newReviewerState() *reviewerState {
 	return &reviewerState{
 		reviewHistory:  make(map[string]*taskReviewRecord),
-		completedTasks: make(map[string]work.TaskCompletedContent),
+		completedTasks: make(map[string]completedRecord),
 	}
 }
 
-// InitReviewerFromRecovery seeds reviewer state from chain replay.
+// InitReviewerFromRecovery seeds reviewer state from chain replay. Verdicts
+// and issues ride along when the recovery provides them (v12-F1 review,
+// findings B1/N3): a recovered approve/reject keeps settled work settled
+// across restarts, a recovered request_changes pends for re-review, and a
+// recovered cap escalation can cite the actual outstanding issues. Counts
+// without verdicts (legacy recovery shape) keep the fail-toward-review
+// behavior in findPendingReviews.
 func (s *reviewerState) InitReviewerFromRecovery(state *checkpoint.ReviewerRecoveredState) {
 	if state == nil {
 		return
 	}
 	for taskID, count := range state.ReviewCounts {
-		s.reviewHistory[taskID] = &taskReviewRecord{
+		rec := &taskReviewRecord{
+			taskID:      taskID,
 			reviewCount: count,
 		}
+		if state.LastVerdicts != nil {
+			rec.lastVerdict = state.LastVerdicts[taskID]
+		}
+		if state.LastIssues != nil {
+			rec.lastIssues = state.LastIssues[taskID]
+		}
+		s.reviewHistory[taskID] = rec
 	}
 }
 
@@ -234,7 +259,7 @@ const scanPageSize = 1000
 func (s *reviewerState) foldChainEvent(ev event.Event, selfID types.ActorID) {
 	switch c := ev.Content().(type) {
 	case work.TaskCompletedContent:
-		s.completedTasks[c.TaskID.Value()] = c
+		s.completedTasks[c.TaskID.Value()] = completedRecord{content: c, eventID: ev.ID()}
 	case event.CodeReviewContent:
 		if ev.Source() == selfID {
 			return
@@ -243,8 +268,21 @@ func (s *reviewerState) foldChainEvent(ev event.Event, selfID types.ActorID) {
 	case work.TaskReopenedContent:
 		// The review→fix return edge (run findings v12-F1): a reopened task
 		// is being fixed, so its superseded completion must not pend review.
-		// The re-completion re-enters via its own fold.
-		delete(s.completedTasks, c.TaskID.Value())
+		// Evict ONLY when this reopen names the resident completion — work's
+		// CompletionRefs algebra, mirrored: a reopen referencing only an
+		// older duplicate completion leaves a still-live newer one pending
+		// (v12-F1 review, finding B2). The re-completion re-enters via its
+		// own fold.
+		rec, resident := s.completedTasks[c.TaskID.Value()]
+		if !resident {
+			return
+		}
+		for _, ref := range c.CompletionRefs {
+			if ref == rec.eventID {
+				delete(s.completedTasks, c.TaskID.Value())
+				return
+			}
+		}
 	case work.CommentContent:
 		// Only the reviewer's OWN cap-trip escalation comment matters here:
 		// folding it re-arms emit-once state after a restart, so a recovered
@@ -644,7 +682,8 @@ func (l *Loop) enrichReviewObservation(obs string) string {
 
 	// One task per iteration — focus produces better reviews.
 	taskID := pending[0]
-	task, ok := l.reviewerState.completedTasks[taskID]
+	compRec, ok := l.reviewerState.completedTasks[taskID]
+	task := compRec.content
 
 	var sb strings.Builder
 	sb.WriteString("\n\n=== CODE REVIEW CONTEXT ===\n")

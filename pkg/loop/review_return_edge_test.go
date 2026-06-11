@@ -7,6 +7,7 @@ import (
 	"time"
 
 	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
 	"github.com/transpara-ai/work"
@@ -189,7 +190,7 @@ func TestRouteReviewVerdict_ThirdRequestChangesEscalates(t *testing.T) {
 
 func TestFindPendingReviews_CappedTaskNotPending(t *testing.T) {
 	s := newReviewerState()
-	s.completedTasks["task-1"] = work.TaskCompletedContent{}
+	s.completedTasks["task-1"] = completedRecord{}
 	s.recordReview("task-1", "request_changes", []string{"a"})
 	s.recordReview("task-1", "request_changes", []string{"b"})
 	if got := len(s.findPendingReviews()); got != 1 {
@@ -207,9 +208,104 @@ func TestFindPendingReviews_RecoverySeededCapNotPending(t *testing.T) {
 		ReviewCounts: map[string]int{"task-1": 3},
 	})
 	// The completion folds in from the chain after recovery.
-	s.completedTasks["task-1"] = work.TaskCompletedContent{}
+	s.completedTasks["task-1"] = completedRecord{}
 	if got := len(s.findPendingReviews()); got != 0 {
 		t.Fatalf("a recovery-seeded capped task must not pend (restart re-burn); got %d", got)
+	}
+}
+
+func TestInitReviewerFromRecovery_VerdictFidelity(t *testing.T) {
+	s := newReviewerState()
+	s.InitReviewerFromRecovery(&checkpoint.ReviewerRecoveredState{
+		ReviewCounts: map[string]int{"settled": 1, "rejected-fix": 2},
+		LastVerdicts: map[string]string{"settled": "approve", "rejected-fix": "request_changes"},
+		LastIssues:   map[string][]string{"rejected-fix": {"still wrong"}},
+	})
+	// Completions fold back in from the chain after recovery.
+	s.completedTasks["settled"] = completedRecord{}
+	s.completedTasks["rejected-fix"] = completedRecord{}
+
+	pending := s.findPendingReviews()
+	if len(pending) != 1 || pending[0] != "rejected-fix" {
+		t.Fatalf("recovered approve must stay settled and recovered request_changes must pend; got %v", pending)
+	}
+	rec := s.reviewHistory["rejected-fix"]
+	if rec == nil || len(rec.lastIssues) != 1 || rec.lastIssues[0] != "still wrong" {
+		t.Fatalf("recovered issues must survive for escalation fidelity; got %+v", rec)
+	}
+}
+
+// TestFoldReopen_SupersedesOnlyReferencedCompletions pins the v12-F1 review
+// finding B2: the reviewer projection mirrors work's CompletionRefs algebra.
+// A reopen that names only an OLDER duplicate completion must not evict a
+// still-live newer one from pending review (duplicate completions are
+// possible at store level pre-G-2.x).
+func TestFoldReopen_SupersedesOnlyReferencedCompletions(t *testing.T) {
+	l, ts, agent, convID, causes, task := newReturnEdgeFixture(t)
+
+	// A duplicate completion C2 on top of the fixture's C1.
+	if err := ts.Complete(agent.ID(), task.ID, "done again", causes, convID); err != nil {
+		t.Fatalf("duplicate Complete: %v", err)
+	}
+
+	// Collect both completion event IDs from the chain.
+	g := l.agent.Graph()
+	page, err := g.Store().ByType(work.EventTypeTaskCompleted, 1000, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType completed: %v", err)
+	}
+	var c1ID, c2ID types.EventID
+	for _, ev := range page.Items() {
+		c, ok := ev.Content().(work.TaskCompletedContent)
+		if !ok || c.TaskID != task.ID {
+			continue
+		}
+		switch c.Summary {
+		case "done":
+			c1ID = ev.ID()
+		case "done again":
+			c2ID = ev.ID()
+		}
+	}
+	if c1ID.IsZero() || c2ID.IsZero() {
+		t.Fatal("did not find both completion events")
+	}
+
+	// A reopen referencing ONLY the older C1 — a raced or foreign writer
+	// shape TaskStore.Reopen itself would not produce.
+	factory := event.NewEventFactory(g.Registry())
+	appendReopen := func(refs []types.EventID, reason string) {
+		t.Helper()
+		content := work.TaskReopenedContent{
+			TaskID:         task.ID,
+			ReopenedBy:     agent.ID(),
+			Reason:         reason,
+			CompletionRefs: refs,
+		}
+		ev, err := factory.Create(work.EventTypeTaskReopened, agent.ID(), content, causes, convID, g.Store(), &testSigner{})
+		if err != nil {
+			t.Fatalf("create reopen event: %v", err)
+		}
+		if _, err := g.Store().Append(ev); err != nil {
+			t.Fatalf("append reopen event: %v", err)
+		}
+	}
+
+	appendReopen([]types.EventID{c1ID}, "subset reopen")
+	if !l.catchUpReviewProjection() {
+		t.Fatal("catch-up failed")
+	}
+	if got := len(l.reviewerState.findPendingReviews()); got != 1 {
+		t.Fatalf("a reopen naming only an older duplicate completion must leave the live one pending; got %d", got)
+	}
+
+	// A reopen that names the resident completion evicts.
+	appendReopen([]types.EventID{c1ID, c2ID}, "full reopen")
+	if !l.catchUpReviewProjection() {
+		t.Fatal("second catch-up failed")
+	}
+	if got := len(l.reviewerState.findPendingReviews()); got != 0 {
+		t.Fatalf("a reopen naming the resident completion must evict it from pending; got %d", got)
 	}
 }
 
@@ -265,6 +361,8 @@ func TestCatchUp_SweepPostsLostEscalation(t *testing.T) {
 	// is the only path left for the intervention request.
 	l.reviewerState.InitReviewerFromRecovery(&checkpoint.ReviewerRecoveredState{
 		ReviewCounts: map[string]int{task.ID.Value(): 3},
+		LastVerdicts: map[string]string{task.ID.Value(): "request_changes"},
+		LastIssues:   map[string][]string{task.ID.Value(): {"the Tier citation is still wrong"}},
 	})
 
 	if !l.catchUpReviewProjection() {
@@ -272,6 +370,19 @@ func TestCatchUp_SweepPostsLostEscalation(t *testing.T) {
 	}
 	if got := escalationComments(t, ts, task.ID); got != 1 {
 		t.Fatalf("a lost escalation must be re-posted after recovery; got %d comments", got)
+	}
+	comments, err := ts.ListComments(task.ID)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	foundIssues := false
+	for _, c := range comments {
+		if strings.HasPrefix(c.Body, reviewEscalationMarker) && strings.Contains(c.Body, "the Tier citation is still wrong") {
+			foundIssues = true
+		}
+	}
+	if !foundIssues {
+		t.Fatal("the recovered escalation must cite the outstanding issues, not an empty list")
 	}
 	if got := len(l.reviewerState.findPendingReviews()); got != 0 {
 		t.Fatalf("the capped task must not pend after the sweep; got %d", got)

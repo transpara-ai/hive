@@ -125,6 +125,22 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 		}
 	}
 
+	// ── Reviewer chain state: attaches in EVERY mode ──────────────────────────
+
+	// The verdict cap is chain truth, and the live chain fold deliberately
+	// skips the reviewer's own reviews (they are recorded at emission) — so
+	// any reviewer boot that skips this seeding forgets its cap: settled work
+	// pends again and a capped task can be re-reviewed or re-reopened past
+	// the limit (v12-F1 review, finding B1). Warm-start narrative context
+	// carries intent, not mechanical counts; only the chain carries those.
+	// The sibling warm-mode gaps (budget/CTO/spawner/iteration stay cold-only
+	// below) are pre-existing and routed G-2.x.
+	if revState, err := ReplayReviewerFromStore(s); err != nil {
+		log.Printf("checkpoint: recover: Reviewer replay error: %v — Reviewer state unavailable", err)
+	} else if rs, ok := result[RoleReviewer]; ok {
+		rs.ReviewerState = revState
+	}
+
 	// ── Tier 1: Chain replay for cold-start agents ────────────────────────────
 
 	// Only run chain replay if at least one agent is cold-starting.
@@ -150,11 +166,6 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 		spawnerState, err := ReplaySpawnerFromStore(s)
 		if err != nil {
 			log.Printf("checkpoint: recover: Spawner replay error: %v — Spawner state unavailable", err)
-		}
-
-		reviewerState, err := ReplayReviewerFromStore(s)
-		if err != nil {
-			log.Printf("checkpoint: recover: Reviewer replay error: %v — Reviewer state unavailable", err)
 		}
 
 		// Replay iteration counters from heartbeat + agent.stopped events.
@@ -184,14 +195,13 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 				}
 			}
 
-			// Attach role-specific chain state.
+			// Attach role-specific chain state. (Reviewer state attached
+			// above, for every mode.)
 			switch role {
 			case RoleCTO:
 				rs.CTOState = ctoState
 			case RoleSpawner:
 				rs.SpawnerState = spawnerState
-			case RoleReviewer:
-				rs.ReviewerState = reviewerState
 			}
 		}
 	}

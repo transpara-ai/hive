@@ -391,10 +391,10 @@ func TestHasReviewableWork(t *testing.T) {
 	if !ok {
 		t.Fatal("historical completion not replayed into reviewerState.completedTasks")
 	}
-	if c.CompletedBy != completer.ID() {
-		t.Fatalf("replayed completion lost CompletedBy: got %s, want %s", c.CompletedBy.Value(), completer.ID().Value())
+	if c.content.CompletedBy != completer.ID() {
+		t.Fatalf("replayed completion lost CompletedBy: got %s, want %s", c.content.CompletedBy.Value(), completer.ID().Value())
 	}
-	if c.ArtifactRef.IsZero() {
+	if c.content.ArtifactRef.IsZero() {
 		t.Fatal("replayed completion lost ArtifactRef; review git context would degrade to heuristics")
 	}
 	obs := l.enrichReviewObservation("base obs")
@@ -757,7 +757,7 @@ func TestHasReviewableWork_RecompletionAfterRequestChanges(t *testing.T) {
 func TestFindPendingReviews_RecoveredCountWithoutVerdictPends(t *testing.T) {
 	st := newReviewerState()
 	taskID, _ := types.NewEventIDFromNew()
-	st.completedTasks[taskID.Value()] = work.TaskCompletedContent{TaskID: taskID}
+	st.completedTasks[taskID.Value()] = completedRecord{content: work.TaskCompletedContent{TaskID: taskID}}
 	st.reviewHistory[taskID.Value()] = &taskReviewRecord{taskID: taskID.Value(), reviewCount: 1}
 
 	pending := st.findPendingReviews()
