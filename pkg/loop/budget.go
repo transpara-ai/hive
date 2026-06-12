@@ -69,11 +69,20 @@ func (l *Loop) isParkedDurationRenewal(cmd *BudgetCommand) bool {
 		if !e.DurationParked {
 			return false
 		}
+		// A target already at the duration ceiling cannot be raised (codex
+		// r1 #3): any increase, or any set, clamps to a zero-delta no-op —
+		// it would ride the exemption past the timing gates, burn the
+		// allocator's fire, and leave the target parked. No possible raise →
+		// no exemption. The ceiling is the designed epoch bound.
+		currentMin := int(e.Budget.MaxDuration() / time.Minute)
+		if currentMin >= budget.LoadConfig().DurationCeilingMin {
+			return false
+		}
 		switch cmd.Action {
 		case "increase":
 			return cmd.Amount > 0
 		case "set":
-			return cmd.Amount > int(e.Budget.MaxDuration()/time.Minute)
+			return cmd.Amount > currentMin
 		default:
 			return false
 		}

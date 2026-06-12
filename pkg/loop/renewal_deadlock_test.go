@@ -734,3 +734,172 @@ func TestEnrichBudgetObservation_MarksParkedAgents(t *testing.T) {
 		t.Fatalf("PARKED(duration) marker count = %d; want exactly 1 (only the parked agent)", strings.Count(obs, "PARKED(duration)"))
 	}
 }
+
+// ────────────────────────────────────────────────────────────────────
+// codex r1 nonblockers (2026-06-12), each pinned red-first.
+// ────────────────────────────────────────────────────────────────────
+
+// TestRun_DurationParkMarkerSurvivesSpuriousWakes pins codex r1 #1: a wake
+// that does NOT carry a renewal must not flicker the DurationParked marker.
+// The clear belongs at the proven-resume site (budget check passes) and at
+// shutdown — never on the wake edge itself, where a still-exhausted loop
+// would briefly read as unparked and the allocator's empty-set reset would
+// treat the SAME park as a new episode (delta-gate invariant violation).
+func TestRun_DurationParkMarkerSurvivesSpuriousWakes(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-time.Hour))
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), bi, 100, "test-model")
+	l, err := New(Config{
+		Agent:          agent,
+		HumanID:        humanID(),
+		Bus:            g.Bus(),
+		Keepalive:      true,
+		Budget:         cfg,
+		BudgetInstance: bi,
+		BudgetRegistry: reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(reg.DurationParkedNames()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(reg.DurationParkedNames()) == 0 {
+		t.Fatal("never parked")
+	}
+
+	// Hammer spurious wakes while a sampler watches for any empty window.
+	sawEmpty := make(chan struct{}, 1)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if len(reg.DurationParkedNames()) == 0 {
+					select {
+					case sawEmpty <- struct{}{}:
+					default:
+					}
+					return
+				}
+			}
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		select {
+		case l.wake <- struct{}{}:
+		default:
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	close(stop)
+	select {
+	case <-sawEmpty:
+		t.Fatal("DurationParked flickered empty on a spurious wake; the marker must clear only on proven resume or shutdown")
+	default:
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+// TestRun_DurationParkMarkerVisibleWhenRaiseLands pins codex r1 #2: the
+// registry marker must be set BEFORE agent.budget.exhausted is emitted, so
+// any observer the raise wakes — however the bus schedules delivery — reads
+// PARKED(duration) for the source agent. Marker-after-emit leaves the
+// immediate wake path racing the registry write.
+func TestRun_DurationParkMarkerVisibleWhenRaiseLands(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-time.Hour))
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), bi, 100, "test-model")
+
+	markerAtDelivery := make(chan bool, 4)
+	g.Bus().Subscribe(types.MustSubscriptionPattern("agent.budget.exhausted"), func(ev event.Event) {
+		markerAtDelivery <- len(reg.DurationParkedNames()) > 0
+	})
+
+	l, err := New(Config{
+		Agent:          agent,
+		HumanID:        humanID(),
+		Bus:            g.Bus(),
+		Keepalive:      true,
+		Budget:         cfg,
+		BudgetInstance: bi,
+		BudgetRegistry: reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	select {
+	case visible := <-markerAtDelivery:
+		if !visible {
+			t.Fatal("agent.budget.exhausted delivered while DurationParked was unset; the marker must be set before the raise")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("raise never delivered")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+// TestValidateBudget_ParkedRenewalAtCeilingNotExempt pins codex r1 #3: a
+// parked target already AT the duration ceiling cannot be raised — any
+// "increase", or "set" that clamps, is a guaranteed no-op that would ride
+// the exemption past the timing gates, burn the allocator's fire, emit a
+// zero-delta adjustment, and leave the target parked. No raise possible →
+// no exemption (fail closed); the ceiling is the designed epoch bound.
+func TestValidateBudget_ParkedRenewalAtCeilingNotExempt(t *testing.T) {
+	l := makeLoopWithRegistry(t, "allocator")
+	ceiling := budget.LoadConfig().DurationCeilingMin
+	l.config.BudgetRegistry.Register("maxed",
+		resources.NewBudget(resources.BudgetConfig{MaxIterations: 100, MaxDuration: time.Duration(ceiling) * time.Minute}), 100, "")
+	markParked(l, "maxed")
+
+	for _, cmd := range []*BudgetCommand{
+		{Agent: "maxed", Action: "increase", Amount: 30, Reason: "x", Resource: "duration"},
+		{Agent: "maxed", Action: "set", Amount: ceiling + 100, Reason: "x", Resource: "duration"},
+	} {
+		if err := l.validateBudgetCommand(cmd, 1); err == nil {
+			t.Errorf("%s at ceiling bypassed the timing gates; a guaranteed-clamp no-op must not be exempt", cmd.Action)
+		}
+	}
+
+	// Boundary: one minute below the ceiling is still raisable — exempt.
+	l.config.BudgetRegistry.Register("almost",
+		resources.NewBudget(resources.BudgetConfig{MaxIterations: 100, MaxDuration: time.Duration(ceiling-1) * time.Minute}), 100, "")
+	markParked(l, "almost")
+	cmd := &BudgetCommand{Agent: "almost", Action: "increase", Amount: 30, Reason: "x", Resource: "duration"}
+	if err := l.validateBudgetCommand(cmd, 1); err != nil {
+		t.Errorf("increase one minute below ceiling = %v; want exempt (still raisable)", err)
+	}
+}

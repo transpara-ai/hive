@@ -454,6 +454,17 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
 					l.budgetParkLogged = true
 				}
+				// v15-F1(b): register the park BEFORE the raise (codex r1 #2)
+				// so any observer the event wakes — however the bus schedules
+				// delivery — reads PARKED(duration) for this agent. The clear
+				// happens ONLY at proven resume (the budget check passes
+				// below) or at shutdown — never on the wake edge (codex r1
+				// #1: a spurious wake re-enters this branch still exhausted;
+				// a marker flicker would let the allocator's empty-set reset
+				// read the SAME park as a new episode).
+				if reg := l.config.BudgetRegistry; reg != nil {
+					reg.SetDurationParked(l.agent.Name(), true)
+				}
 				// v15-F1(a): the raise half. Round 5's park was stdout-only —
 				// no chain event, so a quiescent society gave the allocator
 				// no wake and the renewer slept while the renewables waited.
@@ -468,28 +479,30 @@ func (l *Loop) Run(ctx context.Context) Result {
 						l.budgetParkEmitted = true
 					}
 				}
-				// v15-F1(b): register the park so the allocator's recheck
-				// gate and the renewal exemption key on EXPLICIT parked
-				// state. Cleared on resume AND on shutdown-while-parked —
-				// a dead loop must never read as a renewable.
-				if reg := l.config.BudgetRegistry; reg != nil {
-					reg.SetDurationParked(l.agent.Name(), true)
-				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event
 				// may not match this agent's subscriptions, and a fully
 				// parked society generates no other wakes — the park polls
 				// the in-memory budget so a renewed agent always resumes.
-				resumed := l.waitForBudgetRenewal(ctx)
-				if reg := l.config.BudgetRegistry; reg != nil {
-					reg.SetDurationParked(l.agent.Name(), false)
-				}
-				if resumed {
+				if l.waitForBudgetRenewal(ctx) {
 					consecutiveEmpty = 0
 					continue
+				}
+				// Shutdown while parked: clear the marker — a dead loop must
+				// never read as a renewable.
+				if reg := l.config.BudgetRegistry; reg != nil {
+					reg.SetDurationParked(l.agent.Name(), false)
 				}
 				return l.result(StopBudget, iteration, "shutdown while parked on budget exhaustion: "+err.Error())
 			}
 			return l.result(StopBudget, iteration, err.Error())
+		}
+		// Proven resume: the budget check passed. Clear the park episode
+		// state — the registry marker (set only while a live loop is parked)
+		// and both per-episode dedup flags.
+		if l.budgetParkLogged {
+			if reg := l.config.BudgetRegistry; reg != nil {
+				reg.SetDurationParked(l.agent.Name(), false)
+			}
 		}
 		l.budgetParkLogged = false
 		l.budgetParkEmitted = false
