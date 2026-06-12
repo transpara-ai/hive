@@ -288,10 +288,14 @@ type Loop struct {
 	// once on a stale picture and the deadlock resurrects).
 	budgetParkEmitted bool
 
-	// parkLimitAtRaise is the MaxDuration observed when the park's raise
-	// last went on-chain. A differing live limit on park re-entry means
-	// someone renewed insufficiently — re-raise. Run() goroutine only.
-	parkLimitAtRaise time.Duration
+	// parkAckedLimit is the duration limit the current park episode has
+	// ACKNOWLEDGED: set at episode entry and again on each successful
+	// raise. A live limit that differs is an unacknowledged renewal — the
+	// park's recheck tick re-enters the branch (codex r3: a renewal whose
+	// budget.adjusted emit failed delivers NO wake, so the tick is the only
+	// way the re-raise belt is reachable) and the belt raises afresh.
+	// Run() goroutine only.
+	parkAckedLimit time.Duration
 
 	// allocParkSig is the park-set signature at the allocator recheck's
 	// last fire (v15-F1b): the sorted, joined names of duration-parked
@@ -461,6 +465,10 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if !l.budgetParkLogged {
 					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
 					l.budgetParkLogged = true
+					// Fresh episode: acknowledge the limit we parked at, so
+					// the renewal-change detector (tick side and belt below)
+					// has a baseline even if the raise itself fails.
+					l.parkAckedLimit = l.budget.MaxDuration()
 				}
 				// v15-F1(b): register the park BEFORE the raise (codex r1 #2)
 				// so any observer the event wakes — however the bus schedules
@@ -483,7 +491,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 				// A limit that CHANGED without unparking is an insufficient
 				// renewal (codex r2 #3) — re-raise so the renewer gets a
 				// fresh wake; bounded by renewal acts, not by wakes.
-				if l.budgetParkEmitted && l.budget.MaxDuration() != l.parkLimitAtRaise {
+				if l.budgetParkEmitted && l.budget.MaxDuration() != l.parkAckedLimit {
 					l.budgetParkEmitted = false
 				}
 				if !l.budgetParkEmitted {
@@ -491,7 +499,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 						fmt.Printf("[%s] budget.exhausted raise failed (park proceeds; recheck pulse remains): %v\n", l.agent.Name(), emitErr)
 					} else {
 						l.budgetParkEmitted = true
-						l.parkLimitAtRaise = l.budget.MaxDuration()
+						l.parkAckedLimit = l.budget.MaxDuration()
 					}
 				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event

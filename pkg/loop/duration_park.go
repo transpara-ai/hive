@@ -19,7 +19,8 @@ import (
 // the default (fail closed).
 
 // waitForBudgetRenewal blocks a duration-parked loop until a wake arrives,
-// the budget passes again, or the context ends. Returns true to resume,
+// the budget passes again, a LIMIT CHANGE goes unacknowledged, or the
+// context ends. Returns true to resume (or re-enter the park branch),
 // false on cancellation.
 //
 // The bare wake channel is NOT sufficient here: only some agents subscribe
@@ -30,6 +31,13 @@ import (
 // recheck tick — zero LLM cost, runs only while parked, and cannot
 // re-ignite the wakeup storm the per-iteration timers were removed to kill:
 // its only action is resuming an agent someone explicitly renewed.
+//
+// The tick also returns on an UNACKNOWLEDGED limit change (codex r3): an
+// insufficient renewal whose budget.adjusted emit failed mutates the limit
+// with NO wake — without this arm the re-raise belt in the park branch is
+// unreachable and the renewal deadlock resurrects through the failed-emit
+// path. Returning re-enters the park branch, which raises afresh and
+// acknowledges the new limit — one raise per change, no tick storm.
 func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 	interval := l.config.RecheckInterval
 	if interval <= 0 {
@@ -43,6 +51,9 @@ func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 			return true
 		case <-ticker.C:
 			if l.budget.Check() == nil {
+				return true
+			}
+			if l.budget.MaxDuration() != l.parkAckedLimit {
 				return true
 			}
 		case <-ctx.Done():

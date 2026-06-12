@@ -1161,3 +1161,79 @@ func TestRun_DurationParkReRaisesOnInsufficientRenewal(t *testing.T) {
 		t.Fatal("Run did not return after cancellation")
 	}
 }
+
+// TestRun_DurationParkReRaisesWithoutAnyWake pins codex r3's blocker: an
+// insufficient renewal whose agent.budget.adjusted emit FAILS mutates the
+// live limit but delivers no wake — and a poll that only checks for a full
+// budget pass leaves the re-raise belt unreachable. The park's recheck tick
+// must notice ANY unacknowledged limit change (acknowledged = at episode
+// entry or on a successful raise), re-enter the park branch, and raise
+// afresh — with NO wake involved at any point. The follow-up sufficient
+// renewal must also resume the worker wake-free (the v14 poll contract).
+func TestRun_DurationParkReRaisesWithoutAnyWake(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-2*time.Hour))
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), bi, 100, "test-model")
+	l, err := New(Config{
+		Agent: agent, HumanID: humanID(), Bus: g.Bus(), Keepalive: true,
+		Budget: cfg, BudgetInstance: bi, BudgetRegistry: reg,
+		RecheckInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	count := func() int {
+		page, err := g.Store().ByType(event.EventTypeAgentBudgetExhausted, 100, types.None[types.Cursor]())
+		if err != nil {
+			t.Fatalf("ByType: %v", err)
+		}
+		return len(page.Items())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("initial raise count = %d; want 1", got)
+	}
+
+	// Insufficient renewal lands with NO event and NO wake (the failed-emit
+	// shape): 2h elapsed, limit only reaches 60m.
+	bi.SetMaxDuration(time.Hour)
+	deadline = time.Now().Add(2 * time.Second)
+	for count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("raise count after wake-less insufficient renewal = %d; want 2 — the park's tick must notice an unacknowledged limit change or the deadlock resurrects through the failed-emit path", got)
+	}
+
+	// The re-raise acknowledged the new limit: ticks stay quiet now.
+	time.Sleep(300 * time.Millisecond)
+	if got := count(); got != 2 {
+		t.Fatalf("raise count grew to %d on a stable limit; want still 2 (one raise per unacknowledged change, no tick storm)", got)
+	}
+
+	// Sufficient renewal, still wake-free: the poll resumes the worker.
+	bi.SetMaxDuration(24 * time.Hour)
+	if !waitForCallCount(t, provider, 1, 2*time.Second) {
+		t.Fatalf("worker never resumed after wake-free sufficient renewal")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
