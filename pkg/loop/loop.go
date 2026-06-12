@@ -282,8 +282,16 @@ type Loop struct {
 	// wakes re-enter the parked branch. Set ONLY on a successful chain
 	// write (the v13-F1 dedup lesson: a failed raise must stay retryable,
 	// never silently marked done). Cleared when a budget check passes
-	// again (resume), so the next park episode raises again.
+	// again (resume), so the next park episode raises again — and reset
+	// when the duration limit CHANGES without unparking (codex r2 #3: an
+	// insufficient renewal must produce a fresh raise, or the renewer acts
+	// once on a stale picture and the deadlock resurrects).
 	budgetParkEmitted bool
+
+	// parkLimitAtRaise is the MaxDuration observed when the park's raise
+	// last went on-chain. A differing live limit on park re-entry means
+	// someone renewed insufficiently — re-raise. Run() goroutine only.
+	parkLimitAtRaise time.Duration
 
 	// allocParkSig is the park-set signature at the allocator recheck's
 	// last fire (v15-F1b): the sorted, joined names of duration-parked
@@ -472,11 +480,18 @@ func (l *Loop) Run(ctx context.Context) Result {
 				// failure never blocks the park (parking is the safe state;
 				// the allocator's gated re-check is the fail-safe wake) and
 				// leaves the flag unset so the next pass retries the raise.
+				// A limit that CHANGED without unparking is an insufficient
+				// renewal (codex r2 #3) — re-raise so the renewer gets a
+				// fresh wake; bounded by renewal acts, not by wakes.
+				if l.budgetParkEmitted && l.budget.MaxDuration() != l.parkLimitAtRaise {
+					l.budgetParkEmitted = false
+				}
 				if !l.budgetParkEmitted {
 					if emitErr := l.agent.EmitBudgetExhausted(string(resources.ResourceDuration)); emitErr != nil {
 						fmt.Printf("[%s] budget.exhausted raise failed (park proceeds; recheck pulse remains): %v\n", l.agent.Name(), emitErr)
 					} else {
 						l.budgetParkEmitted = true
+						l.parkLimitAtRaise = l.budget.MaxDuration()
 					}
 				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event
@@ -487,11 +502,8 @@ func (l *Loop) Run(ctx context.Context) Result {
 					consecutiveEmpty = 0
 					continue
 				}
-				// Shutdown while parked: clear the marker — a dead loop must
-				// never read as a renewable.
-				if reg := l.config.BudgetRegistry; reg != nil {
-					reg.SetDurationParked(l.agent.Name(), false)
-				}
+				// Shutdown while parked: result() clears the marker — every
+				// loop death does (codex r2 #1/#2 made it the chokepoint).
 				return l.result(StopBudget, iteration, "shutdown while parked on budget exhaustion: "+err.Error())
 			}
 			return l.result(StopBudget, iteration, err.Error())
@@ -1396,8 +1408,17 @@ func (l *Loop) waitForEvents(ctx context.Context) bool {
 	}
 }
 
-// result creates a Result with budget snapshot.
+// result creates a Result with budget snapshot. It is the single chokepoint
+// every loop death passes through, so it owns the duration-park marker's
+// death-clear (codex r2 #1/#2): a returned loop is a corpse, and a corpse
+// must never read as a renewable — whatever path it died through
+// (cancellation winning a wake race, a non-duration budget failure after a
+// renewal, or any future return). Unconditional and idempotent: clearing an
+// unset marker or an unregistered name is a no-op.
 func (l *Loop) result(reason StopReason, iterations int, detail string) Result {
+	if reg := l.config.BudgetRegistry; reg != nil {
+		reg.SetDurationParked(l.agent.Name(), false)
+	}
 	return Result{
 		Reason:     reason,
 		Iterations: iterations,

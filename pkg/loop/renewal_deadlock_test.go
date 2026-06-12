@@ -903,3 +903,261 @@ func TestValidateBudget_ParkedRenewalAtCeilingNotExempt(t *testing.T) {
 		t.Errorf("increase one minute below ceiling = %v; want exempt (still raisable)", err)
 	}
 }
+
+// ────────────────────────────────────────────────────────────────────
+// codex r2 blockers (2026-06-12), each pinned red-first.
+// ────────────────────────────────────────────────────────────────────
+
+// TestRun_DurationParkMarkerNeverSurvivesLoopDeath pins codex r2 #1+#2 as a
+// CLASS: whatever path a parked loop dies through — cancellation winning
+// the race after a wake, a non-duration budget failure surfacing after a
+// renewal, any future return — the DurationParked marker must not survive
+// Run() returning. A stale marker makes the allocator renew a corpse and
+// wedges the park-set signature on a dead name. The fix owns the clear at
+// the result() chokepoint, so the property holds for every death path by
+// construction, not per-path whack-a-mole.
+func TestRun_DurationParkMarkerNeverSurvivesLoopDeath(t *testing.T) {
+	t.Run("cancellation wins after a wake", func(t *testing.T) {
+		provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+		agent, g := agentWithGraph(t, provider)
+		cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+		bi := resources.NewBudgetForTest(cfg, time.Now().Add(-time.Hour))
+		reg := resources.NewBudgetRegistry()
+		reg.Register(agent.Name(), bi, 100, "test-model")
+		l, err := New(Config{
+			Agent: agent, HumanID: humanID(), Bus: g.Bus(), Keepalive: true,
+			Budget: cfg, BudgetInstance: bi, BudgetRegistry: reg,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan Result, 1)
+		go func() { done <- l.Run(ctx) }()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for len(reg.DurationParkedNames()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if len(reg.DurationParkedNames()) == 0 {
+			t.Fatal("never parked")
+		}
+
+		// Cancel and wake in a deliberate race: whichever select arm wins,
+		// the loop dies (ctx.Err at loop top, or ctx.Done in the wait).
+		cancel()
+		for i := 0; i < 10; i++ {
+			select {
+			case l.wake <- struct{}{}:
+			default:
+			}
+		}
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run did not return")
+		}
+		if got := reg.DurationParkedNames(); len(got) != 0 {
+			t.Fatalf("DurationParked = %v after Run returned; a dead loop must never read as a renewable", got)
+		}
+	})
+
+	t.Run("non-duration exhaustion surfaces after renewal", func(t *testing.T) {
+		provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+		agent, g := agentWithGraph(t, provider)
+		cfg := resources.BudgetConfig{MaxIterations: 100, MaxDuration: 30 * time.Minute}
+		bi := resources.NewBudgetForTest(cfg, time.Now().Add(-time.Hour))
+		bi.SeedConsumed(25, 0, 0) // used=25 passes max=100 at park entry
+		reg := resources.NewBudgetRegistry()
+		reg.Register(agent.Name(), bi, 100, "test-model")
+		l, err := New(Config{
+			Agent: agent, HumanID: humanID(), Bus: g.Bus(), Keepalive: true,
+			Budget: cfg, BudgetInstance: bi, BudgetRegistry: reg,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan Result, 1)
+		go func() { done <- l.Run(ctx) }()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for len(reg.DurationParkedNames()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if len(reg.DurationParkedNames()) == 0 {
+			t.Fatal("never parked")
+		}
+
+		// While parked: the duration renewal lands AND the allocator
+		// decreases iterations below the seeded usage (prod-reachable via
+		// /budget decrease). The resume re-check now fails on ITERATIONS —
+		// the terminal, non-parking branch.
+		bi.SetMaxDuration(24 * time.Hour)
+		if _, _, err := reg.AdjustMaxIterations(agent.Name(), -85, 10, 500); err != nil {
+			t.Fatalf("AdjustMaxIterations: %v", err)
+		}
+		select {
+		case l.wake <- struct{}{}:
+		default:
+		}
+		select {
+		case r := <-done:
+			if r.Reason != StopBudget {
+				t.Fatalf("Run returned %s (%s); want StopBudget on iterations", r.Reason, r.Detail)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run did not return on non-duration exhaustion")
+		}
+		if got := reg.DurationParkedNames(); len(got) != 0 {
+			t.Fatalf("DurationParked = %v after a non-duration death; the marker leaked through the terminal StopBudget path", got)
+		}
+	})
+}
+
+// TestValidateBudget_InsufficientRenewalNotExempt pins codex r2 #3
+// (validate side): the exemption exists to UNPARK — a renewal whose
+// post-clamp limit still trails the target's elapsed wall-clock cannot
+// unpark anyone. It must not ride the exemption: it would burn the
+// allocator's one fire for this park set, leave the signature unchanged,
+// and resurrect the renewal deadlock with the renewer believing it acted.
+func TestValidateBudget_InsufficientRenewalNotExempt(t *testing.T) {
+	l := makeLoopWithRegistry(t, "allocator")
+	// Parked 10 hours past a 30m limit: elapsed ≈ 600 minutes.
+	stale := resources.NewBudgetForTest(
+		resources.BudgetConfig{MaxIterations: 100, MaxDuration: 30 * time.Minute},
+		time.Now().Add(-10*time.Hour))
+	l.config.BudgetRegistry.Register("stale-worker", stale, 100, "")
+	markParked(l, "stale-worker")
+
+	for _, tc := range []struct {
+		name   string
+		cmd    *BudgetCommand
+		exempt bool
+	}{
+		{"increase 30 -> 60m, far below 600m elapsed", &BudgetCommand{Agent: "stale-worker", Action: "increase", Amount: 30, Reason: "x", Resource: "duration"}, false},
+		{"set 500 < 600m elapsed", &BudgetCommand{Agent: "stale-worker", Action: "set", Amount: 500, Reason: "x", Resource: "duration"}, false},
+		{"set 601 > 600m elapsed", &BudgetCommand{Agent: "stale-worker", Action: "set", Amount: 601, Reason: "x", Resource: "duration"}, true},
+		{"increase 600 -> 630m > elapsed", &BudgetCommand{Agent: "stale-worker", Action: "increase", Amount: 600, Reason: "x", Resource: "duration"}, true},
+		{"set 800 clamps to 720 ceiling, still > elapsed", &BudgetCommand{Agent: "stale-worker", Action: "set", Amount: 800, Reason: "x", Resource: "duration"}, true},
+	} {
+		err := l.validateBudgetCommand(tc.cmd, 1) // iteration 1: only the exemption passes the window
+		if tc.exempt && err != nil {
+			t.Errorf("%s: want exempt (sufficient renewal), got %v", tc.name, err)
+		}
+		if !tc.exempt && err == nil {
+			t.Errorf("%s: insufficient renewal rode the exemption; it cannot unpark and must keep every timing gate", tc.name)
+		}
+	}
+}
+
+// TestValidateBudget_InsufficientBeyondCeilingNeverExempt: a worker parked
+// longer than the ceiling allows (elapsed > 720m) can NEVER be renewed
+// past its elapsed — every renewal clamps below elapsed. No command may
+// ride the exemption for it; the epoch ceiling is where the society ends.
+func TestValidateBudget_InsufficientBeyondCeilingNeverExempt(t *testing.T) {
+	l := makeLoopWithRegistry(t, "allocator")
+	ancient := resources.NewBudgetForTest(
+		resources.BudgetConfig{MaxIterations: 100, MaxDuration: 30 * time.Minute},
+		time.Now().Add(-13*time.Hour)) // 780m elapsed > 720m ceiling
+	l.config.BudgetRegistry.Register("ancient-worker", ancient, 100, "")
+	markParked(l, "ancient-worker")
+
+	for _, cmd := range []*BudgetCommand{
+		{Agent: "ancient-worker", Action: "increase", Amount: 700, Reason: "x", Resource: "duration"},
+		{Agent: "ancient-worker", Action: "set", Amount: 800, Reason: "x", Resource: "duration"},
+	} {
+		if err := l.validateBudgetCommand(cmd, 1); err == nil {
+			t.Errorf("%s for beyond-ceiling worker rode the exemption; post-clamp limit can never exceed its elapsed", cmd.Action)
+		}
+	}
+}
+
+// TestRun_DurationParkReRaisesOnInsufficientRenewal pins codex r2 #3
+// (worker side, the belt): a renewal that lands but does NOT unpark the
+// worker must trigger a fresh agent.budget.exhausted raise — the limit
+// CHANGED while the park persisted, so the renewer acted on a stale
+// picture and needs a new wake. Spurious wakes without a limit change must
+// still not re-raise (episode dedup holds).
+func TestRun_DurationParkReRaisesOnInsufficientRenewal(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-2*time.Hour))
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), bi, 100, "test-model")
+	l, err := New(Config{
+		Agent: agent, HumanID: humanID(), Bus: g.Bus(), Keepalive: true,
+		Budget: cfg, BudgetInstance: bi, BudgetRegistry: reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	count := func() int {
+		page, err := g.Store().ByType(event.EventTypeAgentBudgetExhausted, 100, types.None[types.Cursor]())
+		if err != nil {
+			t.Fatalf("ByType: %v", err)
+		}
+		return len(page.Items())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("initial raise count = %d; want 1", got)
+	}
+
+	// An INSUFFICIENT renewal: 2h elapsed, limit raised to only 60m. The
+	// wake re-enters the park branch, the budget still fails, the limit
+	// changed -> the worker must raise again.
+	bi.SetMaxDuration(time.Hour)
+	select {
+	case l.wake <- struct{}{}:
+	default:
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("raise count after insufficient renewal = %d; want 2 (the renewer needs a fresh wake — without it the deadlock resurrects)", got)
+	}
+
+	// Spurious wakes with NO limit change: no further raises.
+	for i := 0; i < 3; i++ {
+		select {
+		case l.wake <- struct{}{}:
+		default:
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("raise count after spurious wakes = %d; want still 2 (episode dedup must hold)", got)
+	}
+
+	// A SUFFICIENT renewal resumes the worker.
+	bi.SetMaxDuration(24 * time.Hour)
+	select {
+	case l.wake <- struct{}{}:
+	default:
+	}
+	if !waitForCallCount(t, provider, 1, 2*time.Second) {
+		t.Fatalf("worker never resumed after sufficient renewal")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}

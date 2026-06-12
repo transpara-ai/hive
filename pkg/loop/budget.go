@@ -43,18 +43,21 @@ func parseBudgetCommand(response string) *BudgetCommand {
 }
 
 // isParkedDurationRenewal reports whether cmd is the narrow shape exempt
-// from the allocator's TIMING gates (v15-F1c): resource=duration, the action
-// RAISES the limit ("increase", or "set" strictly above the target's current
-// limit-minutes), and the target is verifiably duration-parked in the
-// registry right now. A renewer that wakes but refuses is the renewal
-// deadlock with extra steps — in a quiescent society the allocator's
-// iterations only advance on fires, so a window/cooldown refusal is
-// permanent (v14's close parked EIGHT agents at once; the global cooldown
-// alone would have stranded seven). Everything outside this shape —
-// iteration commands, decreases, set-below-current, non-parked targets, a
-// missing registry — keeps every gate (fail closed), and the constitutional
+// from the allocator's TIMING gates (v15-F1c): resource=duration, the
+// target is verifiably duration-parked in the registry right now, and the
+// renewal is a SUFFICIENT raise — the post-clamp new limit exceeds both the
+// current limit and the target's elapsed wall-clock, i.e. it actually
+// unparks. A renewer that wakes but refuses is the renewal deadlock with
+// extra steps — in a quiescent society the allocator's iterations only
+// advance on fires, so a window/cooldown refusal is permanent (v14's close
+// parked EIGHT agents at once; the global cooldown alone would have
+// stranded seven). Everything outside this shape — iteration commands,
+// decreases, no-op or insufficient raises, non-parked targets, a missing
+// registry — keeps every gate (fail closed), and the constitutional
 // self-renewal refusal is checked independently of this exemption.
-func (l *Loop) isParkedDurationRenewal(cmd *BudgetCommand) bool {
+// cfg is the caller's single config snapshot (codex r2 NB: validate must
+// not read two different ceilings in one decision).
+func (l *Loop) isParkedDurationRenewal(cmd *BudgetCommand, cfg budget.Config) bool {
 	if cmd.Resource != "duration" {
 		return false
 	}
@@ -69,23 +72,34 @@ func (l *Loop) isParkedDurationRenewal(cmd *BudgetCommand) bool {
 		if !e.DurationParked {
 			return false
 		}
-		// A target already at the duration ceiling cannot be raised (codex
-		// r1 #3): any increase, or any set, clamps to a zero-delta no-op —
-		// it would ride the exemption past the timing gates, burn the
-		// allocator's fire, and leave the target parked. No possible raise →
-		// no exemption. The ceiling is the designed epoch bound.
+		// The exemption exists to UNPARK (codex r1 #3, r2 #3): the renewal
+		// must be a real, SUFFICIENT raise after clamping. The POST-CLAMP
+		// new limit must exceed both the current limit (a clamped no-op at
+		// the ceiling raises nothing) and the target's ELAPSED wall-clock
+		// (a limit still below elapsed leaves the target parked while the
+		// renewer believes it acted — the park signature never changes, no
+		// recheck refires, and the renewal deadlock resurrects). Anything
+		// that cannot unpark keeps every timing gate; a worker parked past
+		// the ceiling can never be exempt — the ceiling is the epoch bound.
 		currentMin := int(e.Budget.MaxDuration() / time.Minute)
-		if currentMin >= budget.LoadConfig().DurationCeilingMin {
-			return false
-		}
+		elapsedMin := int(e.Budget.Snapshot().Elapsed / time.Minute)
+		var rawNew int
 		switch cmd.Action {
 		case "increase":
-			return cmd.Amount > 0
+			if cmd.Amount <= 0 {
+				return false
+			}
+			rawNew = currentMin + cmd.Amount
 		case "set":
-			return cmd.Amount > currentMin
+			rawNew = cmd.Amount
 		default:
 			return false
 		}
+		effectiveNew := rawNew
+		if effectiveNew > cfg.DurationCeilingMin {
+			effectiveNew = cfg.DurationCeilingMin
+		}
+		return effectiveNew > currentMin && effectiveNew > elapsedMin
 	}
 	return false
 }
@@ -98,7 +112,7 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 	// v15-F1(c): a parked-target duration renewal bypasses the TIMING gates
 	// only (stabilization window, global cooldown, per-agent cooldown).
 	// Validity, authority, and pool gates below all still apply.
-	renewal := l.isParkedDurationRenewal(cmd)
+	renewal := l.isParkedDurationRenewal(cmd, cfg)
 
 	// 1. Stabilization window.
 	if !renewal && budget.InStabilizationWindow(iteration, cfg) {
