@@ -495,11 +495,22 @@ func (l *Loop) Run(ctx context.Context) Result {
 					l.budgetParkEmitted = false
 				}
 				if !l.budgetParkEmitted {
+					// Capture the limit BEFORE publishing (codex r4): the
+					// acknowledged value must be the limit this raise was
+					// issued against. Reading it after the publish lets a
+					// fast renewal land inside the window and be swallowed
+					// as already-acknowledged — if that renewal was
+					// insufficient with a failed budget.adjusted emit, the
+					// wake-free detector would go quiet (the r3 deadlock,
+					// one window narrower). With capture-before-emit, any
+					// change after the read is unacknowledged by
+					// construction and fires the detector.
+					limitAtRaise := l.budget.MaxDuration()
 					if emitErr := l.agent.EmitBudgetExhausted(string(resources.ResourceDuration)); emitErr != nil {
 						fmt.Printf("[%s] budget.exhausted raise failed (park proceeds; recheck pulse remains): %v\n", l.agent.Name(), emitErr)
 					} else {
 						l.budgetParkEmitted = true
-						l.parkAckedLimit = l.budget.MaxDuration()
+						l.parkAckedLimit = limitAtRaise
 					}
 				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event

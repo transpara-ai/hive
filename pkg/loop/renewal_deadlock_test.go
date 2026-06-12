@@ -1237,3 +1237,72 @@ func TestRun_DurationParkReRaisesWithoutAnyWake(t *testing.T) {
 		t.Fatal("Run did not return after cancellation")
 	}
 }
+
+// TestRun_DurationParkRaceRenewalDuringRaiseStillDetected pins codex r4's
+// blocker as a property: a renewal that lands WHILE the raise is being
+// published (injected from the exhausted-event subscriber, the earliest
+// hook an external actor has) must still be detected — the acknowledged
+// limit is captured BEFORE the publish, so any change after that read is
+// unacknowledged by construction and produces a follow-up raise with no
+// wake required. Pre-fix the ack read the limit AFTER publishing, so a
+// fast renewal inside the window was swallowed as already-acknowledged.
+// (The adverse interleaving is sub-microsecond and not reliably forcible
+// in-process — this is the by-construction pin, per the r1-#2 precedent.)
+func TestRun_DurationParkRaceRenewalDuringRaiseStillDetected(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	cfg := resources.BudgetConfig{MaxDuration: 30 * time.Minute}
+	bi := resources.NewBudgetForTest(cfg, time.Now().Add(-2*time.Hour))
+	reg := resources.NewBudgetRegistry()
+	reg.Register(agent.Name(), bi, 100, "test-model")
+
+	// On the FIRST raise delivery, inject an insufficient renewal with no
+	// event and no wake (the failed-emit shape) — as close to "during the
+	// publish" as an external actor can get.
+	injected := false
+	g.Bus().Subscribe(types.MustSubscriptionPattern("agent.budget.exhausted"), func(ev event.Event) {
+		if !injected {
+			injected = true
+			bi.SetMaxDuration(time.Hour) // 60m, still below 120m elapsed
+		}
+	})
+
+	l, err := New(Config{
+		Agent: agent, HumanID: humanID(), Bus: g.Bus(), Keepalive: true,
+		Budget: cfg, BudgetInstance: bi, BudgetRegistry: reg,
+		RecheckInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	count := func() int {
+		page, err := g.Store().ByType(event.EventTypeAgentBudgetExhausted, 100, types.None[types.Cursor]())
+		if err != nil {
+			t.Fatalf("ByType: %v", err)
+		}
+		return len(page.Items())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+
+	// The injected mid-raise renewal must surface as a SECOND raise via the
+	// wake-free detector.
+	deadline := time.Now().Add(3 * time.Second)
+	for count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := count(); got < 2 {
+		t.Fatalf("raise count after mid-raise insufficient renewal = %d; want >= 2 (a renewal landing during the publish window must not be swallowed as acknowledged)", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
