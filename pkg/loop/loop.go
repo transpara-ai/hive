@@ -277,6 +277,36 @@ type Loop struct {
 	// re-print per cycle. Cleared when a budget check passes again (resume).
 	budgetParkLogged bool
 
+	// budgetParkEmitted dedupes the on-chain agent.budget.exhausted raise
+	// (v15-F1a): one event per park episode, no matter how many spurious
+	// wakes re-enter the parked branch. Set ONLY on a successful chain
+	// write (the v13-F1 dedup lesson: a failed raise must stay retryable,
+	// never silently marked done). Cleared when a budget check passes
+	// again (resume), so the next park episode raises again — and reset
+	// when the duration limit CHANGES without unparking (codex r2 #3: an
+	// insufficient renewal must produce a fresh raise, or the renewer acts
+	// once on a stale picture and the deadlock resurrects).
+	budgetParkEmitted bool
+
+	// parkAckedLimit is the duration limit the current park episode has
+	// ACKNOWLEDGED: set at episode entry and again on each successful
+	// raise. A live limit that differs is an unacknowledged renewal — the
+	// park's recheck tick re-enters the branch (codex r3: a renewal whose
+	// budget.adjusted emit failed delivers NO wake, so the tick is the only
+	// way the re-raise belt is reachable) and the belt raises afresh.
+	// Run() goroutine only.
+	parkAckedLimit time.Duration
+
+	// allocParkSig is the park-set signature at the allocator recheck's
+	// last fire (v15-F1b): the sorted, joined names of duration-parked
+	// agents. The recheck fires only when a NON-EMPTY set differs from
+	// this signature, and resets when the set empties — so an allocator
+	// that declined to renew is not re-prompted every tick (a 50ms-30s
+	// storm would burn its terminal iteration budget and kill the
+	// renewer), while a new park or a renew-then-repark always fires.
+	// Only accessed from the Run() goroutine (waitForEvents).
+	allocParkSig string
+
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
 	sink checkpoint.CheckpointSink
 
@@ -298,15 +328,18 @@ func New(cfg Config) (*Loop, error) {
 	if cfg.QuiescenceDelay <= 0 {
 		cfg.QuiescenceDelay = 5 * time.Second
 	}
-	// Default the keepalive re-check for the two re-check duties so both are
+	// Default the keepalive re-check for the three re-check duties so all are
 	// covered without every call site setting it: a CanOperate keepalive agent
-	// (the implementer wakeup race, hive#135) and a keepalive reviewer (the
-	// historical-completion stranding, run findings F8) with an unset interval
-	// get a slow safety-net re-check. <0 disables it. Keepalive agents with
-	// neither duty get no default — the re-check stays disabled for agents
-	// with no governance review duty, so no idle ticker is added anywhere else.
+	// (the implementer wakeup race, hive#135), a keepalive reviewer (the
+	// historical-completion stranding, run findings F8), and a keepalive
+	// allocator (the renewal deadlock, v15-F1b: the renewer must notice
+	// duration-parked renewables even when the park's wake edge was lost)
+	// with an unset interval get a slow safety-net re-check. <0 disables it.
+	// Keepalive agents with none of these duties get no default — the
+	// re-check stays disabled, so no idle ticker is added anywhere else.
 	if cfg.Keepalive && cfg.RecheckInterval == 0 &&
-		(cfg.CanOperate || string(cfg.Agent.Role()) == "reviewer") {
+		(cfg.CanOperate || string(cfg.Agent.Role()) == "reviewer" ||
+			string(cfg.Agent.Role()) == "allocator") {
 		cfg.RecheckInterval = 30 * time.Second
 	}
 
@@ -432,6 +465,53 @@ func (l *Loop) Run(ctx context.Context) Result {
 				if !l.budgetParkLogged {
 					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
 					l.budgetParkLogged = true
+					// Fresh episode: acknowledge the limit we parked at, so
+					// the renewal-change detector (tick side and belt below)
+					// has a baseline even if the raise itself fails.
+					l.parkAckedLimit = l.budget.MaxDuration()
+				}
+				// v15-F1(b): register the park BEFORE the raise (codex r1 #2)
+				// so any observer the event wakes — however the bus schedules
+				// delivery — reads PARKED(duration) for this agent. The clear
+				// happens ONLY at proven resume (the budget check passes
+				// below) or at shutdown — never on the wake edge (codex r1
+				// #1: a spurious wake re-enters this branch still exhausted;
+				// a marker flicker would let the allocator's empty-set reset
+				// read the SAME park as a new episode).
+				if reg := l.config.BudgetRegistry; reg != nil {
+					reg.SetDurationParked(l.agent.Name(), true)
+				}
+				// v15-F1(a): the raise half. Round 5's park was stdout-only —
+				// no chain event, so a quiescent society gave the allocator
+				// no wake and the renewer slept while the renewables waited.
+				// Emit agent.budget.exhausted once per park episode. An emit
+				// failure never blocks the park (parking is the safe state;
+				// the allocator's gated re-check is the fail-safe wake) and
+				// leaves the flag unset so the next pass retries the raise.
+				// A limit that CHANGED without unparking is an insufficient
+				// renewal (codex r2 #3) — re-raise so the renewer gets a
+				// fresh wake; bounded by renewal acts, not by wakes.
+				if l.budgetParkEmitted && l.budget.MaxDuration() != l.parkAckedLimit {
+					l.budgetParkEmitted = false
+				}
+				if !l.budgetParkEmitted {
+					// Capture the limit BEFORE publishing (codex r4): the
+					// acknowledged value must be the limit this raise was
+					// issued against. Reading it after the publish lets a
+					// fast renewal land inside the window and be swallowed
+					// as already-acknowledged — if that renewal was
+					// insufficient with a failed budget.adjusted emit, the
+					// wake-free detector would go quiet (the r3 deadlock,
+					// one window narrower). With capture-before-emit, any
+					// change after the read is unacknowledged by
+					// construction and fires the detector.
+					limitAtRaise := l.budget.MaxDuration()
+					if emitErr := l.agent.EmitBudgetExhausted(string(resources.ResourceDuration)); emitErr != nil {
+						fmt.Printf("[%s] budget.exhausted raise failed (park proceeds; recheck pulse remains): %v\n", l.agent.Name(), emitErr)
+					} else {
+						l.budgetParkEmitted = true
+						l.parkAckedLimit = limitAtRaise
+					}
 				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event
 				// may not match this agent's subscriptions, and a fully
@@ -441,11 +521,22 @@ func (l *Loop) Run(ctx context.Context) Result {
 					consecutiveEmpty = 0
 					continue
 				}
+				// Shutdown while parked: result() clears the marker — every
+				// loop death does (codex r2 #1/#2 made it the chokepoint).
 				return l.result(StopBudget, iteration, "shutdown while parked on budget exhaustion: "+err.Error())
 			}
 			return l.result(StopBudget, iteration, err.Error())
 		}
+		// Proven resume: the budget check passed. Clear the park episode
+		// state — the registry marker (set only while a live loop is parked)
+		// and both per-episode dedup flags.
+		if l.budgetParkLogged {
+			if reg := l.config.BudgetRegistry; reg != nil {
+				reg.SetDurationParked(l.agent.Name(), false)
+			}
+		}
 		l.budgetParkLogged = false
+		l.budgetParkEmitted = false
 
 		iteration++
 		l.iteration = iteration
@@ -1274,19 +1365,25 @@ func (l *Loop) onEvent(ev event.Event) {
 // the wake channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
 	if l.config.Keepalive {
-		// Re-check eligibility is an ALLOWLIST of exactly two duties, each with
-		// its own "work exists" gate so an idle agent stays parked — no
+		// Re-check eligibility is an ALLOWLIST of exactly three duties, each
+		// with its own "work exists" gate so an idle agent stays parked — no
 		// re-ignition of the wakeup storm the per-iteration timers were removed
 		// to kill:
 		//   - implementer: a wake edge dropped while it was mid-Operate cannot
 		//     park it forever (hive#135), gated to hasAssignableWork;
 		//   - reviewer: a completion persisted by a prior daemon instance never
 		//     fires a fresh wake, stranding the review→fix loop (run findings
-		//     F8), gated to hasReviewableWork.
-		// Keepalive agents with neither duty keep pure wake-blocking.
+		//     F8), gated to hasReviewableWork;
+		//   - allocator: the renewer must notice duration-parked renewables
+		//     whose wake edge was lost (v15-F1b), gated to a CHANGED non-empty
+		//     park set (hasParkedRenewables) so a decline-to-renew can never
+		//     storm the allocator's own terminal iteration budget.
+		// Keepalive agents with none of these duties keep pure wake-blocking.
 		operateRecheck := l.config.CanOperate && l.config.RepoPath != ""
 		reviewRecheck := l.reviewerState != nil
-		if l.config.RecheckInterval > 0 && (operateRecheck || reviewRecheck) {
+		allocRecheck := l.config.BudgetRegistry != nil &&
+			string(l.agent.Role()) == "allocator"
+		if l.config.RecheckInterval > 0 && (operateRecheck || reviewRecheck || allocRecheck) {
 			ticker := time.NewTicker(l.config.RecheckInterval)
 			defer ticker.Stop()
 			for {
@@ -1298,6 +1395,9 @@ func (l *Loop) waitForEvents(ctx context.Context) bool {
 						return true
 					}
 					if reviewRecheck && l.hasReviewableWork() {
+						return true
+					}
+					if allocRecheck && l.hasParkedRenewables() {
 						return true
 					}
 					// Nothing actionable — stay parked; re-arm on the next tick.
@@ -1327,8 +1427,17 @@ func (l *Loop) waitForEvents(ctx context.Context) bool {
 	}
 }
 
-// result creates a Result with budget snapshot.
+// result creates a Result with budget snapshot. It is the single chokepoint
+// every loop death passes through, so it owns the duration-park marker's
+// death-clear (codex r2 #1/#2): a returned loop is a corpse, and a corpse
+// must never read as a renewable — whatever path it died through
+// (cancellation winning a wake race, a non-duration budget failure after a
+// renewal, or any future return). Unconditional and idempotent: clearing an
+// unset marker or an unregistered name is a no-op.
 func (l *Loop) result(reason StopReason, iterations int, detail string) Result {
+	if reg := l.config.BudgetRegistry; reg != nil {
+		reg.SetDurationParked(l.agent.Name(), false)
+	}
 	return Result{
 		Reason:     reason,
 		Iterations: iterations,

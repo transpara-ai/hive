@@ -169,7 +169,9 @@ func TestValidateReviewCommand_StabilizationWindow(t *testing.T) {
 		Issues:     []string{},
 		Confidence: 0.9,
 	}
-	for _, iter := range []int{0, 3, 9} {
+	// v15-F3 tuned the default window 10 → 3 (round 5's reviewer burned its
+	// whole 30m lifespan inside the old window: zero reviews, structurally).
+	for _, iter := range []int{0, 1, 2} {
 		err := validateReviewCommand(cmd, iter)
 		if err == nil {
 			t.Errorf("iteration %d: expected stabilization error, got nil", iter)

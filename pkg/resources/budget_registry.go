@@ -2,6 +2,7 @@ package resources
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -13,6 +14,13 @@ type BudgetEntry struct {
 	MaxIterations int
 	AgentState    string // "Active", "Quiesced", "Stopped"
 	ResolvedModel string // canonical model ID from resolver (for cost estimation)
+	// DurationParked marks a LIVE loop currently parked on duration
+	// exhaustion (v15-F1b). Set by the loop entering the park, cleared by
+	// the same loop on resume or shutdown. The allocator's recheck gate and
+	// renewal-exemption checks key on this explicit marker — never on
+	// derived "elapsed past limit", which turns permanently true for agents
+	// whose loops already exited and would storm the allocator forever.
+	DurationParked bool
 }
 
 // BudgetRegistry provides cross-agent budget visibility and mutation.
@@ -53,14 +61,42 @@ func (r *BudgetRegistry) Snapshot() []BudgetEntry {
 	result := make([]BudgetEntry, 0, len(r.entries))
 	for _, e := range r.entries {
 		result = append(result, BudgetEntry{
-			Name:          e.Name,
-			Budget:        e.Budget,
-			MaxIterations: e.MaxIterations,
-			AgentState:    e.AgentState,
-			ResolvedModel: e.ResolvedModel,
+			Name:           e.Name,
+			Budget:         e.Budget,
+			MaxIterations:  e.MaxIterations,
+			AgentState:     e.AgentState,
+			ResolvedModel:  e.ResolvedModel,
+			DurationParked: e.DurationParked,
 		})
 	}
 	return result
+}
+
+// SetDurationParked marks or clears an agent's live duration-park state
+// (v15-F1b). Unknown names are a no-op: the marker only ever describes a
+// registered, live loop — it must never create phantom entries.
+func (r *BudgetRegistry) SetDurationParked(name string, parked bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.entries[name]; ok {
+		e.DurationParked = parked
+	}
+}
+
+// DurationParkedNames returns the sorted names of agents currently parked on
+// duration exhaustion. Sorted so callers can use the joined list as a stable
+// park-set signature (the allocator recheck's delta gate).
+func (r *BudgetRegistry) DurationParkedNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.entries))
+	for _, e := range r.entries {
+		if e.DurationParked {
+			names = append(names, e.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // AdjustMaxIterations modifies a specific agent's iteration limit by delta.

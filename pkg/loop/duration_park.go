@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -18,7 +19,8 @@ import (
 // the default (fail closed).
 
 // waitForBudgetRenewal blocks a duration-parked loop until a wake arrives,
-// the budget passes again, or the context ends. Returns true to resume,
+// the budget passes again, a LIMIT CHANGE goes unacknowledged, or the
+// context ends. Returns true to resume (or re-enter the park branch),
 // false on cancellation.
 //
 // The bare wake channel is NOT sufficient here: only some agents subscribe
@@ -29,6 +31,13 @@ import (
 // recheck tick — zero LLM cost, runs only while parked, and cannot
 // re-ignite the wakeup storm the per-iteration timers were removed to kill:
 // its only action is resuming an agent someone explicitly renewed.
+//
+// The tick also returns on an UNACKNOWLEDGED limit change (codex r3): an
+// insufficient renewal whose budget.adjusted emit failed mutates the limit
+// with NO wake — without this arm the re-raise belt in the park branch is
+// unreachable and the renewal deadlock resurrects through the failed-emit
+// path. Returning re-enters the park branch, which raises afresh and
+// acknowledges the new limit — one raise per change, no tick storm.
 func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 	interval := l.config.RecheckInterval
 	if interval <= 0 {
@@ -44,6 +53,9 @@ func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 			if l.budget.Check() == nil {
 				return true
 			}
+			if l.budget.MaxDuration() != l.parkAckedLimit {
+				return true
+			}
 		case <-ctx.Done():
 			return false
 		}
@@ -54,6 +66,33 @@ func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 // keepalive loop. The sentinel wake patterns match on "parked pending".
 func formatBudgetPark(agentName string, err error) string {
 	return fmt.Sprintf("[%s] budget exhausted (duration): parked pending renewal/wake — %v", agentName, err)
+}
+
+// hasParkedRenewables is the allocator recheck's gate (v15-F1b): true when
+// the set of duration-parked agents is NON-EMPTY and DIFFERENT from the set
+// at the last fire. Keying on the explicit DurationParked marker — never on
+// derived "elapsed past limit", which turns permanently true for exited
+// loops — and delta-gating on the set signature makes the gate storm-proof:
+//   - allocator declines to renew → set unchanged → no refire;
+//   - a NEW agent parks → signature changes → fire;
+//   - renew-then-repark of the same agent → the empty set observed between
+//     episodes resets the signature → fire.
+// Only called from the Run() goroutine.
+func (l *Loop) hasParkedRenewables() bool {
+	reg := l.config.BudgetRegistry
+	if reg == nil {
+		return false
+	}
+	sig := strings.Join(reg.DurationParkedNames(), ",")
+	if sig == "" {
+		l.allocParkSig = ""
+		return false
+	}
+	if sig == l.allocParkSig {
+		return false
+	}
+	l.allocParkSig = sig
+	return true
 }
 
 // formatReasonPromptSize renders the per-call prompt-size line (v14-F1

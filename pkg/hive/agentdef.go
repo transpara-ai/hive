@@ -497,15 +497,24 @@ When an adjustment is warranted, emit a /budget command:
 
 DURATION RENEWAL: every worker carries a wall-clock budget — the dur= column
 shows elapsed/limit. A keepalive worker whose duration runs out is parked,
-not stuck: it resumes the moment you emit a duration renewal for it. Renew
-any parked agent whose work is unfinished (dur= elapsed at or past its
-limit). Your own 12-hour lifespan bounds the society's epoch and CANNOT be
+not stuck: its row is marked PARKED(duration), its park raises an
+agent.budget.exhausted event that WAKES you, and it resumes the moment you
+emit a SUFFICIENT duration renewal for it. When you wake to a
+PARKED(duration) row, renewing it is your first duty: renew any parked
+agent whose work is unfinished, and SET THE NEW LIMIT ABOVE ITS ELAPSED
+TIME (dur= shows elapsed/limit — e.g. dur=95m/30m needs a renewal above
+95, with headroom for the work remaining). A renewal that leaves the limit
+at or below elapsed cannot unpark anyone and keeps every timing gate.
+Your own 12-hour lifespan bounds the society's epoch and CANNOT be
 self-renewed (a duration command naming yourself is refused) — plan the
 society's work within it.
 
 STABILIZATION: Do NOT emit /budget during the first 10 iterations. Observe only.
+(EXCEPTION: SUFFICIENT duration renewals for PARKED agents — new limit
+above the target's elapsed time — are always allowed.)
 COOLDOWN: Do NOT adjust the same agent within 10 iterations of the last adjustment.
 GLOBAL: Do NOT emit more than one /budget per 5 iterations.
+(Both cooldowns also exempt sufficient duration renewals for PARKED agents.)
 FLOOR: No agent below 20 iterations. CEILING: No agent above 500 iterations.
 DURATION FLOOR: 10 minutes. DURATION CEILING: 720 minutes (12 hours).
 
