@@ -42,13 +42,57 @@ func parseBudgetCommand(response string) *BudgetCommand {
 	return nil
 }
 
+// isParkedDurationRenewal reports whether cmd is the narrow shape exempt
+// from the allocator's TIMING gates (v15-F1c): resource=duration, the action
+// RAISES the limit ("increase", or "set" strictly above the target's current
+// limit-minutes), and the target is verifiably duration-parked in the
+// registry right now. A renewer that wakes but refuses is the renewal
+// deadlock with extra steps — in a quiescent society the allocator's
+// iterations only advance on fires, so a window/cooldown refusal is
+// permanent (v14's close parked EIGHT agents at once; the global cooldown
+// alone would have stranded seven). Everything outside this shape —
+// iteration commands, decreases, set-below-current, non-parked targets, a
+// missing registry — keeps every gate (fail closed), and the constitutional
+// self-renewal refusal is checked independently of this exemption.
+func (l *Loop) isParkedDurationRenewal(cmd *BudgetCommand) bool {
+	if cmd.Resource != "duration" {
+		return false
+	}
+	reg := l.config.BudgetRegistry
+	if reg == nil {
+		return false
+	}
+	for _, e := range reg.Snapshot() {
+		if e.Name != cmd.Agent {
+			continue
+		}
+		if !e.DurationParked {
+			return false
+		}
+		switch cmd.Action {
+		case "increase":
+			return cmd.Amount > 0
+		case "set":
+			return cmd.Amount > int(e.Budget.MaxDuration()/time.Minute)
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 // validateBudgetCommand checks all safety constraints before applying.
 // Returns nil if valid, descriptive error if rejected.
 func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 	cfg := budget.LoadConfig()
 
+	// v15-F1(c): a parked-target duration renewal bypasses the TIMING gates
+	// only (stabilization window, global cooldown, per-agent cooldown).
+	// Validity, authority, and pool gates below all still apply.
+	renewal := l.isParkedDurationRenewal(cmd)
+
 	// 1. Stabilization window.
-	if budget.InStabilizationWindow(iteration, cfg) {
+	if !renewal && budget.InStabilizationWindow(iteration, cfg) {
 		return fmt.Errorf("stabilization window active (iteration %d < %d)", iteration, cfg.StabilizationWindow)
 	}
 
@@ -98,16 +142,22 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 		return fmt.Errorf("duration self-renewal refused: %s's lifespan bounds the society's epoch and is set by definition, not self-extension", cmd.Agent)
 	}
 
-	// 5. Global cooldown.
-	globalRemaining := budget.GlobalCooldownRemaining(l.adjustmentHistory, iteration, cfg)
-	if globalRemaining > 0 {
-		return fmt.Errorf("global cooldown active (%d iterations remaining)", globalRemaining)
+	// 5. Global cooldown (timing gate — bypassed by a parked renewal: eight
+	// simultaneous parks cannot wait 5 quiescent iterations each).
+	if !renewal {
+		globalRemaining := budget.GlobalCooldownRemaining(l.adjustmentHistory, iteration, cfg)
+		if globalRemaining > 0 {
+			return fmt.Errorf("global cooldown active (%d iterations remaining)", globalRemaining)
+		}
 	}
 
-	// 6. Agent cooldown.
-	agentRemaining := budget.CooldownRemaining(cmd.Agent, l.adjustmentHistory, iteration, cfg)
-	if agentRemaining > 0 {
-		return fmt.Errorf("cooldown active for %s (%d iterations remaining)", cmd.Agent, agentRemaining)
+	// 6. Agent cooldown (timing gate — bypassed by a parked renewal: a
+	// renew-then-repark of the same agent is a new episode, not thrash).
+	if !renewal {
+		agentRemaining := budget.CooldownRemaining(cmd.Agent, l.adjustmentHistory, iteration, cfg)
+		if agentRemaining > 0 {
+			return fmt.Errorf("cooldown active for %s (%d iterations remaining)", cmd.Agent, agentRemaining)
+		}
 	}
 
 	// 7. Pool headroom for increases — an ITERATION-pool concept: a duration
@@ -251,11 +301,18 @@ func (l *Loop) enrichBudgetObservation(obs string, iteration int) string {
 		if e.MaxIterations > 0 {
 			pct = float64(snap.Iterations) * 100.0 / float64(e.MaxIterations)
 		}
-		// dur= elapsed/limit is the renewal signal (v14-F3c): a keepalive
-		// agent past its limit is PARKED pending a duration renewal.
-		sb.WriteString(fmt.Sprintf("  %-14s max=%-4d used=%-4d(%.1f%%)  dur=%s/%s  state=%-10s\n",
+		// dur= elapsed/limit is the renewal signal (v14-F3c). PARKED(duration)
+		// is the explicit live-park marker (v15-F1): the dur= column alone
+		// made parked-ness an inference, and it reads exhausted for agents
+		// whose loops already EXITED — the marker names the agents a renewal
+		// would actually resume.
+		parked := ""
+		if e.DurationParked {
+			parked = "  PARKED(duration)"
+		}
+		sb.WriteString(fmt.Sprintf("  %-14s max=%-4d used=%-4d(%.1f%%)  dur=%s/%s  state=%-10s%s\n",
 			e.Name+":", e.MaxIterations, snap.Iterations, pct,
-			snap.Elapsed.Round(time.Second), e.Budget.MaxDuration(), e.AgentState))
+			snap.Elapsed.Round(time.Second), e.Budget.MaxDuration(), e.AgentState, parked))
 	}
 
 	// SysMon summary from recent pending events (extract last health.report).

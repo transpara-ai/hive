@@ -277,6 +277,24 @@ type Loop struct {
 	// re-print per cycle. Cleared when a budget check passes again (resume).
 	budgetParkLogged bool
 
+	// budgetParkEmitted dedupes the on-chain agent.budget.exhausted raise
+	// (v15-F1a): one event per park episode, no matter how many spurious
+	// wakes re-enter the parked branch. Set ONLY on a successful chain
+	// write (the v13-F1 dedup lesson: a failed raise must stay retryable,
+	// never silently marked done). Cleared when a budget check passes
+	// again (resume), so the next park episode raises again.
+	budgetParkEmitted bool
+
+	// allocParkSig is the park-set signature at the allocator recheck's
+	// last fire (v15-F1b): the sorted, joined names of duration-parked
+	// agents. The recheck fires only when a NON-EMPTY set differs from
+	// this signature, and resets when the set empties — so an allocator
+	// that declined to renew is not re-prompted every tick (a 50ms-30s
+	// storm would burn its terminal iteration budget and kill the
+	// renewer), while a new park or a renew-then-repark always fires.
+	// Only accessed from the Run() goroutine (waitForEvents).
+	allocParkSig string
+
 	// sink receives checkpoint signals. Nil-safe — callers check before use.
 	sink checkpoint.CheckpointSink
 
@@ -298,15 +316,18 @@ func New(cfg Config) (*Loop, error) {
 	if cfg.QuiescenceDelay <= 0 {
 		cfg.QuiescenceDelay = 5 * time.Second
 	}
-	// Default the keepalive re-check for the two re-check duties so both are
+	// Default the keepalive re-check for the three re-check duties so all are
 	// covered without every call site setting it: a CanOperate keepalive agent
-	// (the implementer wakeup race, hive#135) and a keepalive reviewer (the
-	// historical-completion stranding, run findings F8) with an unset interval
-	// get a slow safety-net re-check. <0 disables it. Keepalive agents with
-	// neither duty get no default — the re-check stays disabled for agents
-	// with no governance review duty, so no idle ticker is added anywhere else.
+	// (the implementer wakeup race, hive#135), a keepalive reviewer (the
+	// historical-completion stranding, run findings F8), and a keepalive
+	// allocator (the renewal deadlock, v15-F1b: the renewer must notice
+	// duration-parked renewables even when the park's wake edge was lost)
+	// with an unset interval get a slow safety-net re-check. <0 disables it.
+	// Keepalive agents with none of these duties get no default — the
+	// re-check stays disabled, so no idle ticker is added anywhere else.
 	if cfg.Keepalive && cfg.RecheckInterval == 0 &&
-		(cfg.CanOperate || string(cfg.Agent.Role()) == "reviewer") {
+		(cfg.CanOperate || string(cfg.Agent.Role()) == "reviewer" ||
+			string(cfg.Agent.Role()) == "allocator") {
 		cfg.RecheckInterval = 30 * time.Second
 	}
 
@@ -433,11 +454,36 @@ func (l *Loop) Run(ctx context.Context) Result {
 					fmt.Printf("%s\n", formatBudgetPark(l.agent.Name(), err))
 					l.budgetParkLogged = true
 				}
+				// v15-F1(a): the raise half. Round 5's park was stdout-only —
+				// no chain event, so a quiescent society gave the allocator
+				// no wake and the renewer slept while the renewables waited.
+				// Emit agent.budget.exhausted once per park episode. An emit
+				// failure never blocks the park (parking is the safe state;
+				// the allocator's gated re-check is the fail-safe wake) and
+				// leaves the flag unset so the next pass retries the raise.
+				if !l.budgetParkEmitted {
+					if emitErr := l.agent.EmitBudgetExhausted(string(resources.ResourceDuration)); emitErr != nil {
+						fmt.Printf("[%s] budget.exhausted raise failed (park proceeds; recheck pulse remains): %v\n", l.agent.Name(), emitErr)
+					} else {
+						l.budgetParkEmitted = true
+					}
+				}
+				// v15-F1(b): register the park so the allocator's recheck
+				// gate and the renewal exemption key on EXPLICIT parked
+				// state. Cleared on resume AND on shutdown-while-parked —
+				// a dead loop must never read as a renewable.
+				if reg := l.config.BudgetRegistry; reg != nil {
+					reg.SetDurationParked(l.agent.Name(), true)
+				}
 				// waitForBudgetRenewal, not waitForEvents: the renewal event
 				// may not match this agent's subscriptions, and a fully
 				// parked society generates no other wakes — the park polls
 				// the in-memory budget so a renewed agent always resumes.
-				if l.waitForBudgetRenewal(ctx) {
+				resumed := l.waitForBudgetRenewal(ctx)
+				if reg := l.config.BudgetRegistry; reg != nil {
+					reg.SetDurationParked(l.agent.Name(), false)
+				}
+				if resumed {
 					consecutiveEmpty = 0
 					continue
 				}
@@ -446,6 +492,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			return l.result(StopBudget, iteration, err.Error())
 		}
 		l.budgetParkLogged = false
+		l.budgetParkEmitted = false
 
 		iteration++
 		l.iteration = iteration
@@ -1274,19 +1321,25 @@ func (l *Loop) onEvent(ev event.Event) {
 // the wake channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
 	if l.config.Keepalive {
-		// Re-check eligibility is an ALLOWLIST of exactly two duties, each with
-		// its own "work exists" gate so an idle agent stays parked — no
+		// Re-check eligibility is an ALLOWLIST of exactly three duties, each
+		// with its own "work exists" gate so an idle agent stays parked — no
 		// re-ignition of the wakeup storm the per-iteration timers were removed
 		// to kill:
 		//   - implementer: a wake edge dropped while it was mid-Operate cannot
 		//     park it forever (hive#135), gated to hasAssignableWork;
 		//   - reviewer: a completion persisted by a prior daemon instance never
 		//     fires a fresh wake, stranding the review→fix loop (run findings
-		//     F8), gated to hasReviewableWork.
-		// Keepalive agents with neither duty keep pure wake-blocking.
+		//     F8), gated to hasReviewableWork;
+		//   - allocator: the renewer must notice duration-parked renewables
+		//     whose wake edge was lost (v15-F1b), gated to a CHANGED non-empty
+		//     park set (hasParkedRenewables) so a decline-to-renew can never
+		//     storm the allocator's own terminal iteration budget.
+		// Keepalive agents with none of these duties keep pure wake-blocking.
 		operateRecheck := l.config.CanOperate && l.config.RepoPath != ""
 		reviewRecheck := l.reviewerState != nil
-		if l.config.RecheckInterval > 0 && (operateRecheck || reviewRecheck) {
+		allocRecheck := l.config.BudgetRegistry != nil &&
+			string(l.agent.Role()) == "allocator"
+		if l.config.RecheckInterval > 0 && (operateRecheck || reviewRecheck || allocRecheck) {
 			ticker := time.NewTicker(l.config.RecheckInterval)
 			defer ticker.Stop()
 			for {
@@ -1298,6 +1351,9 @@ func (l *Loop) waitForEvents(ctx context.Context) bool {
 						return true
 					}
 					if reviewRecheck && l.hasReviewableWork() {
+						return true
+					}
+					if allocRecheck && l.hasParkedRenewables() {
 						return true
 					}
 					// Nothing actionable — stay parked; re-arm on the next tick.

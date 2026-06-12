@@ -56,8 +56,8 @@ func TestOperateInstructionSucceedsOnEmptyArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a successful empty load must not error: %v", err)
 	}
-	if got != "Task: T\n\nD" {
-		t.Errorf("empty load must yield the title+description form, got %q", got)
+	if got != "Task: T\n\nD\n\n"+operateGitDiscipline {
+		t.Errorf("empty load must yield the title+description+discipline form, got %q", got)
 	}
 }
 
@@ -114,12 +114,14 @@ func TestComposeOperateInstruction(t *testing.T) {
 }
 
 // TestComposeOperateInstruction_NoGatesBackwardCompatible verifies the fallback
-// is byte-identical to the original title+description form, so a task without a
-// readiness contract behaves exactly as before.
+// is the title+description form plus exactly the standing git discipline —
+// nothing else may sneak into a gateless task's prompt (v15-F2 made the
+// discipline unconditional, so "backward compatible" now means this shape).
 func TestComposeOperateInstruction_NoGatesBackwardCompatible(t *testing.T) {
 	task := work.Task{Title: "T", Description: "D"}
-	if got := composeOperateInstruction(task, nil, nil); got != "Task: T\n\nD" {
-		t.Errorf("no-gate instruction must equal the original form %q, got %q", "Task: T\n\nD", got)
+	want := "Task: T\n\nD\n\n" + operateGitDiscipline
+	if got := composeOperateInstruction(task, nil, nil); got != want {
+		t.Errorf("no-gate instruction must equal title+description+discipline exactly, got %q", got)
 	}
 }
 

@@ -15,8 +15,9 @@ import (
 // behavior) left it blind to the acceptance criteria the Planner attached, which
 // let round 1 over-enumerate the roles catalog (46 roles vs the scoped 24). Gates
 // are emitted in canonical order; non-readiness artifacts (e.g. the post-Operate
-// "Operate result") are ignored. With no gates the output is byte-identical to the
-// original title+description form (backward compatible).
+// "Operate result") are ignored. Every instruction ends with the standing
+// workspace git discipline (v15-F2) — the one section present regardless of
+// gates or reopens.
 func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent, reopens []work.ReopenEvent) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s\n\n%s", task.Title, task.Description)
@@ -43,8 +44,7 @@ func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent, r
 	// reviewer's fix list — without it the producer would re-Operate on the
 	// original instruction alone, blind to WHY its completion was rejected.
 	// Bounded by the reviewer's per-task verdict cap; cumulative so a second
-	// fix round still sees the first round's findings. With no reopens the
-	// output is byte-identical to the prior form (backward compatible).
+	// fix round still sees the first round's findings.
 	if len(reopens) > 0 {
 		b.WriteString("\n\n== REVIEW FEEDBACK (this task was REOPENED after review — your previous work on it was rejected; fix the issues below, then complete it again) ==")
 		for i, r := range reopens {
@@ -54,8 +54,28 @@ func composeOperateInstruction(task work.Task, artifacts []work.ArtifactEvent, r
 			}
 		}
 	}
+
+	// Workspace git discipline (v15-F2): UNCONDITIONAL and LAST. Round 5's
+	// operate #2 "fixed" a filename-case discrepancy by amending the
+	// delivered commit on a switched branch; the integrity gate refused
+	// commit verification and halted the implementer — correctly, but the
+	// instruction layer had never stated the append-only contract the gate
+	// enforces. Every operate now carries it, after every per-task section,
+	// so no readiness contract or review feedback can displace it.
+	b.WriteString("\n\n" + operateGitDiscipline)
 	return b.String()
 }
+
+// operateGitDiscipline is the standing workspace law every Operate prompt
+// ends with (v15-F2). It names the exact v15 incident (a filename-case fix
+// done as an amend on a switched branch) so the provider recognizes the
+// temptation, and states the consequence the integrity gate enforces.
+const operateGitDiscipline = `== WORKSPACE GIT DISCIPLINE (constitutional — the workspace integrity gate enforces this) ==
+Work on the CURRENT branch at its CURRENT HEAD. Stack every change as a NEW commit on top.
+- NEVER amend, rebase, reset, cherry-pick, or force-push — existing commits are immutable history.
+- NEVER switch branches, create branches, or detach HEAD.
+- To correct an earlier commit — wrong content, wrong filename case, anything — make a NEW commit on top with the fix.
+History rewrites move HEAD off the verified lineage; the integrity gate refuses them and HALTS you for human review. A stacked fix commit is always the right move.`
 
 // latestArtifactBody returns the body of the most-recently-attached artifact whose
 // label matches (after normalization), or "" if none. ListArtifacts returns artifacts

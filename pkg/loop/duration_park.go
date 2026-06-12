@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,33 @@ func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
 // keepalive loop. The sentinel wake patterns match on "parked pending".
 func formatBudgetPark(agentName string, err error) string {
 	return fmt.Sprintf("[%s] budget exhausted (duration): parked pending renewal/wake — %v", agentName, err)
+}
+
+// hasParkedRenewables is the allocator recheck's gate (v15-F1b): true when
+// the set of duration-parked agents is NON-EMPTY and DIFFERENT from the set
+// at the last fire. Keying on the explicit DurationParked marker — never on
+// derived "elapsed past limit", which turns permanently true for exited
+// loops — and delta-gating on the set signature makes the gate storm-proof:
+//   - allocator declines to renew → set unchanged → no refire;
+//   - a NEW agent parks → signature changes → fire;
+//   - renew-then-repark of the same agent → the empty set observed between
+//     episodes resets the signature → fire.
+// Only called from the Run() goroutine.
+func (l *Loop) hasParkedRenewables() bool {
+	reg := l.config.BudgetRegistry
+	if reg == nil {
+		return false
+	}
+	sig := strings.Join(reg.DurationParkedNames(), ",")
+	if sig == "" {
+		l.allocParkSig = ""
+		return false
+	}
+	if sig == l.allocParkSig {
+		return false
+	}
+	l.allocParkSig = sig
+	return true
 }
 
 // formatReasonPromptSize renders the per-call prompt-size line (v14-F1

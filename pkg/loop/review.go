@@ -3,7 +3,9 @@ package loop
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -490,12 +492,37 @@ func parseReviewCommand(response string) *ReviewCommand {
 // Validation
 // ────────────────────────────────────────────────────────────────────
 
+// defaultReviewStabilizationWindow is the v15-F3 tune: round 5's reviewer
+// spent its entire 30-minute lifespan inside the old 10-iteration window
+// (~3.3 min/iteration at natural cadence ≈ 33 minutes of warm-up) and
+// produced structurally zero reviews. Three iterations of observation puts
+// the first possible review ~10 minutes in, leaving two-thirds of the
+// lifespan for the review duty itself. The lifespan half stays at 30m —
+// with v15-F1, lifespan is governed live by allocator renewals.
+const defaultReviewStabilizationWindow = 3
+
+// reviewStabilizationWindow reads REVIEWER_STABILIZATION_WINDOW (matching
+// the ALLOCATOR_*/CTO_* knob convention). Unset, unparseable, or negative
+// values fall back to the default (fail safe — a typo must not change the
+// window); an explicit 0 disables it (a deliberate operator choice).
+func reviewStabilizationWindow() int {
+	s := os.Getenv("REVIEWER_STABILIZATION_WINDOW")
+	if s == "" {
+		return defaultReviewStabilizationWindow
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v < 0 {
+		return defaultReviewStabilizationWindow
+	}
+	return v
+}
+
 // validateReviewCommand checks all constraints before emitting a review event.
 // Returns a descriptive error if any constraint is violated, nil if valid.
 func validateReviewCommand(cmd *ReviewCommand, iteration int) error {
-	// 1. Stabilization window.
-	if iteration < 10 {
-		return fmt.Errorf("stabilization window active (iteration %d < 10): observe first", iteration)
+	// 1. Stabilization window (v15-F3: tunable, default 3).
+	if window := reviewStabilizationWindow(); iteration < window {
+		return fmt.Errorf("stabilization window active (iteration %d < %d): observe first", iteration, window)
 	}
 
 	// 2. TaskID non-empty.
