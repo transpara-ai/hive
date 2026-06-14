@@ -197,25 +197,48 @@ func modelSelectionSourceWithRolePolicyUpdates(s store.Store, source OperatorMod
 }
 
 func latestModelRolePolicyUpdates(p *OperatorProjection, s store.Store, limit int) map[string]OperatorModelRolePolicy {
-	events := readProjectionEvents(p, s, EventTypeModelRolePolicyUpdated, limit)
-	out := make(map[string]OperatorModelRolePolicy)
-	for _, pe := range events {
-		role, policy, ok, err := modelRolePolicyUpdateFromEvent(pe.event)
-		if err != nil {
-			p.Errors = append(p.Errors, err.Error())
-			continue
-		}
-		if !ok {
-			continue
-		}
-		// Store pagination is newest-first by append/chain position. First valid
-		// policy per role wins; wall-clock timestamps are not policy authority.
-		if _, exists := out[role]; exists {
-			continue
-		}
-		out[role] = policy
+	if limit <= 0 {
+		limit = defaultOperatorProjectionLimit
 	}
-	return out
+	out := make(map[string]OperatorModelRolePolicy)
+	if s == nil {
+		return out
+	}
+	starterRoles := StarterRoleDefinitions()
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(EventTypeModelRolePolicyUpdated, limit, cursor)
+		if err != nil {
+			p.Errors = append(p.Errors, fmt.Sprintf("read %s: %v", EventTypeModelRolePolicyUpdated.Value(), err))
+			return out
+		}
+		for _, item := range page.Items() {
+			role, policy, ok, err := modelRolePolicyUpdateFromEvent(item)
+			if err != nil {
+				p.Errors = append(p.Errors, err.Error())
+				continue
+			}
+			if !ok {
+				continue
+			}
+			// Store pagination is newest-first by append/chain position. First valid
+			// policy per role wins; wall-clock timestamps are not policy authority.
+			if _, exists := out[role]; exists {
+				continue
+			}
+			out[role] = policy
+			if len(out) == len(starterRoles) {
+				return out
+			}
+		}
+		if !page.HasMore() {
+			return out
+		}
+		cursor = page.Cursor()
+		if cursor.IsNone() {
+			return out
+		}
+	}
 }
 
 func latestModelRolePolicyUpdateForRole(s store.Store, role string, limit int) (OperatorModelRolePolicy, bool, error) {
@@ -226,30 +249,32 @@ func latestModelRolePolicyUpdateForRole(s store.Store, role string, limit int) (
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
 	}
-	page, err := s.ByType(EventTypeModelRolePolicyUpdated, limit, types.None[types.Cursor]())
-	if err != nil {
-		return OperatorModelRolePolicy{}, false, fmt.Errorf("read %s: %w", EventTypeModelRolePolicyUpdated.Value(), err)
-	}
-	var latest OperatorModelRolePolicy
-	found := false
-	for _, item := range page.Items() {
-		eventRole, policy, ok, err := modelRolePolicyUpdateFromEvent(item)
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(EventTypeModelRolePolicyUpdated, limit, cursor)
 		if err != nil {
-			if eventRole == canonicalRole {
+			return OperatorModelRolePolicy{}, false, fmt.Errorf("read %s: %w", EventTypeModelRolePolicyUpdated.Value(), err)
+		}
+		for _, item := range page.Items() {
+			eventRole, policy, ok, err := modelRolePolicyUpdateFromEvent(item)
+			if err != nil {
 				return OperatorModelRolePolicy{}, false, err
 			}
-			continue
+			if !ok || eventRole != canonicalRole {
+				continue
+			}
+			// ByType is newest-first by append/chain position, so the first matching
+			// role is the active policy even if wall-clock timestamps moved backward.
+			return policy, true, nil
 		}
-		if !ok || eventRole != canonicalRole {
-			continue
+		if !page.HasMore() {
+			return OperatorModelRolePolicy{}, false, nil
 		}
-		// ByType is newest-first by append/chain position, so the first matching
-		// role is the active policy even if wall-clock timestamps moved backward.
-		latest = policy
-		found = true
-		break
+		cursor = page.Cursor()
+		if cursor.IsNone() {
+			return OperatorModelRolePolicy{}, false, nil
+		}
 	}
-	return latest, found, nil
 }
 
 func modelRolePolicyUpdateFromEvent(ev event.Event) (string, OperatorModelRolePolicy, bool, error) {
@@ -260,7 +285,8 @@ func modelRolePolicyUpdateFromEvent(ev event.Event) (string, OperatorModelRolePo
 	rawRole := strings.TrimSpace(content.Role)
 	role, _, ok := canonicalStarterRole(rawRole)
 	if !ok {
-		return rawRole, OperatorModelRolePolicy{}, false, fmt.Errorf("model policy event %s has unknown role %q", ev.ID().Value(), content.Role)
+		// Unknown or retired roles cannot affect active starter-role selection.
+		return rawRole, OperatorModelRolePolicy{}, false, nil
 	}
 	return role, OperatorModelRolePolicy{
 		Policy:            modelRolePolicyFromUpdate(content),
