@@ -204,7 +204,10 @@ func latestModelRolePolicyUpdates(p *OperatorProjection, s store.Store, limit in
 	if s == nil {
 		return out
 	}
-	starterRoles := StarterRoleDefinitions()
+	remainingRoles := make(map[string]struct{}, len(StarterRoleDefinitions()))
+	for role := range StarterRoleDefinitions() {
+		remainingRoles[role] = struct{}{}
+	}
 	cursor := types.None[types.Cursor]()
 	for {
 		page, err := s.ByType(EventTypeModelRolePolicyUpdated, limit, cursor)
@@ -227,7 +230,8 @@ func latestModelRolePolicyUpdates(p *OperatorProjection, s store.Store, limit in
 				continue
 			}
 			out[role] = policy
-			if len(out) == len(starterRoles) {
+			delete(remainingRoles, role)
+			if len(remainingRoles) == 0 {
 				return out
 			}
 		}

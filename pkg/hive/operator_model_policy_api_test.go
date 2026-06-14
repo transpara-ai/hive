@@ -2,6 +2,7 @@ package hive
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,34 @@ func TestUnknownModelRolePolicyEventsDoNotPoisonStarterRolePolicyState(t *testin
 	}
 }
 
+func TestMalformedModelRolePolicyEventFailsClosedAndProjectsError(t *testing.T) {
+	s, _, signer, human, conv := newDecisionTestStore(t)
+	want := appendModelRolePolicyEventAt(t, s, signer, human, conv, modelPolicyContent("guardian", "sonnet"), time.Unix(100, 0))
+	appendMalformedModelRolePolicyEventAt(t, s, signer, human, conv, time.Unix(200, 0))
+
+	if _, ok, err := latestModelRolePolicyUpdateForRole(s, "guardian", 50); err == nil {
+		t.Fatal("latestModelRolePolicyUpdateForRole err = nil, want malformed-content fail-closed error")
+	} else if ok {
+		t.Fatal("latestModelRolePolicyUpdateForRole ok = true with malformed newest policy event")
+	} else if !strings.Contains(err.Error(), "ModelRolePolicyUpdatedContent") {
+		t.Fatalf("latestModelRolePolicyUpdateForRole err = %q, want content type error", err.Error())
+	}
+
+	projection := BuildOperatorProjection(s, 50)
+	if !containsStringWith(projection.Errors, "ModelRolePolicyUpdatedContent") {
+		t.Fatalf("projection errors = %+v, want malformed role-policy content error", projection.Errors)
+	}
+	guardian := requireModelAssignment(t, projection.ModelSelection, "guardian")
+	if guardian.PolicyEventID != want.ID().Value() {
+		t.Fatalf("projected guardian policy event = %q, want valid older policy %q", guardian.PolicyEventID, want.ID().Value())
+	}
+
+	config := modelSelectionSourceWithRolePolicyUpdates(s, nil, 50)()
+	if !strings.Contains(config.RolePolicyError, "ModelRolePolicyUpdatedContent") {
+		t.Fatalf("RolePolicyError = %q, want malformed role-policy content error", config.RolePolicyError)
+	}
+}
+
 func modelPolicyContent(role, model string) ModelRolePolicyUpdatedContent {
 	return ModelRolePolicyUpdatedContent{
 		Role:              role,
@@ -150,7 +179,36 @@ func modelPolicyContent(role, model string) ModelRolePolicyUpdatedContent {
 	}
 }
 
+func containsStringWith(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func appendModelRolePolicyEventAt(t *testing.T, s store.Store, signer event.Signer, source types.ActorID, conv types.ConversationID, content ModelRolePolicyUpdatedContent, at time.Time) event.Event {
+	t.Helper()
+	return appendModelRolePolicyEventContentAt(t, s, signer, source, conv, content, at)
+}
+
+func appendMalformedModelRolePolicyEventAt(t *testing.T, s store.Store, signer event.Signer, source types.ActorID, conv types.ConversationID, at time.Time) event.Event {
+	t.Helper()
+	content := AuthorityRequestRecordedContent{
+		RequestingRole:   "guardian",
+		ActionName:       "malformed-model-policy",
+		Target:           "model-policy-test",
+		Environment:      "test",
+		RiskClass:        "test",
+		RequestedOutcome: "ignored",
+		Justification:    "exercise malformed content fail-closed path",
+		RiskSummary:      "wrong content payload under model-policy event type",
+	}
+	return appendModelRolePolicyEventContentAt(t, s, signer, source, conv, content, at)
+}
+
+func appendModelRolePolicyEventContentAt(t *testing.T, s store.Store, signer event.Signer, source types.ActorID, conv types.ConversationID, content event.EventContent, at time.Time) event.Event {
 	t.Helper()
 	head, err := s.Head()
 	if err != nil {
