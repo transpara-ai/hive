@@ -228,6 +228,17 @@ func (r *Runtime) newProvider(cfg intelligence.Config) (intelligence.Provider, e
 	return r.providerFactory(cfg)
 }
 
+func (r *Runtime) reloadModelCatalogOnce(now time.Time) (bool, error) {
+	changed, err := r.modelSelectionManager.ReloadIfChanged(now)
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		r.setResolver(r.modelSelectionManager.Snapshot().Resolver)
+	}
+	return changed, nil
+}
+
 func (r *Runtime) runCatalogReloadLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -236,14 +247,13 @@ func (r *Runtime) runCatalogReloadLoop(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			changed, err := r.modelSelectionManager.ReloadIfChanged(time.Now().UTC())
+			changed, err := r.reloadModelCatalogOnce(time.Now().UTC())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: model catalog reload failed: %v\n", err)
 				continue
 			}
 			if changed {
 				snapshot := r.modelSelectionManager.Snapshot()
-				r.setResolver(snapshot.Resolver)
 				fmt.Fprintf(os.Stderr, "Model catalog reloaded: %s\n", snapshot.CatalogSource)
 			}
 		}

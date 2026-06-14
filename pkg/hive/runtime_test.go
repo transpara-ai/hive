@@ -2,13 +2,17 @@ package hive
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
 	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
 )
@@ -58,6 +62,97 @@ func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 				t.Errorf("canOperateMismatch returned %v; want %v", emitWarning, tt.expectWarning)
 			}
 		})
+	}
+}
+
+func TestRuntimeModelCatalogReloadAffectsNextSpawn(t *testing.T) {
+	ctx := context.Background()
+	initialCatalogTime := time.Unix(1_700_000_000, 0).UTC()
+	reloadTime := initialCatalogTime.Add(100 * time.Second)
+	catalogPath := writeRoleDefaultCatalog(t, "guardian", "haiku")
+	forceCatalogModTime(t, catalogPath, initialCatalogTime)
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	r, err := New(ctx, Config{
+		Store:                 store.NewInMemoryStore(),
+		Actors:                actors,
+		HumanID:               humanID,
+		CatalogPath:           catalogPath,
+		CatalogReloadInterval: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	manager, err := NewOperatorModelSelectionManager(catalogPath, initialCatalogTime, true)
+	if err != nil {
+		t.Fatalf("NewOperatorModelSelectionManager: %v", err)
+	}
+	r.modelSelectionManager = manager
+	r.setResolver(manager.Snapshot().Resolver)
+
+	var captures []intelligence.Config
+	r.providerFactory = func(cfg intelligence.Config) (intelligence.Provider, error) {
+		captures = append(captures, cfg)
+		return &runtimeOverrideTestProvider{name: cfg.Provider, model: cfg.Model}, nil
+	}
+
+	firstDef := hotReloadTestAgentDef("guardian-before-reload")
+	_, firstModel, err := r.spawnAgent(ctx, firstDef)
+	if err != nil {
+		t.Fatalf("first spawnAgent: %v", err)
+	}
+	if firstModel == "" {
+		t.Fatal("first spawn resolved empty model")
+	}
+
+	writeRoleDefaultCatalogAt(t, catalogPath, "guardian", "sonnet")
+	forceCatalogModTime(t, catalogPath, reloadTime)
+	changed, err := r.reloadModelCatalogOnce(reloadTime)
+	if err != nil {
+		t.Fatalf("reloadModelCatalogOnce: %v", err)
+	}
+	if !changed {
+		t.Fatal("reloadModelCatalogOnce changed = false, want true after catalog edit")
+	}
+
+	secondDef := hotReloadTestAgentDef("guardian-after-reload")
+	_, secondModel, err := r.spawnAgent(ctx, secondDef)
+	if err != nil {
+		t.Fatalf("second spawnAgent: %v", err)
+	}
+	if secondModel == "" {
+		t.Fatal("second spawn resolved empty model")
+	}
+	if firstModel == secondModel {
+		t.Fatalf("next spawn kept old model after reload: first=%q second=%q", firstModel, secondModel)
+	}
+	if len(captures) != 2 {
+		t.Fatalf("provider captures = %d, want 2", len(captures))
+	}
+	if captures[0].Model != firstModel || captures[1].Model != secondModel {
+		t.Fatalf("provider captures = %s then %s, want %s then %s", captures[0].Model, captures[1].Model, firstModel, secondModel)
+	}
+	if captures[0].Provider != "claude-cli" || captures[1].Provider != "claude-cli" {
+		t.Fatalf("providers = %s then %s, want claude-cli subscription path", captures[0].Provider, captures[1].Provider)
+	}
+}
+
+func hotReloadTestAgentDef(name string) AgentDef {
+	return AgentDef{
+		Name:                name,
+		Role:                "guardian",
+		SystemPrompt:        "watch the hive",
+		CanOperate:          false,
+		RoleDefinition:      StarterRoleDefinitions()["guardian"],
+		IdentityEnvironment: AgentIdentityEnvironmentTest,
+		IdentityMode:        AgentIdentityModeDeterministicFixture,
+	}
+}
+
+func forceCatalogModTime(t *testing.T, path string, modTime time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatalf("advance catalog modtime: %v", err)
 	}
 }
 
