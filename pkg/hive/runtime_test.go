@@ -2,6 +2,7 @@ package hive
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,10 @@ func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 
 func TestRuntimeModelCatalogReloadAffectsNextSpawn(t *testing.T) {
 	ctx := context.Background()
+	initialCatalogTime := time.Unix(1_700_000_000, 0).UTC()
+	reloadTime := initialCatalogTime.Add(100 * time.Second)
 	catalogPath := writeRoleDefaultCatalog(t, "guardian", "haiku")
+	forceCatalogModTime(t, catalogPath, initialCatalogTime)
 	actors := actor.NewInMemoryActorStore()
 	humanID := registerTestHuman(t, actors, "Operator")
 	r, err := New(ctx, Config{
@@ -79,7 +83,7 @@ func TestRuntimeModelCatalogReloadAffectsNextSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	manager, err := NewOperatorModelSelectionManager(catalogPath, time.Unix(1_700_000_000, 0).UTC(), true)
+	manager, err := NewOperatorModelSelectionManager(catalogPath, initialCatalogTime, true)
 	if err != nil {
 		t.Fatalf("NewOperatorModelSelectionManager: %v", err)
 	}
@@ -102,7 +106,8 @@ func TestRuntimeModelCatalogReloadAffectsNextSpawn(t *testing.T) {
 	}
 
 	writeRoleDefaultCatalogAt(t, catalogPath, "guardian", "sonnet")
-	changed, err := r.reloadModelCatalogOnce(time.Unix(1_700_000_100, 0).UTC())
+	forceCatalogModTime(t, catalogPath, reloadTime)
+	changed, err := r.reloadModelCatalogOnce(reloadTime)
 	if err != nil {
 		t.Fatalf("reloadModelCatalogOnce: %v", err)
 	}
@@ -141,6 +146,13 @@ func hotReloadTestAgentDef(name string) AgentDef {
 		RoleDefinition:      StarterRoleDefinitions()["guardian"],
 		IdentityEnvironment: AgentIdentityEnvironmentTest,
 		IdentityMode:        AgentIdentityModeDeterministicFixture,
+	}
+}
+
+func forceCatalogModTime(t *testing.T, path string, modTime time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatalf("advance catalog modtime: %v", err)
 	}
 }
 
