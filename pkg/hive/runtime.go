@@ -254,7 +254,6 @@ func (r *Runtime) runCatalogReloadLoop(ctx context.Context, interval time.Durati
 			}
 			if changed {
 				snapshot := r.modelSelectionManager.Snapshot()
-				r.setResolver(snapshot.Resolver)
 				fmt.Fprintf(os.Stderr, "Model catalog reloaded: %s\n", snapshot.CatalogSource)
 			}
 		}
