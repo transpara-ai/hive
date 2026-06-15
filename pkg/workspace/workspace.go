@@ -169,10 +169,15 @@ func (p *Product) StageAll() error {
 }
 
 // Commit commits staged changes in the product repo.
-// Uses the hive agent identity as author so self-improve commits
-// are distinguishable from human commits.
+// Pins both author and committer to the transpara agent identity via -c, so the
+// commit identity is independent of the repo's local git config — a product repo
+// created before the identity migration may still carry the old identity, and
+// --author alone would leave the committer (%ce) stamped with it.
 func (p *Product) Commit(message string) error {
-	return p.git("commit", "-m", message,
+	return p.git(
+		"-c", "user.name=ai-agent",
+		"-c", "user.email=ai-agent@transpara.com",
+		"commit", "-m", message,
 		"--author", "ai-agent <ai-agent@transpara.com>")
 }
 
