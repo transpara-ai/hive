@@ -130,6 +130,59 @@ func initGitRepo(t *testing.T, dir string) {
 	run("commit", "--allow-empty", "-m", "initial")
 }
 
+// TestCommitUsesAgentIdentity locks BOTH the author and committer of a product
+// commit to the transpara agent identity and guards against any reintroduction
+// of a lovyou identity — even when the product repo's local git config still
+// carries the old identity (a repo created before the migration). git records
+// the committer from repo config, so setting --author alone is not sufficient.
+func TestCommitUsesAgentIdentity(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	p := &Product{Name: "test", Dir: dir}
+
+	// Simulate a pre-migration product repo whose local config is still lovyou.
+	setGit := func(k, v string) {
+		t.Helper()
+		c := exec.Command("git", "config", k, v)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %s: %v", k, out, err)
+		}
+	}
+	setGit("user.name", "hive")
+	setGit("user.email", "hive@lovyou.ai")
+
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := p.StageAll(); err != nil {
+		t.Fatalf("StageAll: %v", err)
+	}
+	if err := p.Commit("add f"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	cmd := exec.Command("git", "log", "-1", "--pretty=%ae%n%ce")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected author+committer email on two lines, got %q", string(out))
+	}
+
+	for _, f := range []struct{ field, got string }{
+		{"author", lines[0]},
+		{"committer", lines[1]},
+	} {
+		if f.got != "ai-agent@transpara.com" {
+			t.Errorf("commit %s email = %q, want %q", f.field, f.got, "ai-agent@transpara.com")
+		}
+		if strings.Contains(f.got, "lovyou") {
+			t.Errorf("commit %s email %q must not reference lovyou", f.field, f.got)
+		}
+	}
+}
+
 func TestCreateWorktree_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
