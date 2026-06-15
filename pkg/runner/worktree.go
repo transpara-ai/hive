@@ -54,10 +54,10 @@ func CreateTaskWorktree(repoDir, taskTitle, taskID string) (*WorktreeContext, er
 	}
 
 	// Configure git identity in the worktree (cmd.Dir = dir, not main repo).
-	if err := gitIn(dir, "config", "user.name", "hive"); err != nil {
+	if err := gitIn(dir, "config", "user.name", "ai-agent"); err != nil {
 		log.Printf("[worktree] warning: git config user.name: %v", err)
 	}
-	if err := gitIn(dir, "config", "user.email", "hive@lovyou.ai"); err != nil {
+	if err := gitIn(dir, "config", "user.email", "ai-agent@transpara.com"); err != nil {
 		log.Printf("[worktree] warning: git config user.email: %v", err)
 	}
 

@@ -130,6 +130,36 @@ func initGitRepo(t *testing.T, dir string) {
 	run("commit", "--allow-empty", "-m", "initial")
 }
 
+// TestCommitUsesAgentIdentity locks the product-commit author to the transpara
+// agent identity and guards against any reintroduction of a lovyou identity.
+func TestCommitUsesAgentIdentity(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	p := &Product{Name: "test", Dir: dir}
+
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := p.StageAll(); err != nil {
+		t.Fatalf("StageAll: %v", err)
+	}
+	if err := p.Commit("add f"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	cmd := exec.Command("git", "log", "-1", "--pretty=%ae")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	authorEmail := strings.TrimSpace(string(out))
+
+	if authorEmail != "ai-agent@transpara.com" {
+		t.Errorf("commit author email = %q, want %q", authorEmail, "ai-agent@transpara.com")
+	}
+	if strings.Contains(authorEmail, "lovyou") {
+		t.Errorf("commit author email %q must not reference lovyou", authorEmail)
+	}
+}
+
 func TestCreateWorktree_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)

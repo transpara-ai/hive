@@ -76,11 +76,14 @@ func TestCreateTaskWorktree(t *testing.T) {
 		out, _ := cmd.Output()
 		return strings.TrimSpace(string(out))
 	}
-	if got := getConfig(wc.Dir, "user.name"); got != "hive" {
-		t.Errorf("worktree user.name = %q, want %q", got, "hive")
+	if got := getConfig(wc.Dir, "user.name"); got != "ai-agent" {
+		t.Errorf("worktree user.name = %q, want %q", got, "ai-agent")
 	}
-	if got := getConfig(wc.Dir, "user.email"); got != "hive@lovyou.ai" {
-		t.Errorf("worktree user.email = %q, want %q", got, "hive@lovyou.ai")
+	if got := getConfig(wc.Dir, "user.email"); got != "ai-agent@transpara.com" {
+		t.Errorf("worktree user.email = %q, want %q", got, "ai-agent@transpara.com")
+	}
+	if strings.Contains(getConfig(wc.Dir, "user.email"), "lovyou") {
+		t.Errorf("worktree user.email %q must not reference lovyou", getConfig(wc.Dir, "user.email"))
 	}
 }
 
@@ -105,11 +108,14 @@ func TestGitConfigScopedToWorktree(t *testing.T) {
 
 	// gitIn must run config in the repo context (not the process CWD).
 	// Worktrees share config with main repo, so identity is visible from both.
-	if got := getConfig(wc.Dir, "user.name"); got != "hive" {
-		t.Errorf("worktree user.name = %q, want %q", got, "hive")
+	if got := getConfig(wc.Dir, "user.name"); got != "ai-agent" {
+		t.Errorf("worktree user.name = %q, want %q", got, "ai-agent")
 	}
-	if got := getConfig(wc.Dir, "user.email"); got != "hive@lovyou.ai" {
-		t.Errorf("worktree user.email = %q, want %q", got, "hive@lovyou.ai")
+	if got := getConfig(wc.Dir, "user.email"); got != "ai-agent@transpara.com" {
+		t.Errorf("worktree user.email = %q, want %q", got, "ai-agent@transpara.com")
+	}
+	if strings.Contains(getConfig(wc.Dir, "user.email"), "lovyou") {
+		t.Errorf("worktree user.email %q must not reference lovyou", getConfig(wc.Dir, "user.email"))
 	}
 }
 

@@ -66,8 +66,8 @@ func (w *Workspace) InitProduct(name string) (*Product, error) {
 		}
 
 		// Configure git identity for commits
-		_ = p.git("config", "user.name", "hive")
-		_ = p.git("config", "user.email", "hive@lovyou.ai")
+		_ = p.git("config", "user.name", "ai-agent")
+		_ = p.git("config", "user.email", "ai-agent@transpara.com")
 
 		// Try to create the GitHub repo (may already exist)
 		_ = p.gh("repo", "create", repo, "--public",
@@ -173,7 +173,7 @@ func (p *Product) StageAll() error {
 // are distinguishable from human commits.
 func (p *Product) Commit(message string) error {
 	return p.git("commit", "-m", message,
-		"--author", "hive <hive@lovyou.ai>")
+		"--author", "ai-agent <ai-agent@transpara.com>")
 }
 
 // CommitIfStaged commits staged changes if any exist, or does nothing if
@@ -458,8 +458,8 @@ func (p *Product) CreateWorktree(name string) (*Product, error) {
 	}
 
 	// Configure git identity in worktree.
-	_ = wt.git("config", "user.name", "hive")
-	_ = wt.git("config", "user.email", "hive@lovyou.ai")
+	_ = wt.git("config", "user.name", "ai-agent")
+	_ = wt.git("config", "user.email", "ai-agent@transpara.com")
 
 	// Link .hive/ from source repo so telemetry and evolve state are
 	// accessible in the worktree without copying. Try junction first
