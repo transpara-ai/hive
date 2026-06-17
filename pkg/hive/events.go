@@ -21,6 +21,7 @@ var (
 	EventTypeSourceIngested          = types.MustEventType("source.ingested")
 	EventTypeBriefDerived            = types.MustEventType("brief.derived")
 	EventTypeFactoryRunRequested     = types.MustEventType("factory.run.requested")
+	EventTypeFactoryArtifactCreated  = types.MustEventType("factory.artifact.created")
 	EventTypeModelRolePolicyUpdated  = types.MustEventType("hive.model.role.policy.updated")
 )
 
@@ -31,7 +32,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeProgress, EventTypeRoleDefinition,
 		EventTypeAgentIdentityRegistered,
 		EventTypeSourceIngested, EventTypeBriefDerived,
-		EventTypeFactoryRunRequested,
+		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated,
 		EventTypeModelRolePolicyUpdated,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
@@ -190,6 +191,23 @@ type FactoryRunRequestedContent struct {
 
 func (c FactoryRunRequestedContent) EventTypeName() string { return "factory.run.requested" }
 
+// FactoryArtifactCreatedContent records a run artifact as an EventGraph event.
+// Artifact provenance lives on the event's causes, so projections can render
+// both the artifact and the causal edge without trusting duplicated content.
+type FactoryArtifactCreatedContent struct {
+	hiveContent
+	RunID           string `json:"run_id"`
+	ArtifactID      string `json:"artifact_id"`
+	Label           string `json:"label"`
+	Title           string `json:"title,omitempty"`
+	MediaType       string `json:"media_type"`
+	URI             string `json:"uri,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	ProducerActorID string `json:"producer_actor_id,omitempty"`
+}
+
+func (c FactoryArtifactCreatedContent) EventTypeName() string { return "factory.artifact.created" }
+
 // ModelRolePolicyUpdatedContent records Hive-owned durable model policy for one
 // civic role. Site may request this write through Hive's ops API, but Hive
 // validates, resolves, records, and later projects the policy.
@@ -262,6 +280,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("source.ingested", event.Unmarshal[SourceIngestedContent])
 	event.RegisterContentUnmarshaler("brief.derived", event.Unmarshal[BriefDerivedContent])
 	event.RegisterContentUnmarshaler("factory.run.requested", event.Unmarshal[FactoryRunRequestedContent])
+	event.RegisterContentUnmarshaler("factory.artifact.created", event.Unmarshal[FactoryArtifactCreatedContent])
 	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])

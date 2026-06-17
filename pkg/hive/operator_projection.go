@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -98,6 +99,9 @@ type OperatorRuntimeEvidence struct {
 	LastRun              *OperatorRuntimeRunEvidence       `json:"last_run,omitempty"`
 	AgentEvents          OperatorRuntimeAgentEvents        `json:"agent_events"`
 	LastQueuedRunRequest *OperatorQueuedRunRequestEvidence `json:"last_queued_run_request,omitempty"`
+	Artifacts            []OperatorRuntimeArtifactEvidence `json:"artifacts"`
+	RunEvents            []OperatorRuntimeEventEvidence    `json:"run_events"`
+	CausalGraph          OperatorRuntimeCausalGraph        `json:"causal_graph"`
 	Limitations          []string                          `json:"limitations,omitempty"`
 }
 
@@ -149,6 +153,62 @@ type OperatorQueuedRunRequestEvidence struct {
 	BriefEventID          string    `json:"brief_event_id,omitempty"`
 	EvidenceKind          string    `json:"evidence_kind"`
 	CreatedAt             time.Time `json:"created_at"`
+}
+
+type OperatorRuntimeArtifactEvidence struct {
+	EventID         string                         `json:"event_id"`
+	RunID           string                         `json:"run_id"`
+	ArtifactID      string                         `json:"artifact_id"`
+	Label           string                         `json:"label"`
+	Title           string                         `json:"title,omitempty"`
+	MediaType       string                         `json:"media_type"`
+	URI             string                         `json:"uri,omitempty"`
+	Summary         string                         `json:"summary,omitempty"`
+	ProducerActorID string                         `json:"producer_actor_id,omitempty"`
+	Causes          []OperatorRuntimeCauseEvidence `json:"causes"`
+	CauseStatus     string                         `json:"cause_status"`
+	CreatedAt       time.Time                      `json:"created_at"`
+}
+
+type OperatorRuntimeCauseEvidence struct {
+	EventID   string `json:"event_id"`
+	EventType string `json:"event_type,omitempty"`
+	Scope     string `json:"scope"`
+}
+
+type OperatorRuntimeEventEvidence struct {
+	EventID        string          `json:"event_id"`
+	EventType      string          `json:"event_type"`
+	ConversationID string          `json:"conversation_id"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Causes         []string        `json:"causes"`
+	InspectorKind  string          `json:"inspector_kind"`
+	Content        json.RawMessage `json:"content,omitempty"`
+	ContentError   string          `json:"content_error,omitempty"`
+}
+
+type OperatorRuntimeCausalGraph struct {
+	Scope          string                      `json:"scope"`
+	ConversationID string                      `json:"conversation_id,omitempty"`
+	Limit          int                         `json:"limit"`
+	Truncated      bool                        `json:"truncated"`
+	Nodes          []OperatorRuntimeCausalNode `json:"nodes"`
+	Edges          []OperatorRuntimeCausalEdge `json:"edges"`
+}
+
+type OperatorRuntimeCausalNode struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	Label      string    `json:"label"`
+	ArtifactID string    `json:"artifact_id,omitempty"`
+	Scope      string    `json:"scope"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
+}
+
+type OperatorRuntimeCausalEdge struct {
+	FromEventID string `json:"from_event_id"`
+	ToEventID   string `json:"to_event_id"`
+	Scope       string `json:"scope"`
 }
 
 type projectionEvent struct {
@@ -486,11 +546,20 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		AgentEvents: OperatorRuntimeAgentEvents{
 			Scope: "none",
 		},
+		Artifacts: []OperatorRuntimeArtifactEvidence{},
+		RunEvents: []OperatorRuntimeEventEvidence{},
+		CausalGraph: OperatorRuntimeCausalGraph{
+			Scope: "none",
+			Limit: limit,
+			Nodes: []OperatorRuntimeCausalNode{},
+			Edges: []OperatorRuntimeCausalEdge{},
+		},
 		Limitations: []string{
 			"factory.run.requested is queued launch intent, not runtime-start proof",
 			"hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
 			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
 			"runtime event order follows EventGraph store order, not wall-clock timestamp order",
+			"artifact and causal graph projections are bounded by the operator projection limit",
 		},
 	}
 
@@ -549,23 +618,18 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		Scope: "events_since_latest_hive.run.started",
 	}
 
-	conversationEvents := readProjectionEventsByConversation(p, s, latestRunConversationID, limit)
+	conversationEvents, conversationTruncated := readProjectionEventsByConversation(p, s, latestRunConversationID, limit)
+	runEvents := runtimeRunEvents(startEvent, conversationEvents)
+	evidence.RunEvents = buildRuntimeEventEvidence(p, runEvents)
+	evidence.Artifacts = buildRuntimeArtifactEvidence(runEvents)
+	evidence.CausalGraph = buildRuntimeCausalGraph(runEvents, latestRunConversationID, limit, conversationTruncated)
+
 	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
 	activeAgentKeysByNameRole := map[string][]string{}
 	runClosed := false
-	startSeen := false
-	startInWindow := containsProjectionEvent(conversationEvents, startEvent.event.ID())
-	for i := len(conversationEvents) - 1; i >= 0; i-- {
-		pe := conversationEvents[i]
+	for _, pe := range runEvents {
 		eventID := pe.event.ID().Value()
 		timestamp := pe.event.Timestamp().Value()
-		if pe.event.ID() == startEvent.event.ID() {
-			startSeen = true
-			continue
-		}
-		if !startSeen && startInWindow {
-			continue
-		}
 		switch content := pe.event.Content().(type) {
 		case AgentSpawnedContent:
 			if runClosed {
@@ -624,20 +688,221 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	return evidence
 }
 
-func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) []projectionEvent {
+func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) ([]projectionEvent, bool) {
 	// Store implementations return newest-first pages. buildRuntimeEvidenceProjection
 	// walks this slice in reverse so run events are applied in EventGraph store order.
 	page, err := s.ByConversation(conversationID, limit, types.None[types.Cursor]())
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("read conversation %s: %v", conversationID.Value(), err))
-		return nil
+		return nil, false
 	}
 	items := page.Items()
 	events := make([]projectionEvent, 0, len(items))
 	for _, item := range items {
 		events = append(events, projectionEvent{event: item})
 	}
+	return events, page.HasMore()
+}
+
+func runtimeRunEvents(startEvent projectionEvent, conversationEvents []projectionEvent) []projectionEvent {
+	events := []projectionEvent{startEvent}
+	seen := map[types.EventID]struct{}{startEvent.event.ID(): {}}
+	startSeen := false
+	startInWindow := containsProjectionEvent(conversationEvents, startEvent.event.ID())
+	for i := len(conversationEvents) - 1; i >= 0; i-- {
+		pe := conversationEvents[i]
+		if pe.event.ID() == startEvent.event.ID() {
+			startSeen = true
+			continue
+		}
+		if !startSeen && startInWindow {
+			continue
+		}
+		if _, ok := seen[pe.event.ID()]; ok {
+			continue
+		}
+		events = append(events, pe)
+		seen[pe.event.ID()] = struct{}{}
+	}
 	return events
+}
+
+func buildRuntimeEventEvidence(p *OperatorProjection, events []projectionEvent) []OperatorRuntimeEventEvidence {
+	out := make([]OperatorRuntimeEventEvidence, 0, len(events))
+	for _, pe := range events {
+		content, contentErr := runtimeEventContent(pe.event)
+		if contentErr != "" {
+			p.Errors = append(p.Errors, fmt.Sprintf("marshal event inspector content for %s: %s", pe.event.ID().Value(), contentErr))
+		}
+		out = append(out, OperatorRuntimeEventEvidence{
+			EventID:        pe.event.ID().Value(),
+			EventType:      pe.event.Type().Value(),
+			ConversationID: pe.event.ConversationID().Value(),
+			CreatedAt:      pe.event.Timestamp().Value(),
+			Causes:         eventCauseIDs(pe.event),
+			InspectorKind:  "eventgraph_event",
+			Content:        content,
+			ContentError:   contentErr,
+		})
+	}
+	return out
+}
+
+func buildRuntimeArtifactEvidence(events []projectionEvent) []OperatorRuntimeArtifactEvidence {
+	nodeByID := runtimeEventTypeByID(events)
+	artifacts := make([]OperatorRuntimeArtifactEvidence, 0)
+	for _, pe := range events {
+		content, ok := pe.event.Content().(FactoryArtifactCreatedContent)
+		if !ok {
+			continue
+		}
+		causes := runtimeCauseEvidence(pe.event, nodeByID)
+		causeStatus := "caused"
+		if len(causes) == 0 {
+			causeStatus = "missing_causes"
+		}
+		artifacts = append(artifacts, OperatorRuntimeArtifactEvidence{
+			EventID:         pe.event.ID().Value(),
+			RunID:           content.RunID,
+			ArtifactID:      content.ArtifactID,
+			Label:           content.Label,
+			Title:           content.Title,
+			MediaType:       content.MediaType,
+			URI:             content.URI,
+			Summary:         content.Summary,
+			ProducerActorID: content.ProducerActorID,
+			Causes:          causes,
+			CauseStatus:     causeStatus,
+			CreatedAt:       pe.event.Timestamp().Value(),
+		})
+	}
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt)
+	})
+	return artifacts
+}
+
+func buildRuntimeCausalGraph(events []projectionEvent, conversationID types.ConversationID, limit int, truncated bool) OperatorRuntimeCausalGraph {
+	graph := OperatorRuntimeCausalGraph{
+		Scope:          "latest_run_conversation",
+		ConversationID: conversationID.Value(),
+		Limit:          limit,
+		Truncated:      truncated,
+		Nodes:          []OperatorRuntimeCausalNode{},
+		Edges:          []OperatorRuntimeCausalEdge{},
+	}
+	nodeByID := map[string]OperatorRuntimeCausalNode{}
+	for _, pe := range events {
+		node := runtimeCausalNode(pe, "run")
+		graph.Nodes = append(graph.Nodes, node)
+		nodeByID[node.EventID] = node
+	}
+	for _, pe := range events {
+		toID := pe.event.ID().Value()
+		for _, cause := range pe.event.Causes() {
+			fromID := cause.Value()
+			scope := "run"
+			if _, ok := nodeByID[fromID]; !ok {
+				scope = "external_or_out_of_window"
+				node := OperatorRuntimeCausalNode{
+					EventID:   fromID,
+					EventType: "external_or_out_of_window",
+					Label:     "External or out-of-window cause",
+					Scope:     scope,
+				}
+				graph.Nodes = append(graph.Nodes, node)
+				nodeByID[fromID] = node
+			}
+			graph.Edges = append(graph.Edges, OperatorRuntimeCausalEdge{
+				FromEventID: fromID,
+				ToEventID:   toID,
+				Scope:       scope,
+			})
+		}
+	}
+	return graph
+}
+
+func runtimeEventTypeByID(events []projectionEvent) map[string]string {
+	out := make(map[string]string, len(events))
+	for _, pe := range events {
+		out[pe.event.ID().Value()] = pe.event.Type().Value()
+	}
+	return out
+}
+
+func runtimeCauseEvidence(ev event.Event, nodeByID map[string]string) []OperatorRuntimeCauseEvidence {
+	causes := ev.Causes()
+	out := make([]OperatorRuntimeCauseEvidence, 0, len(causes))
+	for _, cause := range causes {
+		item := OperatorRuntimeCauseEvidence{
+			EventID: cause.Value(),
+			Scope:   "external_or_out_of_window",
+		}
+		if eventType, ok := nodeByID[cause.Value()]; ok {
+			item.EventType = eventType
+			item.Scope = "run"
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func runtimeCausalNode(pe projectionEvent, scope string) OperatorRuntimeCausalNode {
+	node := OperatorRuntimeCausalNode{
+		EventID:   pe.event.ID().Value(),
+		EventType: pe.event.Type().Value(),
+		Label:     runtimeEventLabel(pe.event),
+		Scope:     scope,
+		CreatedAt: pe.event.Timestamp().Value(),
+	}
+	if content, ok := pe.event.Content().(FactoryArtifactCreatedContent); ok {
+		node.ArtifactID = content.ArtifactID
+	}
+	return node
+}
+
+func runtimeEventLabel(ev event.Event) string {
+	switch content := ev.Content().(type) {
+	case RunStartedContent:
+		if content.Idea != "" {
+			return "Run started: " + content.Idea
+		}
+		return "Run started"
+	case AgentSpawnedContent:
+		return "Agent spawned: " + content.Role + "/" + content.Name
+	case AgentStoppedContent:
+		return "Agent stopped: " + content.Role + "/" + content.Name
+	case RunCompletedContent:
+		return "Run completed"
+	case FactoryArtifactCreatedContent:
+		if content.Title != "" {
+			return "Artifact: " + content.Title
+		}
+		if content.Label != "" {
+			return "Artifact: " + content.Label
+		}
+		return "Artifact created"
+	default:
+		return ev.Type().Value()
+	}
+}
+
+func runtimeEventContent(ev event.Event) (json.RawMessage, string) {
+	content, err := json.Marshal(ev.Content())
+	if err != nil {
+		return nil, err.Error()
+	}
+	return content, ""
+}
+
+func eventCauseIDs(ev event.Event) []string {
+	causes := ev.Causes()
+	out := make([]string, 0, len(causes))
+	for _, cause := range causes {
+		out = append(out, cause.Value())
+	}
+	return out
 }
 
 func containsProjectionEvent(events []projectionEvent, eventID types.EventID) bool {

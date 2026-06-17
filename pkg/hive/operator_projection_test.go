@@ -535,6 +535,70 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeEvidenceIncludesArtifactsAndCausalGraph(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_artifact_graph")
+
+	started := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "render artifacts",
+		RepoPath: "/tmp/runtime",
+	})
+	spawned := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder",
+	})
+	artifact := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:           "run_artifact_graph",
+		ArtifactID:      "artifact_brief_001",
+		Label:           "factory_brief",
+		Title:           "Factory brief",
+		MediaType:       "text/markdown",
+		URI:             "eventgraph://artifact/artifact_brief_001",
+		Summary:         "brief ready for operator inspection",
+		ProducerActorID: "actor_builder",
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	runtimeEvidence := projection.RuntimeEvidence
+	if runtimeEvidence.LastRun == nil || runtimeEvidence.LastRun.StartedEventID != started.ID().Value() {
+		t.Fatalf("last run evidence = %+v, want start %s", runtimeEvidence.LastRun, started.ID().Value())
+	}
+	if len(runtimeEvidence.Artifacts) != 1 {
+		t.Fatalf("artifacts = %+v, want one artifact", runtimeEvidence.Artifacts)
+	}
+	projectedArtifact := runtimeEvidence.Artifacts[0]
+	if projectedArtifact.EventID != artifact.ID().Value() || projectedArtifact.ArtifactID != "artifact_brief_001" {
+		t.Fatalf("artifact projection = %+v", projectedArtifact)
+	}
+	if projectedArtifact.CauseStatus != "caused" {
+		t.Fatalf("artifact cause status = %q, want caused", projectedArtifact.CauseStatus)
+	}
+	if len(projectedArtifact.Causes) != 1 || projectedArtifact.Causes[0].EventID != spawned.ID().Value() || projectedArtifact.Causes[0].EventType != EventTypeAgentSpawned.Value() || projectedArtifact.Causes[0].Scope != "run" {
+		t.Fatalf("artifact causes = %+v, want run-scoped spawned event %s", projectedArtifact.Causes, spawned.ID().Value())
+	}
+
+	inspectorEvent, ok := findRuntimeEventEvidence(runtimeEvidence.RunEvents, artifact.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing artifact inspector payload: %+v", runtimeEvidence.RunEvents)
+	}
+	if inspectorEvent.InspectorKind != "eventgraph_event" || !strings.Contains(string(inspectorEvent.Content), `"artifact_id":"artifact_brief_001"`) {
+		t.Fatalf("artifact inspector event = %+v", inspectorEvent)
+	}
+
+	graph := runtimeEvidence.CausalGraph
+	if graph.Scope != "latest_run_conversation" || graph.ConversationID != convID.Value() {
+		t.Fatalf("causal graph metadata = %+v", graph)
+	}
+	if len(graph.Nodes) < 3 {
+		t.Fatalf("causal graph nodes = %+v, want run start, agent, and artifact nodes", graph.Nodes)
+	}
+	if !hasRuntimeGraphEdge(graph.Edges, spawned.ID().Value(), artifact.ID().Value(), "run") {
+		t.Fatalf("causal graph edges = %+v, want spawned -> artifact edge", graph.Edges)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *testing.T) {
 	s, actorID, _ := newOperatorProjectionStore(t)
 	firstConversation := types.MustConversationID("conv_runtime_evidence_first")
@@ -857,6 +921,24 @@ func requireModelAssignment(t *testing.T, projection OperatorModelSelection, rol
 func containsModelProjectionString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func findRuntimeEventEvidence(events []OperatorRuntimeEventEvidence, eventID string) (OperatorRuntimeEventEvidence, bool) {
+	for _, ev := range events {
+		if ev.EventID == eventID {
+			return ev, true
+		}
+	}
+	return OperatorRuntimeEventEvidence{}, false
+}
+
+func hasRuntimeGraphEdge(edges []OperatorRuntimeCausalEdge, from, to, scope string) bool {
+	for _, edge := range edges {
+		if edge.FromEventID == from && edge.ToEventID == to && edge.Scope == scope {
 			return true
 		}
 	}
