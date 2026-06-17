@@ -817,22 +817,21 @@ func buildRuntimeCausalGraph(events []projectionEvent, conversationID types.Conv
 		toID := pe.event.ID().Value()
 		for _, cause := range pe.event.Causes() {
 			fromID := cause.Value()
-			scope := "run"
-			if _, ok := nodeByID[fromID]; !ok {
-				scope = "external_or_out_of_window"
-				node := OperatorRuntimeCausalNode{
+			fromNode, ok := nodeByID[fromID]
+			if !ok {
+				fromNode = OperatorRuntimeCausalNode{
 					EventID:   fromID,
 					EventType: "external_or_out_of_window",
 					Label:     "External or out-of-window cause",
-					Scope:     scope,
+					Scope:     "external_or_out_of_window",
 				}
-				graph.Nodes = append(graph.Nodes, node)
-				nodeByID[fromID] = node
+				graph.Nodes = append(graph.Nodes, fromNode)
+				nodeByID[fromID] = fromNode
 			}
 			graph.Edges = append(graph.Edges, OperatorRuntimeCausalEdge{
 				FromEventID: fromID,
 				ToEventID:   toID,
-				Scope:       scope,
+				Scope:       fromNode.Scope,
 			})
 		}
 	}

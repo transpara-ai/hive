@@ -638,15 +638,21 @@ func TestBuildOperatorProjectionRuntimeArtifactCauseStatusDistinguishesExternalO
 		Label:      "external_artifact",
 		MediaType:  "text/plain",
 	}, []types.EventID{externalCause.ID()})
+	secondArtifact := appendOperatorProjectionEventWithConversationAndCauses(t, s, actorID, runConvID, EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:      "run_external_artifact",
+		ArtifactID: "artifact_external_002",
+		Label:      "second_external_artifact",
+		MediaType:  "text/plain",
+	}, []types.EventID{externalCause.ID()})
 
 	projection := BuildOperatorProjection(s, 50)
 	runtimeEvidence := projection.RuntimeEvidence
-	if len(runtimeEvidence.Artifacts) != 1 {
-		t.Fatalf("artifacts = %+v, want one artifact", runtimeEvidence.Artifacts)
+	if len(runtimeEvidence.Artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want two artifacts", runtimeEvidence.Artifacts)
 	}
-	projectedArtifact := runtimeEvidence.Artifacts[0]
-	if projectedArtifact.EventID != artifact.ID().Value() {
-		t.Fatalf("artifact projection = %+v, want event %s", projectedArtifact, artifact.ID().Value())
+	projectedArtifact, ok := findRuntimeArtifactEvidence(runtimeEvidence.Artifacts, artifact.ID().Value())
+	if !ok {
+		t.Fatalf("artifacts = %+v, want event %s", runtimeEvidence.Artifacts, artifact.ID().Value())
 	}
 	if projectedArtifact.CauseStatus != "caused_external_only" {
 		t.Fatalf("artifact cause status = %q, want caused_external_only", projectedArtifact.CauseStatus)
@@ -656,6 +662,14 @@ func TestBuildOperatorProjectionRuntimeArtifactCauseStatusDistinguishesExternalO
 	}
 	if !hasRuntimeGraphEdge(runtimeEvidence.CausalGraph.Edges, externalCause.ID().Value(), artifact.ID().Value(), "external_or_out_of_window") {
 		t.Fatalf("causal graph edges = %+v, want external cause -> artifact edge", runtimeEvidence.CausalGraph.Edges)
+	}
+	if !hasRuntimeGraphEdge(runtimeEvidence.CausalGraph.Edges, externalCause.ID().Value(), secondArtifact.ID().Value(), "external_or_out_of_window") {
+		t.Fatalf("causal graph edges = %+v, want repeated external cause -> second artifact edge", runtimeEvidence.CausalGraph.Edges)
+	}
+	for _, edge := range runtimeEvidence.CausalGraph.Edges {
+		if edge.FromEventID == externalCause.ID().Value() && edge.Scope != "external_or_out_of_window" {
+			t.Fatalf("edge from external cause mislabeled: %+v", edge)
+		}
 	}
 }
 
@@ -1032,6 +1046,15 @@ func findRuntimeEventEvidence(events []OperatorRuntimeEventEvidence, eventID str
 		}
 	}
 	return OperatorRuntimeEventEvidence{}, false
+}
+
+func findRuntimeArtifactEvidence(artifacts []OperatorRuntimeArtifactEvidence, eventID string) (OperatorRuntimeArtifactEvidence, bool) {
+	for _, artifact := range artifacts {
+		if artifact.EventID == eventID {
+			return artifact, true
+		}
+	}
+	return OperatorRuntimeArtifactEvidence{}, false
 }
 
 func hasRuntimeGraphEdge(edges []OperatorRuntimeCausalEdge, from, to, scope string) bool {
