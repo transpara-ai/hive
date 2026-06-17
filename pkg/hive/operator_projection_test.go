@@ -392,6 +392,75 @@ func TestBuildOperatorProjectionRuntimeEvidenceCombinesQueuedIntentAndRuntimeEve
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresUnrelatedConversationEvents(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_evidence_progress")
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime with progress",
+		RepoPath: "/tmp/runtime",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeProgress, ProgressContent{
+		Message: "unrelated progress event for runtime evidence",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder",
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for unrelated conversation events", projection.Errors)
+	}
+	runtimeEvidence := projection.RuntimeEvidence
+	if runtimeEvidence.Status != "running" || runtimeEvidence.AgentEvents.Spawned != 1 || runtimeEvidence.AgentEvents.ObservedActive != 1 {
+		t.Fatalf("runtime evidence = %+v, want unrelated progress ignored and agent counted", runtimeEvidence)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceKeepsDistinctActiveAgentsWithSameNameRole(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_evidence_duplicate_agents")
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "duplicate names",
+		RepoPath: "/tmp/runtime",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder_one",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder_two",
+	})
+
+	runningProjection := BuildOperatorProjection(s, 50)
+	runningEvidence := runningProjection.RuntimeEvidence
+	if runningEvidence.AgentEvents.Spawned != 2 || runningEvidence.AgentEvents.ObservedActive != 2 {
+		t.Fatalf("running agent events = %+v, want two distinct active agents", runningEvidence.AgentEvents)
+	}
+
+	appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "builder",
+		Role:       "implementer",
+		StopReason: "complete",
+		Iterations: 1,
+	})
+	stoppedProjection := BuildOperatorProjection(s, 50)
+	stoppedEvidence := stoppedProjection.RuntimeEvidence
+	if stoppedEvidence.AgentEvents.Spawned != 2 || stoppedEvidence.AgentEvents.Stopped != 1 || stoppedEvidence.AgentEvents.ObservedActive != 1 {
+		t.Fatalf("stopped agent events = %+v, want one duplicate-name agent remaining", stoppedEvidence.AgentEvents)
+	}
+	if len(stoppedEvidence.AgentEvents.ActiveAgents) != 1 || stoppedEvidence.AgentEvents.ActiveAgents[0].ActorID != "actor_builder_one" {
+		t.Fatalf("active agents after stop = %+v, want first actor remaining", stoppedEvidence.AgentEvents.ActiveAgents)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 

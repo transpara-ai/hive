@@ -551,8 +551,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 
 	conversationEvents := readProjectionEventsByConversation(p, s, latestRunConversationID, limit)
 	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
+	activeAgentKeysByNameRole := map[string][]string{}
 	runClosed := false
 	startSeen := false
+	startInWindow := containsProjectionEvent(conversationEvents, startEvent.event.ID())
 	for i := len(conversationEvents) - 1; i >= 0; i-- {
 		pe := conversationEvents[i]
 		eventID := pe.event.ID().Value()
@@ -561,7 +563,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			startSeen = true
 			continue
 		}
-		if !startSeen && containsProjectionEvent(conversationEvents, startEvent.event.ID()) {
+		if !startSeen && startInWindow {
 			continue
 		}
 		switch content := pe.event.Content().(type) {
@@ -577,14 +579,19 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				SpawnedEventID: eventID,
 				SpawnedAt:      timestamp,
 			}
-			activeAgents[runtimeAgentKey(content.Name, content.Role)] = agent
+			agentKey := runtimeAgentKey(content.ActorID, content.Name, content.Role, eventID)
+			if _, exists := activeAgents[agentKey]; !exists {
+				nameRoleKey := runtimeAgentNameRoleKey(content.Name, content.Role)
+				activeAgentKeysByNameRole[nameRoleKey] = append(activeAgentKeysByNameRole[nameRoleKey], agentKey)
+			}
+			activeAgents[agentKey] = agent
 			evidence.AgentEvents.Spawned++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case AgentStoppedContent:
 			if runClosed {
 				continue
 			}
-			delete(activeAgents, runtimeAgentKey(content.Name, content.Role))
+			deleteLatestRuntimeAgent(activeAgents, activeAgentKeysByNameRole, content.Name, content.Role)
 			evidence.AgentEvents.Stopped++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case RunCompletedContent:
@@ -608,7 +615,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		case FactoryRunRequestedContent:
 			continue
 		default:
-			p.Errors = append(p.Errors, contentTypeError(pe.event, "runtime evidence content"))
+			continue
 		}
 	}
 
@@ -618,6 +625,8 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 }
 
 func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) []projectionEvent {
+	// Store implementations return newest-first pages. buildRuntimeEvidenceProjection
+	// walks this slice in reverse so run events are applied in EventGraph store order.
 	page, err := s.ByConversation(conversationID, limit, types.None[types.Cursor]())
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("read conversation %s: %v", conversationID.Value(), err))
@@ -640,6 +649,25 @@ func containsProjectionEvent(events []projectionEvent, eventID types.EventID) bo
 	return false
 }
 
+func deleteLatestRuntimeAgent(active map[string]OperatorRuntimeAgentEvidence, keysByNameRole map[string][]string, name, role string) {
+	nameRoleKey := runtimeAgentNameRoleKey(name, role)
+	keys := keysByNameRole[nameRoleKey]
+	for len(keys) > 0 {
+		lastIndex := len(keys) - 1
+		agentKey := keys[lastIndex]
+		keys = keys[:lastIndex]
+		if _, ok := active[agentKey]; ok {
+			delete(active, agentKey)
+			break
+		}
+	}
+	if len(keys) == 0 {
+		delete(keysByNameRole, nameRoleKey)
+		return
+	}
+	keysByNameRole[nameRoleKey] = keys
+}
+
 func setRuntimeLastAgentEvent(agentEvents *OperatorRuntimeAgentEvents, eventID string, timestamp time.Time) {
 	eventAt := timestamp
 	agentEvents.LastAgentEventID = eventID
@@ -652,15 +680,28 @@ func sortedRuntimeActiveAgents(active map[string]OperatorRuntimeAgentEvidence) [
 		agents = append(agents, agent)
 	}
 	sort.Slice(agents, func(i, j int) bool {
-		if agents[i].Role == agents[j].Role {
+		if agents[i].Role != agents[j].Role {
+			return agents[i].Role < agents[j].Role
+		}
+		if agents[i].Name != agents[j].Name {
 			return agents[i].Name < agents[j].Name
 		}
-		return agents[i].Role < agents[j].Role
+		if agents[i].ActorID != agents[j].ActorID {
+			return agents[i].ActorID < agents[j].ActorID
+		}
+		return agents[i].SpawnedEventID < agents[j].SpawnedEventID
 	})
 	return agents
 }
 
-func runtimeAgentKey(name, role string) string {
+func runtimeAgentKey(actorID, name, role, spawnedEventID string) string {
+	if actorID != "" {
+		return actorID
+	}
+	return runtimeAgentNameRoleKey(name, role) + "/" + spawnedEventID
+}
+
+func runtimeAgentNameRoleKey(name, role string) string {
 	return role + "/" + name
 }
 
