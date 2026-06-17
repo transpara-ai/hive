@@ -18,6 +18,7 @@ type OperatorProjection struct {
 	GeneratedAt        time.Time                     `json:"generated_at"`
 	Source             string                        `json:"source"`
 	ModelSelection     OperatorModelSelection        `json:"model_selection"`
+	RuntimeEvidence    OperatorRuntimeEvidence       `json:"runtime_evidence"`
 	PendingApprovals   []OperatorApprovalProjection  `json:"pending_approvals"`
 	AuthorityDecisions []OperatorDecisionProjection  `json:"authority_decisions"`
 	Lifecycle          []OperatorLifecycleProjection `json:"lifecycle"`
@@ -91,6 +92,65 @@ type OperatorKeyAuditProjection struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+type OperatorRuntimeEvidence struct {
+	Source               string                            `json:"source"`
+	Status               string                            `json:"status"`
+	LastRun              *OperatorRuntimeRunEvidence       `json:"last_run,omitempty"`
+	AgentEvents          OperatorRuntimeAgentEvents        `json:"agent_events"`
+	LastQueuedRunRequest *OperatorQueuedRunRequestEvidence `json:"last_queued_run_request,omitempty"`
+	Limitations          []string                          `json:"limitations,omitempty"`
+}
+
+type OperatorRuntimeRunEvidence struct {
+	StartedEventID   string     `json:"started_event_id"`
+	ConversationID   string     `json:"conversation_id"`
+	StartedAt        time.Time  `json:"started_at"`
+	SeedIdea         string     `json:"seed_idea,omitempty"`
+	RepoPath         string     `json:"repo_path,omitempty"`
+	CompletedEventID string     `json:"completed_event_id,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	AgentCount       *int       `json:"agent_count,omitempty"`
+	DurationMs       *int64     `json:"duration_ms,omitempty"`
+	TotalCost        *float64   `json:"total_cost,omitempty"`
+}
+
+type OperatorRuntimeAgentEvents struct {
+	Scope            string                         `json:"scope"`
+	Spawned          int                            `json:"spawned"`
+	Stopped          int                            `json:"stopped"`
+	ObservedActive   int                            `json:"observed_active"`
+	ActiveAgents     []OperatorRuntimeAgentEvidence `json:"active_agents,omitempty"`
+	LastAgentEventID string                         `json:"last_agent_event_id,omitempty"`
+	LastAgentEventAt *time.Time                     `json:"last_agent_event_at,omitempty"`
+}
+
+type OperatorRuntimeAgentEvidence struct {
+	Name           string    `json:"name"`
+	Role           string    `json:"role"`
+	Model          string    `json:"model,omitempty"`
+	ActorID        string    `json:"actor_id,omitempty"`
+	SpawnedEventID string    `json:"spawned_event_id"`
+	SpawnedAt      time.Time `json:"spawned_at"`
+}
+
+type OperatorQueuedRunRequestEvidence struct {
+	EventID               string    `json:"event_id"`
+	ConversationID        string    `json:"conversation_id"`
+	RunID                 string    `json:"run_id"`
+	Title                 string    `json:"title"`
+	OperatorID            string    `json:"operator_id,omitempty"`
+	Status                string    `json:"status"`
+	TargetRepos           []string  `json:"target_repos,omitempty"`
+	AuthorityInitialLevel string    `json:"authority_initial_level,omitempty"`
+	AuthorityScope        string    `json:"authority_scope,omitempty"`
+	BudgetMaxIterations   *int      `json:"budget_max_iterations,omitempty"`
+	BudgetMaxCostUSD      *float64  `json:"budget_max_cost_usd,omitempty"`
+	SourceEventID         string    `json:"source_event_id,omitempty"`
+	BriefEventID          string    `json:"brief_event_id,omitempty"`
+	EvidenceKind          string    `json:"evidence_kind"`
+	CreatedAt             time.Time `json:"created_at"`
+}
+
 type projectionEvent struct {
 	event event.Event
 }
@@ -143,6 +203,7 @@ func BuildOperatorProjection(s store.Store, limit int, opts ...OperatorProjectio
 	}
 	modelSelection = applyModelRolePolicyUpdates(&p, s, modelSelection, limit)
 	p.ModelSelection = BuildOperatorModelSelection(modelSelection)
+	p.RuntimeEvidence = buildRuntimeEvidenceProjection(&p, s, limit)
 
 	requestEvents := readProjectionEvents(&p, s, EventTypeAuthorityRequestRecorded, limit)
 	decisionEvents := readProjectionEvents(&p, s, EventTypeAuthorityDecisionRecorded, limit)
@@ -416,6 +477,232 @@ func buildKeyAuditProjection(p *OperatorProjection, s store.Store, limit int) []
 		traces = traces[:limit]
 	}
 	return traces
+}
+
+func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit int) OperatorRuntimeEvidence {
+	evidence := OperatorRuntimeEvidence{
+		Source: "eventgraph",
+		Status: "not_observed",
+		AgentEvents: OperatorRuntimeAgentEvents{
+			Scope: "none",
+		},
+		Limitations: []string{
+			"factory.run.requested is queued launch intent, not runtime-start proof",
+			"hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
+			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
+			"runtime event order follows EventGraph store order, not wall-clock timestamp order",
+		},
+	}
+
+	requestEvents := readProjectionEvents(p, s, EventTypeFactoryRunRequested, limit)
+	if len(requestEvents) > 0 {
+		pe := requestEvents[0]
+		eventID := pe.event.ID().Value()
+		conversationID := pe.event.ConversationID().Value()
+		timestamp := pe.event.Timestamp().Value()
+		content, ok := pe.event.Content().(FactoryRunRequestedContent)
+		if !ok {
+			p.Errors = append(p.Errors, contentTypeError(pe.event, "FactoryRunRequestedContent"))
+		} else {
+			budgetMaxIterations := content.Budget.MaxIterations
+			budgetMaxCostUSD := content.Budget.MaxCostUSD
+			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
+				EventID:               eventID,
+				ConversationID:        conversationID,
+				RunID:                 content.RunID,
+				Title:                 content.Title,
+				OperatorID:            content.OperatorID,
+				Status:                content.Status,
+				TargetRepos:           append([]string(nil), content.TargetRepos...),
+				AuthorityInitialLevel: string(content.Authority.InitialLevel),
+				AuthorityScope:        content.Authority.Scope,
+				BudgetMaxIterations:   &budgetMaxIterations,
+				BudgetMaxCostUSD:      &budgetMaxCostUSD,
+				SourceEventID:         content.SourceEventID.Value(),
+				BriefEventID:          content.BriefEventID.Value(),
+				EvidenceKind:          "queued_request_not_runtime_start",
+				CreatedAt:             timestamp,
+			}
+		}
+	}
+
+	runStartEvents := readProjectionEvents(p, s, EventTypeRunStarted, limit)
+	if len(runStartEvents) == 0 {
+		return evidence
+	}
+	startEvent := runStartEvents[0]
+	startContent, ok := startEvent.event.Content().(RunStartedContent)
+	if !ok {
+		p.Errors = append(p.Errors, contentTypeError(startEvent.event, "RunStartedContent"))
+		return evidence
+	}
+	latestRunConversationID := startEvent.event.ConversationID()
+	evidence.Status = "running"
+	evidence.LastRun = &OperatorRuntimeRunEvidence{
+		StartedEventID: startEvent.event.ID().Value(),
+		ConversationID: latestRunConversationID.Value(),
+		StartedAt:      startEvent.event.Timestamp().Value(),
+		SeedIdea:       startContent.Idea,
+		RepoPath:       startContent.RepoPath,
+	}
+	evidence.AgentEvents = OperatorRuntimeAgentEvents{
+		Scope: "events_since_latest_hive.run.started",
+	}
+
+	conversationEvents := readProjectionEventsByConversation(p, s, latestRunConversationID, limit)
+	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
+	activeAgentKeysByNameRole := map[string][]string{}
+	runClosed := false
+	startSeen := false
+	startInWindow := containsProjectionEvent(conversationEvents, startEvent.event.ID())
+	for i := len(conversationEvents) - 1; i >= 0; i-- {
+		pe := conversationEvents[i]
+		eventID := pe.event.ID().Value()
+		timestamp := pe.event.Timestamp().Value()
+		if pe.event.ID() == startEvent.event.ID() {
+			startSeen = true
+			continue
+		}
+		if !startSeen && startInWindow {
+			continue
+		}
+		switch content := pe.event.Content().(type) {
+		case AgentSpawnedContent:
+			if runClosed {
+				continue
+			}
+			agent := OperatorRuntimeAgentEvidence{
+				Name:           content.Name,
+				Role:           content.Role,
+				Model:          content.Model,
+				ActorID:        content.ActorID,
+				SpawnedEventID: eventID,
+				SpawnedAt:      timestamp,
+			}
+			agentKey := runtimeAgentKey(content.ActorID, content.Name, content.Role, eventID)
+			if _, exists := activeAgents[agentKey]; !exists {
+				nameRoleKey := runtimeAgentNameRoleKey(content.Name, content.Role)
+				activeAgentKeysByNameRole[nameRoleKey] = append(activeAgentKeysByNameRole[nameRoleKey], agentKey)
+			}
+			activeAgents[agentKey] = agent
+			evidence.AgentEvents.Spawned++
+			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
+		case AgentStoppedContent:
+			if runClosed {
+				continue
+			}
+			deleteLatestRuntimeAgent(activeAgents, activeAgentKeysByNameRole, content.Name, content.Role)
+			evidence.AgentEvents.Stopped++
+			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
+		case RunCompletedContent:
+			if runClosed {
+				continue
+			}
+			completedAt := timestamp
+			agentCount := content.AgentCount
+			durationMs := content.DurationMs
+			totalCost := content.TotalCost
+			evidence.Status = "completed"
+			evidence.LastRun.CompletedEventID = eventID
+			evidence.LastRun.CompletedAt = &completedAt
+			evidence.LastRun.AgentCount = &agentCount
+			evidence.LastRun.DurationMs = &durationMs
+			evidence.LastRun.TotalCost = &totalCost
+			activeAgents = map[string]OperatorRuntimeAgentEvidence{}
+			runClosed = true
+		case RunStartedContent:
+			continue
+		case FactoryRunRequestedContent:
+			continue
+		default:
+			continue
+		}
+	}
+
+	evidence.AgentEvents.ActiveAgents = sortedRuntimeActiveAgents(activeAgents)
+	evidence.AgentEvents.ObservedActive = len(evidence.AgentEvents.ActiveAgents)
+	return evidence
+}
+
+func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) []projectionEvent {
+	// Store implementations return newest-first pages. buildRuntimeEvidenceProjection
+	// walks this slice in reverse so run events are applied in EventGraph store order.
+	page, err := s.ByConversation(conversationID, limit, types.None[types.Cursor]())
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("read conversation %s: %v", conversationID.Value(), err))
+		return nil
+	}
+	items := page.Items()
+	events := make([]projectionEvent, 0, len(items))
+	for _, item := range items {
+		events = append(events, projectionEvent{event: item})
+	}
+	return events
+}
+
+func containsProjectionEvent(events []projectionEvent, eventID types.EventID) bool {
+	for _, pe := range events {
+		if pe.event.ID() == eventID {
+			return true
+		}
+	}
+	return false
+}
+
+func deleteLatestRuntimeAgent(active map[string]OperatorRuntimeAgentEvidence, keysByNameRole map[string][]string, name, role string) {
+	nameRoleKey := runtimeAgentNameRoleKey(name, role)
+	keys := keysByNameRole[nameRoleKey]
+	for len(keys) > 0 {
+		lastIndex := len(keys) - 1
+		agentKey := keys[lastIndex]
+		keys = keys[:lastIndex]
+		if _, ok := active[agentKey]; ok {
+			delete(active, agentKey)
+			break
+		}
+	}
+	if len(keys) == 0 {
+		delete(keysByNameRole, nameRoleKey)
+		return
+	}
+	keysByNameRole[nameRoleKey] = keys
+}
+
+func setRuntimeLastAgentEvent(agentEvents *OperatorRuntimeAgentEvents, eventID string, timestamp time.Time) {
+	eventAt := timestamp
+	agentEvents.LastAgentEventID = eventID
+	agentEvents.LastAgentEventAt = &eventAt
+}
+
+func sortedRuntimeActiveAgents(active map[string]OperatorRuntimeAgentEvidence) []OperatorRuntimeAgentEvidence {
+	agents := make([]OperatorRuntimeAgentEvidence, 0, len(active))
+	for _, agent := range active {
+		agents = append(agents, agent)
+	}
+	sort.Slice(agents, func(i, j int) bool {
+		if agents[i].Role != agents[j].Role {
+			return agents[i].Role < agents[j].Role
+		}
+		if agents[i].Name != agents[j].Name {
+			return agents[i].Name < agents[j].Name
+		}
+		if agents[i].ActorID != agents[j].ActorID {
+			return agents[i].ActorID < agents[j].ActorID
+		}
+		return agents[i].SpawnedEventID < agents[j].SpawnedEventID
+	})
+	return agents
+}
+
+func runtimeAgentKey(actorID, name, role, spawnedEventID string) string {
+	if actorID != "" {
+		return actorID
+	}
+	return runtimeAgentNameRoleKey(name, role) + "/" + spawnedEventID
+}
+
+func runtimeAgentNameRoleKey(name, role string) string {
+	return role + "/" + name
 }
 
 func contentTypeError(ev event.Event, want string) string {
