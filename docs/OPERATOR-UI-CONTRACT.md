@@ -180,13 +180,16 @@ POST /api/hive/approvals/{id}/resolve
         "conversation_id": "conv_hive_run_123",
         "created_at": "2026-06-17T12:02:00Z",
         "causes": ["evt_spawned"],
-        "inspector_kind": "eventgraph_event",
+        "inspector_kind": "curated_eventgraph_event",
         "content": {
           "run_id": "run_123",
           "artifact_id": "artifact_factory_brief",
           "label": "factory_brief",
           "title": "Factory brief",
-          "media_type": "text/markdown"
+          "media_type": "text/markdown",
+          "uri": "eventgraph://artifact/artifact_factory_brief",
+          "summary": "brief ready for operator inspection",
+          "producer_actor_id": "actor_builder"
         }
       }
     ],
@@ -254,7 +257,7 @@ The projection includes:
 - `agent_events`: spawn/stop counts and active-agent observations scoped to events since the latest `hive.run.started`.
 - `last_queued_run_request`: the latest `factory.run.requested` event with run ID, operator, target repos, authority envelope, budget, and source/brief event references.
 - `artifacts`: newest-first `factory.artifact.created` events from the latest run conversation, including artifact metadata and EventGraph causes.
-- `run_events`: bounded event-inspector payloads for the latest run conversation, including event ID, type, timestamp, causes, and JSON event content.
+- `run_events`: bounded event-inspector payloads for the latest run conversation, including event ID, type, timestamp, causes, and allowlisted curated JSON event content. Non-allowlisted event types remain inspectable by ID/type/causes but report `content_error` instead of raw content.
 - `causal_graph`: run-local graph nodes and edges derived from EventGraph event IDs and causes. External or out-of-window causes are represented explicitly rather than invented.
 - `limitations`: machine-readable boundary text Site can surface or log when presenting runtime evidence.
 
@@ -266,9 +269,10 @@ Important boundaries:
 - Completion proof fields use explicit observed values. A completed run with zero cost projects `total_cost: 0`; absence of completion keeps completion fields absent.
 - Queued budget fields also use explicit observed values. A queued request with zero budget projects `budget_max_iterations: 0` or `budget_max_cost_usd: 0`; absence of a queued request keeps queued budget fields absent.
 - Runtime anchoring reads the latest `hive.run.started` independently from agent-event volume, then reads bounded events from that run conversation in EventGraph store order. Agent counts are bounded event tallies, not invariants; `spawned` and `stopped` may differ when the bounded conversation window excludes matching events.
-- Artifact causes are the EventGraph causes on the artifact event. Hive does not duplicate cause truth inside artifact content; Site must render the projected causes and `cause_status`.
-- The event inspector exposes bounded EventGraph event content for operator inspection. It is not an execution log, deploy log, human approval record, or source-repo adoption record.
+- Artifact causes are the EventGraph causes on the artifact event. Hive does not duplicate cause truth inside artifact content; Site must render the projected causes and `cause_status`. `caused` means at least one cause is in the run window, `caused_external_only` means causes exist only outside the bounded run window, and `missing_causes` means the artifact event has no EventGraph causes.
+- The event inspector exposes curated, allowlisted EventGraph event content for operator inspection. It is not a raw event dump, execution log, deploy log, human approval record, or source-repo adoption record. Curated content is capped at 8 KiB per event.
 - The causal graph is scoped to the latest run conversation. Causes outside the bounded run window are labeled `external_or_out_of_window` and must not be presented as missing runtime evidence.
+- This projection defines the read-side contract. Runtime artifact production still requires Hive to append `factory.artifact.created` with real EventGraph causes that point at the events that actually produced the artifact.
 - Runtime evidence has no approval powers and cannot resolve authority. Site must continue using Hive's approval resolution endpoint for authority decisions.
 - If the projection window excludes older events, `status` and counts are bounded by the returned EventGraph reads, not by unstated runtime history.
 

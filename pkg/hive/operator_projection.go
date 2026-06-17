@@ -11,7 +11,11 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
-const defaultOperatorProjectionLimit = 50
+const (
+	defaultOperatorProjectionLimit             = 50
+	maxOperatorRuntimeInspectorContentBytes    = 8 * 1024
+	runtimeInspectorKindCuratedEventgraphEvent = "curated_eventgraph_event"
+)
 
 // OperatorProjection is the read-only Site-facing view over Hive Phase 3
 // EventGraph records. It is derived state; EventGraph remains the authority.
@@ -730,9 +734,10 @@ func runtimeRunEvents(startEvent projectionEvent, conversationEvents []projectio
 func buildRuntimeEventEvidence(p *OperatorProjection, events []projectionEvent) []OperatorRuntimeEventEvidence {
 	out := make([]OperatorRuntimeEventEvidence, 0, len(events))
 	for _, pe := range events {
-		content, contentErr := runtimeEventContent(pe.event)
-		if contentErr != "" {
-			p.Errors = append(p.Errors, fmt.Sprintf("marshal event inspector content for %s: %s", pe.event.ID().Value(), contentErr))
+		content, contentError, err := runtimeEventContent(pe.event)
+		if err != nil {
+			p.Errors = append(p.Errors, fmt.Sprintf("marshal event inspector content for %s: %s", pe.event.ID().Value(), err.Error()))
+			contentError = err.Error()
 		}
 		out = append(out, OperatorRuntimeEventEvidence{
 			EventID:        pe.event.ID().Value(),
@@ -740,9 +745,9 @@ func buildRuntimeEventEvidence(p *OperatorProjection, events []projectionEvent) 
 			ConversationID: pe.event.ConversationID().Value(),
 			CreatedAt:      pe.event.Timestamp().Value(),
 			Causes:         eventCauseIDs(pe.event),
-			InspectorKind:  "eventgraph_event",
+			InspectorKind:  runtimeInspectorKindCuratedEventgraphEvent,
 			Content:        content,
-			ContentError:   contentErr,
+			ContentError:   contentError,
 		})
 	}
 	return out
@@ -757,10 +762,6 @@ func buildRuntimeArtifactEvidence(events []projectionEvent) []OperatorRuntimeArt
 			continue
 		}
 		causes := runtimeCauseEvidence(pe.event, nodeByID)
-		causeStatus := "caused"
-		if len(causes) == 0 {
-			causeStatus = "missing_causes"
-		}
 		artifacts = append(artifacts, OperatorRuntimeArtifactEvidence{
 			EventID:         pe.event.ID().Value(),
 			RunID:           content.RunID,
@@ -772,7 +773,7 @@ func buildRuntimeArtifactEvidence(events []projectionEvent) []OperatorRuntimeArt
 			Summary:         content.Summary,
 			ProducerActorID: content.ProducerActorID,
 			Causes:          causes,
-			CauseStatus:     causeStatus,
+			CauseStatus:     runtimeArtifactCauseStatus(causes),
 			CreatedAt:       pe.event.Timestamp().Value(),
 		})
 	}
@@ -780,6 +781,18 @@ func buildRuntimeArtifactEvidence(events []projectionEvent) []OperatorRuntimeArt
 		return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt)
 	})
 	return artifacts
+}
+
+func runtimeArtifactCauseStatus(causes []OperatorRuntimeCauseEvidence) string {
+	if len(causes) == 0 {
+		return "missing_causes"
+	}
+	for _, cause := range causes {
+		if cause.Scope == "run" {
+			return "caused"
+		}
+	}
+	return "caused_external_only"
 }
 
 func buildRuntimeCausalGraph(events []projectionEvent, conversationID types.ConversationID, limit int, truncated bool) OperatorRuntimeCausalGraph {
@@ -888,12 +901,84 @@ func runtimeEventLabel(ev event.Event) string {
 	}
 }
 
-func runtimeEventContent(ev event.Event) (json.RawMessage, string) {
-	content, err := json.Marshal(ev.Content())
-	if err != nil {
-		return nil, err.Error()
+func runtimeEventContent(ev event.Event) (json.RawMessage, string, error) {
+	var content any
+	switch c := ev.Content().(type) {
+	case RunStartedContent:
+		content = struct {
+			Idea     string `json:"idea,omitempty"`
+			RepoPath string `json:"repo_path,omitempty"`
+		}{
+			Idea:     c.Idea,
+			RepoPath: c.RepoPath,
+		}
+	case AgentSpawnedContent:
+		content = struct {
+			Name    string `json:"name"`
+			Role    string `json:"role"`
+			Model   string `json:"model,omitempty"`
+			ActorID string `json:"actor_id,omitempty"`
+		}{
+			Name:    c.Name,
+			Role:    c.Role,
+			Model:   c.Model,
+			ActorID: c.ActorID,
+		}
+	case AgentStoppedContent:
+		content = struct {
+			Name       string `json:"name"`
+			Role       string `json:"role"`
+			StopReason string `json:"stop_reason"`
+			Iterations int    `json:"iterations"`
+			Detail     string `json:"detail,omitempty"`
+		}{
+			Name:       c.Name,
+			Role:       c.Role,
+			StopReason: c.StopReason,
+			Iterations: c.Iterations,
+			Detail:     c.Detail,
+		}
+	case RunCompletedContent:
+		content = struct {
+			AgentCount int     `json:"agent_count"`
+			DurationMs int64   `json:"duration_ms"`
+			TotalCost  float64 `json:"total_cost"`
+		}{
+			AgentCount: c.AgentCount,
+			DurationMs: c.DurationMs,
+			TotalCost:  c.TotalCost,
+		}
+	case FactoryArtifactCreatedContent:
+		content = struct {
+			RunID           string `json:"run_id"`
+			ArtifactID      string `json:"artifact_id"`
+			Label           string `json:"label"`
+			Title           string `json:"title,omitempty"`
+			MediaType       string `json:"media_type"`
+			URI             string `json:"uri,omitempty"`
+			Summary         string `json:"summary,omitempty"`
+			ProducerActorID string `json:"producer_actor_id,omitempty"`
+		}{
+			RunID:           c.RunID,
+			ArtifactID:      c.ArtifactID,
+			Label:           c.Label,
+			Title:           c.Title,
+			MediaType:       c.MediaType,
+			URI:             c.URI,
+			Summary:         c.Summary,
+			ProducerActorID: c.ProducerActorID,
+		}
+	default:
+		return nil, fmt.Sprintf("content omitted: %s is not in the runtime inspector allowlist", ev.Type().Value()), nil
 	}
-	return content, ""
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(raw) > maxOperatorRuntimeInspectorContentBytes {
+		return nil, fmt.Sprintf("content omitted: curated inspector content for %s exceeds %d bytes", ev.Type().Value(), maxOperatorRuntimeInspectorContentBytes), nil
+	}
+	return raw, "", nil
 }
 
 func eventCauseIDs(ev event.Event) []string {
