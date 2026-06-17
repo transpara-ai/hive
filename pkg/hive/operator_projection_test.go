@@ -535,6 +535,233 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeEvidenceIncludesArtifactsAndCausalGraph(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_artifact_graph")
+
+	started := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "render artifacts",
+		RepoPath: "/tmp/runtime",
+	})
+	spawned := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder",
+	})
+	artifact := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:           "run_artifact_graph",
+		ArtifactID:      "artifact_brief_001",
+		Label:           "factory_brief",
+		Title:           "Factory brief",
+		MediaType:       "text/markdown",
+		URI:             "eventgraph://artifact/artifact_brief_001",
+		Summary:         "brief ready for operator inspection",
+		ProducerActorID: "actor_builder",
+	})
+	authorityRequest := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAuthorityRequestRecorded, AuthorityRequestRecordedContent{
+		RequestID:        newTestEventID(t),
+		RequestingActor:  actorID,
+		RequestingRole:   "operator",
+		ActionName:       "repo.pull_request.create",
+		Target:           "transpara-ai/site",
+		Environment:      "test",
+		RequestedOutcome: "inspect artifact without raw authority payload exposure",
+		Justification:    "sensitive rationale must not be exposed through raw run event content",
+		RiskSummary:      "raw authority payload exposure",
+		Scope:            []string{"repo:transpara-ai/site"},
+	})
+	runRequest := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_artifact_graph",
+		IntakeID:   "intake_artifact_graph",
+		OperatorID: "operator_001",
+		Title:      "Launch artifact graph",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "operator-launch",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 4,
+			MaxCostUSD:    12.5,
+		},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         []byte(`{"goal":"sensitive launch brief"}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	runtimeEvidence := projection.RuntimeEvidence
+	if runtimeEvidence.LastRun == nil || runtimeEvidence.LastRun.StartedEventID != started.ID().Value() {
+		t.Fatalf("last run evidence = %+v, want start %s", runtimeEvidence.LastRun, started.ID().Value())
+	}
+	if len(runtimeEvidence.Artifacts) != 1 {
+		t.Fatalf("artifacts = %+v, want one artifact", runtimeEvidence.Artifacts)
+	}
+	projectedArtifact := runtimeEvidence.Artifacts[0]
+	if projectedArtifact.EventID != artifact.ID().Value() || projectedArtifact.ArtifactID != "artifact_brief_001" {
+		t.Fatalf("artifact projection = %+v", projectedArtifact)
+	}
+	if projectedArtifact.CauseStatus != "caused" {
+		t.Fatalf("artifact cause status = %q, want caused", projectedArtifact.CauseStatus)
+	}
+	if len(projectedArtifact.Causes) != 1 || projectedArtifact.Causes[0].EventID != spawned.ID().Value() || projectedArtifact.Causes[0].EventType != EventTypeAgentSpawned.Value() || projectedArtifact.Causes[0].Scope != "run" {
+		t.Fatalf("artifact causes = %+v, want run-scoped spawned event %s", projectedArtifact.Causes, spawned.ID().Value())
+	}
+
+	inspectorEvent, ok := findRuntimeEventEvidence(runtimeEvidence.RunEvents, artifact.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing artifact inspector payload: %+v", runtimeEvidence.RunEvents)
+	}
+	if inspectorEvent.InspectorKind != runtimeInspectorKindCuratedEventgraphEvent ||
+		!strings.Contains(string(inspectorEvent.Content), `"artifact_id":"artifact_brief_001"`) ||
+		!strings.Contains(string(inspectorEvent.Content), `"producer_actor_id":"actor_builder"`) {
+		t.Fatalf("artifact inspector event = %+v", inspectorEvent)
+	}
+	omittedEvent, ok := findRuntimeEventEvidence(runtimeEvidence.RunEvents, authorityRequest.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing authority request event: %+v", runtimeEvidence.RunEvents)
+	}
+	if len(omittedEvent.Content) != 0 || !strings.Contains(omittedEvent.ContentError, "not in the runtime inspector allowlist") {
+		t.Fatalf("authority request inspector event = %+v, want curated content omission", omittedEvent)
+	}
+	omittedRunRequest, ok := findRuntimeEventEvidence(runtimeEvidence.RunEvents, runRequest.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing factory run request event: %+v", runtimeEvidence.RunEvents)
+	}
+	if len(omittedRunRequest.Content) != 0 || !strings.Contains(omittedRunRequest.ContentError, "not in the runtime inspector allowlist") {
+		t.Fatalf("factory run request inspector event = %+v, want curated content omission", omittedRunRequest)
+	}
+
+	graph := runtimeEvidence.CausalGraph
+	if graph.Scope != "latest_run_conversation" || graph.ConversationID != convID.Value() {
+		t.Fatalf("causal graph metadata = %+v", graph)
+	}
+	if len(graph.Nodes) < 3 {
+		t.Fatalf("causal graph nodes = %+v, want run start, agent, and artifact nodes", graph.Nodes)
+	}
+	if !hasRuntimeGraphEdge(graph.Edges, spawned.ID().Value(), artifact.ID().Value(), "run") {
+		t.Fatalf("causal graph edges = %+v, want spawned -> artifact edge", graph.Edges)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeCausalGraphReportsTruncatedConversation(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_graph_truncated")
+	started := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "truncate graph",
+		RepoPath: "/tmp/runtime",
+	})
+	latest := started
+	for i := 0; i < 3; i++ {
+		latest = appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeAgentSpawned, AgentSpawnedContent{
+			Name:    "builder",
+			Role:    "implementer",
+			Model:   "claude-opus-4-6",
+			ActorID: "actor_builder",
+		})
+	}
+
+	projection := BuildOperatorProjection(s, 1)
+	graph := projection.RuntimeEvidence.CausalGraph
+	if !graph.Truncated {
+		t.Fatalf("causal graph truncated = false, want true for limit 1 with extra conversation events: %+v", graph)
+	}
+	if graph.Limit != 1 {
+		t.Fatalf("causal graph limit = %d, want 1", graph.Limit)
+	}
+	if !hasRuntimeGraphNode(graph.Nodes, started.ID().Value()) || !hasRuntimeGraphNode(graph.Nodes, latest.ID().Value()) {
+		t.Fatalf("causal graph nodes = %+v, want anchored start and latest bounded event", graph.Nodes)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeArtifactCauseStatusDistinguishesExternalOnly(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	runConvID := types.MustConversationID("conv_runtime_artifact_external")
+	externalConvID := types.MustConversationID("conv_external_artifact_cause")
+
+	appendOperatorProjectionEventWithConversation(t, s, actorID, runConvID, EventTypeRunStarted, RunStartedContent{
+		Idea:     "render external artifact causes",
+		RepoPath: "/tmp/runtime",
+	})
+	externalCause := appendOperatorProjectionEventWithConversation(t, s, actorID, externalConvID, EventTypeProgress, ProgressContent{
+		Message: "external producer signal",
+	})
+	artifact := appendOperatorProjectionEventWithConversationAndCauses(t, s, actorID, runConvID, EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:      "run_external_artifact",
+		ArtifactID: "artifact_external_001",
+		Label:      "external_artifact",
+		MediaType:  "text/plain",
+	}, []types.EventID{externalCause.ID()})
+	secondArtifact := appendOperatorProjectionEventWithConversationAndCauses(t, s, actorID, runConvID, EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:      "run_external_artifact",
+		ArtifactID: "artifact_external_002",
+		Label:      "second_external_artifact",
+		MediaType:  "text/plain",
+	}, []types.EventID{externalCause.ID()})
+
+	projection := BuildOperatorProjection(s, 50)
+	runtimeEvidence := projection.RuntimeEvidence
+	if len(runtimeEvidence.Artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want two artifacts", runtimeEvidence.Artifacts)
+	}
+	projectedArtifact, ok := findRuntimeArtifactEvidence(runtimeEvidence.Artifacts, artifact.ID().Value())
+	if !ok {
+		t.Fatalf("artifacts = %+v, want event %s", runtimeEvidence.Artifacts, artifact.ID().Value())
+	}
+	if projectedArtifact.CauseStatus != "caused_external_only" {
+		t.Fatalf("artifact cause status = %q, want caused_external_only", projectedArtifact.CauseStatus)
+	}
+	if len(projectedArtifact.Causes) != 1 || projectedArtifact.Causes[0].EventID != externalCause.ID().Value() || projectedArtifact.Causes[0].Scope != "external_or_out_of_window" {
+		t.Fatalf("artifact causes = %+v, want external-only cause %s", projectedArtifact.Causes, externalCause.ID().Value())
+	}
+	if !hasRuntimeGraphEdge(runtimeEvidence.CausalGraph.Edges, externalCause.ID().Value(), artifact.ID().Value(), "external_or_out_of_window") {
+		t.Fatalf("causal graph edges = %+v, want external cause -> artifact edge", runtimeEvidence.CausalGraph.Edges)
+	}
+	if !hasRuntimeGraphEdge(runtimeEvidence.CausalGraph.Edges, externalCause.ID().Value(), secondArtifact.ID().Value(), "external_or_out_of_window") {
+		t.Fatalf("causal graph edges = %+v, want repeated external cause -> second artifact edge", runtimeEvidence.CausalGraph.Edges)
+	}
+	for _, edge := range runtimeEvidence.CausalGraph.Edges {
+		if edge.FromEventID == externalCause.ID().Value() && edge.Scope != "external_or_out_of_window" {
+			t.Fatalf("edge from external cause mislabeled: %+v", edge)
+		}
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeInspectorOmitsOversizedCuratedContent(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_inspector_oversized")
+	started := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     strings.Repeat("x", maxOperatorRuntimeInspectorContentBytes+1),
+		RepoPath: "/tmp/runtime",
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for intentionally omitted oversized inspector content", projection.Errors)
+	}
+	inspectorEvent, ok := findRuntimeEventEvidence(projection.RuntimeEvidence.RunEvents, started.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing start event: %+v", projection.RuntimeEvidence.RunEvents)
+	}
+	if len(inspectorEvent.Content) != 0 || !strings.Contains(inspectorEvent.ContentError, "exceeds") {
+		t.Fatalf("start inspector event = %+v, want oversized content omitted", inspectorEvent)
+	}
+}
+
+func TestRuntimeArtifactCauseStatusValues(t *testing.T) {
+	if got := runtimeArtifactCauseStatus(nil); got != "missing_causes" {
+		t.Fatalf("empty cause status = %q, want missing_causes", got)
+	}
+	if got := runtimeArtifactCauseStatus([]OperatorRuntimeCauseEvidence{{EventID: "evt_external", Scope: "external_or_out_of_window"}}); got != "caused_external_only" {
+		t.Fatalf("external-only cause status = %q, want caused_external_only", got)
+	}
+	if got := runtimeArtifactCauseStatus([]OperatorRuntimeCauseEvidence{{EventID: "evt_run", Scope: "run"}}); got != "caused" {
+		t.Fatalf("run cause status = %q, want caused", got)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *testing.T) {
 	s, actorID, _ := newOperatorProjectionStore(t)
 	firstConversation := types.MustConversationID("conv_runtime_evidence_first")
@@ -799,17 +1026,22 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 
 func appendOperatorProjectionEventWithConversation(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent) event.Event {
 	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	return appendOperatorProjectionEventWithConversationAndCauses(t, s, actorID, convID, eventType, content, []types.EventID{head.Unwrap().ID()})
+}
+
+func appendOperatorProjectionEventWithConversationAndCauses(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent, causes []types.EventID) event.Event {
+	t.Helper()
 	RegisterEventTypes()
 	registry := event.DefaultRegistry()
 	RegisterWithRegistry(registry)
 	factory := event.NewEventFactory(registry)
 	signer := deriveSignerFromID(actorID)
 
-	head, err := s.Head()
-	if err != nil {
-		t.Fatalf("head: %v", err)
-	}
-	ev, err := factory.Create(eventType, actorID, content, []types.EventID{head.Unwrap().ID()}, convID, s, signer)
+	ev, err := factory.Create(eventType, actorID, content, causes, convID, s, signer)
 	if err != nil {
 		t.Fatalf("create %s: %v", eventType.Value(), err)
 	}
@@ -857,6 +1089,42 @@ func requireModelAssignment(t *testing.T, projection OperatorModelSelection, rol
 func containsModelProjectionString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func findRuntimeEventEvidence(events []OperatorRuntimeEventEvidence, eventID string) (OperatorRuntimeEventEvidence, bool) {
+	for _, ev := range events {
+		if ev.EventID == eventID {
+			return ev, true
+		}
+	}
+	return OperatorRuntimeEventEvidence{}, false
+}
+
+func findRuntimeArtifactEvidence(artifacts []OperatorRuntimeArtifactEvidence, eventID string) (OperatorRuntimeArtifactEvidence, bool) {
+	for _, artifact := range artifacts {
+		if artifact.EventID == eventID {
+			return artifact, true
+		}
+	}
+	return OperatorRuntimeArtifactEvidence{}, false
+}
+
+func hasRuntimeGraphEdge(edges []OperatorRuntimeCausalEdge, from, to, scope string) bool {
+	for _, edge := range edges {
+		if edge.FromEventID == from && edge.ToEventID == to && edge.Scope == scope {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRuntimeGraphNode(nodes []OperatorRuntimeCausalNode, eventID string) bool {
+	for _, node := range nodes {
+		if node.EventID == eventID {
 			return true
 		}
 	}
