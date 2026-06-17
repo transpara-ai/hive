@@ -154,7 +154,8 @@ POST /api/hive/approvals/{id}/resolve
     "limitations": [
       "factory.run.requested is queued launch intent, not runtime-start proof",
       "hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
-      "runtime start, agent, and completion events are correlated by EventGraph conversation ID"
+      "runtime start, agent, and completion events are correlated by EventGraph conversation ID",
+      "runtime event order follows EventGraph store order, not wall-clock timestamp order"
     ]
   },
   "model_selection": {
@@ -190,6 +191,8 @@ Important boundaries:
 - `hive.run.started`, `hive.agent.spawned`, `hive.agent.stopped`, and `hive.run.completed` are observed Hive runtime events. They prove event emission into Hive's EventGraph store, not production deployment, human authorization, source-repo adoption, or protected side effects.
 - Runtime start, agent, and completion events are correlated by EventGraph conversation ID. A completion event from another conversation is not attached to the latest run projection.
 - Completion proof fields use explicit observed values. A completed run with zero cost projects `total_cost: 0`; absence of completion keeps completion fields absent.
+- Queued budget fields also use explicit observed values. A queued request with zero budget projects `budget_max_iterations: 0` or `budget_max_cost_usd: 0`; absence of a queued request keeps queued budget fields absent.
+- Runtime anchoring reads the latest `hive.run.started` independently from agent-event volume, then reads bounded events from that run conversation in EventGraph store order. Agent counts are bounded event tallies, not invariants; `spawned` and `stopped` may differ when the bounded conversation window excludes matching events.
 - Runtime evidence has no approval powers and cannot resolve authority. Site must continue using Hive's approval resolution endpoint for authority decisions.
 - If the projection window excludes older events, `status` and counts are bounded by the returned EventGraph reads, not by unstated runtime history.
 

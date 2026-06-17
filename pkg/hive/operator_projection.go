@@ -143,8 +143,8 @@ type OperatorQueuedRunRequestEvidence struct {
 	TargetRepos           []string  `json:"target_repos,omitempty"`
 	AuthorityInitialLevel string    `json:"authority_initial_level,omitempty"`
 	AuthorityScope        string    `json:"authority_scope,omitempty"`
-	BudgetMaxIterations   int       `json:"budget_max_iterations,omitempty"`
-	BudgetMaxCostUSD      float64   `json:"budget_max_cost_usd,omitempty"`
+	BudgetMaxIterations   *int      `json:"budget_max_iterations,omitempty"`
+	BudgetMaxCostUSD      *float64  `json:"budget_max_cost_usd,omitempty"`
 	SourceEventID         string    `json:"source_event_id,omitempty"`
 	BriefEventID          string    `json:"brief_event_id,omitempty"`
 	EvidenceKind          string    `json:"evidence_kind"`
@@ -490,29 +490,22 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			"factory.run.requested is queued launch intent, not runtime-start proof",
 			"hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
 			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
+			"runtime event order follows EventGraph store order, not wall-clock timestamp order",
 		},
 	}
-	eventTypes := []types.EventType{
-		EventTypeFactoryRunRequested,
-		EventTypeRunStarted,
-		EventTypeAgentSpawned,
-		EventTypeAgentStopped,
-		EventTypeRunCompleted,
-	}
-	events := readProjectionEventsByTypes(p, s, eventTypes, limit)
-	sort.SliceStable(events, func(i, j int) bool {
-		return events[i].event.Timestamp().Value().Before(events[j].event.Timestamp().Value())
-	})
 
-	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
-	runObserved := false
-	latestRunConversationID := ""
-	for _, pe := range events {
+	requestEvents := readProjectionEvents(p, s, EventTypeFactoryRunRequested, limit)
+	if len(requestEvents) > 0 {
+		pe := requestEvents[0]
 		eventID := pe.event.ID().Value()
 		conversationID := pe.event.ConversationID().Value()
 		timestamp := pe.event.Timestamp().Value()
-		switch content := pe.event.Content().(type) {
-		case FactoryRunRequestedContent:
+		content, ok := pe.event.Content().(FactoryRunRequestedContent)
+		if !ok {
+			p.Errors = append(p.Errors, contentTypeError(pe.event, "FactoryRunRequestedContent"))
+		} else {
+			budgetMaxIterations := content.Budget.MaxIterations
+			budgetMaxCostUSD := content.Budget.MaxCostUSD
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -523,30 +516,57 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				TargetRepos:           append([]string(nil), content.TargetRepos...),
 				AuthorityInitialLevel: string(content.Authority.InitialLevel),
 				AuthorityScope:        content.Authority.Scope,
-				BudgetMaxIterations:   content.Budget.MaxIterations,
-				BudgetMaxCostUSD:      content.Budget.MaxCostUSD,
+				BudgetMaxIterations:   &budgetMaxIterations,
+				BudgetMaxCostUSD:      &budgetMaxCostUSD,
 				SourceEventID:         content.SourceEventID.Value(),
 				BriefEventID:          content.BriefEventID.Value(),
 				EvidenceKind:          "queued_request_not_runtime_start",
 				CreatedAt:             timestamp,
 			}
-		case RunStartedContent:
-			runObserved = true
-			latestRunConversationID = conversationID
-			activeAgents = map[string]OperatorRuntimeAgentEvidence{}
-			evidence.Status = "running"
-			evidence.LastRun = &OperatorRuntimeRunEvidence{
-				StartedEventID: eventID,
-				ConversationID: latestRunConversationID,
-				StartedAt:      timestamp,
-				SeedIdea:       content.Idea,
-				RepoPath:       content.RepoPath,
-			}
-			evidence.AgentEvents = OperatorRuntimeAgentEvents{
-				Scope: "events_since_latest_hive.run.started",
-			}
+		}
+	}
+
+	runStartEvents := readProjectionEvents(p, s, EventTypeRunStarted, limit)
+	if len(runStartEvents) == 0 {
+		return evidence
+	}
+	startEvent := runStartEvents[0]
+	startContent, ok := startEvent.event.Content().(RunStartedContent)
+	if !ok {
+		p.Errors = append(p.Errors, contentTypeError(startEvent.event, "RunStartedContent"))
+		return evidence
+	}
+	latestRunConversationID := startEvent.event.ConversationID()
+	evidence.Status = "running"
+	evidence.LastRun = &OperatorRuntimeRunEvidence{
+		StartedEventID: startEvent.event.ID().Value(),
+		ConversationID: latestRunConversationID.Value(),
+		StartedAt:      startEvent.event.Timestamp().Value(),
+		SeedIdea:       startContent.Idea,
+		RepoPath:       startContent.RepoPath,
+	}
+	evidence.AgentEvents = OperatorRuntimeAgentEvents{
+		Scope: "events_since_latest_hive.run.started",
+	}
+
+	conversationEvents := readProjectionEventsByConversation(p, s, latestRunConversationID, limit)
+	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
+	runClosed := false
+	startSeen := false
+	for i := len(conversationEvents) - 1; i >= 0; i-- {
+		pe := conversationEvents[i]
+		eventID := pe.event.ID().Value()
+		timestamp := pe.event.Timestamp().Value()
+		if pe.event.ID() == startEvent.event.ID() {
+			startSeen = true
+			continue
+		}
+		if !startSeen && containsProjectionEvent(conversationEvents, startEvent.event.ID()) {
+			continue
+		}
+		switch content := pe.event.Content().(type) {
 		case AgentSpawnedContent:
-			if !runObserved || conversationID != latestRunConversationID {
+			if runClosed {
 				continue
 			}
 			agent := OperatorRuntimeAgentEvidence{
@@ -561,14 +581,14 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			evidence.AgentEvents.Spawned++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case AgentStoppedContent:
-			if !runObserved || conversationID != latestRunConversationID {
+			if runClosed {
 				continue
 			}
 			delete(activeAgents, runtimeAgentKey(content.Name, content.Role))
 			evidence.AgentEvents.Stopped++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case RunCompletedContent:
-			if evidence.LastRun == nil || conversationID != evidence.LastRun.ConversationID {
+			if runClosed {
 				continue
 			}
 			completedAt := timestamp
@@ -582,6 +602,11 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			evidence.LastRun.DurationMs = &durationMs
 			evidence.LastRun.TotalCost = &totalCost
 			activeAgents = map[string]OperatorRuntimeAgentEvidence{}
+			runClosed = true
+		case RunStartedContent:
+			continue
+		case FactoryRunRequestedContent:
+			continue
 		default:
 			p.Errors = append(p.Errors, contentTypeError(pe.event, "runtime evidence content"))
 		}
@@ -590,6 +615,29 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	evidence.AgentEvents.ActiveAgents = sortedRuntimeActiveAgents(activeAgents)
 	evidence.AgentEvents.ObservedActive = len(evidence.AgentEvents.ActiveAgents)
 	return evidence
+}
+
+func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) []projectionEvent {
+	page, err := s.ByConversation(conversationID, limit, types.None[types.Cursor]())
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("read conversation %s: %v", conversationID.Value(), err))
+		return nil
+	}
+	items := page.Items()
+	events := make([]projectionEvent, 0, len(items))
+	for _, item := range items {
+		events = append(events, projectionEvent{event: item})
+	}
+	return events
+}
+
+func containsProjectionEvent(events []projectionEvent, eventID types.EventID) bool {
+	for _, pe := range events {
+		if pe.event.ID() == eventID {
+			return true
+		}
+	}
+	return false
 }
 
 func setRuntimeLastAgentEvent(agentEvents *OperatorRuntimeAgentEvents, eventID string, timestamp time.Time) {
