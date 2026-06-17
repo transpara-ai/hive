@@ -778,6 +778,9 @@ func buildRuntimeArtifactEvidence(events []projectionEvent) []OperatorRuntimeArt
 		})
 	}
 	sort.Slice(artifacts, func(i, j int) bool {
+		if artifacts[i].CreatedAt.Equal(artifacts[j].CreatedAt) {
+			return artifacts[i].EventID < artifacts[j].EventID
+		}
 		return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt)
 	})
 	return artifacts
@@ -930,13 +933,11 @@ func runtimeEventContent(ev event.Event) (json.RawMessage, string, error) {
 			Role       string `json:"role"`
 			StopReason string `json:"stop_reason"`
 			Iterations int    `json:"iterations"`
-			Detail     string `json:"detail,omitempty"`
 		}{
 			Name:       c.Name,
 			Role:       c.Role,
 			StopReason: c.StopReason,
 			Iterations: c.Iterations,
-			Detail:     c.Detail,
 		}
 	case RunCompletedContent:
 		content = struct {

@@ -659,6 +659,39 @@ func TestBuildOperatorProjectionRuntimeArtifactCauseStatusDistinguishesExternalO
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeInspectorOmitsOversizedCuratedContent(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	convID := types.MustConversationID("conv_runtime_inspector_oversized")
+	started := appendOperatorProjectionEventWithConversation(t, s, actorID, convID, EventTypeRunStarted, RunStartedContent{
+		Idea:     strings.Repeat("x", maxOperatorRuntimeInspectorContentBytes+1),
+		RepoPath: "/tmp/runtime",
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for intentionally omitted oversized inspector content", projection.Errors)
+	}
+	inspectorEvent, ok := findRuntimeEventEvidence(projection.RuntimeEvidence.RunEvents, started.ID().Value())
+	if !ok {
+		t.Fatalf("run_events missing start event: %+v", projection.RuntimeEvidence.RunEvents)
+	}
+	if len(inspectorEvent.Content) != 0 || !strings.Contains(inspectorEvent.ContentError, "exceeds") {
+		t.Fatalf("start inspector event = %+v, want oversized content omitted", inspectorEvent)
+	}
+}
+
+func TestRuntimeArtifactCauseStatusValues(t *testing.T) {
+	if got := runtimeArtifactCauseStatus(nil); got != "missing_causes" {
+		t.Fatalf("empty cause status = %q, want missing_causes", got)
+	}
+	if got := runtimeArtifactCauseStatus([]OperatorRuntimeCauseEvidence{{EventID: "evt_external", Scope: "external_or_out_of_window"}}); got != "caused_external_only" {
+		t.Fatalf("external-only cause status = %q, want caused_external_only", got)
+	}
+	if got := runtimeArtifactCauseStatus([]OperatorRuntimeCauseEvidence{{EventID: "evt_run", Scope: "run"}}); got != "caused" {
+		t.Fatalf("run cause status = %q, want caused", got)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *testing.T) {
 	s, actorID, _ := newOperatorProjectionStore(t)
 	firstConversation := types.MustConversationID("conv_runtime_evidence_first")
