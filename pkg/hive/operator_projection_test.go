@@ -220,6 +220,133 @@ func TestBuildOperatorProjectionLifecycleAndKeyAudit(t *testing.T) {
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	sourceEventID := newTestEventID(t)
+	briefEventID := newTestEventID(t)
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_queued",
+		IntakeID:   "intake_001",
+		OperatorID: "operator_001",
+		Title:      "Test 001 evidence run",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "test-001",
+			PolicyRef:    "DF-GATE-K",
+			Rationale:    "operator request requires explicit authority",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 3,
+			MaxCostUSD:    12.5,
+		},
+		TargetRepos:   []string{"transpara-ai/hive", "transpara-ai/eventgraph"},
+		SourceEventID: sourceEventID,
+		BriefEventID:  briefEventID,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	runtimeEvidence := projection.RuntimeEvidence
+
+	if runtimeEvidence.Status != "not_observed" {
+		t.Fatalf("runtime status = %q, want not_observed", runtimeEvidence.Status)
+	}
+	if runtimeEvidence.LastRun != nil {
+		t.Fatalf("last run = %+v, want nil for queued request only", runtimeEvidence.LastRun)
+	}
+	if runtimeEvidence.LastQueuedRunRequest == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	queued := runtimeEvidence.LastQueuedRunRequest
+	if queued.RunID != "run_queued" || queued.EvidenceKind != "queued_request_not_runtime_start" {
+		t.Fatalf("queued evidence = %+v", queued)
+	}
+	if queued.AuthorityInitialLevel != string(event.AuthorityLevelRequired) || queued.AuthorityScope != "test-001" {
+		t.Fatalf("queued authority evidence = %+v", queued)
+	}
+	if len(queued.TargetRepos) != 2 || queued.TargetRepos[0] != "transpara-ai/hive" {
+		t.Fatalf("queued target repos = %+v", queued.TargetRepos)
+	}
+	if runtimeEvidence.AgentEvents.Scope != "none" || runtimeEvidence.AgentEvents.ObservedActive != 0 {
+		t.Fatalf("agent evidence = %+v, want no runtime agents", runtimeEvidence.AgentEvents)
+	}
+	if !containsModelProjectionString(runtimeEvidence.Limitations, "factory.run.requested is queued launch intent, not runtime-start proof") {
+		t.Fatalf("limitations = %+v, want queued-intent boundary", runtimeEvidence.Limitations)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+
+	started := appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "prove runtime evidence",
+		RepoPath: "/Transpara/transpara-ai/data/repos/hive",
+	})
+	spawned := appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_builder",
+	})
+
+	runningProjection := BuildOperatorProjection(s, 50)
+	runningEvidence := runningProjection.RuntimeEvidence
+	if runningEvidence.Status != "running" {
+		t.Fatalf("running status = %q, want running", runningEvidence.Status)
+	}
+	if runningEvidence.LastRun == nil || runningEvidence.LastRun.StartedEventID != started.ID().Value() {
+		t.Fatalf("running last run = %+v, want started event %s", runningEvidence.LastRun, started.ID().Value())
+	}
+	if runningEvidence.AgentEvents.Spawned != 1 || runningEvidence.AgentEvents.ObservedActive != 1 {
+		t.Fatalf("running agent events = %+v, want one active spawn", runningEvidence.AgentEvents)
+	}
+	if len(runningEvidence.AgentEvents.ActiveAgents) != 1 {
+		t.Fatalf("active agents = %+v, want one agent", runningEvidence.AgentEvents.ActiveAgents)
+	}
+	active := runningEvidence.AgentEvents.ActiveAgents[0]
+	if active.Name != "builder" || active.ActorID != "actor_builder" || active.SpawnedEventID != spawned.ID().Value() {
+		t.Fatalf("active agent evidence = %+v", active)
+	}
+
+	stopped := appendEvent(EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "builder",
+		Role:       "implementer",
+		StopReason: "complete",
+		Iterations: 2,
+	})
+	completed := appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	completedProjection := BuildOperatorProjection(s, 50)
+	completedEvidence := completedProjection.RuntimeEvidence
+	if completedEvidence.Status != "completed" {
+		t.Fatalf("completed status = %q, want completed", completedEvidence.Status)
+	}
+	if completedEvidence.LastRun == nil {
+		t.Fatal("completed last run is nil")
+	}
+	run := completedEvidence.LastRun
+	if run.StartedEventID != started.ID().Value() || run.CompletedEventID != completed.ID().Value() {
+		t.Fatalf("run evidence = %+v", run)
+	}
+	if run.SeedIdea != "prove runtime evidence" || run.RepoPath != "/Transpara/transpara-ai/data/repos/hive" {
+		t.Fatalf("run start metadata = %+v", run)
+	}
+	if run.CompletedAt == nil || run.AgentCount != 1 || run.DurationMs != 1234 || run.TotalCost != 0.25 {
+		t.Fatalf("run completion metadata = %+v", run)
+	}
+	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
+		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
+	}
+	if completedEvidence.AgentEvents.LastAgentEventID != stopped.ID().Value() {
+		t.Fatalf("last agent event = %q, want %q", completedEvidence.AgentEvents.LastAgentEventID, stopped.ID().Value())
+	}
+}
+
 func TestBuildOperatorProjectionIncludesStaticModelSelection(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 
