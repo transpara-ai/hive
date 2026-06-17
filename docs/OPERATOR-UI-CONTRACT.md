@@ -108,6 +108,7 @@ POST /api/hive/approvals/{id}/resolve
     "status": "running|completed|not_observed",
     "last_run": {
       "started_event_id": "evt_started",
+      "conversation_id": "conv_hive_123",
       "started_at": "2026-06-17T12:00:00Z",
       "seed_idea": "Build onboarding flow",
       "repo_path": "/Transpara/transpara-ai/data/repos/hive",
@@ -135,6 +136,7 @@ POST /api/hive/approvals/{id}/resolve
     },
     "last_queued_run_request": {
       "event_id": "evt_requested",
+      "conversation_id": "conv_hive_run_123",
       "run_id": "run_123",
       "title": "Build onboarding flow",
       "operator_id": "user_123",
@@ -151,7 +153,8 @@ POST /api/hive/approvals/{id}/resolve
     },
     "limitations": [
       "factory.run.requested is queued launch intent, not runtime-start proof",
-      "hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment"
+      "hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
+      "runtime start, agent, and completion events are correlated by EventGraph conversation ID"
     ]
   },
   "model_selection": {
@@ -176,7 +179,7 @@ Site may render this data as operational evidence, but Hive remains the source o
 The projection includes:
 
 - `status`: `not_observed` when no `hive.run.started` event exists in the bounded projection window, `running` after the latest `hive.run.started`, and `completed` after a later `hive.run.completed`.
-- `last_run`: the latest observed Hive runtime start and completion event IDs, timestamps, seed idea, repo path, agent count, duration, and cost fields when present.
+- `last_run`: the latest observed Hive runtime start and completion event IDs, EventGraph conversation ID, timestamps, seed idea, repo path, agent count, duration, and cost fields when present.
 - `agent_events`: spawn/stop counts and active-agent observations scoped to events since the latest `hive.run.started`.
 - `last_queued_run_request`: the latest `factory.run.requested` event with run ID, operator, target repos, authority envelope, budget, and source/brief event references.
 - `limitations`: machine-readable boundary text Site can surface or log when presenting runtime evidence.
@@ -185,6 +188,8 @@ Important boundaries:
 
 - `factory.run.requested` records accepted queued launch intent only. It is not proof that Hive started a runtime, spawned agents, touched a target repo, or completed work.
 - `hive.run.started`, `hive.agent.spawned`, `hive.agent.stopped`, and `hive.run.completed` are observed Hive runtime events. They prove event emission into Hive's EventGraph store, not production deployment, human authorization, source-repo adoption, or protected side effects.
+- Runtime start, agent, and completion events are correlated by EventGraph conversation ID. A completion event from another conversation is not attached to the latest run projection.
+- Completion proof fields use explicit observed values. A completed run with zero cost projects `total_cost: 0`; absence of completion keeps completion fields absent.
 - Runtime evidence has no approval powers and cannot resolve authority. Site must continue using Hive's approval resolution endpoint for authority decisions.
 - If the projection window excludes older events, `status` and counts are bounded by the returned EventGraph reads, not by unstated runtime history.
 

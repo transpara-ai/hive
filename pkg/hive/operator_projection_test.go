@@ -262,6 +262,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.RunID != "run_queued" || queued.EvidenceKind != "queued_request_not_runtime_start" {
 		t.Fatalf("queued evidence = %+v", queued)
 	}
+	if queued.ConversationID == "" {
+		t.Fatalf("queued conversation ID is empty: %+v", queued)
+	}
 	if queued.AuthorityInitialLevel != string(event.AuthorityLevelRequired) || queued.AuthorityScope != "test-001" {
 		t.Fatalf("queued authority evidence = %+v", queued)
 	}
@@ -273,6 +276,40 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	}
 	if !containsModelProjectionString(runtimeEvidence.Limitations, "factory.run.requested is queued launch intent, not runtime-start proof") {
 		t.Fatalf("limitations = %+v, want queued-intent boundary", runtimeEvidence.Limitations)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresEventsWithoutRunStart(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "orphan-builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_orphan",
+	})
+	appendEvent(EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "orphan-builder",
+		Role:       "implementer",
+		StopReason: "orphaned",
+		Iterations: 1,
+	})
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 0,
+		DurationMs: 0,
+		TotalCost:  0,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	runtimeEvidence := projection.RuntimeEvidence
+	if runtimeEvidence.Status != "not_observed" {
+		t.Fatalf("runtime status = %q, want not_observed", runtimeEvidence.Status)
+	}
+	if runtimeEvidence.LastRun != nil {
+		t.Fatalf("last run = %+v, want nil without run start", runtimeEvidence.LastRun)
+	}
+	if runtimeEvidence.AgentEvents.Spawned != 0 || runtimeEvidence.AgentEvents.Stopped != 0 || runtimeEvidence.AgentEvents.ObservedActive != 0 {
+		t.Fatalf("agent events = %+v, want no pre-start events counted", runtimeEvidence.AgentEvents)
 	}
 }
 
@@ -297,6 +334,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 	if runningEvidence.LastRun == nil || runningEvidence.LastRun.StartedEventID != started.ID().Value() {
 		t.Fatalf("running last run = %+v, want started event %s", runningEvidence.LastRun, started.ID().Value())
+	}
+	if runningEvidence.LastRun.ConversationID == "" {
+		t.Fatalf("running last run conversation ID is empty: %+v", runningEvidence.LastRun)
 	}
 	if runningEvidence.AgentEvents.Spawned != 1 || runningEvidence.AgentEvents.ObservedActive != 1 {
 		t.Fatalf("running agent events = %+v, want one active spawn", runningEvidence.AgentEvents)
@@ -336,7 +376,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	if run.SeedIdea != "prove runtime evidence" || run.RepoPath != "/Transpara/transpara-ai/data/repos/hive" {
 		t.Fatalf("run start metadata = %+v", run)
 	}
-	if run.CompletedAt == nil || run.AgentCount != 1 || run.DurationMs != 1234 || run.TotalCost != 0.25 {
+	if run.CompletedAt == nil || run.AgentCount == nil || *run.AgentCount != 1 || run.DurationMs == nil || *run.DurationMs != 1234 || run.TotalCost == nil || *run.TotalCost != 0.25 {
 		t.Fatalf("run completion metadata = %+v", run)
 	}
 	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
@@ -344,6 +384,85 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 	if completedEvidence.AgentEvents.LastAgentEventID != stopped.ID().Value() {
 		t.Fatalf("last agent event = %q, want %q", completedEvidence.AgentEvents.LastAgentEventID, stopped.ID().Value())
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	firstConversation := types.MustConversationID("conv_runtime_evidence_first")
+	secondConversation := types.MustConversationID("conv_runtime_evidence_second")
+
+	appendOperatorProjectionEventWithConversation(t, s, actorID, firstConversation, EventTypeRunStarted, RunStartedContent{
+		Idea:     "first run",
+		RepoPath: "/tmp/first",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, firstConversation, EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 2,
+		DurationMs: 100,
+		TotalCost:  1.5,
+	})
+	secondStarted := appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeRunStarted, RunStartedContent{
+		Idea:     "second run",
+		RepoPath: "/tmp/second",
+	})
+	secondSpawned := appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "second-builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_second_builder",
+	})
+	appendOperatorProjectionEventWithConversation(t, s, actorID, firstConversation, EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 9,
+		DurationMs: 999,
+		TotalCost:  9.99,
+	})
+
+	runningProjection := BuildOperatorProjection(s, 50)
+	runningEvidence := runningProjection.RuntimeEvidence
+	if runningEvidence.Status != "running" {
+		t.Fatalf("status after stale completion = %q, want running", runningEvidence.Status)
+	}
+	if runningEvidence.LastRun == nil {
+		t.Fatal("last run is nil")
+	}
+	if runningEvidence.LastRun.StartedEventID != secondStarted.ID().Value() || runningEvidence.LastRun.ConversationID != secondConversation.Value() {
+		t.Fatalf("latest run evidence = %+v, want second conversation", runningEvidence.LastRun)
+	}
+	if runningEvidence.LastRun.CompletedEventID != "" || runningEvidence.LastRun.AgentCount != nil {
+		t.Fatalf("stale completion was attached to latest run: %+v", runningEvidence.LastRun)
+	}
+	if runningEvidence.AgentEvents.Spawned != 1 || runningEvidence.AgentEvents.ObservedActive != 1 {
+		t.Fatalf("running agent events = %+v, want one active second-run spawn", runningEvidence.AgentEvents)
+	}
+	if len(runningEvidence.AgentEvents.ActiveAgents) != 1 || runningEvidence.AgentEvents.ActiveAgents[0].SpawnedEventID != secondSpawned.ID().Value() {
+		t.Fatalf("active agents = %+v, want second-run agent", runningEvidence.AgentEvents.ActiveAgents)
+	}
+
+	appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "second-builder",
+		Role:       "implementer",
+		StopReason: "complete",
+		Iterations: 1,
+	})
+	secondCompleted := appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 200,
+		TotalCost:  0,
+	})
+
+	completedProjection := BuildOperatorProjection(s, 50)
+	completedEvidence := completedProjection.RuntimeEvidence
+	if completedEvidence.Status != "completed" {
+		t.Fatalf("status = %q, want completed", completedEvidence.Status)
+	}
+	if completedEvidence.LastRun == nil || completedEvidence.LastRun.CompletedEventID != secondCompleted.ID().Value() {
+		t.Fatalf("completed latest run evidence = %+v", completedEvidence.LastRun)
+	}
+	if completedEvidence.LastRun.TotalCost == nil || *completedEvidence.LastRun.TotalCost != 0 {
+		t.Fatalf("zero total cost was not preserved as observed evidence: %+v", completedEvidence.LastRun)
+	}
+	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
+		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
 	}
 }
 
@@ -510,6 +629,29 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 	}
 
 	return s, actorID, appendEvent
+}
+
+func appendOperatorProjectionEventWithConversation(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent) event.Event {
+	t.Helper()
+	RegisterEventTypes()
+	registry := event.DefaultRegistry()
+	RegisterWithRegistry(registry)
+	factory := event.NewEventFactory(registry)
+	signer := deriveSignerFromID(actorID)
+
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	ev, err := factory.Create(eventType, actorID, content, []types.EventID{head.Unwrap().ID()}, convID, s, signer)
+	if err != nil {
+		t.Fatalf("create %s: %v", eventType.Value(), err)
+	}
+	stored, err := s.Append(ev)
+	if err != nil {
+		t.Fatalf("append %s: %v", eventType.Value(), err)
+	}
+	return stored
 }
 
 func testModelSelectionConfigWithRoleDefault(role, model string) OperatorModelSelectionConfig {

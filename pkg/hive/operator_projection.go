@@ -103,14 +103,15 @@ type OperatorRuntimeEvidence struct {
 
 type OperatorRuntimeRunEvidence struct {
 	StartedEventID   string     `json:"started_event_id"`
+	ConversationID   string     `json:"conversation_id"`
 	StartedAt        time.Time  `json:"started_at"`
 	SeedIdea         string     `json:"seed_idea,omitempty"`
 	RepoPath         string     `json:"repo_path,omitempty"`
 	CompletedEventID string     `json:"completed_event_id,omitempty"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
-	AgentCount       int        `json:"agent_count,omitempty"`
-	DurationMs       int64      `json:"duration_ms,omitempty"`
-	TotalCost        float64    `json:"total_cost,omitempty"`
+	AgentCount       *int       `json:"agent_count,omitempty"`
+	DurationMs       *int64     `json:"duration_ms,omitempty"`
+	TotalCost        *float64   `json:"total_cost,omitempty"`
 }
 
 type OperatorRuntimeAgentEvents struct {
@@ -134,6 +135,7 @@ type OperatorRuntimeAgentEvidence struct {
 
 type OperatorQueuedRunRequestEvidence struct {
 	EventID               string    `json:"event_id"`
+	ConversationID        string    `json:"conversation_id"`
 	RunID                 string    `json:"run_id"`
 	Title                 string    `json:"title"`
 	OperatorID            string    `json:"operator_id,omitempty"`
@@ -487,6 +489,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		Limitations: []string{
 			"factory.run.requested is queued launch intent, not runtime-start proof",
 			"hive.run.started and hive.run.completed prove Hive runtime event emission, not production deployment",
+			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
 		},
 	}
 	eventTypes := []types.EventType{
@@ -503,13 +506,16 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 
 	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
 	runObserved := false
+	latestRunConversationID := ""
 	for _, pe := range events {
 		eventID := pe.event.ID().Value()
+		conversationID := pe.event.ConversationID().Value()
 		timestamp := pe.event.Timestamp().Value()
 		switch content := pe.event.Content().(type) {
 		case FactoryRunRequestedContent:
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
+				ConversationID:        conversationID,
 				RunID:                 content.RunID,
 				Title:                 content.Title,
 				OperatorID:            content.OperatorID,
@@ -526,10 +532,12 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			}
 		case RunStartedContent:
 			runObserved = true
+			latestRunConversationID = conversationID
 			activeAgents = map[string]OperatorRuntimeAgentEvidence{}
 			evidence.Status = "running"
 			evidence.LastRun = &OperatorRuntimeRunEvidence{
 				StartedEventID: eventID,
+				ConversationID: latestRunConversationID,
 				StartedAt:      timestamp,
 				SeedIdea:       content.Idea,
 				RepoPath:       content.RepoPath,
@@ -538,7 +546,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				Scope: "events_since_latest_hive.run.started",
 			}
 		case AgentSpawnedContent:
-			if !runObserved {
+			if !runObserved || conversationID != latestRunConversationID {
 				continue
 			}
 			agent := OperatorRuntimeAgentEvidence{
@@ -553,23 +561,26 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			evidence.AgentEvents.Spawned++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case AgentStoppedContent:
-			if !runObserved {
+			if !runObserved || conversationID != latestRunConversationID {
 				continue
 			}
 			delete(activeAgents, runtimeAgentKey(content.Name, content.Role))
 			evidence.AgentEvents.Stopped++
 			setRuntimeLastAgentEvent(&evidence.AgentEvents, eventID, timestamp)
 		case RunCompletedContent:
-			if evidence.LastRun == nil {
+			if evidence.LastRun == nil || conversationID != evidence.LastRun.ConversationID {
 				continue
 			}
 			completedAt := timestamp
+			agentCount := content.AgentCount
+			durationMs := content.DurationMs
+			totalCost := content.TotalCost
 			evidence.Status = "completed"
 			evidence.LastRun.CompletedEventID = eventID
 			evidence.LastRun.CompletedAt = &completedAt
-			evidence.LastRun.AgentCount = content.AgentCount
-			evidence.LastRun.DurationMs = content.DurationMs
-			evidence.LastRun.TotalCost = content.TotalCost
+			evidence.LastRun.AgentCount = &agentCount
+			evidence.LastRun.DurationMs = &durationMs
+			evidence.LastRun.TotalCost = &totalCost
 			activeAgents = map[string]OperatorRuntimeAgentEvidence{}
 		default:
 			p.Errors = append(p.Errors, contentTypeError(pe.event, "runtime evidence content"))
