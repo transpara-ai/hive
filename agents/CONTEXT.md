@@ -8,7 +8,7 @@ transpara.ai is a platform for collective existence. Not a task tracker. Not a s
 
 - **EventGraph** — the foundation. Signed, causal, hash-chained events. Trust scores. Authority levels.
 - **One graph, one grammar.** Every entity is a Node. Every operation is an Op. The grammar (intend, assign, claim, complete, endorse, respond, etc.) works on any node kind.
-- **Go + templ + HTMX + Tailwind.** Server-rendered. On-prem (private). Postgres (Neon).
+- **Go + templ + HTMX + Tailwind.** Server-rendered. On-prem (private). Postgres (on-prem; Supabase if cloud-hosted).
 - **Four repos:** eventgraph (foundation), agent (abstraction), hive (this repo — agents + loop), site (transpara.ai web app).
 
 ## The Product
