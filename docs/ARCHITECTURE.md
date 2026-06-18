@@ -2,10 +2,10 @@
 
 ## One Service
 
-lovyou.ai is one Go binary. Not microservices. One event graph, one actor store, one database.
+transpara.ai is one Go binary. Not microservices. One event graph, one actor store, one database.
 
 ```
-lovyou.ai
+transpara.ai
 ├── Hive runtime (agent registration, spawning, event emission)
 ├── Agentic loop (observe → reason/operate → check stopping → repeat)
 ├── Agents (Strategist, Planner, Implementer, Guardian)
@@ -50,7 +50,7 @@ The agent society built on EventGraph + Agent.
 - **Resources** — budget enforcement (iterations, duration, tokens, cost)
 - **Workspace** — git management (clone, branch, commit, push, PR)
 
-### lovyou.ai (surface)
+### transpara.ai (surface)
 
 Separate repo (transpara-ai/site). Go + templ + HTMX + Tailwind.
 

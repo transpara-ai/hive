@@ -1,5 +1,5 @@
 // Package localapi provides a local database-backed store that mirrors the
-// lovyou.ai REST API, enabling fully offline operation of the hive pipeline.
+// transpara.ai REST API, enabling fully offline operation of the hive pipeline.
 package localapi
 
 import "database/sql"

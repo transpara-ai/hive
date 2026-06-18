@@ -464,8 +464,8 @@ package checkpoint
 import (
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
 // EventTypeAgentHeartbeat is the event type for periodic heartbeat snapshots.
@@ -884,8 +884,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
 // CheckpointSink receives boundary and heartbeat signals from the loop.
@@ -1039,9 +1039,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/event"
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
-	"github.com/lovyou-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
 // BudgetState holds recovered budget state for one agent.
@@ -1405,7 +1405,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lovyou-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 )
 
 // RecoveryMode indicates how an agent was recovered.
@@ -1581,7 +1581,7 @@ git commit -m "feat(checkpoint): add recovery orchestrator with warm/cold fallba
 Add to imports (`loop.go:13-31`):
 
 ```go
-"github.com/lovyou-ai/hive/pkg/checkpoint"
+"github.com/transpara-ai/hive/pkg/checkpoint"
 ```
 
 Add to Config struct (after `KnowledgeStore` field, around line 122):
@@ -1788,7 +1788,7 @@ git commit -m "feat(checkpoint): integrate recovery state and sink into loop"
 Add to imports (`runtime.go:8-32`):
 
 ```go
-"github.com/lovyou-ai/hive/pkg/checkpoint"
+"github.com/transpara-ai/hive/pkg/checkpoint"
 ```
 
 - [ ] **Step 2: Wire recovery into Run() boot sequence**
@@ -1935,7 +1935,7 @@ func (c *CTOCooldowns) InitCTOFromRecovery(state *checkpoint.CTORecoveredState) 
 }
 ```
 
-Add `"github.com/lovyou-ai/hive/pkg/checkpoint"` to cto.go imports.
+Add `"github.com/transpara-ai/hive/pkg/checkpoint"` to cto.go imports.
 
 - [ ] **Step 2: Add InitSpawnerFromRecovery to spawner.go**
 
@@ -1958,7 +1958,7 @@ func (s *spawnerState) InitSpawnerFromRecovery(state *checkpoint.SpawnerRecovere
 }
 ```
 
-Add `"github.com/lovyou-ai/hive/pkg/checkpoint"` to spawner.go imports.
+Add `"github.com/transpara-ai/hive/pkg/checkpoint"` to spawner.go imports.
 
 - [ ] **Step 3: Add InitReviewerFromRecovery to review.go**
 
@@ -1978,7 +1978,7 @@ func (s *reviewerState) InitReviewerFromRecovery(state *checkpoint.ReviewerRecov
 }
 ```
 
-Add `"github.com/lovyou-ai/hive/pkg/checkpoint"` to review.go imports.
+Add `"github.com/transpara-ai/hive/pkg/checkpoint"` to review.go imports.
 
 - [ ] **Step 4: Call init functions from loop New()**
 

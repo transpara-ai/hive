@@ -2,14 +2,14 @@
 
 ## What This Is
 
-lovyou.ai is a platform for collective existence. Not a task tracker. Not a social network. A substrate where any group — friend group, dev team, company, charity, civilization — organizes their existence on one graph.
+transpara.ai is a platform for collective existence. Not a task tracker. Not a social network. A substrate where any group — friend group, dev team, company, charity, civilization — organizes their existence on one graph.
 
 ## Architecture
 
 - **EventGraph** — the foundation. Signed, causal, hash-chained events. Trust scores. Authority levels.
 - **One graph, one grammar.** Every entity is a Node. Every operation is an Op. The grammar (intend, assign, claim, complete, endorse, respond, etc.) works on any node kind.
 - **Go + templ + HTMX + Tailwind.** Server-rendered. On-prem (private). Postgres (Neon).
-- **Four repos:** eventgraph (foundation), agent (abstraction), hive (this repo — agents + loop), site (lovyou.ai web app).
+- **Four repos:** eventgraph (foundation), agent (abstraction), hive (this repo — agents + loop), site (transpara.ai web app).
 
 ## The Product
 

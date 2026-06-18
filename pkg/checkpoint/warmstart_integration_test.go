@@ -372,6 +372,6 @@ type passthroughContent struct {
 	EventType string `json:"EventType"`
 }
 
-func (c passthroughContent) EventTypeName() string        { return c.EventType }
-func (c passthroughContent) Validate() error               { return nil }
+func (c passthroughContent) EventTypeName() string            { return c.EventType }
+func (c passthroughContent) Validate() error                  { return nil }
 func (c passthroughContent) Accept(event.EventContentVisitor) {}

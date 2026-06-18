@@ -18,11 +18,11 @@
 
 ## Problem
 
-The hive's `run.sh` loop was built for the original developer's machine (`/c/src/matt/lovyou3/`) and assumes:
+The hive's `run.sh` loop was built for the original developer's machine (`/c/src/matt/transpara3/`) and assumes:
 
-1. Direct access to `lovyou.ai` for posting iteration summaries
+1. Direct access to `transpara.ai` for posting iteration summaries
 2. Fly.io deployment (`fly status`, `./ship.sh`)
-3. Push to `origin main` (lovyou-ai upstream repo)
+3. Push to `origin main` (transpara-ai upstream repo)
 4. The `site` repo as the primary work target
 
 These are hardcoded values. Replacing them with different hardcoded values (e.g., transpara-ai paths) repeats the same mistake. The fix is to parameterize the deployment so any operator can configure the loop for their environment.
@@ -51,8 +51,8 @@ These are hard rules from CLAUDE.md and the operator. They are enforced by the c
 | `loop/config.env` | **New file.** Declarative config for all environment-specific values |
 | `loop/scout-prompt.txt` | Read repo paths from config, remove hardcoded paths and external service checks |
 | `loop/builder-prompt.txt` | Read repo paths from config, remove deploy step |
-| `loop/reflector-prompt.txt` | Remove close.sh lovyou.ai references, reference config |
-| `loop/run.sh` | Source config.env, remove lovyou.ai post block, update comment paths |
+| `loop/reflector-prompt.txt` | Remove close.sh transpara.ai references, reference config |
+| `loop/run.sh` | Source config.env, remove transpara.ai post block, update comment paths |
 | `loop/close.sh` | Rewrite: source config.env, use parameterized remote/org, safety gates |
 | `loop/state.md` | Reset focus to building missing hive agents (primary section at line 7; archived section at ~line 774 is historical and left intact) |
 | `CLAUDE.md` | Add Local Loop Guardrails section |
@@ -69,11 +69,11 @@ These are hard rules from CLAUDE.md and the operator. They are enforced by the c
 
 ### 0. run.sh — Source Config, Remove Post Block
 
-Source config.env at the top. Remove the lovyou.ai post block (lines 80-86). Replace with config-driven post. Update comment path on line 12.
+Source config.env at the top. Remove the transpara.ai post block (lines 80-86). Replace with config-driven post. Update comment path on line 12.
 
 ### 1. scout-prompt.txt
 
-Replace hardcoded `/c/src/matt/lovyou3/` path and external service checks with config.env references. Include all five repos: hive, eventgraph, agent, work, site.
+Replace hardcoded `/c/src/matt/transpara3/` path and external service checks with config.env references. Include all five repos: hive, eventgraph, agent, work, site.
 
 ### 2. builder-prompt.txt
 
@@ -81,7 +81,7 @@ Replace hardcoded deploy/ship.sh instruction with config-driven test-and-commit 
 
 ### 3. reflector-prompt.txt
 
-Replace lovyou.ai close.sh instruction with config-driven local commit instruction.
+Replace transpara.ai close.sh instruction with config-driven local commit instruction.
 
 ### 4. close.sh — Full Rewrite
 

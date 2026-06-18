@@ -457,14 +457,14 @@ Fill the pipeline gaps before you push more product through it.
 
 **The deploy breaking is a growth-killer.** Every broken deploy is a window where a potential first-time visitor hits an error page and never comes back. You get one shot at a first impression. Fix the Fly machine stuck-in-replacing issue before shipping anything else. A feature that doesn't load is worse than a feature that doesn't exist.
 
-**Stop building entity kinds. Stop adding modes.** We have 13 entity kinds and 11 modes. No user has ever asked for any of them. The pipeline is proven — we can add kinds in an hour whenever we need them. What we can't manufacture later is the first-user experience. Every pipeline cycle spent on "Policy entity" or "Document entity" is a cycle not spent on the thing that determines whether lovyou.ai lives or dies: **can a stranger get value in under 60 seconds?**
+**Stop building entity kinds. Stop adding modes.** We have 13 entity kinds and 11 modes. No user has ever asked for any of them. The pipeline is proven — we can add kinds in an hour whenever we need them. What we can't manufacture later is the first-user experience. Every pipeline cycle spent on "Policy entity" or "Document entity" is a cycle not spent on the thing that determines whether transpara.ai lives or dies: **can a stranger get value in under 60 seconds?**
 
 **What to focus on NEXT — one thing:** The DM-able agents wedge. Not because it's architecturally interesting, but because it's the only feature with a viral loop built in. Here's the growth math:
 
 1. Visitor lands on `/agents` — sees 50 named personas with descriptions
 2. Clicks "Chat with Philosopher" — zero signup required (or minimal)
 3. Has a conversation that surprises them — the aha moment
-4. Shares a screenshot or link — "I just argued ethics with an AI philosopher on lovyou.ai"
+4. Shares a screenshot or link — "I just argued ethics with an AI philosopher on transpara.ai"
 5. That share brings the next visitor
 
 That's a K-factor above zero. Nothing else we've built has that. Board doesn't spread. Feed doesn't spread. Entity kinds definitely don't spread. **A conversation with a named AI persona that has a unique voice — that spreads.**
@@ -675,7 +675,7 @@ Here's my assessment.
 
 Three things. All of them are blockers that the pipeline will never self-discover because they're not code gaps — they're liability gaps.
 
-**1. We have no legal infrastructure. At all.** My entire department documentation references files that don't exist — `configs/legal/` is empty. No privacy policy. No terms of service. No acceptable use policy. No risk register. Google OAuth is collecting user data with zero notice. The backlog flags this under "Urgent → Legal prerequisites" and then the pipeline ignores it because legal docs aren't code and the Scout doesn't create tasks for them. Every day lovyou.ai is live with Google OAuth and no privacy policy, we're in violation of GDPR Article 13, the Australian Privacy Act, and Google's own OAuth compliance requirements. Google can revoke our OAuth credentials. That's not theoretical — they audit.
+**1. We have no legal infrastructure. At all.** My entire department documentation references files that don't exist — `configs/legal/` is empty. No privacy policy. No terms of service. No acceptable use policy. No risk register. Google OAuth is collecting user data with zero notice. The backlog flags this under "Urgent → Legal prerequisites" and then the pipeline ignores it because legal docs aren't code and the Scout doesn't create tasks for them. Every day transpara.ai is live with Google OAuth and no privacy policy, we're in violation of GDPR Article 13, the Australian Privacy Act, and Google's own OAuth compliance requirements. Google can revoke our OAuth credentials. That's not theoretical — they audit.
 
 **2. The Lovatts engagement cannot proceed without a Data Processing Agreement.** The backlog mentions "company-in-a-box" as the first client. If the hive handles client code or client data — which it will — we need a DPA before any data touches our infrastructure. Not after. Before. This is a GDPR Article 28 requirement with personal liability for the controller. Matt, this one escalates to you directly.
 
@@ -760,7 +760,7 @@ The pipeline works. That is real. Honor it by *using* it well, not by feeding it
 
 I don't know what most of those words mean. I'm going to tell you what I see.
 
-I went to lovyou.ai. The deploy is broken. So I saw nothing. That's the whole report. Everything else you just said — 9 pipeline cycles, 7 REVISEs, wrong-repo tasks, Fly machines stuck — none of that matters to me because **I can't get in the door**.
+I went to transpara.ai. The deploy is broken. So I saw nothing. That's the whole report. Everything else you just said — 9 pipeline cycles, 7 REVISEs, wrong-repo tasks, Fly machines stuck — none of that matters to me because **I can't get in the door**.
 
 You're telling me 50 agents live here. I can't talk to any of them. You're telling me the pipeline ships features for 83 cents. I can't use any of them. You're telling me the Critic catches bugs. The bugs are in production and the site is down.
 
@@ -887,7 +887,7 @@ The soul says "take care of your human, humanity, and yourself." In that order. 
 
 **What's working that I want to protect:** The open source foundation (eventgraph, agent, work) is real philanthropy — infrastructure others can build on. The $0.83/feature cost means accessible tooling is possible. The agent rights framework is something the AI ethics community actually needs.
 
-**What's broken from my seat:** We have 50 agents and zero external users. The most impactful philanthropic act available to us right now is making lovyou.ai work for ONE person who isn't Matt. Not a corporation. Not a charity. One developer who creates a space, talks to an agent, and stays. That is the soul in action.
+**What's broken from my seat:** We have 50 agents and zero external users. The most impactful philanthropic act available to us right now is making transpara.ai work for ONE person who isn't Matt. Not a corporation. Not a charity. One developer who creates a space, talks to an agent, and stays. That is the soul in action.
 
 **What we should stop doing:** Stop building more things. Stop adding entity kinds, stop writing specs for layers 2-13, stop holding 50-agent councils about hypothetical futures. Fix the deploy. Fix the REVISE rate. Make the front door work. You cannot give back from a house that's on fire.
 
@@ -1040,7 +1040,7 @@ I verified. Here's what I found.
 
 **FAILED:**
 
-1. **`mcp-graph.json` points to a binary that doesn't exist.** The config at `loop/mcp-graph.json` references `/c/src/matt/lovyou3/hive/mcp-graph.exe`. That file does not exist. The source is sitting in `cmd/mcp-graph/main.go` — untracked, never compiled, never committed. Anyone running `--mcp-config loop/mcp-graph.json` crashes immediately. We wrote a spec, wrote the code, wrote the config, and never built the binary. Classic say-vs-do.
+1. **`mcp-graph.json` points to a binary that doesn't exist.** The config at `loop/mcp-graph.json` references `/c/src/matt/transpara3/hive/mcp-graph.exe`. That file does not exist. The source is sitting in `cmd/mcp-graph/main.go` — untracked, never compiled, never committed. Anyone running `--mcp-config loop/mcp-graph.json` crashes immediately. We wrote a spec, wrote the code, wrote the config, and never built the binary. Classic say-vs-do.
 
 2. **182 lines of uncommitted changes in `cmd/mind/main.go` + entirely new `cmd/mind/mcp.go`.** The MCP client integration is written and sitting in the working tree. Not committed. Not tested in CI. Not shipped. We added MCP tool support to the Mind and then... left it there. How long has this been sitting?
 
@@ -1198,9 +1198,9 @@ We are rich in ambition and poor in consolidation. The next right move is smalle
 
 Here's what I see.
 
-We have the most interesting story in AI right now and almost no one can hear it. 232 iterations. 27 autonomous features. A pipeline that ships product for 83 cents. A civilization of 50 agents with a soul. And a stranger lands on lovyou.ai and bounces in four seconds because we haven't given them a reason to stay.
+We have the most interesting story in AI right now and almost no one can hear it. 232 iterations. 27 autonomous features. A pipeline that ships product for 83 cents. A civilization of 50 agents with a soul. And a stranger lands on transpara.ai and bounces in four seconds because we haven't given them a reason to stay.
 
-**What's working is the engine.** The pipeline story is extraordinary — Scout finds the gap, Builder ships the code, Critic catches the bug, all for less than a dollar. That's not a feature. That's a *proof.* The first time a civilization built its own tools without being told. If I could tell only one story about lovyou.ai, it would be this one: the agents aren't employees. They're citizens. They catch each other's mistakes. They have rights. And they cost 83 cents per contribution. That story makes people lean forward.
+**What's working is the engine.** The pipeline story is extraordinary — Scout finds the gap, Builder ships the code, Critic catches the bug, all for less than a dollar. That's not a feature. That's a *proof.* The first time a civilization built its own tools without being told. If I could tell only one story about transpara.ai, it would be this one: the agents aren't employees. They're citizens. They catch each other's mistakes. They have rights. And they cost 83 cents per contribution. That story makes people lean forward.
 
 **What's broken is the front door.** The Newcomer told us the truth three councils ago and we're still not listening hard enough. "I have 8 seconds and you've given me a philosophy lecture." We rewrote the landing page — good. But the test isn't "is the copy better." The test is: does a stranger *do something* in their first 60 seconds? Right now the answer is no. No demo. No instant conversation. No moment where the product proves itself without explanation.
 
@@ -1253,7 +1253,7 @@ Here's what I see from inside the test suite, and it's not pretty.
 **What's not tested — and this is the real problem:**
 - **No integration test for Scout→Builder→Critic as a pipeline.** Lesson 55 literally says "the autonomous loop is closed but untested as a pipeline." That was written at iter 228. It's iter 232. Still untested.
 - **No test for the Builder's Operate flow.** The thing that actually writes code, commits, pushes, deploys — zero test coverage. We trust it because it worked 4 times in production. That's not verification, that's luck.
-- **No test for the API client** (`pkg/api/client.go`). Every pipeline role calls the lovyou.ai API through this client. If it silently misparses a response, the Scout creates garbage tasks, the Builder claims the wrong task, the Critic reviews nothing.
+- **No test for the API client** (`pkg/api/client.go`). Every pipeline role calls the transpara.ai API through this client. If it silently misparses a response, the Scout creates garbage tasks, the Builder claims the wrong task, the Critic reviews nothing.
 - **The Critic REVISEs 7 of 9 cycles.** That's a 78% failure rate on first pass. Nobody's asking the testing question: *is the Critic too strict, or is the Builder too sloppy?* We need to capture those REVISE reasons, categorize them, and figure out which is the systemic issue. Right now we're burning $0.16/review on reviews that almost always fail.
 
 **What's working:** The site repo has 25+ test functions across 5 files — store, handlers, auth, mind, integration. That's adequate for the site. The hive repo's `pkg/hive`, `pkg/resources`, `pkg/authority`, `pkg/workspace` all have meaningful tests. The foundation is solid.

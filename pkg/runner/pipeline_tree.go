@@ -26,9 +26,9 @@ type FixTasker interface {
 
 // PipelineTree orchestrates a sequence of phases, emitting diagnostics on failure.
 type PipelineTree struct {
-	cfg        Config
-	phases     []Phase
-	fixTasker  FixTasker
+	cfg       Config
+	phases    []Phase
+	fixTasker FixTasker
 }
 
 // clientFixTasker adapts an api.Client to the FixTasker interface.

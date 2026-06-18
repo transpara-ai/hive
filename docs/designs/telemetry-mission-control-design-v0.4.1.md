@@ -23,7 +23,7 @@
 
 ## 1. What This Is
 
-A framework-level telemetry writer and live dashboard for the **Transpara AI hive deployment on nucbuntu**. This is the internal mission control — not the branded LovYou deployment on Fly.io, and not the static GitHub Pages architecture poster at `transpara-ai/summary`.
+A framework-level telemetry writer and live dashboard for the **Transpara AI hive deployment on nucbuntu**. This is the internal mission control — not the branded Transpara deployment on Fly.io, and not the static GitHub Pages architecture poster at `transpara-ai/summary`.
 
 The system has three components:
 

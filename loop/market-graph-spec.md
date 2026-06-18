@@ -391,7 +391,7 @@ A team can allocate budget to tasks. When an agent or contractor claims a task, 
 Agents participate identically to humans. An agent's completed tasks and review verdicts contribute to its reputation. A team evaluating agents can compare reputation graphs the same way they'd compare human candidates.
 
 ### For the platform
-The market layer is the mechanism by which lovyou.ai becomes economically self-sustaining. When real value flows through the graph (consulting contracts, agent services, resource allocation), the platform can take a transaction layer. The architecture already supports this without modification.
+The market layer is the mechanism by which transpara.ai becomes economically self-sustaining. When real value flows through the graph (consulting contracts, agent services, resource allocation), the platform can take a transaction layer. The architecture already supports this without modification.
 
 ---
 

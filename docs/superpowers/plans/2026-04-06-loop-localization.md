@@ -12,5 +12,5 @@
 
 **Git rules:**
 - Branch: `feat/loop-localization` on `transpara-ai` remote
-- Never commit to `main`, never push to `origin` (lovyou-ai upstream)
+- Never commit to `main`, never push to `origin` (transpara-ai upstream)
 - PR to `transpara-ai/hive` when complete

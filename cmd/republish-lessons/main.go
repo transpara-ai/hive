@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	cd /c/src/matt/lovyou3/hive
+//	cd /c/src/matt/transpara3/hive
 //	LOVYOU_API_KEY=lv_... go run ./cmd/republish-lessons/
 package main
 
@@ -21,7 +21,7 @@ import (
 	"strconv"
 )
 
-var baseURL = "https://lovyou.ai"
+var baseURL = "https://transpara.ai"
 
 const spaceSlug = "hive"
 
@@ -55,9 +55,9 @@ func main() {
 	// Target IDs (first 8 chars) in publication order.
 	// Order matches the task spec: 184-193.
 	ordered := []struct {
-		shortID    string
-		coreTitle  string // lesson title stripped of old number
-		newNum     int
+		shortID   string
+		coreTitle string // lesson title stripped of old number
+		newNum    int
 	}{
 		{"f6e95fb1", "Fixing a search index is necessary but not sufficient for institutional memory to influence action", 184},
 		{"df838c45", "File-content truncation in a search index is a silent failure mode worse than an empty index", 185},

@@ -20,9 +20,9 @@ This spec closes the gap.
 
 Every grammar op that a human can perform via the UI, an agent can perform via MCP tools.
 
-### The MCP Server: `lovyou-graph`
+### The MCP Server: `transpara-graph`
 
-A single MCP server that exposes the full lovyou.ai graph API as tools:
+A single MCP server that exposes the full transpara.ai graph API as tools:
 
 ```
 Tools:
@@ -61,7 +61,7 @@ Resources:
 
 ### Implementation
 
-The MCP server is a Go binary that wraps the existing lovyou.ai JSON API:
+The MCP server is a Go binary that wraps the existing transpara.ai JSON API:
 
 ```go
 // cmd/mcp-graph/main.go
@@ -258,7 +258,7 @@ Summaries are stored as agent memories (kind="summary", source_id=conversation_i
 ## Build order
 
 ### Phase 1: MCP Graph Server (foundation)
-1. `cmd/mcp-graph/main.go` — MCP server wrapping lovyou.ai API
+1. `cmd/mcp-graph/main.go` — MCP server wrapping transpara.ai API
 2. Start with 5 core tools: `graph.respond`, `graph.intend`, `graph.search`, `graph.getBoard`, `graph.getNode`
 3. Wire into Mind via `--mcp-config`
 4. Test: agent creates a task from within a conversation

@@ -166,7 +166,7 @@ func RunCouncil(ctx context.Context, cfg Config) error {
 	elapsed := time.Since(start).Round(time.Second)
 	log.Printf("[council] ═══ Council complete (%s, $%.4f) ═══", elapsed, totalCost)
 
-	// Post summary to lovyou.ai if API client is available.
+	// Post summary to transpara.ai if API client is available.
 	if cfg.APIClient != nil {
 		title := fmt.Sprintf("Council report — %s", time.Now().Format("2006-01-02"))
 		_ = cfg.APIClient.PostUpdate(cfg.SpaceSlug, title, truncateForPost(report, 2000))

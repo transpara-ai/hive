@@ -218,7 +218,7 @@ Products about existential wellbeing.
 
 ## Foundation: EventGraph — The Substrate
 
-Not a product family. The substrate that all product families run on. EventGraph is to lovyou.ai what Linux is to Android.
+Not a product family. The substrate that all product families run on. EventGraph is to transpara.ai what Linux is to Android.
 
 | Product | Does one thing | Comparable to | Key mechanism |
 |---------|---------------|---------------|--------------|
@@ -228,7 +228,7 @@ Not a product family. The substrate that all product families run on. EventGraph
 | **SDKs** | Build on EventGraph from any language | Stripe SDK, Firebase SDK | Go SDK (exists), future: JS, Python, Rust |
 | **Trust Engine** | Reputation from verified work | Web of trust | Asymmetric, non-transitive, earned trust scores |
 
-EventGraph is open source. Others can build their own ecosystems on it — their own hives, products, civilizations. We build lovyou.ai on EventGraph. Someone else builds their platform on EventGraph. The primitives are the same. The trust is portable.
+EventGraph is open source. Others can build their own ecosystems on it — their own hives, products, civilizations. We build transpara.ai on EventGraph. Someone else builds their platform on EventGraph. The primitives are the same. The trust is portable.
 
 ---
 
@@ -375,7 +375,7 @@ It is NOT a separate codebase, database, or deployment. Every product runs on th
 ## Navigation Model
 
 ```
-lovyou.ai
+transpara.ai
 ├── Home (personal dashboard across all products)
 ├── Work
 │   ├── Board

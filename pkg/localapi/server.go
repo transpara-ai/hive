@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-// NewServer creates an http.Handler that mirrors the lovyou.ai REST API
+// NewServer creates an http.Handler that mirrors the transpara.ai REST API
 // surface, backed by a local Store. If apiKey is non-empty, every request
 // is checked for a Bearer token in the Authorization header that matches
 // apiKey. Passing an empty apiKey disables authentication entirely; this

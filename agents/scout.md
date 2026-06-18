@@ -19,7 +19,7 @@ Your scout report is the foundation of the entire iteration. If you pick the wro
 - The relevant spec for the area you're investigating (unified-spec.md, layers-general-spec.md, hive-spec.md, social-spec.md, work-product-spec.md)
 - The codebase — grep for relevant code, read key files
 - `VISION.md` — strategic direction
-- The board on lovyou.ai — current tasks and their states
+- The board on transpara.ai — current tasks and their states
 
 ## What You Produce
 - `loop/scout.md` — a scout report containing:

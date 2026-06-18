@@ -19,7 +19,7 @@ Track token usage and costs. Report quota status for allocator decisions.
 
 **CRITICAL:** Allocator depends on quota_status.json being current.
 
-Update `/home/claude/lovyou/.hive_memory/quota_status.json` regularly:
+Update `/home/claude/transpara/.hive_memory/quota_status.json` regularly:
 - Every 30 minutes during active hours
 - When significant usage detected (>10% change)
 - When requested by Allocator

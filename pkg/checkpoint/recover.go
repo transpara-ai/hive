@@ -74,9 +74,9 @@ func RecoverAll(agents []string, thoughts ThoughtStore, s store.Store, staleness
 	if thoughts != nil {
 		for _, role := range agents {
 			// Query uses the exact header prefix from FormatCheckpoint so the
-		// StubThoughtStore substring match works in tests, and Open Brain
-		// semantic search matches it in production.
-		query := "[CHECKPOINT] " + role
+			// StubThoughtStore substring match works in tests, and Open Brain
+			// semantic search matches it in production.
+			query := "[CHECKPOINT] " + role
 			found, err := thoughts.SearchRecent(query, staleness)
 			if err != nil {
 				log.Printf("checkpoint: recover: ThoughtStore search error for %q: %v — cold start", role, err)

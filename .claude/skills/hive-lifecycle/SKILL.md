@@ -213,7 +213,7 @@ echo "Open: http://nucbuntu:8080/telemetry/"
 
 ## Hive Run (Runner / Pipeline Mode)
 
-Run individual agents or the Scout-Builder-Critic pipeline against lovyou.ai tasks.
+Run individual agents or the Scout-Builder-Critic pipeline against transpara.ai tasks.
 This is an alternative to the legacy multi-agent runtime above.
 
 ```bash
@@ -233,7 +233,7 @@ go run ./cmd/hive pipeline run --space hive
 go run ./cmd/hive council --topic "Should we add a caching layer?"
 ```
 
-### Local Pipeline (no lovyou.ai dependency)
+### Local Pipeline (no transpara.ai dependency)
 
 Requires the local API server (`cmd/localapi`) running alongside postgres.
 
@@ -431,7 +431,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -t -c \
 | `--repo` | current dir | Path to repo for Implementer's Operate |
 | `--approve-requests` | false | Auto-approve authority requests |
 | `--approve-roles` | false | Auto-approve role proposals |
-| `--space`, `--api` | `hive`, `https://lovyou.ai` | lovyou.ai targeting |
+| `--space`, `--api` | `hive`, `https://transpara.ai` | transpara.ai targeting |
 
 ### `civilization daemon` (multi-agent, long-running)
 
@@ -441,12 +441,12 @@ Same flags as `civilization run` except `--idea` becomes `--seed-spec PATH` (opt
 
 | Flag | Default | Purpose | Where |
 |------|---------|---------|-------|
-| `--space` | `hive` | lovyou.ai space slug | both |
-| `--api` | `https://lovyou.ai` | lovyou.ai API base URL | both |
+| `--space` | `hive` | transpara.ai space slug | both |
+| `--api` | `https://transpara.ai` | transpara.ai API base URL | both |
 | `--repo` | current dir | Path to repo | both |
 | `--repos` | "" | Named repos: `name=path,...` | both |
 | `--budget` | 10.0 | Daily budget in USD | both |
-| `--agent-id` | "" | Agent's lovyou.ai user ID | both |
+| `--agent-id` | "" | Agent's transpara.ai user ID | both |
 | `--store` | in-memory | Postgres DSN | both |
 | `--pr` | false | Branch + PR instead of pushing to main | both |
 | `--worktrees` | false | Per-task worktrees | both |

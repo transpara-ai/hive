@@ -445,8 +445,8 @@ func makeHiveDir(t *testing.T, stateContent string, artifacts map[string]string)
 func TestRunReflectorAppendsToReflections(t *testing.T) {
 	stateContent := "# Loop State\n\nLast updated: Iteration 10, 2026-03-25.\n"
 	artifacts := map[string]string{
-		"scout.md":   "## Scout\nGap: missing reflector",
-		"build.md":   "## Build\nAdded runReflector()",
+		"scout.md":    "## Scout\nGap: missing reflector",
+		"build.md":    "## Build\nAdded runReflector()",
 		"critique.md": "VERDICT: PASS",
 	}
 	hiveDir := makeHiveDir(t, stateContent, artifacts)
@@ -461,8 +461,8 @@ func TestRunReflectorAppendsToReflections(t *testing.T) {
 
 	r := &Runner{
 		cfg: Config{
-			HiveDir: hiveDir,
-			OneShot: true,
+			HiveDir:  hiveDir,
+			OneShot:  true,
 			Provider: &mockProvider{response: llmResponse},
 		},
 		tick: 1,
@@ -492,8 +492,8 @@ func TestRunReflectorAdvancesStateIteration(t *testing.T) {
 
 	r := &Runner{
 		cfg: Config{
-			HiveDir: hiveDir,
-			OneShot: true,
+			HiveDir:  hiveDir,
+			OneShot:  true,
 			Provider: &mockProvider{response: "**COVER:** x\n**BLIND:** y\n**ZOOM:** z\n**FORMALIZE:** No new lesson."},
 		},
 		tick: 1,
@@ -521,8 +521,8 @@ func TestRunReflectorMissingArtifactsNoError(t *testing.T) {
 
 	r := &Runner{
 		cfg: Config{
-			HiveDir: hiveDir,
-			OneShot: true,
+			HiveDir:  hiveDir,
+			OneShot:  true,
 			Provider: &mockProvider{response: "**COVER:** nothing\n**BLIND:** n/a\n**ZOOM:** n/a\n**FORMALIZE:** No new lesson."},
 		},
 		tick: 1,

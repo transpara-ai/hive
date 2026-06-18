@@ -3331,7 +3331,7 @@ Fix task created: `d884978e`.
 3. **What was built is correct but incomplete** — `causality_test.go` covers item 5 of scope, all 4 tests pass, code quality is solid. That work should be kept.
 
 **Builder must:**
-1. Deploy site: `cd /c/src/matt/lovyou3/site && flyctl deploy --remote-only`
+1. Deploy site: `cd /c/src/matt/transpara3/site && flyctl deploy --remote-only`
 2. Fix `pkg/runner/observer.go:runObserverReason` — add fallback cause when `t.causeID == ""`
 3. Add test in `observer_test.go`: assert parsed task with `TASK_CAUSE: none` still gets a fallback cause
 4. Write `loop/build.md`

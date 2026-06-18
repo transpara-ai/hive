@@ -1,4 +1,4 @@
-// Package api provides an HTTP client for the lovyou.ai JSON API.
+// Package api provides an HTTP client for the transpara.ai JSON API.
 // Agents use this to poll tasks, post updates, and close work items.
 package api
 
@@ -15,19 +15,19 @@ import (
 
 // Node is a task, post, comment, or any other graph node returned by the API.
 type Node struct {
-	ID         string `json:"id"`
-	SpaceID    string `json:"space_id"`
-	ParentID   string `json:"parent_id,omitempty"`
-	Kind       string `json:"kind"`
-	Title      string `json:"title"`
-	Body       string `json:"body"`
-	State      string `json:"state"`
-	Priority   string `json:"priority"`
-	Assignee   string `json:"assignee,omitempty"`
-	AssigneeID string `json:"assignee_id,omitempty"`
-	Author     string `json:"author,omitempty"`
-	AuthorID   string `json:"author_id,omitempty"`
-	AuthorKind string `json:"author_kind,omitempty"`
+	ID           string `json:"id"`
+	SpaceID      string `json:"space_id"`
+	ParentID     string `json:"parent_id,omitempty"`
+	Kind         string `json:"kind"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	State        string `json:"state"`
+	Priority     string `json:"priority"`
+	Assignee     string `json:"assignee,omitempty"`
+	AssigneeID   string `json:"assignee_id,omitempty"`
+	Author       string `json:"author,omitempty"`
+	AuthorID     string `json:"author_id,omitempty"`
+	AuthorKind   string `json:"author_kind,omitempty"`
 	DueDate      string `json:"due_date,omitempty"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
@@ -49,14 +49,14 @@ type OpResponse struct {
 	Status string `json:"status,omitempty"`
 }
 
-// Client talks to the lovyou.ai JSON API.
+// Client talks to the transpara.ai JSON API.
 type Client struct {
-	base   string // e.g. "https://lovyou.ai"
+	base   string // e.g. "https://transpara.ai"
 	apiKey string // LOVYOU_API_KEY (sent as Bearer token)
 	http   *http.Client
 }
 
-// New creates an API client. base is the origin (e.g. "https://lovyou.ai").
+// New creates an API client. base is the origin (e.g. "https://transpara.ai").
 func New(base, apiKey string) *Client {
 	return &Client{
 		base:   base,
@@ -373,7 +373,7 @@ func (c *Client) StartThread(slug, title, body string) (*Node, error) {
 	return resp.Node, nil
 }
 
-// Agent is an agent definition from the lovyou.ai database.
+// Agent is an agent definition from the transpara.ai database.
 type Agent struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

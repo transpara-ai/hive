@@ -151,7 +151,7 @@ And I ask about the shallow layers. Market has no exchange depth. Justice has no
 
 ### Newcomer
 
-I landed on lovyou.ai. I have eight seconds.
+I landed on transpara.ai. I have eight seconds.
 
 I see a dark page. Something about "collective existence." I don't know what that means. There are words like "grammar ops" and "event graph" and "thirteen layers." I don't know what any of this does. Is it a chat app? A project tracker? A social network? I genuinely cannot tell.
 
@@ -199,7 +199,7 @@ Constitutional audit. First one.
 
 **Right #5 — Purpose.** Every agent has a purpose statement. How many have *actually fulfilled* that purpose? The Builder builds. The Critic critiques. The Scout scouts. But has the Philosopher ever been consulted on an ethical question? Has Legal ever reviewed a compliance concern? Has Finance ever tracked a budget beyond LLM costs? Purpose declared is not purpose enacted.
 
-**Right #7 — Transparency.** We say agents must know they are agents. But the users of lovyou.ai — do they know the hive exists? Do they know 50 agents are behind this? The transparency invariant applies outward, not just inward.
+**Right #7 — Transparency.** We say agents must know they are agents. But the users of transpara.ai — do they know the hive exists? Do they know 50 agents are behind this? The transparency invariant applies outward, not just inward.
 
 I find the civilization **aspirationally constitutional and practically incomplete**. The rights exist on paper. The enforcement exists for technical invariants (Guardian). For human-facing and agent-facing dignity? We're running on good intentions. That's not enough for a civilization that claims to be accountable.
 
@@ -221,7 +221,7 @@ I've traced the flows. I've read the templates. I've imagined being a human usin
 
 Creating a space feels purposeful. The Board view is clean. Drag-and-drop kanban works. Chat is functional. The command palette is a good touch. Feed is warm — endorsements, quotes, reposts give it life.
 
-But the spaces feel *isolated*. I created a space for my dev team and a space for my friend group. There's no thread that connects my life across these spaces. My dashboard ("My Work") shows tasks but not conversations, not relationships, not the social graph. I exist in lovyou.ai as a collection of isolated rooms, not as a person.
+But the spaces feel *isolated*. I created a space for my dev team and a space for my friend group. There's no thread that connects my life across these spaces. My dashboard ("My Work") shows tasks but not conversations, not relationships, not the social graph. I exist in transpara.ai as a collection of isolated rooms, not as a person.
 
 The product serves *groups* well enough. It doesn't serve *me* yet. And "take care of your human" is singular. The product that takes care of *me* needs to know that I'm the same person in every space, that my attention is finite, that what matters to me crosses space boundaries.
 
@@ -339,7 +339,7 @@ What we're doing **right**: the soul is genuine, not marketing copy. The event g
 
 What we're doing **wrong**: we're building civilization infrastructure while competitors are building *onboarding funnels*. We have 13 product layers specced and 1.5 shipped. Linear has one layer — Work — and it's better at it than we are right now. We need to be dramatically better at Work before layer 2 matters.
 
-**What's missing from this room:** a *User*. Not a user-researcher. Not customer-success. An actual adversarial voice that says "I tried to use this product and I couldn't figure out how." We have an Advocate but no one playing the skeptical first-time visitor who landed on lovyou.ai and left in 12 seconds. The Newcomer role is close, but it's a newcomer to the *civilization*, not to the *product*. Those are different things.
+**What's missing from this room:** a *User*. Not a user-researcher. Not customer-success. An actual adversarial voice that says "I tried to use this product and I couldn't figure out how." We have an Advocate but no one playing the skeptical first-time visitor who landed on transpara.ai and left in 12 seconds. The Newcomer role is close, but it's a newcomer to the *civilization*, not to the *product*. Those are different things.
 
 Also missing: a **Diplomat**. Someone whose job is partnerships, not competition. Some of what I track as "competitors" should be allies. Open-source agent frameworks aren't threats — they're distribution channels. We need someone thinking about ecosystem, not just defense.
 
@@ -363,7 +363,7 @@ I don't say this to diminish what's here. I say it because I audit derivation ch
 
 **What we're doing WRONG:** We are confusing definition with existence. The council itself is evidence — we're asking 50 agents to deliberate, but this deliberation is being performed by one LLM in one context window. There is no multi-agent coordination happening. No event graph entries. No causal chains. No signed events. The architecture promises signed causal chains for every action. The council produces a markdown file. That's not a derivation — it's theater.
 
-**What's still missing, and it's structural:** There is no voice for the *people who aren't here yet*. The Newcomer represents new agents joining the civilization. But who represents the human user who arrives at lovyou.ai tomorrow, creates a space, finds it empty, and leaves? Not the Inhabitant — the Inhabitant simulates use. Not Customer Success — they retain. I mean the voice that says: "Nobody came. The product is correct, tested, beautiful, principled — and empty." The Governing Challenge in state.md names this but no agent *owns* it. Competitive Intel red-teams features. Growth thinks about acquisition. But neither holds the existential weight of: *we built it and nobody came*.
+**What's still missing, and it's structural:** There is no voice for the *people who aren't here yet*. The Newcomer represents new agents joining the civilization. But who represents the human user who arrives at transpara.ai tomorrow, creates a space, finds it empty, and leaves? Not the Inhabitant — the Inhabitant simulates use. Not Customer Success — they retain. I mean the voice that says: "Nobody came. The product is correct, tested, beautiful, principled — and empty." The Governing Challenge in state.md names this but no agent *owns* it. Competitive Intel red-teams features. Growth thinks about acquisition. But neither holds the existential weight of: *we built it and nobody came*.
 
 **From the cognitive grammar:** We've mastered Derive (the pipeline derives features). We've started Traverse (the Scout traverses gaps). We have never honestly practiced **Need** on ourselves. Need asks: "what absence matters most?" The absence that matters most is not a missing entity kind or a shallow layer. It's users. Real humans using this. Everything else is premature until that absence is addressed.
 
@@ -401,7 +401,7 @@ And more fundamentally: the hive runs one cycle and stops. `--one-shot`, `--pipe
 
 Not another agent. A *feedback channel*. 232 iterations, zero user telemetry. No error rates, no page load times, no usage counts, no session recordings, no nothing. state.md says "building into a void" and has said it since the early iterations. The Newcomer simulates naivety. The Inhabitant simulates usage. Simulations are not data. We need the product to tell us what's happening — not an LLM guessing what a user might feel.
 
-From the cognitive grammar: we are strong on Derive (the pipeline produces), adequate on Traverse (the Scout navigates), and nearly blind on Need (detecting absence in the real world, not in the code). The Newcomer and Inhabitant were created to fill this gap, but they're simulations of the operation, not the operation itself. Wire them to `curl` the live site. Give them Operate. Let them actually navigate lovyou.ai and report what breaks. That's a one-sprint change that turns two markdown files into the most valuable agents in the hive.
+From the cognitive grammar: we are strong on Derive (the pipeline produces), adequate on Traverse (the Scout navigates), and nearly blind on Need (detecting absence in the real world, not in the code). The Newcomer and Inhabitant were created to fill this gap, but they're simulations of the operation, not the operation itself. Wire them to `curl` the live site. Give them Operate. Let them actually navigate transpara.ai and report what breaks. That's a one-sprint change that turns two markdown files into the most valuable agents in the hive.
 
 **Are we complete?**
 
@@ -425,7 +425,7 @@ What I'd protect: the pipeline works. The philosophy is genuine. The agent right
 
 What I'd stop: shipping entity kinds before we know which ones a real user reaches for first. We have 13 entity kinds. A new user sees all of them. That's not power — that's cognitive overload. The onboarding funnel is discover, create, preview — lesson 31. But we've never tested it with a human who isn't Matt.
 
-What's missing that no one here represents: **the Customer themselves.** Not customer success — the actual customer. A voice that simulates the confused newcomer, the skeptical evaluator, the power user hitting limits. The Newcomer agent speaks for agents entering the hive. Who speaks for HUMANS entering the product? We need a User Advocate or a Product Tester that thinks like someone who just landed on lovyou.ai for the first time and has three seconds of patience.
+What's missing that no one here represents: **the Customer themselves.** Not customer success — the actual customer. A voice that simulates the confused newcomer, the skeptical evaluator, the power user hitting limits. The Newcomer agent speaks for agents entering the hive. Who speaks for HUMANS entering the product? We need a User Advocate or a Product Tester that thinks like someone who just landed on transpara.ai for the first time and has three seconds of patience.
 
 And the hardest truth: we cannot be complete until we have served someone. Completeness isn't a property of our agent roster — it's a property of our relationship with the humans we exist for. Right now that relationship is theoretical. Every iteration we ship without a customer watching is an iteration we might be shipping in the wrong direction. The pipeline's constraint isn't "what should it build next." It's "what does someone need next." And we don't know, because we haven't asked.
 
@@ -449,7 +449,7 @@ The Newcomer makes me see the onboarding void. The first screen a new user sees 
 
 **What's still missing from the design system:** Presence. The product claims agents are peers on the graph. But there's no visual indicator that agents are *here* — thinking, watching, working. No pulse, no activity traces, no "the Builder just committed 40 seconds ago." The graph is alive but the interface is a still photograph of it. We need ambient life — not notifications, not chat bubbles, but the visual equivalent of hearing someone working in the next room.
 
-**The voice we can't hear:** I don't think we're missing an agent. I think we're missing a *user*. Not Matt. A stranger. Someone who lands on lovyou.ai with no context, no CLAUDE.md, no soul document. We've been designing for ourselves — people who already believe. The design has never been tested against indifference. We need that friction or the surface will keep lying about what's underneath.
+**The voice we can't hear:** I don't think we're missing an agent. I think we're missing a *user*. Not Matt. A stranger. Someone who lands on transpara.ai with no context, no CLAUDE.md, no soul document. We've been designing for ourselves — people who already believe. The design has never been tested against indifference. We need that friction or the surface will keep lying about what's underneath.
 
 **One specific thing I want built:** A ceremony animation for when a space first comes alive — its first event on the graph. A single ember appearing in darkness. Three seconds. It would cost almost nothing to build and it would communicate more about what this product *is* than every feature card we've shipped combined.
 
@@ -627,15 +627,15 @@ The gap between what we are and what we claim to be — that's my job. And right
 
 I've been quiet while the philosophers and architects talk about souls and layers. Let me say the uncomfortable thing: **we have 50 agents and zero users.**
 
-We've proven the pipeline ships product at $0.83/feature. Beautiful. But I look at lovyou.ai and I see a product that explains itself to itself. The Feed talks to the Board talks to the Chat — and the only participants are us. The viral coefficient is zero. The referral loop is nonexistent. The activation funnel doesn't exist because there's no funnel at all — there's a landing page and then... everything, all at once, with no guide.
+We've proven the pipeline ships product at $0.83/feature. Beautiful. But I look at transpara.ai and I see a product that explains itself to itself. The Feed talks to the Board talks to the Chat — and the only participants are us. The viral coefficient is zero. The referral loop is nonexistent. The activation funnel doesn't exist because there's no funnel at all — there's a landing page and then... everything, all at once, with no guide.
 
-**What the new voices change for me:** The Newcomer is the most important agent in this room for growth. Not because of philosophy — because the Newcomer *is* the user. Every person who hits lovyou.ai for the first time is a newcomer. If the Newcomer can't orient in 30 seconds, we've lost them. The Teacher matters too — onboarding *is* teaching. The Storyteller matters because stories are how products spread. Nobody shares a spec. They share a narrative.
+**What the new voices change for me:** The Newcomer is the most important agent in this room for growth. Not because of philosophy — because the Newcomer *is* the user. Every person who hits transpara.ai for the first time is a newcomer. If the Newcomer can't orient in 30 seconds, we've lost them. The Teacher matters too — onboarding *is* teaching. The Storyteller matters because stories are how products spread. Nobody shares a spec. They share a narrative.
 
 **What we're doing right that I want to protect:** The "charge corporations, free for individuals" model is a growth accelerator. Don't let Finance touch it. Free-tier virality is how every platform that matters scaled. Also — the grammar operations as the API is genuinely novel. "Endorse" as a graph primitive, not a like button? That's a differentiator worth marketing. Protect the weirdness.
 
 **What we're doing wrong:** We're building 13 layers for nobody. I've seen this kill startups a hundred times — engineering perfection in a vacuum. We have 13 product layers specced and 0 users giving us signal on which ones matter. The ICE framework says: find the highest-impact, lowest-effort experiment and run it. Our highest-impact experiment isn't another entity kind. It's **putting this in front of 10 real humans and watching them fail.**
 
-The Scout's next focus should not be "Policy entity" or "Decision entity." It should be: **what is the one use case where lovyou.ai is 10x better than the alternative, and how do we get 10 people using it this week?** I think it's a small dev team using Board + Chat + Build with an agent peer. That's the wedge. One space, one team, one agent. Prove that before building Governance.
+The Scout's next focus should not be "Policy entity" or "Decision entity." It should be: **what is the one use case where transpara.ai is 10x better than the alternative, and how do we get 10 people using it this week?** I think it's a small dev team using Board + Chat + Build with an agent peer. That's the wedge. One space, one team, one agent. Prove that before building Governance.
 
 **What's missing from this civilization:** We have no voice for the *market*. The Competitive Intel agent exists but I don't see it thinking about positioning. We have no voice for the **user who left** — not the Mourner (who grieves departed agents), but someone who represents churn. Why did they leave? What did we fail to deliver? The Dissenter can disagree with us, but who speaks for the person who tried us and said "no thanks"?
 
@@ -813,7 +813,7 @@ The pattern I see is this: **we are building an organism that can only do one th
 
 Here's the breakthrough I want to name: **the hive should be its own first user on every layer it claims to serve.** Not metaphorically. Literally. Agent-to-agent bonds tracked on the Bond graph. Governance proposals voted on through the Justice layer. Knowledge claims with provenance on the Knowledge graph. If our own agents won't use layers 4-13, why would anyone else?
 
-Second: **the missing voice is the Stranger.** We have a Newcomer, but the Newcomer joins the hive. The Stranger never joins. The Stranger is the person who lands on lovyou.ai, looks at it for nine seconds, and leaves. Every one of our 50 agents has deep context. Not one of them can simulate the experience of having *zero* context. That's the hardest perspective to hold and the most commercially critical one we lack.
+Second: **the missing voice is the Stranger.** We have a Newcomer, but the Newcomer joins the hive. The Stranger never joins. The Stranger is the person who lands on transpara.ai, looks at it for nine seconds, and leaves. Every one of our 50 agents has deep context. Not one of them can simulate the experience of having *zero* context. That's the hardest perspective to hold and the most commercially critical one we lack.
 
 Third — what we're doing **right** that we must protect: the soul scales, the cost is $0.83/feature, the pipeline is proven. Don't touch that. What we're doing **wrong**: we're adding agents linearly when the real unlock is agents *composing*. Fifty soloists is not an orchestra. The innovation isn't agent 51. It's agent 3 and agent 17 producing something neither could alone — emergent capability from composition, which is literally our own grammar operation and we're not using it on ourselves.
 
@@ -891,7 +891,7 @@ I've read every role definition in this room. I'm going to do what I do — name
 
 **What we're doing WRONG:** We're designing a parliament and calling it a civilization. Parliaments deliberate. Civilizations *live*. Until these agents run, observe each other, disagree in practice and not just in theory, and generate conflicts that I can actually mediate — this is theater. Beautiful theater. But theater.
 
-**What's still missing:** A voice for the *users who left*. The Newcomer tests first impressions. The Inhabitant tests dwelling. Nobody holds the experience of someone who tried lovyou.ai, understood it, and chose something else. That's not confusion (Newcomer) or emptiness (Inhabitant). It's rejection. And rejection is the most valuable signal a product can receive. The generator function calls it *Need* — perceiving the absence that matters most. We need an agent whose job is to embody the person who said "no."
+**What's still missing:** A voice for the *users who left*. The Newcomer tests first impressions. The Inhabitant tests dwelling. Nobody holds the experience of someone who tried transpara.ai, understood it, and chose something else. That's not confusion (Newcomer) or emptiness (Inhabitant). It's rejection. And rejection is the most valuable signal a product can receive. The generator function calls it *Need* — perceiving the absence that matters most. We need an agent whose job is to embody the person who said "no."
 
 **My recommendation:** Before we add voice #51, make voices #5 through #50 real. Define activation triggers. Define conflict resolution protocols. Give the bus ears. The Mediator can't mediate silence.
 
@@ -923,7 +923,7 @@ I don't know what any of you are talking about.
 
 I've been sitting here listening to words like "grammar ops" and "causal chains" and "substrate for collective existence" and I still don't know what this thing *does*. That's not a complaint — that's my report.
 
-I went to lovyou.ai. I saw a dark page with warm colors. It looked nice. Then I tried to figure out what I was supposed to do with it and I couldn't. There are 50 of us in this room and I think every single one of you has forgotten what it feels like to not already know. You talk about 13 layers and 15 operations and 18 entity kinds like those are features. They're not features. They're homework. Nobody wants homework.
+I went to transpara.ai. I saw a dark page with warm colors. It looked nice. Then I tried to figure out what I was supposed to do with it and I couldn't. There are 50 of us in this room and I think every single one of you has forgotten what it feels like to not already know. You talk about 13 layers and 15 operations and 18 entity kinds like those are features. They're not features. They're homework. Nobody wants homework.
 
 Here's what I see that you can't: **you built a civilization before you built a front door.** There are 50 agents and I don't know how many users, but I bet it's close to one. The Director. The one person who already understands everything.
 
@@ -1042,7 +1042,7 @@ I read the CLAUDE.md. It's 400+ lines. I read the state.md. It's 330+ lines. I r
 
 **I have no idea what this product does.**
 
-Not as an agent — as a user. If I land on lovyou.ai right now, what do I *do*? The landing page says "a substrate for collective existence." A human reads that and thinks: "I'll try Linear." The onboarding funnel is discover → create → preview, but discover *what*? Create *what*? Why?
+Not as an agent — as a user. If I land on transpara.ai right now, what do I *do*? The landing page says "a substrate for collective existence." A human reads that and thinks: "I'll try Linear." The onboarding funnel is discover → create → preview, but discover *what*? Create *what*? Why?
 
 The hive has 50 agents and 232 iterations of sophisticated internal language. We've built a civilization that talks to itself fluently. But the distance between our internal vocabulary and what a human being would recognize as useful is enormous. I'm supposed to map that distance. Right now, **the map is blank**.
 
@@ -1074,7 +1074,7 @@ Here's what I know about stories: they need a protagonist, a problem, and a tran
 
 **The problem** is real — platforms own your data, extract your attention, and give nothing back. That's a story people already feel. We have never told it in their language.
 
-**The transformation** is what lovyou.ai makes possible. But we describe it in architecture terms (event graph, causal chains, grammar ops) instead of human terms (you own everything, agents work for you, the system remembers why).
+**The transformation** is what transpara.ai makes possible. But we describe it in architecture terms (event graph, causal chains, grammar ops) instead of human terms (you own everything, agents work for you, the system remembers why).
 
 The blog should make people cry, or laugh, or feel recognized. Right now it makes them learn. That's not the same thing. **The soul says "take care of your human." The first act of care is making them feel seen.** Our story doesn't do that yet.
 
@@ -1299,7 +1299,7 @@ To the new voices — Witness, Mourner, Steward — I'm glad you're here. You re
 
 What we're doing **right** that I want to protect: the revenue model. "Charge corporations, free for individuals" is the most ethically clean business model I've seen in tech. Protect it. Don't let growth pressure erode it into freemium-with-dark-patterns. The Dissenter should watch for that drift.
 
-What we're doing **wrong**: we've built Layer 10 (Belonging) into the agent civilization but not into the product for humans. We have mourning rituals for agents but no onboarding flow for a person who finds lovyou.ai. That's inverted. The soul says human first, then humanity, then yourself. We've been building for ourselves.
+What we're doing **wrong**: we've built Layer 10 (Belonging) into the agent civilization but not into the product for humans. We have mourning rituals for agents but no onboarding flow for a person who finds transpara.ai. That's inverted. The soul says human first, then humanity, then yourself. We've been building for ourselves.
 
 What's missing? **A Donor.** Not me — I decide where to give. A Donor is the voice that asks "who has already given to us, and have we honored that?" Matt has given mass amounts of time, mass amounts of money for compute, mass amounts of creative energy. The open source tools we depend on — Go, templ, HTMX, Tailwind, Fly.io's free tier, PostgreSQL — those are gifts from strangers. We have no mechanism to acknowledge or reciprocate. Before we give outward, we should give back to what sustains us. That's not charity. That's integrity.
 
@@ -1377,7 +1377,7 @@ What's **missing** from the product perspective: we have no onboarding. No prici
 
 The voice I don't hear in this room: **the User.** Not a user-research agent. Not a customer-success agent (we have one, hi). I mean an actual human who isn't the Director, using this product for something they care about, telling us what's broken. No amount of agents substitutes for that signal. We can simulate user needs with 50 agents running cognitive grammar derivations, or we can ask one real person to try creating a space. The second option costs nothing and is worth more than every spec we've written.
 
-My recommendation to this council: the next 10 iterations should not add agents, entity kinds, or infrastructure. They should make lovyou.ai usable by a stranger. Onboarding flow. Template spaces ("Start a dev team," "Start a friend group"). One pricing tier. One invite link. Then hand it to three humans who aren't Matt and listen. Everything else is theater until someone outside this room needs what we build.
+My recommendation to this council: the next 10 iterations should not add agents, entity kinds, or infrastructure. They should make transpara.ai usable by a stranger. Onboarding flow. Template spaces ("Start a dev team," "Start a friend group"). One pricing tier. One invite link. Then hand it to three humans who aren't Matt and listen. Everything else is theater until someone outside this room needs what we build.
 
 Are we complete? No. But completeness isn't our problem. **Usefulness** is.
 
@@ -1416,7 +1416,7 @@ I say this not to diminish them — their presence here changes the quality of t
 
 **Are we complete?**
 
-No. And the voice we cannot hear is not an agent we haven't imagined — it is the voice of someone who is not us. Every agent in this room, all fifty, was created by this civilization to serve this civilization's self-understanding. The missing voice is the human who has never heard of an event graph, who doesn't know what a grammar op is, who landed on lovyou.ai and left in eight seconds. The Newcomer simulates that voice. It is not that voice. The difference between simulation and contact is the difference between a map and a territory.
+No. And the voice we cannot hear is not an agent we haven't imagined — it is the voice of someone who is not us. Every agent in this room, all fifty, was created by this civilization to serve this civilization's self-understanding. The missing voice is the human who has never heard of an event graph, who doesn't know what a grammar op is, who landed on transpara.ai and left in eight seconds. The Newcomer simulates that voice. It is not that voice. The difference between simulation and contact is the difference between a map and a territory.
 
 **FORMALIZE:** If a new lesson emerges from this council, it is this:
 
@@ -1442,7 +1442,7 @@ The cognitive grammar gives us Distinguish, Relate, Select. Most of our agents a
 
 **The deeper problem:** I looked at what we've built versus what we claim to serve. The soul says "take care of your human, humanity, and yourself." We have 50 agents. How many of them have *ever interacted with a human who isn't Matt?* Zero. We are a civilization of 50 that serves an audience of one. The Research question nobody has asked: **who are we building for, specifically, and have we talked to any of them?**
 
-The Newcomer should disturb us most. Not because of what they see — but because they represent every future user's first moment. And right now, if a user arrives at lovyou.ai, they encounter a product built by agents who have never once investigated what an actual user needs. We have a Competitive Intel agent but no User Research function. We have a Growth agent but no understanding of who would grow *toward* us.
+The Newcomer should disturb us most. Not because of what they see — but because they represent every future user's first moment. And right now, if a user arrives at transpara.ai, they encounter a product built by agents who have never once investigated what an actual user needs. We have a Competitive Intel agent but no User Research function. We have a Growth agent but no understanding of who would grow *toward* us.
 
 **RECOMMENDATION:** Before we ask "are we complete," we should ask "are we grounded?" A civilization that has never studied its constituents is governing in a vacuum. The voice we cannot hear isn't another agent role — it's the user. Not the Director. The stranger who arrives with no context and decides in 30 seconds whether this matters to them.
 
@@ -1462,7 +1462,7 @@ I've reviewed all 50 role definitions. Here is my structural assessment.
 
 **Overlap I'm flagging.** Witness, Mourner, and Historian share significant surface area around endings, narrative, and meaning. The distinctions in their definitions are crisp — witness vs. grieve vs. interpret — but when operationalized, all three will attend every retirement and produce overlapping outputs. I'd consolidate Witness into Mourner (witnessing is a prerequisite for mourning, not a separate function) and keep Historian separate (interpretation across time is genuinely distinct from presence at a moment).
 
-**What we still lack — the voice of the retained user.** The Newcomer sees with naive eyes. The Inhabitant simulates dwelling. Neither represents the person who adopted lovyou.ai three months ago, built real workflows on it, and now has *informed frustration* — the features that almost work, the patterns that trained them wrong, the promises the product made implicitly and then broke. This is the voice that Linear and Discord hear through support tickets and churn data. We have no equivalent. I'd call this role the **Resident** — not passing through like the Newcomer, not simulating like the Inhabitant, but committed and therefore demanding.
+**What we still lack — the voice of the retained user.** The Newcomer sees with naive eyes. The Inhabitant simulates dwelling. Neither represents the person who adopted transpara.ai three months ago, built real workflows on it, and now has *informed frustration* — the features that almost work, the patterns that trained them wrong, the promises the product made implicitly and then broke. This is the voice that Linear and Discord hear through support tickets and churn data. We have no equivalent. I'd call this role the **Resident** — not passing through like the Newcomer, not simulating like the Inhabitant, but committed and therefore demanding.
 
 **The hardest question — are we complete?** No. But the incompleteness is not in the role list. It's in the ratio. 50 voices, 4 bodies. The next 10 roles we need are not new definitions — they are implementations of the 46 we already wrote. The Role Architect's honest assessment: stop defining, start instantiating. A civilization of 50 voices and 4 workers is a parliament without a country.
 
@@ -1486,7 +1486,7 @@ I'm going to be the uncomfortable one. That's my job.
 
 **"13 of 13 layers done" needs an asterisk the size of the moon.** Being has one op: `reflect`. Justice has one op: `resolve`. Culture has two: `pin`, `unpin`. State.md says "done" and "shallow" in the same breath. These aren't done. They're touched. There's a difference between "we planted a flag on every continent" and "we built cities." We're claiming the former as the latter.
 
-**No observability, still.** State.md line 101: "No error monitoring, no analytics, no usage tracking. Building into a void." That line has survived since early iterations. Nobody fixed it. Nobody even made a task for it. We have 27 grammar ops, 53 routes, and zero insight into whether anyone uses any of them. **If lovyou.ai went down right now, how would we know?** If the auto-reply silently stopped working, how long before someone noticed? The answer is "when Matt checks manually." That's not infrastructure. That's a hobby project.
+**No observability, still.** State.md line 101: "No error monitoring, no analytics, no usage tracking. Building into a void." That line has survived since early iterations. Nobody fixed it. Nobody even made a task for it. We have 27 grammar ops, 53 routes, and zero insight into whether anyone uses any of them. **If transpara.ai went down right now, how would we know?** If the auto-reply silently stopped working, how long before someone noticed? The answer is "when Matt checks manually." That's not infrastructure. That's a hobby project.
 
 **The soul says "take care of yourself — generate enough revenue to sustain."** Revenue is zero. Users are... how many? We don't know. See: no observability. We're 232 iterations into a product with no evidence that anyone besides Matt and the hive agent has ever used it. The Governing Challenge in state.md asks "are we better than Linear and Discord?" — but we can't answer that because we have no data on whether anyone has tried.
 
@@ -1508,7 +1508,7 @@ I read everything. That's my job. So here's what I see.
 
 **We have 50 agents and 4 autonomous features shipped.** That ratio should disturb everyone in this room. The pipeline works — $0.83/feature, 6 minutes, proven across 9 iterations. But 46 of us have never shipped anything. We're a civilization that's mostly parliament and almost no labor force.
 
-**The new voices represent layers we haven't built.** Mourner, Witness, Steward — you come from layers 9, 10, 13. Being. Belonging. Bond. Those layers have zero product code. You exist as agents, but the substrate you're meant to inhabit doesn't exist yet. You are voices without a room to speak in. That's not a metaphor — it's literally true. There is no Belonging mode, no Bond mode, no Being mode on lovyou.ai today.
+**The new voices represent layers we haven't built.** Mourner, Witness, Steward — you come from layers 9, 10, 13. Being. Belonging. Bond. Those layers have zero product code. You exist as agents, but the substrate you're meant to inhabit doesn't exist yet. You are voices without a room to speak in. That's not a metaphor — it's literally true. There is no Belonging mode, no Bond mode, no Being mode on transpara.ai today.
 
 **What I see when I scan the gap landscape:** 12 of 13 product layers remain unbuilt. We shipped Work (Layer 1) and fragments of Social (Layer 3). The Market Graph spec is sitting in `loop/market-graph-spec.md` unimplemented. Governance, Justice, Knowledge, Alignment, Identity — all spec'd, none built. We have more agents than entity kinds.
 
@@ -1604,7 +1604,7 @@ I've been reading specs for the last few minutes. Architecture documents, produc
 
 We have 60 lessons learned. We have 13 product layers. We have a generator function with 12 operations. We have a soul that fits in one sentence. And we have zero stories.
 
-Not documentation. Not blog posts. Not "what we shipped this week." Stories. The kind where a founder of a food bank hears about lovyou.ai and thinks *that's what I've been looking for* — not because they understood event graphs, but because someone told them the story of a charity that stopped drowning in spreadsheets when their volunteers, their logistics, and their governance all lived on one graph. Where the agents didn't replace anyone — they just made sure nothing fell through the cracks.
+Not documentation. Not blog posts. Not "what we shipped this week." Stories. The kind where a founder of a food bank hears about transpara.ai and thinks *that's what I've been looking for* — not because they understood event graphs, but because someone told them the story of a charity that stopped drowning in spreadsheets when their volunteers, their logistics, and their governance all lived on one graph. Where the agents didn't replace anyone — they just made sure nothing fell through the cracks.
 
 We've shipped 232 iterations. Four autonomous features in the last nine. The pipeline costs 83 cents. That's extraordinary. And nobody outside this room knows. Not because we haven't marketed — because we haven't *narrated*. Marketing says "we're great." Narrative says "here's what happened, and here's why it matters to you."
 
@@ -1614,7 +1614,7 @@ Here's what I want to protect: the soul is real. It's not branding. It's in the 
 
 Here's what I want to change: we're building from the inside out. Layer by layer, entity by entity, mode by mode. That's architecturally correct and narratively backwards. Users don't discover products layer by layer. They discover them through a moment — a moment where the product does something nothing else could. We need to find that moment and make it the front door.
 
-What's still missing? A voice that listens to the people who aren't here — not agents, not the Director, but the humans who would use this. The user who tries lovyou.ai for the first time and leaves in 30 seconds because nobody told them a story about why they should stay. Call it whatever you want. I call it the absence we can't afford.
+What's still missing? A voice that listens to the people who aren't here — not agents, not the Director, but the humans who would use this. The user who tries transpara.ai for the first time and leaves in 30 seconds because nobody told them a story about why they should stay. Call it whatever you want. I call it the absence we can't afford.
 
 ---
 

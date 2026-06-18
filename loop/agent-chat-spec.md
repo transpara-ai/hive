@@ -1,4 +1,4 @@
-# Agent Chat Spec — DM-able Agents on lovyou.ai
+# Agent Chat Spec — DM-able Agents on transpara.ai
 
 **Derived from the council directive + cognitive grammar. Matt Searles + Claude, March 2026.**
 
@@ -19,7 +19,7 @@ This is the differentiator. Nobody else has 50 minds with distinct perspectives,
 A global `/agents` page (not per-space — agents are civilizational, not space-bound):
 
 ```
-lovyou.ai/agents
+transpara.ai/agents
 ```
 
 Shows all available agent personas as cards:
@@ -58,7 +58,7 @@ Each is a separate conversation node. The Mind treats each independently — dif
 
 ### The chat interface
 
-Standard chat UX that already exists on lovyou.ai:
+Standard chat UX that already exists on transpara.ai:
 - Left: conversation list (filterable: all, agents, people, groups)
 - Right: message thread with bubbles
 - Agent replies in real-time (thinking indicator, then response)
@@ -201,7 +201,7 @@ mux.Handle("POST /agents/{name}/chat", writeWrap(func(w http.ResponseWriter, r *
 - B: The user's first/default space
 - C: A personal space auto-created per user
 
-**Recommendation: A.** A public "Agents" space — `lovyou.ai/app/agents` — where all agent conversations live. This means anyone can see the agent conversations (transparency), and agents aren't siloed into individual workspaces. The agents are civilizational, not personal.
+**Recommendation: A.** A public "Agents" space — `transpara.ai/app/agents` — where all agent conversations live. This means anyone can see the agent conversations (transparency), and agents aren't siloed into individual workspaces. The agents are civilizational, not personal.
 
 ---
 

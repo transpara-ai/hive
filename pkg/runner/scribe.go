@@ -30,7 +30,7 @@ func (r *Runner) runScribe(ctx context.Context) {
 	}
 
 	// Find conversation transcripts.
-	transcriptDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects", "C--src-matt-lovyou3")
+	transcriptDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects", "C--src-matt-transpara3")
 	transcripts := findTranscripts(transcriptDir)
 	if len(transcripts) == 0 {
 		log.Printf("[scribe] no transcripts found in %s", transcriptDir)

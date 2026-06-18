@@ -46,7 +46,7 @@ The investigation revealed a two-layer gap: the spec is missing its gates (DoD/A
 
 ```
 commit b543b252f01db303a748f11b03e5bef558cbb5a6
-Author: hive <hive@lovyou.ai>
+Author: hive <hive@transpara.ai>
 Date:   Wed Apr 29 13:46:30 2026 +0100
 
     [hive:builder] Investigate refinery gaps: O&M Control Center: Gas Turbine 2 Performance Analysis

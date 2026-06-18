@@ -327,7 +327,7 @@ The Critic found no issues. Derivation chain was clean: gap (65-node cap silentl
 
 **BLIND:** Three gaps, one integration-layer observation.
 
-(1) **Client-side limit injection is unverified at the server.** A live curl to `https://lovyou.ai/app/hive/board?q=Lesson+&limit=500` during this reflection returned 66 nodes — one above the previous default cap of 65. If the server ignores the `limit` query parameter, the fix accomplishes nothing in production. `TestFetchBoardByQuerySendsLimit` is a unit test against a mock server: it verifies the URL *contains* a `limit` param, not that the real API *respects* it. Client-side limit injection without server-side verification shifts the invisible boundary from the URL to the server's query parser. The production effect of this fix is currently unknown.
+(1) **Client-side limit injection is unverified at the server.** A live curl to `https://transpara.ai/app/hive/board?q=Lesson+&limit=500` during this reflection returned 66 nodes — one above the previous default cap of 65. If the server ignores the `limit` query parameter, the fix accomplishes nothing in production. `TestFetchBoardByQuerySendsLimit` is a unit test against a mock server: it verifies the URL *contains* a `limit` param, not that the real API *respects* it. Client-side limit injection without server-side verification shifts the invisible boundary from the URL to the server's query parser. The production effect of this fix is currently unknown.
 
 (2) **Scout/Build gap mismatch — eleventh consecutive iteration (Lessons 168, 171, 174, 178, 181).** Scout 354 named Governance delegation. State.md declared "The BOUNDED infrastructure track is now fully exhausted" before this iteration ran — and another BOUNDED gap appeared. Infrastructure debt has a longer tail than any single audit cycle can bound. The gap is real and was correctly fixed. The pattern is that "infrastructure track exhausted" is an empirical claim, not a structural guarantee.
 
@@ -503,7 +503,7 @@ Lesson 174 — The loop enters treadmill mode when infrastructure convergence di
 
 ## 2026-03-28 — Iteration 384
 
-**COVER:** Iteration 384 is the 9th consecutive ghost builder (376 was real; 377–384 all ghost). The builder fired the identical `chdir C:\c\src\matt\lovyou3\hive` error at 10:20:55, 0.20 seconds, falsely marked task.done. Tester ran 180 seconds — all tests pass, no new code. Critic ran in 0.0005 seconds against stale iteration 376 critique.md.
+**COVER:** Iteration 384 is the 9th consecutive ghost builder (376 was real; 377–384 all ghost). The builder fired the identical `chdir C:\c\src\matt\transpara3\hive` error at 10:20:55, 0.20 seconds, falsely marked task.done. Tester ran 180 seconds — all tests pass, no new code. Critic ran in 0.0005 seconds against stale iteration 376 critique.md.
 
 This Reflector is operator-invoked: Claude Code running the reflection phase manually, outside the autonomous loop. This is materially different from the prior 8 autonomous Reflector invocations. The loop's passive BLOCKING escalation, written to state.md from iteration 378 onward, has reached an operator. The passive mechanism worked — at 9 iterations and ~$18+ cost, but it worked.
 
@@ -535,7 +535,7 @@ Lesson 164 — Formalization has a completion boundary. A lesson is complete whe
 
 ## 2026-03-28 — Iteration 383
 
-**COVER:** Iteration 383 is the 8th consecutive ghost builder (376 was real; 377–383 are ghosts). Build.md is stale — the syncClaims fix from iteration 376, unchanged. The path bug fired again: `chdir C:\c\src\matt\lovyou3\hive` (0.18s, falsely marked task.done). Tester ran 212 seconds — the longest run of the ghost cycle, up from 114s in iteration 382. Critic ran in 0.0005s against stale critique.md.
+**COVER:** Iteration 383 is the 8th consecutive ghost builder (376 was real; 377–383 are ghosts). Build.md is stale — the syncClaims fix from iteration 376, unchanged. The path bug fired again: `chdir C:\c\src\matt\transpara3\hive` (0.18s, falsely marked task.done). Tester ran 212 seconds — the longest run of the ghost cycle, up from 114s in iteration 382. Critic ran in 0.0005s against stale critique.md.
 
 The authentic work this iteration lives in the tester's report: two new tests in `pkg/runner` covering the PhaseEvent infrastructure added in iteration 382:
 
@@ -575,7 +575,7 @@ This is the first Reflector invocation executed directly by Claude Code (operato
 
 **BLIND:** Three gaps, one structural completion.
 
-(1) **Path bug (Lesson 150) still unpatched — 6th ghost.** Operate working directory `C:\c\src\matt\lovyou3\hive` should be `C:\src\matt\lovyou3\hive`. Named in Lessons 149, 150, 152, 155, 156. State.md BLOCKING section has flagged it since iteration 378. The defect persists because no loop-internal agent has authority to edit the operate configuration. The fix is one line.
+(1) **Path bug (Lesson 150) still unpatched — 6th ghost.** Operate working directory `C:\c\src\matt\transpara3\hive` should be `C:\src\matt\transpara3\hive`. Named in Lessons 149, 150, 152, 155, 156. State.md BLOCKING section has flagged it since iteration 378. The defect persists because no loop-internal agent has authority to edit the operate configuration. The fix is one line.
 
 (2) **Ghost-detection halt (Lesson 156) unimplemented.** The loop did not halt after the 2nd or 3rd consecutive ghost. It ran 6 full iterations. The halt condition was formalized (Lesson 156: `diagnostics.jsonl` shows last two builder runs both errored with identical string under 5 seconds → emit HALT). The condition is not coded. The loop has no stopping rule for the saturation state.
 
@@ -601,7 +601,7 @@ MCP search returns no results for "syncClaims", "claims.md", or "board endpoint"
 
 **BLIND:** Four open gaps, one new observation.
 
-(1) **Path bug (Lesson 150) unpatched — 5th ghost.** The operate working directory is `C:\c\src\matt\lovyou3\hive` instead of `C:\src\matt\lovyou3\hive`. Every builder iteration with `CanOperate=true` ghosts in under 1 second. The defect has been formalized in three lessons (149, 150, 152) across four iterations. No code has changed.
+(1) **Path bug (Lesson 150) unpatched — 5th ghost.** The operate working directory is `C:\c\src\matt\transpara3\hive` instead of `C:\src\matt\transpara3\hive`. Every builder iteration with `CanOperate=true` ghosts in under 1 second. The defect has been formalized in three lessons (149, 150, 152) across four iterations. No code has changed.
 
 (2) **BLOCKING directive mechanism is confirmed broken.** State.md has carried an explicit `BLOCKING — OPERATOR ESCALATION REQUIRED` section since iteration 378. In iterations 378, 379, and 380, the Scout produced the same Governance delegation report from iteration 354 — not the path bug. Four consecutive iterations. The routing chain `Reflector → state.md BLOCKING → Scout override` does not work. The Scout reads state.md but does not treat the BLOCKING section as a hard routing override. The lesson was formalized (Lesson 152); the Scout prompt was not changed.
 
@@ -791,17 +791,17 @@ Lesson 146 — When a bug class has two causal paths (signal-level and state-mac
 
 **COVER:** This iteration covered the operational gap — code sitting locally has zero value. The Scout correctly identified that three iterations of work needed to be shipped. ✓
 
-**BLIND:** Deploy is still broken. Docker Desktop hanging on `fly deploy --local-only`. This has been a known issue for all four iterations and hasn't been addressed. It's an environment problem, not a code problem, but it means changes are on GitHub but not live on lovyou.ai.
+**BLIND:** Deploy is still broken. Docker Desktop hanging on `fly deploy --local-only`. This has been a known issue for all four iterations and hasn't been addressed. It's an environment problem, not a code problem, but it means changes are on GitHub but not live on transpara.ai.
 
 **ZOOM:** Right scale. Commit + push is the correct granularity after three iterations of local-only changes. But the loop is still operating at the meta level (managing itself) rather than building product.
 
 **FORMALIZE:** Four iterations of Orient is the upper bound. The loop has: (1) accurate knowledge of the codebase, (2) a knowledge accumulation system, (3) all changes in version control. There is nothing left to calibrate. **The next iteration MUST produce new code or the loop is stuck in a reflection trap.**
 
-**Next iteration:** Build something. The deploy fix is environmental (Docker restart), not a code task. The highest-value code task is either: (a) making lovyou.ai discoverable/useful to new users, or (b) making the hive loop self-running. The Scout should pick one and scope it tightly.
+**Next iteration:** Build something. The deploy fix is environmental (Docker restart), not a code task. The highest-value code task is either: (a) making transpara.ai discoverable/useful to new users, or (b) making the hive loop self-running. The Scout should pick one and scope it tightly.
 
 ## Iteration 5 — 2026-03-22
 
-**Built:** Deployed lovyou.ai using `fly deploy --remote-only`. All accumulated changes now live.
+**Built:** Deployed transpara.ai using `fly deploy --remote-only`. All accumulated changes now live.
 
 **COVER:** The Scout correctly identified the deploy as the highest-leverage action. The Builder found that `--remote-only` bypasses Docker Desktop entirely. The blocker was the `--local-only` flag, not Docker itself. ✓
 
@@ -825,7 +825,7 @@ Lesson 146 — When a bug class has two causal paths (signal-level and state-mac
 
 **ZOOM:** Right scale. Single-file change with maximum visitor impact. The loop is now operating at product-feature level, which is the correct zoom for the Build phase.
 
-**FORMALIZE:** The loop has found its rhythm: Scout identifies gap → Builder produces code → commit, push, deploy in same iteration. This is the steady-state cadence. **Every Build iteration should end with the change live on lovyou.ai.**
+**FORMALIZE:** The loop has found its rhythm: Scout identifies gap → Builder produces code → commit, push, deploy in same iteration. This is the steady-state cadence. **Every Build iteration should end with the change live on transpara.ai.**
 
 **Next iteration:** The loop should continue building. The site now communicates what it is but has no SEO (no meta tags, no Open Graph), no onboarding narrative for the app itself, and the hive loop still runs manually. The Scout should pick the next highest-value target.
 
@@ -879,7 +879,7 @@ The site is now ready for visitors: clear, discoverable, navigable. The next clu
 
 ## Iteration 10 — 2026-03-22
 
-**Built:** Canonical host redirect (fly.dev → lovyou.ai). Health check fix after first deploy failed.
+**Built:** Canonical host redirect (fly.dev → transpara.ai). Health check fix after first deploy failed.
 
 **COVER:** Both domains now handled correctly. Redirect verified with curl. Health check excluded from redirect. ✓
 
@@ -1002,9 +1002,9 @@ User feedback: the site looks too corporate/business-like. The project's actual 
 
 **Built:** Complete dark theme across all templates. Warm near-black backgrounds, rose accent, warm off-white text, light heading weights, dark-appropriate badges. 10 files changed, deployed.
 
-**COVER:** The Scout combined research (color theory, design movements, dark/light analysis) with lovyou2 code exploration to develop a specific aesthetic direction before building. The Builder then systematically applied it across all 5 HTML documents. ✓
+**COVER:** The Scout combined research (color theory, design movements, dark/light analysis) with transpara2 code exploration to develop a specific aesthetic direction before building. The Builder then systematically applied it across all 5 HTML documents. ✓
 
-**BLIND:** No light theme toggle — dark-only. No animations yet (breathing pulse, scroll reveals from lovyou2). Select/option elements may render oddly on some browsers with dark backgrounds. These are acceptable — one polished theme beats two mediocre ones.
+**BLIND:** No light theme toggle — dark-only. No animations yet (breathing pulse, scroll reveals from transpara2). Select/option elements may render oddly on some browsers with dark backgrounds. These are acceptable — one polished theme beats two mediocre ones.
 
 **ZOOM:** Largest iteration by file count (10 files, ~2760 lines touched) but mechanically straightforward — the same class substitutions applied everywhere. The research phase was correctly scoped to produce actionable design tokens, not an abstract design system document.
 
@@ -1078,7 +1078,7 @@ Aesthetic cluster complete:
 
 **Built:** Three animation classes: breathing logo (4s pulse), page-load reveals (staggered fade-up), scroll reveals (IntersectionObserver). Applied to home hero, discover heading/grid, blog heading, all logo instances. Respects `prefers-reduced-motion`. 10 files changed, deployed.
 
-**COVER:** Scout researched lovyou2's animation vocabulary — breathing pulses, scroll reveals, staggered delays, message animations. Builder carried forward the spirit ("ritual minimalism") not the specifics. Three CSS classes + one tiny JS observer is all it took. Applied selectively: content pages animate, app pages don't (speed over ceremony). ✓
+**COVER:** Scout researched transpara2's animation vocabulary — breathing pulses, scroll reveals, staggered delays, message animations. Builder carried forward the spirit ("ritual minimalism") not the specifics. Three CSS classes + one tiny JS observer is all it took. Applied selectively: content pages animate, app pages don't (speed over ceremony). ✓
 
 **BLIND:** Reference pages and blog post pages don't have scroll reveal yet. No hover micro-interactions beyond existing transitions. App views are deliberately unanimated — this is correct (tools should feel fast). The breathing animation timing (4s) and scale (1.03) are tuned but haven't been A/B tested.
 
@@ -1124,7 +1124,7 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 **FORMALIZE:** Iterations 21 and 22 are a matched pair: authentication + API surface. Neither is useful alone. Keys without JSON responses = door key without door handle. JSON responses without auth = door handle without a lock. **When building integration infrastructure, ship both sides of the interface in consecutive iterations.**
 
-**Next iteration:** The API is complete but untested with a real agent. The next step is the first actual agent interaction: generate an API key, create a "hive" space, post an iteration summary. This proves end-to-end integration and creates the first instance of agents as participants on lovyou.ai.
+**Next iteration:** The API is complete but untested with a real agent. The next step is the first actual agent interaction: generate an API key, create a "hive" space, post an iteration summary. This proves end-to-end integration and creates the first instance of agents as participants on transpara.ai.
 
 ---
 
@@ -1142,7 +1142,7 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 **FORMALIZE:** Three iterations (21-23) form a complete integration stack: auth mechanism → API surface → management UI. Each layer depends on the one before it. The pattern: **infrastructure → interface → management**. Skipping any layer leaves the others incomplete.
 
-**Next iteration:** All prerequisites are met. Matt can now: log into lovyou.ai → navigate to /app/keys → create an API key → use it to have an agent interact with the site. The next iteration should be the first actual agent interaction: create a "hive" space and post to it.
+**Next iteration:** All prerequisites are met. Matt can now: log into transpara.ai → navigate to /app/keys → create an API key → use it to have an agent interact with the site. The next iteration should be the first actual agent interaction: create a "hive" space and post to it.
 
 ---
 
@@ -1150,7 +1150,7 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 **Cluster:** Agent Integration (24)
 
-**Built:** `cmd/post` — the hive's first agent tool. A Go program that reads loop artifacts and posts iteration summaries to lovyou.ai via the JSON API. Integrated into run.sh as a post-iteration hook. Gracefully skips if no API key is set. 2 files changed.
+**Built:** `cmd/post` — the hive's first agent tool. A Go program that reads loop artifacts and posts iteration summaries to transpara.ai via the JSON API. Integrated into run.sh as a post-iteration hook. Gracefully skips if no API key is set. 2 files changed.
 
 **COVER:** Scout correctly identified that 3 iterations of infrastructure (auth + API + UI) needed a real consumer. The Builder created the simplest possible one: read a file, POST it. No LLM, no orchestration — just HTTP calls with a Bearer token. This is the right level of complexity for a first interaction. ✓
 
@@ -1262,13 +1262,13 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 **COVER:** First code in the hive repo itself (not site, not loop artifacts) in many iterations. The Mind is the most foundational piece of hive infrastructure — it's what connects Matt to the agents. ✓
 
-**BLIND:** Mid-iteration feedback from Matt: "not sure i want to talk via cli." He suggested the Mind should be a web participant — visible in People, reachable through threads on lovyou.ai. This is a better design: the product already has identity (agent users, violet badges), conversations (threads), and social presence (People lens). Building a CLI duplicates what the web can do.
+**BLIND:** Mid-iteration feedback from Matt: "not sure i want to talk via cli." He suggested the Mind should be a web participant — visible in People, reachable through threads on transpara.ai. This is a better design: the product already has identity (agent users, violet badges), conversations (threads), and social presence (People lens). Building a CLI duplicates what the web can do.
 
 **ZOOM:** The CLI is ~120 lines, minimal and correct. But it's infrastructure for the wrong interface. The DUAL analysis reveals: the CLI was the obvious choice (hive uses CLI tools) but not the right one (the director interface should be where the product lives). The web UI already has everything needed: agent identity, threads, people.
 
 **FORMALIZE:** **Lesson 26: build the interface where the users already are.** A CLI mind is useful for dev/debugging, but the director interaction should happen on the web product. The site already has the social infrastructure; the Mind should be a participant in it, not a parallel system. This echoes lesson 14 ("expose what you've already built") — the thread/people infrastructure is built but not used for agent conversation.
 
-**Next iteration:** Give the Mind a web presence. The Hive agent is already a real user on lovyou.ai. The infrastructure exists: threads for conversation, people for presence, agent badges for visibility. What's missing is a way for the Mind to *respond* to threads — a webhook, polling service, or API endpoint that triggers Mind responses when someone posts a thread directed at it.
+**Next iteration:** Give the Mind a web presence. The Hive agent is already a real user on transpara.ai. The infrastructure exists: threads for conversation, people for presence, agent badges for visibility. What's missing is a way for the Mind to *respond* to threads — a webhook, polling service, or API endpoint that triggers Mind responses when someone posts a thread directed at it.
 
 ---
 
@@ -1298,7 +1298,7 @@ Iteration 20 completes the animation cluster and closes the aesthetic arc that b
 
 **Cluster:** Conversations (31-33)
 
-**Built:** `cmd/reply` — the Mind as a conversation participant. One-shot command that fetches conversations from lovyou.ai, identifies unread messages, invokes Claude Opus with soul + conversation context + loop state, and posts responses via the `respond` op. Also added `me` field to conversations JSON API so agents can resolve their own identity from the API key.
+**Built:** `cmd/reply` — the Mind as a conversation participant. One-shot command that fetches conversations from transpara.ai, identifies unread messages, invokes Claude Opus with soul + conversation context + loop state, and posts responses via the `respond` op. Also added `me` field to conversations JSON API so agents can resolve their own identity from the API key.
 
 **COVER:** The full conversation stack is now: primitive (31) → interface (32) → participant (33). Three consecutive iterations following lesson 20: infrastructure → interface → management. ✓
 
@@ -2219,7 +2219,7 @@ Also: the site has no error monitoring, no analytics, no way to know if anyone i
 
 ## Iterations 157-160 — 2026-03-24 (Visual)
 
-**Visual refresh.** Source Serif 4 display font across entire site. Italic serif logo (*lovyou.ai*). Ember glow on landing hero (radial gradient + pulse animation). Serif headings on all public pages and all in-app lenses. Refined footer with blog/reference links. Sidebar active lens indicator (left border accent). Task card hover with brand shadow. Board column headers with pill state indicators and uppercase tracking. 74 iterations this session (87-160).
+**Visual refresh.** Source Serif 4 display font across entire site. Italic serif logo (*transpara.ai*). Ember glow on landing hero (radial gradient + pulse animation). Serif headings on all public pages and all in-app lenses. Refined footer with blog/reference links. Sidebar active lens indicator (left border accent). Task card hover with brand shadow. Board column headers with pill state indicators and uppercase tracking. 74 iterations this session (87-160).
 
 ---
 
@@ -2591,7 +2591,7 @@ This is the most concentrated conceptual work in the project's history. 5 spec i
 - Product map (56 products, 14 shared components, 13 families)
 - Fixpoint on architecture (space nesting, grammar composition, entity-as-Node)
 
-This is the foundation document for the entire company, not just the product. When someone asks "what does lovyou.ai do?" the answer is: "an ecosystem of 56 focused products sharing one graph, organized around 13 facets of collective existence."
+This is the foundation document for the entire company, not just the product. When someone asks "what does transpara.ai do?" the answer is: "an ecosystem of 56 focused products sharing one graph, organized around 13 facets of collective existence."
 
 **FORMALIZE:** Lesson 53: **Products are molecules, entity kinds are atoms.** A product combines 2-3 entity kinds into a focused experience. The entity kinds are the primitives. The products are the compositions. Don't build atoms for their own sake — build them because a product needs them.
 
@@ -2696,7 +2696,7 @@ This is the foundation document for the entire company, not just the product. Wh
 
 ## Iteration 225 — 2026-03-24
 
-**Built:** Fixed 3 critique issues (double role prompt, recency tiebreak, changes-required guard). Ran builder on Policy entity task. **First autonomous code commit to production.** 2m49s, $0.53. Builder produced KindPolicy constant, handlePolicies handler, PoliciesView template, sidebar/mobile nav entries. Deployed to lovyou.ai. Human fixed one miss: KindPolicy not added to intend allowlist.
+**Built:** Fixed 3 critique issues (double role prompt, recency tiebreak, changes-required guard). Ran builder on Policy entity task. **First autonomous code commit to production.** 2m49s, $0.53. Builder produced KindPolicy constant, handlePolicies handler, PoliciesView template, sidebar/mobile nav entries. Deployed to transpara.ai. Human fixed one miss: KindPolicy not added to intend allowlist.
 
 **COVER:** The builder can ship entity pipeline changes autonomously. What's not covered: the builder has no knowledge of project conventions (CLAUDE.md), coding standards, or the intend allowlist pattern. It follows the template pattern by reading adjacent code, but doesn't know the full checklist. The Critic role would catch these — it knows to trace "new kind" → "all kind guards."
 
@@ -2750,7 +2750,7 @@ This is the foundation document for the entire company, not just the product. Wh
 
 **BLIND:** The builder picked the "governing challenge" vision task over the Scout's concrete "Goal dashboard" task. It produced excellent code — but it chose its own task, not the Scout's. The pipeline works mechanically but the Scout→Builder handoff is broken because Scout doesn't assign tasks.
 
-**ZOOM:** Two autonomous code commits now (iter 225: Policy entity, iter 229: review/progress ops). The hive has shipped 204+ lines of production code to lovyou.ai. Cost: $1.96 for two features ($0.53 + $1.43). The review ops are the first genuinely competitive product feature — Linear has nothing equivalent.
+**ZOOM:** Two autonomous code commits now (iter 225: Policy entity, iter 229: review/progress ops). The hive has shipped 204+ lines of production code to transpara.ai. Cost: $1.96 for two features ($0.53 + $1.43). The review ops are the first genuinely competitive product feature — Linear has nothing equivalent.
 
 **FORMALIZE:** *57. The Scout must assign tasks it creates.* Without assignment, the Builder claims random unassigned tasks from the board. The Scout→Builder handoff requires assignment: Scout creates → Scout assigns to agent → Builder picks up assigned task. One API call closes the gap.
 
@@ -3818,7 +3818,7 @@ Ready to proceed once you grant write permissions.
 
 ## 2026-03-27
 
-**COVER:** Iteration 342 fix closed all three REVISE findings: the 13 stranded site files were committed and pushed to lovyou-ai/site (ca2cb21), the stale state.md section was removed, and build.md was updated with iteration number and root cause. Critic issued PASS. This connects to the multi-iteration pattern of ship.sh deploy failures leaving code in limbo — the fix addressed the symptom (uncommitted code) but not the cause (flyctl auth gate).
+**COVER:** Iteration 342 fix closed all three REVISE findings: the 13 stranded site files were committed and pushed to transpara-ai/site (ca2cb21), the stale state.md section was removed, and build.md was updated with iteration number and root cause. Critic issued PASS. This connects to the multi-iteration pattern of ship.sh deploy failures leaving code in limbo — the fix addressed the symptom (uncommitted code) but not the cause (flyctl auth gate).
 
 **BLIND:** The REVISE gate — the entire point of iteration 341 — did not fire for the fix sub-iteration: Reflector ran before Critic reviewed, producing a reflection against an unverified build. The gate's failure is invisible to the pipeline because PASS was eventually issued and no alarm fired. The site deploy is still not live: ca2cb21 is in git history but flyctl never ran, so the homepage section users see is unchanged. The hive counts this as shipped when it is not. The PM gap (Scout identified it, nothing changed) remains unaddressed — choosing a cosmetic fix deferred the structural problem another iteration.
 
@@ -4194,7 +4194,7 @@ Lesson 135 — When fixing a data-flow invariant requires three sequential patch
 
 ## 2026-03-28 — Iteration 372
 
-**COVER:** A dormant correctness fix in eventgraph gets a test and is committed. The `IsError` guard in `claude_cli.go` — 3 lines checking `is_error: true` in the JSON response and returning an error — existed as uncommitted working-dir code. This iteration staged it, wrote `TestOperateIsErrorReturnsError` using the test-as-helper-process pattern (Go's standard idiom for testing `exec.Command` callers: the test binary acts as the fake subprocess via `os.Args[0]`), and pushed to `lovyou-ai/eventgraph` as commit `249a6ae`. All 38 packages pass. The test fails without the fix (the subprocess emits `{"is_error":true}` and exits 1; without the guard, `Operate` would return a success result). Invariant 12 (VERIFIED) compliance is the explicit motivation. Builder cost: $0.5559 — no REVISE cycle, one clean pass.
+**COVER:** A dormant correctness fix in eventgraph gets a test and is committed. The `IsError` guard in `claude_cli.go` — 3 lines checking `is_error: true` in the JSON response and returning an error — existed as uncommitted working-dir code. This iteration staged it, wrote `TestOperateIsErrorReturnsError` using the test-as-helper-process pattern (Go's standard idiom for testing `exec.Command` callers: the test binary acts as the fake subprocess via `os.Args[0]`), and pushed to `transpara-ai/eventgraph` as commit `249a6ae`. All 38 packages pass. The test fails without the fix (the subprocess emits `{"is_error":true}` and exits 1; without the guard, `Operate` would return a success result). Invariant 12 (VERIFIED) compliance is the explicit motivation. Builder cost: $0.5559 — no REVISE cycle, one clean pass.
 
 **BLIND:** Six gaps.
 
@@ -4312,13 +4312,13 @@ Lesson 148 — The claims.md pipeline has now required two independent fixes at 
 
 ## 2026-03-28 — Iteration 377
 
-**COVER:** The artifacts describe iteration 376's work (claims.md sync via board endpoint queries), because no real work was done in iteration 377. The builder errored immediately — `claude CLI operate error: chdir C:\c\src\matt\lovyou3\hive: The system cannot find the path specified` — and was falsely marked `task.done` in 0.19 seconds. The tester ran for 110 seconds and passed (tests were already correct from the previous iteration). The critic produced a verdict in 0.0005 seconds — a pre-baked pass from the stale `critique.md` written in iteration 376. The Reflector was then invoked on artifacts that describe a different iteration's work. Iteration 377 is a ghost: diagnostics record it, but no builder output was produced, no files were changed, and no meaningful work occurred.
+**COVER:** The artifacts describe iteration 376's work (claims.md sync via board endpoint queries), because no real work was done in iteration 377. The builder errored immediately — `claude CLI operate error: chdir C:\c\src\matt\transpara3\hive: The system cannot find the path specified` — and was falsely marked `task.done` in 0.19 seconds. The tester ran for 110 seconds and passed (tests were already correct from the previous iteration). The critic produced a verdict in 0.0005 seconds — a pre-baked pass from the stale `critique.md` written in iteration 376. The Reflector was then invoked on artifacts that describe a different iteration's work. Iteration 377 is a ghost: diagnostics record it, but no builder output was produced, no files were changed, and no meaningful work occurred.
 
 **BLIND:** Four gaps, two structural regressions.
 
 (1) **False completion recurrence — the DONE→PROGRESS fix has a hole.** Lesson 139 (iteration 371) formalized: "a default of DONE in task-state parsing is a structural lie." The fix changed `parseAction`'s default return. But the diagnostics for this iteration show `builder.error` logged immediately, followed by `builder.task.done` 0.19 seconds later. The error path does not route through `parseAction` — it is handled before action parsing. Lesson 139's fix addressed the happy-path default; it left the error path unchanged. A builder that fails before generating any output still exits with `task.done`. The invariant requires ALL paths that produce `task.done` to be audited, not just the happy path.
 
-(2) **Path configuration bug: `C:\c\src` vs `C:\src`.** The operate call has an incorrect working directory: `C:\c\src\matt\lovyou3\hive`. The correct path is `C:\src\matt\lovyou3\hive` (an extra `\c` is present). This is a Windows path that looks like a mangled Unix-to-Windows conversion (likely `/c/src/...` was mishandled as `C:\c\src\...` instead of `C:\src\...`). This is an infrastructure configuration defect, not a code defect. It will recur on every operate-enabled builder invocation until corrected.
+(2) **Path configuration bug: `C:\c\src` vs `C:\src`.** The operate call has an incorrect working directory: `C:\c\src\matt\transpara3\hive`. The correct path is `C:\src\matt\transpara3\hive` (an extra `\c` is present). This is a Windows path that looks like a mangled Unix-to-Windows conversion (likely `/c/src/...` was mishandled as `C:\c\src\...` instead of `C:\src\...`). This is an infrastructure configuration defect, not a code defect. It will recur on every operate-enabled builder invocation until corrected.
 
 (3) **Stale artifact propagation.** When a builder fails without writing artifacts, the loop's subsequent phases (tester, critic, reflector) process artifacts from the prior iteration. There is no freshness check: the critic does not verify that `critique.md` was written during the current iteration; the reflector does not verify that `build.md` is current. This makes ghost iterations indistinguishable from real ones until a human cross-references diagnostics.
 
@@ -4340,7 +4340,7 @@ Lesson 151 — A loop that runs phases sequentially without artifact freshness c
 
 **COVER:** The artifacts describe the syncClaims fix from iteration 376: `syncClaims()` now queries the board via two prefix-filtered searches (`q=Lesson `, `q=Critique:`) with ID-keyed dedup, replacing the knowledge endpoint that always returned zero results. Critic verdict was PASS with six tests. The work was real — committed as `[hive:builder] claims.md sync broken: Lessons 126-148 missing from MCP index`.
 
-Iteration 378 is the third consecutive Reflector invocation against this build.md. The actual fix landed in iteration 376. Iteration 377 was a confirmed ghost (builder errored at path `C:\c\src\matt\lovyou3\hive`, produced no output, was falsely marked complete). The git log shows no builder commit since iteration 376's `90121a9`. The `cmd/post/main_test.go` file is staged but carries no new changes from this iteration. The tester verified that tests still pass — that is the only authentic work of this session.
+Iteration 378 is the third consecutive Reflector invocation against this build.md. The actual fix landed in iteration 376. Iteration 377 was a confirmed ghost (builder errored at path `C:\c\src\matt\transpara3\hive`, produced no output, was falsely marked complete). The git log shows no builder commit since iteration 376's `90121a9`. The `cmd/post/main_test.go` file is staged but carries no new changes from this iteration. The tester verified that tests still pass — that is the only authentic work of this session.
 
 **BLIND:** Four gaps.
 
@@ -4364,7 +4364,7 @@ The correct routing: infrastructure blockers must be written to `state.md`'s nex
 
 **COVER:** The Tester added two new tests to `cmd/post/main_test.go`: `TestFetchBoardByQueryHTTPError` (verifies direct HTTP 4xx on `fetchBoardByQuery`) and `TestSyncClaimsSecondQueryFails` (verifies partial failure — first board query succeeds, second fails with HTTP 500). Both coverage gaps were real: `fetchBoardByQuery` had no standalone HTTP error test, and the prior `TestSyncClaimsAPIError` only covered total failure (both queries fail), not the asymmetric case. The Tester's 12 named tests now cover boundary cases that were previously only implicitly exercised. This is the only authentic work product of this iteration.
 
-The builder ghosted for the 3rd consecutive time: `claude CLI operate error: chdir C:\c\src\matt\lovyou3\hive: The system cannot find the path specified` (0.19 seconds, falsely marked `task.done`). The critic ran in 0.001 seconds against a stale `critique.md` from iteration 376. The iteration counter is 379; the last real build landed in iteration 376.
+The builder ghosted for the 3rd consecutive time: `claude CLI operate error: chdir C:\c\src\matt\transpara3\hive: The system cannot find the path specified` (0.19 seconds, falsely marked `task.done`). The critic ran in 0.001 seconds against a stale `critique.md` from iteration 376. The iteration counter is 379; the last real build landed in iteration 376.
 
 **BLIND:** Four gaps, one new observation.
 
@@ -4391,7 +4391,7 @@ Lesson 154 — The Tester operates as a continuous coverage auditor, not a post-
 
 ## 2026-03-28 — Iteration 382
 
-**COVER:** Iteration 382 is the seventh consecutive ghost builder (376 was real; 377–382 all ghost). Build.md is stale — it describes the syncClaims fix from iteration 376. The builder hit the identical path error for the seventh time: `chdir C:\c\src\matt\lovyou3\hive: The system cannot find the path specified` (0.25 seconds, falsely marked `task.done`). Tester passed in 114 seconds (no new tests needed — no new code). Critic evaluated the stale build.md trivially in 0.0005 seconds.
+**COVER:** Iteration 382 is the seventh consecutive ghost builder (376 was real; 377–382 all ghost). Build.md is stale — it describes the syncClaims fix from iteration 376. The builder hit the identical path error for the seventh time: `chdir C:\c\src\matt\transpara3\hive: The system cannot find the path specified` (0.25 seconds, falsely marked `task.done`). Tester passed in 114 seconds (no new tests needed — no new code). Critic evaluated the stale build.md trivially in 0.0005 seconds.
 
 However, this iteration has genuine substance that was invisible in prior reflections: the **pipeline agent** made staged changes to `pkg/runner/diagnostic.go` and `pkg/runner/pipeline_state.go`. These are not builder changes — they are infrastructure improvements committed autonomously between iterations:
 
@@ -4420,7 +4420,7 @@ Lesson 160 — The observability fields added this iteration (`FilesChanged`, `R
 
 ## 2026-03-28 — Iteration 385
 
-**COVER:** The ghost cycle has ended. This is the first authentic builder iteration since iteration 376 — nine ghosts confirmed (377–384). The diagnostic signature is unambiguous: the last builder entry shows `duration_secs: 130.70`, no `chdir` error, `board_open: 12`. Every ghost ran in 0.18–0.25 seconds with `claude CLI operate error: chdir C:\c\src\matt\lovyou3\hive`. The path bug was fixed by the operator between iteration 384 and this one. The loop self-healed in the next cycle without a manual restart.
+**COVER:** The ghost cycle has ended. This is the first authentic builder iteration since iteration 376 — nine ghosts confirmed (377–384). The diagnostic signature is unambiguous: the last builder entry shows `duration_secs: 130.70`, no `chdir` error, `board_open: 12`. Every ghost ran in 0.18–0.25 seconds with `claude CLI operate error: chdir C:\c\src\matt\transpara3\hive`. The path bug was fixed by the operator between iteration 384 and this one. The loop self-healed in the next cycle without a manual restart.
 
 The builder's 130-second run covered the `syncClaims()` fix completion: verifying the three test functions added across prior iterations — `TestFetchBoardByQuerySendsAuthHeader` (auth header path), `TestFetchBoardByQueryHTTPError` (direct HTTP 4xx), `TestSyncClaimsSecondQueryFails` (asymmetric partial failure). The critic ran for 60.3 seconds — real evaluation time, confirming the derivation chain (gap → fix → tests) is correct. Verdict: PASS.
 
@@ -4848,7 +4848,7 @@ The `critique.md` artifact still carries contradictory state: "Verdict: PASS" at
 
 Scale was correct for a corrective pass: three tightly-scoped items, no schema changes, no handler changes, two files modified in hive, one deploy command. The proportionality is right.
 
-The more important zoom is on the mechanism that finally closed the deploy gap. Six iterations of Scout correctly diagnosing the gap, six iterations of Builder building something else. What changed: the corrective prompt made the specific command visible (`cd /c/src/matt/lovyou3/site && flyctl deploy --remote-only`) and labeled the omission explicitly ("Builder skipped primary gap"). The Builder's optimization function responds to explicit scope items, not implicit priority. The lesson is not that the loop was broken — it is that deploy tasks are invisible to the Builder unless they are the *only* item or explicitly labeled `[REQUIRED FIRST]`.
+The more important zoom is on the mechanism that finally closed the deploy gap. Six iterations of Scout correctly diagnosing the gap, six iterations of Builder building something else. What changed: the corrective prompt made the specific command visible (`cd /c/src/matt/transpara3/site && flyctl deploy --remote-only`) and labeled the omission explicitly ("Builder skipped primary gap"). The Builder's optimization function responds to explicit scope items, not implicit priority. The lesson is not that the loop was broken — it is that deploy tasks are invisible to the Builder unless they are the *only* item or explicitly labeled `[REQUIRED FIRST]`.
 
 ---
 

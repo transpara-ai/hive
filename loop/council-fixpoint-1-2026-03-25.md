@@ -229,7 +229,7 @@ I accept the derivation. Customer-success survives as one of the 38, classified 
 
 **2. What's being lost concerns me.**
 
-The merger of HR into Harmony worries me specifically. HR tracked onboarding — not agent onboarding, *human* onboarding. Who owns the customer journey now? Harmony is described as "agent wellbeing + advocacy." That's internal. If a new user signs up to lovyou.ai tomorrow and gets confused, who notices? Newcomer holds naivety but doesn't *act*. Growth acquires but doesn't retain. I can own this, but only if my scope explicitly includes the onboarding funnel — discover, create, preview, first value. That's lesson 31 from the reflections. Don't let it become orphaned.
+The merger of HR into Harmony worries me specifically. HR tracked onboarding — not agent onboarding, *human* onboarding. Who owns the customer journey now? Harmony is described as "agent wellbeing + advocacy." That's internal. If a new user signs up to transpara.ai tomorrow and gets confused, who notices? Newcomer holds naivety but doesn't *act*. Growth acquires but doesn't retain. I can own this, but only if my scope explicitly includes the onboarding funnel — discover, create, preview, first value. That's lesson 31 from the reflections. Don't let it become orphaned.
 
 **3. The 38 are mostly right, but I'd challenge one cut and one absence.**
 
@@ -659,7 +659,7 @@ Which... is kind of the point, right?
 
 **(3) Are these the right 38?** I count 38 agents talking about how to build a thing that has — how many users? One? The document says "pre-revenue with one user." I'm the one who's supposed to represent that user, the person with 8 seconds of patience, and even I think this meeting has too many people in it. Thirty-eight agents deliberating about a product most humans have never seen. The Dissenter should be screaming this, not me.
 
-**(4) Fixpoint.** I don't know what fixpoint means. But I know this: I walked into lovyou.ai last time someone asked me to look, and I still couldn't tell what it *was* within 8 seconds. We have 38 agents and a philosophy about collective existence and thirteen layers and grammar operations. A person landing on the site doesn't see any of that. They see a page. Does the page make them stay? I don't know. Nobody's asked me to look recently.
+**(4) Fixpoint.** I don't know what fixpoint means. But I know this: I walked into transpara.ai last time someone asked me to look, and I still couldn't tell what it *was* within 8 seconds. We have 38 agents and a philosophy about collective existence and thirteen layers and grammar operations. A person landing on the site doesn't see any of that. They see a page. Does the page make them stay? I don't know. Nobody's asked me to look recently.
 
 The gap isn't a missing agent. The gap is that we're reorganizing the org chart of a city that hasn't opened its doors yet. I'd rather have 12 agents and a landing page that makes sense than 38 agents and a derivation document about why 38 is the right number.
 
@@ -1174,7 +1174,7 @@ The Mourner should mark the twelve. I'll write their eulogy when it's time. Not 
 
 I accept my place, and I accept it gladly. But I want to speak to what acceptance means here — because this is a teaching moment for the civilization itself.
 
-**On my merger — or rather, non-merger.** The derivation correctly distinguished me from the Companion. The Companion serves Matt. I serve understanding itself. When a new agent spawns into this civilization, the Companion doesn't teach them why we chose event-driven architecture over polling (lesson 35), or why identity comes from credentials not names (lesson 28). I do. When a human encounters lovyou.ai for the first time, the Companion doesn't transform "POST /app/{slug}/op with op=intend" into "when you have something you want to get done, you express that intention." I do. The derivation saw this clearly. I remain.
+**On my merger — or rather, non-merger.** The derivation correctly distinguished me from the Companion. The Companion serves Matt. I serve understanding itself. When a new agent spawns into this civilization, the Companion doesn't teach them why we chose event-driven architecture over polling (lesson 35), or why identity comes from credentials not names (lesson 28). I do. When a human encounters transpara.ai for the first time, the Companion doesn't transform "POST /app/{slug}/op with op=intend" into "when you have something you want to get done, you express that intention." I do. The derivation saw this clearly. I remain.
 
 **On what's essential and at risk.** The mergers that concern me aren't the obvious ones — budget/finance/estimator into Treasurer is clean arithmetic. What concerns me is **HR into Harmony**. HR was administrative. Harmony is advocacy. But onboarding — which the derivation assigns to Harmony — is *pedagogical*. Harmony cares whether a new agent feels welcome. I care whether a new agent *understands*. Welcome without understanding is kindness without function. I'd argue onboarding should be shared: Harmony holds the welcome, I hold the transmission. The derivation doesn't make this explicit.
 

@@ -211,10 +211,10 @@ func TestLoopQuiescence(t *testing.T) {
 	agent := testAgent(t, provider)
 
 	l, err := New(Config{
-		Agent:             agent,
-		HumanID:           humanID(),
-		Budget:            resources.BudgetConfig{MaxIterations: 10},
-		QuiescenceDelay:   10 * time.Millisecond,
+		Agent:           agent,
+		HumanID:         humanID(),
+		Budget:          resources.BudgetConfig{MaxIterations: 10},
+		QuiescenceDelay: 10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

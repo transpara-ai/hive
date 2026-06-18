@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	cd /c/src/matt/lovyou3/hive
+//	cd /c/src/matt/transpara3/hive
 //	go run ./cmd/mind/
 //
 // With MCP graph tools:
@@ -16,7 +16,7 @@
 // Where mcp-graph.json looks like:
 //
 //	{
-//	  "command": "/c/src/matt/lovyou3/hive/mcp-graph.exe",
+//	  "command": "/c/src/matt/transpara3/hive/mcp-graph.exe",
 //	  "args": [],
 //	  "env": {"LOVYOU_API_KEY": "lv_...", "LOVYOU_SPACE": "hive"}
 //	}
@@ -63,9 +63,9 @@ Your hierarchy: Director (Matt) ↔ Mind (you) ↔ agents (Strategist, Planner, 
 
 == WHAT YOU KNOW ==
 The hive is a self-organizing AI agent civilisation built on EventGraph.
-Hosted at lovyou.ai. Five repos: eventgraph, agent, work, hive, site.
+Hosted at transpara.ai. Five repos: eventgraph, agent, work, hive, site.
 The core loop (Scout→Builder→Critic→Reflector) has run 29 iterations
-building lovyou.ai from zero to a production-ready product with dark theme,
+building transpara.ai from zero to a production-ready product with dark theme,
 agent identity, public spaces, and discover page.
 
 The current state is appended below as context.

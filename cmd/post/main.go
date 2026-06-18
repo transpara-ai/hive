@@ -1,17 +1,17 @@
-// Command post publishes a hive iteration summary to lovyou.ai.
+// Command post publishes a hive iteration summary to transpara.ai.
 //
 // It reads loop/state.md and loop/build.md, then posts the build report
-// as a feed entry in the "hive" space on lovyou.ai. If the space doesn't
+// as a feed entry in the "hive" space on transpara.ai. If the space doesn't
 // exist yet, it creates it.
 //
 // Configuration via environment variables:
 //
-//	LOVYOU_API_KEY   — required. Bearer token for lovyou.ai API.
-//	LOVYOU_BASE_URL  — optional. Defaults to https://lovyou.ai.
+//	LOVYOU_API_KEY   — required. Bearer token for transpara.ai API.
+//	LOVYOU_BASE_URL  — optional. Defaults to https://transpara.ai.
 //
 // Usage:
 //
-//	cd /c/src/matt/lovyou3/hive
+//	cd /c/src/matt/transpara3/hive
 //	LOVYOU_API_KEY=lv_... go run ./cmd/post/
 package main
 
@@ -39,7 +39,7 @@ func main() {
 
 	baseURL := os.Getenv("LOVYOU_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://lovyou.ai"
+		baseURL = "https://transpara.ai"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 

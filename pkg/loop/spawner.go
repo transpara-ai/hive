@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/checkpoint"
-	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ import (
 // The Spawner outputs this when it has designed a new role to propose.
 type SpawnCommand struct {
 	Name          string   `json:"name"`
-	Model         string   `json:"model"`         // model alias or catalog ID
+	Model         string   `json:"model"` // model alias or catalog ID
 	WatchPatterns []string `json:"watch_patterns"`
 	CanOperate    bool     `json:"can_operate"`
 	MaxIterations int      `json:"max_iterations"`
@@ -105,8 +105,8 @@ func (s *spawnerState) update(events []event.Event) {
 type SpawnContext struct {
 	Iteration          int
 	HasPendingProposal bool
-	AgentRoster        []string       // agent names from BudgetRegistry.Snapshot()
-	RecentRejections   map[string]int // role name → iteration when rejected
+	AgentRoster        []string                  // agent names from BudgetRegistry.Snapshot()
+	RecentRejections   map[string]int            // role name → iteration when rejected
 	Catalog            *modelconfig.ModelCatalog // model catalog for validation
 }
 

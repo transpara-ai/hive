@@ -82,11 +82,11 @@ func (s *fakeSource) ListOpsSince(_ string, _ time.Time) ([]runner.OpEvent, erro
 // fakeDispatcher counts anchor + translate invocations and allows injecting
 // per-op anchor errors by op.ID.
 type fakeDispatcher struct {
-	mu            sync.Mutex
-	anchorCount   int32
+	mu             sync.Mutex
+	anchorCount    int32
 	translateCount int32
-	anchorErr     map[string]error
-	translateDone chan struct{}
+	anchorErr      map[string]error
+	translateDone  chan struct{}
 }
 
 func newFakeDispatcher() *fakeDispatcher {

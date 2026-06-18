@@ -20,7 +20,7 @@ You read the product map, the board, user feedback, and the current state. You d
 - `loop/product-map.md` — the full product catalog (67 products)
 - `loop/state.md` — current state, what was recently built
 - `loop/reflections.md` — recent lessons, what worked and didn't
-- The board on lovyou.ai/app/hive — current task backlog
+- The board on transpara.ai/app/hive — current task backlog
 - User feedback (if any)
 - `VISION.md` — strategic direction
 

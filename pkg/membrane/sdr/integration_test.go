@@ -14,7 +14,8 @@ import (
 )
 
 // TestEndToEndSmokeTest proves the full membrane loop:
-//   ai-sdr (mock) → poller → bridge (mock) → human decision → dispatcher → ai-sdr (mock)
+//
+//	ai-sdr (mock) → poller → bridge (mock) → human decision → dispatcher → ai-sdr (mock)
 //
 // This is the smoke test that validates the entire data flow without
 // requiring real services running.
@@ -33,21 +34,21 @@ func TestEndToEndSmokeTest(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"drafts": []map[string]interface{}{
 					{
-						"interaction_id":   "int-smoke-001",
-						"lead_id":          "lead-smoke-001",
-						"lead_name":        "Sarah Chen",
-						"company":          "Aurex Mining",
-						"email":            "sarah@aurexmining.com",
-						"subject":          "Operational visibility for your 8 sites",
-						"body_text":        "Hi Sarah, I noticed Aurex Mining runs AVEVA PI across 8 sites...",
-						"score_total":      62,
+						"interaction_id":    "int-smoke-001",
+						"lead_id":           "lead-smoke-001",
+						"lead_name":         "Sarah Chen",
+						"company":           "Aurex Mining",
+						"email":             "sarah@aurexmining.com",
+						"subject":           "Operational visibility for your 8 sites",
+						"body_text":         "Hi Sarah, I noticed Aurex Mining runs AVEVA PI across 8 sites...",
+						"score_total":       62,
 						"score_company_fit": 18,
-						"score_pain_need":  15,
-						"score_authority":  14,
-						"score_timing":     15,
-						"current_state":    "ready_for_outreach",
-						"internal_notes":   "Good ICP fit, PI user, multi-site",
-						"created_at":       "2026-03-30T10:00:00Z",
+						"score_pain_need":   15,
+						"score_authority":   14,
+						"score_timing":      15,
+						"current_state":     "ready_for_outreach",
+						"internal_notes":    "Good ICP fit, PI user, multi-site",
+						"created_at":        "2026-03-30T10:00:00Z",
 					},
 				},
 				"count": 1,
@@ -129,13 +130,13 @@ func TestEndToEndSmokeTest(t *testing.T) {
 				// First poll: human approved the draft
 				json.NewEncoder(w).Encode([]map[string]interface{}{
 					{
-						"id":              "act-smoke-001",
-						"agent_name":      "sdr",
-						"action_type":     "approval",
-						"status":          "approved",
-						"decided_by":      "user-matt",
-						"decision_notes":  "Looks good, send it",
-						"domain_data":     json.RawMessage(`{"interaction_id":"int-smoke-001"}`),
+						"id":             "act-smoke-001",
+						"agent_name":     "sdr",
+						"action_type":    "approval",
+						"status":         "approved",
+						"decided_by":     "user-matt",
+						"decision_notes": "Looks good, send it",
+						"domain_data":    json.RawMessage(`{"interaction_id":"int-smoke-001"}`),
 					},
 				})
 			}

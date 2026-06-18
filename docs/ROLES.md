@@ -46,7 +46,7 @@ These roles exist from the first run. They are the minimum viable civilisation.
 | **Allocator** | Resource allocation (tokens, compute, budget), model selection per task | Haiku | 0.3 | CTO |
 
 **Why these three:**
-- **SysMon** was the first operational role that emerged in lovyou (as "Monitor" + "Debug"). Without it, errors go undetected until a human notices. Reports to Guardian because it's an observation role.
+- **SysMon** was the first operational role that emerged in transpara (as "Monitor" + "Debug"). Without it, errors go undetected until a human notices. Reports to Guardian because it's an observation role.
 - **Spawner** is essential for the growth loop. When the hive identifies a gap ("I need a security reviewer"), the Spawner proposes the new agent, specifies its role, and escalates for authority approval. Without it, the hive can't grow its own workforce.
 - **Allocator** prevents resource contention. When multiple agents need compute, someone has to decide who gets what. The Allocator tracks budgets, selects models per task (Opus for judgment, Sonnet for execution, Haiku for volume), and enforces the BUDGET/MARGIN/RESERVE invariants.
 
@@ -150,7 +150,7 @@ The hive's primary mechanism for growing its workforce:
    c. Trust adjusted (possibly attenuated)
 ```
 
-This is how the first lovyou hive grew from 8 roles to 74 in 7 days, completing 3,653 tasks. The growth is organic — roles emerge from actual gaps, not from planning.
+This is how the first transpara hive grew from 8 roles to 74 in 7 days, completing 3,653 tasks. The growth is organic — roles emerge from actual gaps, not from planning.
 
 ## Model Assignment Strategy
 
@@ -195,9 +195,9 @@ When the hive starts for the first time:
 
 The first 5 are always-on. Pipeline roles activate when work arrives.
 
-## From Lovyou: What We Learned
+## From Transpara: What We Learned
 
-The first hive (lovyou) grew to 74 roles over 7 days. Key lessons:
+The first hive (transpara) grew to 74 roles over 7 days. Key lessons:
 
 1. **Monitor was the first bottleneck.** Task routing without a dedicated role created chaos. → SysMon from day one.
 2. **Resource contention was the second.** Multiple agents competing for tokens. → Allocator from day one.

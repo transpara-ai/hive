@@ -923,7 +923,7 @@ The individual advantages above compound into one meta-advantage: **the graph is
 
 On Twitter, the platform is the algorithm. On Discord, the platform is the server. On Slack, the platform is the workspace. None of these are owned or auditable by the community using them.
 
-On lovyou.ai, the platform IS the graph. The graph is append-only, signed, hash-chained, and transparent. Communities own their graph. Any community that doesn't trust the platform can run their own instance (self-hosted graph) while maintaining identity and trust interoperability. This is the Neutrality Clause made structural.
+On transpara.ai, the platform IS the graph. The graph is append-only, signed, hash-chained, and transparent. Communities own their graph. Any community that doesn't trust the platform can run their own instance (self-hosted graph) while maintaining identity and trust interoperability. This is the Neutrality Clause made structural.
 
 ---
 

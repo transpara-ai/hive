@@ -82,8 +82,8 @@ func TestCreateTaskWorktree(t *testing.T) {
 	if got := getConfig(wc.Dir, "user.email"); got != "ai-agent@transpara.com" {
 		t.Errorf("worktree user.email = %q, want %q", got, "ai-agent@transpara.com")
 	}
-	if strings.Contains(getConfig(wc.Dir, "user.email"), "lovyou") {
-		t.Errorf("worktree user.email %q must not reference lovyou", getConfig(wc.Dir, "user.email"))
+	if strings.Contains(getConfig(wc.Dir, "user.email"), "transpara") {
+		t.Errorf("worktree user.email %q must not reference transpara", getConfig(wc.Dir, "user.email"))
 	}
 }
 
@@ -114,8 +114,8 @@ func TestGitConfigScopedToWorktree(t *testing.T) {
 	if got := getConfig(wc.Dir, "user.email"); got != "ai-agent@transpara.com" {
 		t.Errorf("worktree user.email = %q, want %q", got, "ai-agent@transpara.com")
 	}
-	if strings.Contains(getConfig(wc.Dir, "user.email"), "lovyou") {
-		t.Errorf("worktree user.email %q must not reference lovyou", getConfig(wc.Dir, "user.email"))
+	if strings.Contains(getConfig(wc.Dir, "user.email"), "transpara") {
+		t.Errorf("worktree user.email %q must not reference transpara", getConfig(wc.Dir, "user.email"))
 	}
 }
 

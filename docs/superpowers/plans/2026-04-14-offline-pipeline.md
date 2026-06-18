@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `hive --pipeline` work with zero dependency on lovyou.ai — fully local using postgres + a new local API shim server.
+**Goal:** Make `hive --pipeline` work with zero dependency on transpara.ai — fully local using postgres + a new local API shim server.
 
-**Architecture:** Build a lightweight HTTP server (`cmd/localapi/`) that implements the same REST endpoints the pipeline expects from lovyou.ai, backed by local postgres tables. The `--api` flag (already exists, defaults to `https://lovyou.ai`) gets pointed at `http://localhost:8082`. Embedded curl commands in agent prompts already use `fmt.Sprintf` with the API key and slug — we add the base URL as a third template parameter so they target the local server instead of the hardcoded `https://lovyou.ai`.
+**Architecture:** Build a lightweight HTTP server (`cmd/localapi/`) that implements the same REST endpoints the pipeline expects from transpara.ai, backed by local postgres tables. The `--api` flag (already exists, defaults to `https://transpara.ai`) gets pointed at `http://localhost:8082`. Embedded curl commands in agent prompts already use `fmt.Sprintf` with the API key and slug — we add the base URL as a third template parameter so they target the local server instead of the hardcoded `https://transpara.ai`.
 
 **Tech Stack:** Go, `net/http`, `database/sql`, `lib/pq`, PostgreSQL 16
 
@@ -21,7 +21,7 @@
 | **Create:** `pkg/localapi/store_test.go` | Integration tests for store operations |
 | **Create:** `pkg/localapi/server_test.go` | HTTP handler tests (round-trip: POST op → GET board) |
 | **Modify:** `pkg/runner/runner.go:47-66` | Add `APIBase string` to `Config` struct |
-| **Modify:** `pkg/runner/scout.go:71` | Template base URL into curl instead of hardcoded `https://lovyou.ai` |
+| **Modify:** `pkg/runner/scout.go:71` | Template base URL into curl instead of hardcoded `https://transpara.ai` |
 | **Modify:** `pkg/runner/architect.go:236,245` | Same — template base URL |
 | **Modify:** `pkg/runner/pm.go:57,64` | Same — template base URL |
 | **Modify:** `pkg/runner/critic.go:145` | Same — template base URL |
@@ -552,7 +552,7 @@ git add pkg/localapi/schema.go pkg/localapi/store.go pkg/localapi/store_test.go
 git commit -m "feat(localapi): add store layer for offline pipeline
 
 Tables: local_nodes, local_agents, local_diagnostics.
-Store provides CRUD that mirrors the lovyou.ai API surface."
+Store provides CRUD that mirrors the transpara.ai API surface."
 ```
 
 ---
@@ -563,7 +563,7 @@ Store provides CRUD that mirrors the lovyou.ai API surface."
 - Create: `pkg/localapi/server.go`
 - Create: `pkg/localapi/server_test.go`
 
-The server implements the exact HTTP API that `pkg/api/client.go` calls. Every method in `Client` maps to a route here. The contract is: if `api.New("http://localhost:8082", "dev")` works against lovyou.ai, it works identically against this server.
+The server implements the exact HTTP API that `pkg/api/client.go` calls. Every method in `Client` maps to a route here. The contract is: if `api.New("http://localhost:8082", "dev")` works against transpara.ai, it works identically against this server.
 
 - [ ] **Step 1: Write the failing test — round-trip through the HTTP API**
 
@@ -708,7 +708,7 @@ import (
 	"strings"
 )
 
-// NewServer returns an http.Handler implementing the lovyou.ai API surface.
+// NewServer returns an http.Handler implementing the transpara.ai API surface.
 // apiKey is the expected Bearer token (use "dev" for local).
 func NewServer(store *Store, apiKey string) http.Handler {
 	s := &server{store: store, apiKey: apiKey}
@@ -1040,7 +1040,7 @@ Expected: PASS — all three round-trip tests green.
 
 ```bash
 git add pkg/localapi/server.go pkg/localapi/server_test.go
-git commit -m "feat(localapi): add HTTP server implementing lovyou.ai API surface
+git commit -m "feat(localapi): add HTTP server implementing transpara.ai API surface
 
 Routes: board, op, node, documents, knowledge, feed, agents, session,
 escalation, diagnostic. All backed by local postgres."
@@ -1070,7 +1070,7 @@ import (
 	"os"
 
 	_ "github.com/lib/pq"
-	"github.com/lovyou-ai/hive/pkg/localapi"
+	"github.com/transpara-ai/hive/pkg/localapi"
 )
 
 func main() {
@@ -1159,7 +1159,7 @@ Starts on :8082 by default, auto-migrates tables on startup."
 - Modify: `pkg/runner/scribe.go:59`
 - Modify: `pkg/runner/council.go:308`
 
-Every embedded curl command currently hardcodes `https://lovyou.ai`. The `--api` flag value is already available via `api.Client.base`, but it's not exposed. We add `APIBase` to `runner.Config` and thread it through `fmt.Sprintf` in every agent instruction.
+Every embedded curl command currently hardcodes `https://transpara.ai`. The `--api` flag value is already available via `api.Client.base`, but it's not exposed. We add `APIBase` to `runner.Config` and thread it through `fmt.Sprintf` in every agent instruction.
 
 - [ ] **Step 1: Add `APIBase` to runner.Config**
 
@@ -1175,7 +1175,7 @@ APIBase  string      // Base URL for agent curl commands (e.g. "http://localhost
 In `pkg/runner/scout.go`, find the curl command at line ~71:
 
 ```
-"https://lovyou.ai/app/%s/op"
+"https://transpara.ai/app/%s/op"
 ```
 
 Replace with:
@@ -1184,15 +1184,15 @@ Replace with:
 "%s/app/%s/op"
 ```
 
-And update the `fmt.Sprintf` arguments to include `r.cfg.APIBase` before `r.cfg.SpaceSlug` in the curl line. Repeat for every `https://lovyou.ai` occurrence in the file.
+And update the `fmt.Sprintf` arguments to include `r.cfg.APIBase` before `r.cfg.SpaceSlug` in the curl line. Repeat for every `https://transpara.ai` occurrence in the file.
 
 - [ ] **Step 3: Replace hardcoded URLs in architect.go**
 
-At lines ~236 and ~245, replace `"https://lovyou.ai/app/%s/op"` and `"https://lovyou.ai/app/%s/board"` with `"%s/app/%s/op"` and `"%s/app/%s/board"`. Update the `fmt.Sprintf` arguments to prepend `r.cfg.APIBase` (or the local variable carrying it).
+At lines ~236 and ~245, replace `"https://transpara.ai/app/%s/op"` and `"https://transpara.ai/app/%s/board"` with `"%s/app/%s/op"` and `"%s/app/%s/board"`. Update the `fmt.Sprintf` arguments to prepend `r.cfg.APIBase` (or the local variable carrying it).
 
 - [ ] **Step 4: Replace hardcoded URLs in pm.go**
 
-At lines ~57 and ~64, same pattern: `"https://lovyou.ai/..."` → `"%s/..."` with APIBase.
+At lines ~57 and ~64, same pattern: `"https://transpara.ai/..."` → `"%s/..."` with APIBase.
 
 - [ ] **Step 5: Replace hardcoded URLs in critic.go**
 
@@ -1204,15 +1204,15 @@ At lines ~285 and ~287, same pattern.
 
 - [ ] **Step 7: Replace hardcoded URLs in observer.go**
 
-At lines ~263, ~267, ~297, ~300, ~307, same pattern. Also check line ~230 for the plain text reference to `https://lovyou.ai/` and update that too.
+At lines ~263, ~267, ~297, ~300, ~307, same pattern. Also check line ~230 for the plain text reference to `https://transpara.ai/` and update that too.
 
 - [ ] **Step 8: Replace hardcoded URLs in spawner.go, scribe.go, council.go**
 
 Same pattern in each file.
 
-- [ ] **Step 9: Verify no remaining hardcoded lovyou.ai URLs in agent prompts**
+- [ ] **Step 9: Verify no remaining hardcoded transpara.ai URLs in agent prompts**
 
-Run: `grep -rn 'https://lovyou.ai' pkg/runner/ | grep -v '_test.go'`
+Run: `grep -rn 'https://transpara.ai' pkg/runner/ | grep -v '_test.go'`
 Expected: Zero matches.
 
 - [ ] **Step 10: Verify compilation**
@@ -1229,7 +1229,7 @@ git add pkg/runner/runner.go pkg/runner/scout.go pkg/runner/architect.go \
     pkg/runner/council.go
 git commit -m "refactor(runner): template base URL into agent curl commands
 
-Replace all hardcoded https://lovyou.ai references with the
+Replace all hardcoded https://transpara.ai references with the
 configurable APIBase from runner.Config. This is the key change
 that allows pipeline mode to work against a local API server."
 ```
@@ -1312,7 +1312,7 @@ Add `hive run --pipeline` instructions for local mode so future sessions know ho
 After the existing "Hive Run" section, add:
 
 ```markdown
-### Local Pipeline (no lovyou.ai dependency)
+### Local Pipeline (no transpara.ai dependency)
 
 Requires the local API server (`cmd/localapi`) running alongside postgres.
 

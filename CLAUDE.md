@@ -1,6 +1,6 @@
 # Hive
 
-A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/transpara-ai/eventgraph). Hosted at [lovyou.ai](https://lovyou.ai).
+A self-organizing AI agent civilisation that builds products autonomously. Built on [EventGraph](https://github.com/transpara-ai/eventgraph). Hosted at [transpara.ai](https://transpara.ai).
 
 ## Soul
 
@@ -12,7 +12,7 @@ Inherited from EventGraph. Every agent in the hive operates under this constrain
 
 Not a product factory. A civilisation engine.
 
-lovyou.ai is one service — one binary, one graph, one actor store. Everything lives here: docs, blog, product UIs, auth, the hive itself. Web first, mobile later. The hive builds products from the thirteen EventGraph product layers. Each product runs on the same graph, generates revenue, and funds the next product.
+transpara.ai is one service — one binary, one graph, one actor store. Everything lives here: docs, blog, product UIs, auth, the hive itself. Web first, mobile later. The hive builds products from the thirteen EventGraph product layers. Each product runs on the same graph, generates revenue, and funds the next product.
 
 The hive starts with zero autonomy. Every action is scrutinised by human operators. Trust accumulates through verified work — supervision decreases as the hive proves itself. Authority levels shift from "Required" (blocks until human approves) toward "Recommended" and "Notification" as trust is earned.
 
@@ -22,7 +22,7 @@ The end state is an economy — every transaction, decision, and relationship on
 
 ## The Thirteen Products
 
-Each product layer from EventGraph ([product-layers.md](https://github.com/transpara-ai/eventgraph/blob/main/docs/product-layers.md)) becomes a deployable product on lovyou.ai. Layer 0 is the foundation — layers 1-13 are products:
+Each product layer from EventGraph ([product-layers.md](https://github.com/transpara-ai/eventgraph/blob/main/docs/product-layers.md)) becomes a deployable product on transpara.ai. Layer 0 is the foundation — layers 1-13 are products:
 
 | Layer | Graph | Composition Grammar | What It Solves |
 |-------|-------|---------------------|---------------|

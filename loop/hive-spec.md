@@ -157,7 +157,7 @@ External:
 
 ### How This Maps to the Product
 
-The hive's channels ARE conversations on lovyou.ai. The hive space has:
+The hive's channels ARE conversations on transpara.ai. The hive space has:
 - Channels (= conversations with specific purposes)
 - Posts (= scout reports, build reports, critiques)
 - Tasks (= the board)
@@ -321,14 +321,14 @@ cmd/loop (pipeline orchestrator)
   ├── Ops prompt → Claude CLI (with --allowedTools) → runs ship.sh
   ├── Reflector prompt → Claude CLI → updates state.md, reflections.md
   │
-  └── Posts summary to lovyou.ai via API
+  └── Posts summary to transpara.ai via API
 ```
 
 **Each pipeline step is:**
 1. Assemble the prompt (system prompt + context from previous steps)
 2. Call `claude` CLI with the prompt and allowed tools
 3. Parse the output (artifacts written to files)
-4. Post to the relevant lovyou.ai channel via API
+4. Post to the relevant transpara.ai channel via API
 5. Trigger the next step
 
 ### Agent Triggering
@@ -371,7 +371,7 @@ New binary. The bridge from manual to autonomous.
 // 2. Determines pipeline shape from task metadata
 // 3. Executes each pipeline agent in sequence via Claude CLI
 // 4. Each agent reads prior artifacts and produces its own
-// 5. Posts iteration summary to lovyou.ai
+// 5. Posts iteration summary to transpara.ai
 // 6. Commits artifacts to git
 //
 // Flags:
@@ -386,7 +386,7 @@ New binary. The bridge from manual to autonomous.
 
 | Agent | Claude CLI flags | File access | API access |
 |-------|-----------------|-------------|------------|
-| PM | `--print` (no tools) | Read: state.md, product-map.md, board API | lovyou.ai API (read board) |
+| PM | `--print` (no tools) | Read: state.md, product-map.md, board API | transpara.ai API (read board) |
 | Researcher | `--print` (no tools) | Read: specs, docs | Web search |
 | Scout | `--print` (no tools) | Read: state.md, specs, codebase (grep/read) | — |
 | Architect | `--print` (no tools) | Read: scout.md, specs, codebase | — |
@@ -395,7 +395,7 @@ New binary. The bridge from manual to autonomous.
 | Tester | Full tool access | Read/write: *_test.go files | go test |
 | Critic | `--print` (no tools) | Read: all artifacts + code diff | — |
 | Ops | Full tool access | Read: ship.sh | Fly.io deploy |
-| Reflector | Limited write | Write: state.md, reflections.md | lovyou.ai API (post) |
+| Reflector | Limited write | Write: state.md, reflections.md | transpara.ai API (post) |
 
 **Key insight:** Most agents are read-only. Only Builder, Tester, and Ops get write access. This is the authority model enforced at the tool level, not just in the prompt.
 
@@ -405,14 +405,14 @@ New binary. The bridge from manual to autonomous.
 |-----------|-------|------|
 | `cmd/loop` | Local (now) → Fly.io (later) | Pipeline orchestrator |
 | Claude CLI | On the machine running cmd/loop | Inference engine (Max plan, OAuth) |
-| lovyou.ai API | Fly.io (production) | Board, channels, feed, knowledge |
+| transpara.ai API | Fly.io (production) | Board, channels, feed, knowledge |
 | Git repos | Local clones on the machine | Code access for Builder/Tester |
 | `ship.sh` | In site repo | Deploy pipeline (templ + build + test + deploy + commit + push) |
 | Artifacts | `hive/loop/` directory | scout.md, build.md, critique.md, reflections.md, state.md |
 
-### The Hive Space on lovyou.ai
+### The Hive Space on transpara.ai
 
-The hive already has a space: `lovyou.ai/app/hive`. Currently used for posting iteration summaries. Becomes the full operating environment:
+The hive already has a space: `transpara.ai/app/hive`. Currently used for posting iteration summaries. Becomes the full operating environment:
 
 - **Board** — the hive's task backlog (from the product map)
 - **Feed** — iteration summaries (already exists via cmd/post)
@@ -457,7 +457,7 @@ Background agents (Guardian, Librarian, etc.) use Sonnet/Haiku for lower cost on
 | work-product-spec.md | Work depth | hive/loop/ |
 | The codebase | site/, eventgraph/, agent/, work/ | Git repos |
 | Git history | What changed and why | `git log` |
-| lovyou.ai board | Current backlog | Live site |
+| transpara.ai board | Current backlog | Live site |
 
 ### Context Window Strategy
 
@@ -506,7 +506,7 @@ No agent can read everything. Context must be managed:
 - The core loop works (214+ iterations prove the pattern)
 - Agent definitions exist in `pkg/hive/agentdef.go`
 - `cmd/hive` runs agents concurrently
-- `cmd/post` publishes to lovyou.ai
+- `cmd/post` publishes to transpara.ai
 - `cmd/reply` enables conversation participation
 - The hive space has Board + Feed + Chat
 - The product already has every layer the hive needs to use

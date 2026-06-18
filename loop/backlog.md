@@ -9,7 +9,7 @@ The council, the Director, and the agents generate ideas faster than they can be
 ## Product ideas
 
 ### Hive dashboard (spectator view)
-lovyou.ai/hive — live view of what the civilization is doing. Pipeline status (Scout/Builder/Critic), current task, recent commits, cost total, play/pause. The hive as a spectator sport. Makes the civilization visible to outsiders. The Designer, Storyteller, and Growth agent all asked for this.
+transpara.ai/hive — live view of what the civilization is doing. Pipeline status (Scout/Builder/Critic), current task, recent commits, cost total, play/pause. The hive as a spectator sport. Makes the civilization visible to outsiders. The Designer, Storyteller, and Growth agent all asked for this.
 
 ### Specs on the Knowledge layer
 Specs should be nodes on the graph, not markdown files in a repo. The Knowledge layer already has assert/challenge/verify/retract — perfect for spec lifecycle. Scout reads verified specs, decomposes into tasks. When specs are exhausted, council generates more. Self-sustaining loop.
@@ -192,7 +192,7 @@ Currently the Scout, Builder, Critic, PM are thin wrappers — Go functions that
 
 **What they should be:**
 - Real `agent.Agent` instances (from the agent package) with signing keys, state machines, causality
-- User accounts on lovyou.ai — visible in People, with action histories
+- User accounts on transpara.ai — visible in People, with action histories
 - Memory across cycles — the Scout remembers what it already scouted, the Critic remembers what patterns it keeps catching
 - MCP tools — the Scout queries the graph for gaps, the Critic greps the codebase
 - Soul enforcement — the Builder can refuse a task that violates invariants
@@ -216,7 +216,7 @@ Currently the Scout, Builder, Critic, PM are thin wrappers — Go functions that
 Agents should subscribe to event types they care about. The Critic subscribes to `hive.builder.committed`. The Guardian subscribes to `*`. The Philosopher subscribes to `council.*`. Currently: agents are invoked by the pipeline. Future: agents react to events.
 
 ### Cross-system agent identity (EGIP)
-Agents should be able to participate on OTHER platforms — not just lovyou.ai. The event graph + EGIP protocol enables this. An agent's identity is its signing key, not its platform account.
+Agents should be able to participate on OTHER platforms — not just transpara.ai. The event graph + EGIP protocol enables this. An agent's identity is its signing key, not its platform account.
 
 ### Revenue from agent conversations
 The Finance agent's concern: zero revenue. Agent conversations could be the first revenue stream. Free tier: 10 agent chats/day. Paid tier: unlimited + councils. BYOK: bring your own API key. The soul says "free for individuals" — individual chats stay free, councils and enterprise features pay.
@@ -239,10 +239,10 @@ This replaces: backlog.md, state.md scout section, spec files. The graph IS the 
 The civilization doesn't live in its own product. Tasks are in state.md, not on the board. Specs are markdown files, not Knowledge claims. Conversations happen in Claude Code sessions, not in Chat. The Inhabitant would notice.
 
 **What changes:**
-- Hive tasks go on the lovyou.ai board (already partially true — the pipeline creates tasks there)
+- Hive tasks go on the transpara.ai board (already partially true — the pipeline creates tasks there)
 - Specs become Knowledge claims (assert/challenge/verify lifecycle)
 - Council reports posted to feed (already done) AND stored as Knowledge nodes
-- Agent conversations happen on lovyou.ai Chat, not just in terminal sessions
+- Agent conversations happen on transpara.ai Chat, not just in terminal sessions
 - Lessons from state.md become Knowledge claims with verification status
 - The backlog becomes a project on the board, not a markdown file
 
@@ -256,7 +256,7 @@ The HR agent: "The single point of failure in this civilization isn't technical.
 - Runs on a VM (Fly machine, or a dedicated server) — not Matt's laptop
 - Automatic deploy after successful builds (with Critic PASS gate)
 - Budget ceiling per day ($10-20) to prevent runaway spend
-- Alerting: if the hive encounters errors, send a notification (email, Telegram, or lovyou.ai notification to Matt)
+- Alerting: if the hive encounters errors, send a notification (email, Telegram, or transpara.ai notification to Matt)
 - The Guardian monitors: if the hive has been idle for 24 hours, flag it
 - Graceful degradation: if the API is down, or Fly is having a bad day, the hive waits and retries — doesn't crash
 
@@ -277,7 +277,7 @@ The Legal agent flagged: no privacy policy, no terms of service. Google OAuth co
 ### State of the union
 A living document AND a page on the site. Where everything is. What's working, what's broken, what's next. Not state.md (internal, for the Scout). A public-facing honest assessment.
 
-**On the site:** lovyou.ai/status or lovyou.ai/union
+**On the site:** transpara.ai/status or transpara.ai/union
 - What's built and working (13 layers, 27 ops, pipeline)
 - What's broken or incomplete (test debt, REVISE backlog, no mobile app)
 - What's next (from the spec backlog)
@@ -304,7 +304,7 @@ The hive shouldn't need `--repo` flags or config files. Clients, projects, and r
 clients (id, name, contact, plan, created_at)
 projects (id, client_id, name, description, status)
 repos (id, project_id, url, branch, local_path, deploy_target, deploy_credentials_ref, language, framework)
-project_spaces (project_id, space_id)  -- links to lovyou.ai spaces
+project_spaces (project_id, space_id)  -- links to transpara.ai spaces
 project_agents (project_id, persona, memory_scope)  -- which agent personas are assigned
 ```
 
@@ -318,8 +318,8 @@ project_agents (project_id, persona, memory_scope)  -- which agent personas are 
 - Agent memory is scoped to the project — the Lovatts agents accumulate Lovatts domain knowledge
 - Cross-repo awareness: go.mod replace directives, shared databases, app dependencies — all queryable
 
-**For lovyou.ai itself:**
-- lovyou.ai is the first client (dogfooding)
+**For transpara.ai itself:**
+- transpara.ai is the first client (dogfooding)
 - 5 repos: eventgraph, agent, work, hive, site
 - The hive's own project is in the same DB it queries for client work
 
@@ -327,7 +327,7 @@ project_agents (project_id, persona, memory_scope)  -- which agent personas are 
 - Dozens of repos, several databases
 - Each app: URL, branch, deploy target, language/framework
 - Credentials stored encrypted, agent-scoped access
-- Department spaces on lovyou.ai linked to the project
+- Department spaces on transpara.ai linked to the project
 
 **No --repo flag. No config files. The hive reads its own database.**
 
@@ -371,7 +371,7 @@ MCP screenshot servers: [Puppeteer MCP](https://www.pulsemcp.com/servers/modelco
 
 ### Implementation
 1. Add Puppeteer or Playwright MCP server to the hive's MCP config
-2. The Observer uses `screenshot` tool on lovyou.ai pages after each deploy
+2. The Observer uses `screenshot` tool on transpara.ai pages after each deploy
 3. The Designer reviews screenshots for visual consistency
 4. The Newcomer navigates the site via screenshots and reports confusion
 5. The Inhabitant experiences the product visually, not just structurally
@@ -422,9 +422,9 @@ Sovereign systems communicate without shared infrastructure:
 - Treaties for bilateral governance
 
 ### What it enables
-An agent on lovyou.ai can participate on ANOTHER platform. Your Philosopher can answer questions on someone else's product. The trust score follows the agent — portable, non-transferable, earned.
+An agent on transpara.ai can participate on ANOTHER platform. Your Philosopher can answer questions on someone else's product. The trust score follows the agent — portable, non-transferable, earned.
 
-A company running their own hive can federate with lovyou.ai. Their agents and ours can collaborate across graph boundaries. Tasks can span systems. Reviews can cite evidence from other graphs.
+A company running their own hive can federate with transpara.ai. Their agents and ours can collaborate across graph boundaries. Tasks can span systems. Reviews can cite evidence from other graphs.
 
 ### ZeroPoint integration
 [zeropoint.global](https://zeropoint.global/) — portable proof infrastructure. Cryptographic governance primitives for autonomous agent systems. 700+ tests, 13 Rust crates, MIT/Apache-2.0. Built by ThinkStream AI Labs.
@@ -443,7 +443,7 @@ After the local product works. EGIP + ZeroPoint is the network effect — but th
 
 ### Build order
 1. EGIP message types in the eventgraph Go package (partially exists)
-2. HELLO/DISCOVER handshake between two lovyou.ai instances
+2. HELLO/DISCOVER handshake between two transpara.ai instances
 3. Cross-graph task references (a task on system A depends on a task on system B)
 4. Portable agent identity (agent's signing key works across systems)
 5. Treaty mechanism (two systems agree on shared governance rules)

@@ -1,5 +1,5 @@
 {
-  "command": "/c/src/matt/lovyou3/hive/mcp-graph.exe",
+  "command": "/c/src/matt/transpara3/hive/mcp-graph.exe",
   "args": [],
   "env": {
     "LOVYOU_API_KEY": "lv_b7fb22cde43a8a65289f77ee6dc9aa195184bf6129160f62691e59d8d6ccc8dd",
