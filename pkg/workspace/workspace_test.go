@@ -177,8 +177,8 @@ func TestCommitUsesAgentIdentity(t *testing.T) {
 		if f.got != "ai-agent@transpara.com" {
 			t.Errorf("commit %s email = %q, want %q", f.field, f.got, "ai-agent@transpara.com")
 		}
-		if strings.Contains(f.got, "transpara") {
-			t.Errorf("commit %s email %q must not reference transpara", f.field, f.got)
+		if strings.Contains(f.got, "lovyou") {
+			t.Errorf("commit %s email %q must not reference lovyou", f.field, f.got)
 		}
 	}
 }
