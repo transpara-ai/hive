@@ -298,7 +298,7 @@ The hive's fifth invariant is **SELF-EVOLVE** — agents fix agents, not humans.
 
 Two stores (event, actor) use the same backend, selected via `--store` flag or `DATABASE_URL` env var:
 - **No flag**: in-memory (ephemeral, lost on exit)
-- **`postgres://...`**: PostgreSQL (Docker locally, Neon in production)
+- **`postgres://...`**: PostgreSQL (Docker locally, on-prem in production; Supabase if cloud-hosted)
 
 Tables auto-create on first connection (`CREATE TABLE IF NOT EXISTS`). Local Postgres runs via `docker compose up -d postgres` with DSN `postgres://hive:hive@localhost:5432/hive`.
 
