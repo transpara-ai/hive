@@ -1049,8 +1049,8 @@ This requires factoring out the flag set construction. Add a helper near `cmdCou
 ```go
 func newCouncilFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("council", flag.ContinueOnError)
-	fs.String("space", "hive", "lovyou.ai space slug")
-	fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	fs.String("space", "hive", "transpara.ai space slug")
+	fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	fs.String("repo", "", "Path to repo (default: current dir)")
 	fs.Float64("budget", 10.0, "Daily budget in USD")
 	fs.String("topic", "", "Focus the council on a specific question")

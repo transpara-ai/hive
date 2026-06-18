@@ -453,7 +453,7 @@ If a member disagrees with moderation:
 
 ### Platform-Level Policy
 
-The platform (lovyou.ai) enforces only:
+The platform (transpara.ai) enforces only:
 - Legal compliance (DMCA, illegal content)
 - The neutrality clause (no military applications, no surveillance)
 - Technical abuse (spam, DDoS, credential stuffing)
@@ -537,12 +537,12 @@ Applied cognitive grammar (Need → Traverse → Derive) to this product spec.
 - Missing: **launch sequence** — what order do we release modes?
 
 **Cover:** What territory wasn't explored:
-- **Federation** — how two lovyou.ai instances communicate (EGIP protocol exists but not connected to social product yet)
+- **Federation** — how two transpara.ai instances communicate (EGIP protocol exists but not connected to social product yet)
 - **Data portability** — can users export their graph? (append-only graph makes this natural but not specified)
 - **Rate limiting** — API rate limits, slowmode per channel, spam prevention
 - **Search semantics** — how search works across modes (full-text? Semantic? Operator syntax?)
 
-**Blind:** The spec assumes one instance (lovyou.ai). But the eventgraph architecture is designed for sovereign instances communicating via EGIP. The product spec should acknowledge this and describe the single-instance-first → federation-later path.
+**Blind:** The spec assumes one instance (transpara.ai). But the eventgraph architecture is designed for sovereign instances communicating via EGIP. The product spec should acknowledge this and describe the single-instance-first → federation-later path.
 
 ### Pass 1: Derive Row
 

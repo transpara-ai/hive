@@ -82,8 +82,8 @@ func cmdFactoryDaemon(args []string) error {
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -265,8 +265,8 @@ func cmdCivilizationRun(args []string) error {
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -289,8 +289,8 @@ func cmdCivilizationDaemon(args []string) error {
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -397,10 +397,10 @@ func cmdPipeline(args []string) error {
 }
 
 func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, prMode, worktrees, autoClone *bool) {
-	space = fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space = fs.String("space", "hive", "transpara.ai space slug")
+	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
-	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	storeDSN = fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repos = fs.String("repos", "", "Named repos: name=path,name=path")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
@@ -535,10 +535,10 @@ func cmdRole(args []string) error {
 }
 
 func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, prMode *bool) {
-	space = fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space = fs.String("space", "hive", "transpara.ai space slug")
+	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
-	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
 	prMode = fs.Bool("pr", false, "Create feature branch and open PR instead of pushing to main")
 	return
@@ -629,8 +629,8 @@ In `cmd/hive/router.go`, replace the `cmdIngest` and `cmdCouncil` stubs with:
 ```go
 func cmdIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	priority := fs.String("priority", "high", "Task priority: low|medium|high|critical")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -647,8 +647,8 @@ func cmdIngest(args []string) error {
 
 func cmdCouncil(args []string) error {
 	fs := flag.NewFlagSet("council", flag.ContinueOnError)
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	repo := fs.String("repo", "", "Path to repo (default: current dir)")
 	budget := fs.Float64("budget", 10.0, "Daily budget in USD")
 	topic := fs.String("topic", "", "Focus the council on a specific question")
@@ -983,7 +983,7 @@ Replace with:
 | `--repo` | current dir | Path to repo for Implementer's Operate |
 | `--approve-requests` | false | Auto-approve authority requests |
 | `--approve-roles` | false | Auto-approve role proposals |
-| `--space`, `--api` | `hive`, `https://lovyou.ai` | lovyou.ai targeting |
+| `--space`, `--api` | `hive`, `https://transpara.ai` | transpara.ai targeting |
 
 ### `civilization daemon` (multi-agent, long-running)
 
@@ -1000,7 +1000,7 @@ For the "Runner / Pipeline Mode" table just below it, find:
 | `--interval` | 30m | Pipeline cycle interval |
 | `--council` | false | Convene all agents for deliberation |
 | `--topic` | | Focus question for council |
-| `--space` | hive | lovyou.ai space slug |
+| `--space` | hive | transpara.ai space slug |
 | `--budget` | 10.0 | Daily budget in USD |
 | `--one-shot` | false | Run once then exit (single pipeline cycle or single task) |
 | `--pr` | false | Create feature branch + PR instead of pushing to main |
@@ -1016,12 +1016,12 @@ Replace with:
 
 | Flag | Default | Purpose | Where |
 |------|---------|---------|-------|
-| `--space` | `hive` | lovyou.ai space slug | both |
-| `--api` | `https://lovyou.ai` | lovyou.ai API base URL | both |
+| `--space` | `hive` | transpara.ai space slug | both |
+| `--api` | `https://transpara.ai` | transpara.ai API base URL | both |
 | `--repo` | current dir | Path to repo | both |
 | `--repos` | "" | Named repos: `name=path,...` | both |
 | `--budget` | 10.0 | Daily budget in USD | both |
-| `--agent-id` | "" | Agent's lovyou.ai user ID | both |
+| `--agent-id` | "" | Agent's transpara.ai user ID | both |
 | `--store` | in-memory | Postgres DSN | both |
 | `--pr` | false | Branch + PR instead of pushing to main | both |
 | `--worktrees` | false | Per-task worktrees | both |

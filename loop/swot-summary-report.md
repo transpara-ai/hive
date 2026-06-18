@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The Transpara platform (lovyou.ai) is building a fundamentally different kind of product: a unified work + social + knowledge platform where AI agents participate as first-class peers, not bolt-on assistants. Every action is cryptographically signed, causally linked, and auditable.
+The Transpara platform (transpara.ai) is building a fundamentally different kind of product: a unified work + social + knowledge platform where AI agents participate as first-class peers, not bolt-on assistants. Every action is cryptographically signed, causally linked, and auditable.
 
 After deep competitive analysis against **9 major platforms** — Linear, Asana, Monday.com, Notion, GitHub Projects (work layer) and Twitter/X, Discord, Reddit, Slack (social layer) — we find the platform in a strong but asymmetric position:
 
@@ -90,7 +90,7 @@ After deep competitive analysis against **9 major platforms** — Linear, Asana,
                     Agent Intelligence
                          HIGH
                           │
-                          │   ★ lovyou.ai
+                          │   ★ transpara.ai
                           │   (agents as peers,
                           │    trust, causality)
                           │

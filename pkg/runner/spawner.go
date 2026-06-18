@@ -12,7 +12,7 @@ import (
 )
 
 // InvokeAgent runs any agent by name. Reads persona from the graph first
-// (lovyou.ai agent_personas table), falls back to agents/{name}.md file.
+// (transpara.ai agent_personas table), falls back to agents/{name}.md file.
 // This is how pipeline roles communicate with the broader hive — 50+ agents
 // available on demand, not hardcoded in the pipeline sequence.
 func (r *Runner) InvokeAgent(ctx context.Context, name, task string) (string, error) {

@@ -359,7 +359,7 @@ Per the existing eventgraph coding standard (≥90% for core packages), the new 
 
 ### 7.1 Removed env vars
 
-- `CLAUDE_TOKEN` (site) — documented in `site/CLAUDE.md` migration note. Local-dev `make dev` stops mentioning it. Production Fly secrets: `fly secrets unset CLAUDE_TOKEN --app lovyou-ai` after deploy.
+- `CLAUDE_TOKEN` (site) — documented in `site/CLAUDE.md` migration note. Local-dev `make dev` stops mentioning it. Production Fly secrets: `fly secrets unset CLAUDE_TOKEN --app transpara-ai` after deploy.
 
 ### 7.2 New env vars
 

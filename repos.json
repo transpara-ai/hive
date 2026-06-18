@@ -6,8 +6,7 @@
       "local_path": "../site",
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",
-      "test_cmd": "go test -buildvcs=false ./...",
-      "deploy_target": "fly.io"
+      "test_cmd": "go test -buildvcs=false ./..."
     },
     {
       "name": "hive",

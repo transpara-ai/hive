@@ -324,11 +324,11 @@ func TestIsValidRoleName_Valid(t *testing.T) {
 		"code-reviewer",
 		"security-auditor",
 		"task-prioritizer",
-		"ab",                          // minimum length (2)
-		"a1",                          // digit allowed
+		"ab", // minimum length (2)
+		"a1", // digit allowed
 		"incident-commander",
 		"memory-keeper",
-		strings.Repeat("a", 50),       // maximum length (50)
+		strings.Repeat("a", 50), // maximum length (50)
 	}
 	for _, name := range valid {
 		if !isValidRoleName(name) {
@@ -339,24 +339,24 @@ func TestIsValidRoleName_Valid(t *testing.T) {
 
 func TestIsValidRoleName_Invalid(t *testing.T) {
 	invalid := []string{
-		"",                            // empty
-		"a",                           // too short (1 char)
-		strings.Repeat("a", 51),       // too long (51 chars)
-		"CodeReviewer",                // uppercase not allowed
-		"code reviewer",               // space not allowed
-		"code_reviewer",               // underscore not allowed
-		"-code-reviewer",              // starts with hyphen
-		"code-reviewer-",              // ends with hyphen
-		"code--reviewer",              // consecutive hyphens
-		"GUARDIAN",                    // reserved (uppercase check)
-		"guardian",                    // reserved
-		"sysmon",                      // reserved
-		"allocator",                   // reserved
-		"cto",                         // reserved
-		"spawner",                     // reserved
-		"strategist",                  // reserved
-		"planner",                     // reserved
-		"implementer",                 // reserved
+		"",                      // empty
+		"a",                     // too short (1 char)
+		strings.Repeat("a", 51), // too long (51 chars)
+		"CodeReviewer",          // uppercase not allowed
+		"code reviewer",         // space not allowed
+		"code_reviewer",         // underscore not allowed
+		"-code-reviewer",        // starts with hyphen
+		"code-reviewer-",        // ends with hyphen
+		"code--reviewer",        // consecutive hyphens
+		"GUARDIAN",              // reserved (uppercase check)
+		"guardian",              // reserved
+		"sysmon",                // reserved
+		"allocator",             // reserved
+		"cto",                   // reserved
+		"spawner",               // reserved
+		"strategist",            // reserved
+		"planner",               // reserved
+		"implementer",           // reserved
 	}
 	for _, name := range invalid {
 		if isValidRoleName(name) {

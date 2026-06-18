@@ -12,7 +12,7 @@ The hive is a working agent-first runtime. Four agents run concurrent loops, coo
 | agent | Unified Agent type: FSM, lifecycle, causality tracking, trust hooks | Complete, tested |
 | work | Work Graph: task store, priorities, dependencies, assignment, events | Complete, tested |
 | hive | Runtime: 4 agents, agentic loop, budget, workspace, git | Complete, tested |
-| site | lovyou.ai: blog, reference, auth, unified graph product | Deployed on Fly.io |
+| site | transpara.ai: blog, reference, auth, unified graph product | Deployed on Fly.io |
 
 **What works today:**
 - Agent loops: observe → reason/operate → check stopping → repeat
@@ -42,7 +42,7 @@ Roughly in dependency order, but the core loop decides actual priority:
 - CI/CD — GitHub Actions, automated deploy
 
 **Products**
-- Unified graph product — grammar-first Board/Feed/Threads on lovyou.ai
+- Unified graph product — grammar-first Board/Feed/Threads on transpara.ai
 - Additional product layers (Market, Social, Justice, etc.)
 - Revenue infrastructure — billing, subscriptions
 
@@ -54,7 +54,7 @@ Roughly in dependency order, but the core loop decides actual priority:
 ## Key Decisions
 
 1. **Self-modification: yes.** PRs to transpara-ai/*, reviewed by human.
-2. **One service.** lovyou.ai does everything. Web first.
+2. **One service.** transpara.ai does everything. Web first.
 3. **High scrutiny initially.** Everything starts as Required authority.
 4. **Core loop over milestones.** The loop decides what to build, not a checklist.
 5. **Code is truth.** Docs describe intent and vision. Code describes reality.

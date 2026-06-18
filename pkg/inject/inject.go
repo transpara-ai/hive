@@ -98,7 +98,7 @@ type Event struct {
 // Webhook protocol constants. These match the site's OpEvent wire format
 // (lowercase), which is distinct from eventgraph's ActorType (capitalized).
 const (
-	opIntend      = "intend"
+	opIntend       = "intend"
 	actorKindHuman = "human"
 	eventIDPrefix  = "idea-file-"
 )

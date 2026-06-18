@@ -111,7 +111,7 @@ func TestSetOperatingMode(t *testing.T) {
 	bands := membrane.TrustBands{RequiredBelow: 0.3, RecommendedBelow: 0.6}
 
 	tests := []struct {
-		trust      float64
+		trust       float64
 		wantCopilot bool
 	}{
 		{0.1, true},  // Required → copilot on

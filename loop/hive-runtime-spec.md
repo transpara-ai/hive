@@ -35,9 +35,9 @@ Hive0 shipped commits every 5 minutes. The architecture that made this possible:
 | Authority model | `hive/pkg/resources/authority.go` | Built but not enforced. |
 | Agent definitions | `hive/pkg/hive/agentdef.go` | Working. 4 starter agents defined. |
 | Role prompts | `hive/agents/*.md` | Written (11 roles). Need refinement. |
-| lovyou.ai API | `site/graph/handlers.go` | Working. JSON endpoints for all ops. |
-| lovyou.ai Board | `site/graph/views.templ` | Working. Tasks, projects, goals visible. |
-| lovyou.ai Chat | Conversations + messages | Working. Agent can post via API. |
+| transpara.ai API | `site/graph/handlers.go` | Working. JSON endpoints for all ops. |
+| transpara.ai Board | `site/graph/views.templ` | Working. Tasks, projects, goals visible. |
+| transpara.ai Chat | Conversations + messages | Working. Agent can post via API. |
 
 ## What's Redundant (Retire)
 
@@ -53,8 +53,8 @@ Hive0 shipped commits every 5 minutes. The architecture that made this possible:
 
 | Component | What | Priority |
 |-----------|------|----------|
-| **API client for lovyou.ai** | Agents need to GET/POST tasks, messages, comments via lovyou.ai REST API | P0 |
-| **Per-call cost tracking** | Track tokens + cost per agent per task. Post to lovyou.ai. | P0 |
+| **API client for transpara.ai** | Agents need to GET/POST tasks, messages, comments via transpara.ai REST API | P0 |
+| **Per-call cost tracking** | Track tokens + cost per agent per task. Post to transpara.ai. | P0 |
 | **Task-driven loop** | Agent polls board for assigned tasks, works them, commits | P0 |
 | **Heartbeat system** | Agent sends "alive" signal. Monitor detects crashes. | P1 |
 | **Build verification** | `go build ./...` must pass before task closes | P0 |
@@ -69,7 +69,7 @@ Hive0 shipped commits every 5 minutes. The architecture that made this possible:
 ## The Architecture
 
 ```
-                    lovyou.ai (Fly.io)
+                    transpara.ai (Fly.io)
                     ┌─────────────────────┐
                     │  Board (tasks)       │
                     │  Chat (channels)     │
@@ -96,7 +96,7 @@ Hive0 shipped commits every 5 minutes. The architecture that made this possible:
               │     └─────────────┘         │
               │                             │
               └──── All agents poll ────────┘
-                   lovyou.ai API
+                   transpara.ai API
                    every 15 seconds
 ```
 
@@ -183,13 +183,13 @@ func (r *Runner) workTask(t Task) {
 
 ---
 
-## API Client for lovyou.ai
+## API Client for transpara.ai
 
-The agents communicate via lovyou.ai's existing JSON API:
+The agents communicate via transpara.ai's existing JSON API:
 
 ```go
 type APIClient struct {
-    base   string // "https://lovyou.ai"
+    base   string // "https://transpara.ai"
     apiKey string // LOVYOU_API_KEY (Bearer token)
 }
 
@@ -278,7 +278,7 @@ From hive0, adapted for our roles:
 ## Build Order
 
 ### Phase 1: Single Builder (this session)
-1. Write lovyou.ai API client (`pkg/api/client.go`)
+1. Write transpara.ai API client (`pkg/api/client.go`)
 2. Write Runner with tick loop (`pkg/runner/runner.go`)
 3. Write Builder role (`runBuilder` flow)
 4. Auto-commit after DONE
@@ -314,7 +314,7 @@ After the new runner is working:
 | `cmd/loop/` | Replaced by runner in `cmd/hive/` |
 | `cmd/daemon/` | Background agents are goroutines in the runner |
 | `agents/.sessions/` | No session persistence needed |
-| File-based artifacts (scout.md etc as primary) | Tasks/comments on lovyou.ai are the artifacts |
+| File-based artifacts (scout.md etc as primary) | Tasks/comments on transpara.ai are the artifacts |
 
 The `agents/*.md` prompt files STAY — they're the role definitions loaded at startup.
 
@@ -323,10 +323,10 @@ The `agents/*.md` prompt files STAY — they're the role definitions loaded at s
 ## Convergence Check
 
 **Need:** What's absent?
-- API client for lovyou.ai ← not written yet
+- API client for transpara.ai ← not written yet
 - Runner with tick loop ← not written yet
 - Auto-commit ← not written yet
-- Cost tracking ← exists in resources/tracking.go but not wired to lovyou.ai API
+- Cost tracking ← exists in resources/tracking.go but not wired to transpara.ai API
 - Build verification ← one function, trivial
 
 **Traverse:** What exists?
@@ -334,7 +334,7 @@ The `agents/*.md` prompt files STAY — they're the role definitions loaded at s
 - agent.Agent ← state machine, events, budget work
 - loop.Loop ← budget enforcement, signals, task commands work
 - hive.Runtime ← agent spawning works
-- lovyou.ai ← full JSON API exists
+- transpara.ai ← full JSON API exists
 - hive0 ← complete reference implementation
 
 **Derive:** What follows?

@@ -47,7 +47,7 @@ func (r *Runner) runArchitect(ctx context.Context) {
 		return
 	}
 
-	// Use Operate() so the Architect can create tasks directly via the lovyou.ai API.
+	// Use Operate() so the Architect can create tasks directly via the transpara.ai API.
 	// No text parsing — tasks are structured entities created via HTTP POST.
 	op, canOperate := r.cfg.Provider.(decision.IOperator)
 	if canOperate {
@@ -214,7 +214,7 @@ type architectSubtask struct {
 
 // buildArchitectOperateInstruction creates the instruction for the Architect
 // when using Operate(). The agent creates tasks directly via HTTP POST to the
-// lovyou.ai API — no text parsing needed.
+// transpara.ai API — no text parsing needed.
 // milestoneID, when non-empty, is embedded in the curl payload as "causes":[milestoneID]
 // so every created task declares its causal parent (Invariant 2: CAUSALITY).
 func buildArchitectOperateInstruction(context, spaceSlug, milestoneID, apiBase string) string {

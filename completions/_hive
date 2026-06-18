@@ -49,8 +49,8 @@ _hive() {
                                 '--catalog[Custom YAML model catalog]:file:_files -g "*.{yaml,yml}"' \
                                 '--approve-requests[Auto-approve authority requests]' \
                                 '--approve-roles[Auto-approve role proposals]' \
-                                '--space[lovyou.ai space slug]:slug:' \
-                                '--api[lovyou.ai API base URL]:url:'
+                                '--space[transpara.ai space slug]:slug:' \
+                                '--api[transpara.ai API base URL]:url:'
                             ;;
                     esac
                     ;;
@@ -64,8 +64,8 @@ _hive() {
                             ;;
                         pipe_flags)
                             _arguments \
-                                '--space[lovyou.ai space slug]:slug:' \
-                                '--api[lovyou.ai API base URL]:url:' \
+                                '--space[transpara.ai space slug]:slug:' \
+                                '--api[transpara.ai API base URL]:url:' \
                                 '--repo[Path to repo]:dir:_files -/' \
                                 '--agent-id[Agent user ID]:id:' \
                                 '--store[Store DSN]:dsn:' \
@@ -89,8 +89,8 @@ _hive() {
                             ;;
                         role_flags)
                             _arguments \
-                                '--space[lovyou.ai space slug]:slug:' \
-                                '--api[lovyou.ai API base URL]:url:' \
+                                '--space[transpara.ai space slug]:slug:' \
+                                '--api[transpara.ai API base URL]:url:' \
                                 '--repo[Path to repo]:dir:_files -/' \
                                 '--agent-id[Agent user ID]:id:' \
                                 '--budget[Daily budget in USD]:budget:' \
@@ -101,14 +101,14 @@ _hive() {
                 ingest)
                     _arguments \
                         '1:spec-file:_files -g "*.md"' \
-                        '--space[lovyou.ai space slug]:slug:' \
-                        '--api[lovyou.ai API base URL]:url:' \
+                        '--space[transpara.ai space slug]:slug:' \
+                        '--api[transpara.ai API base URL]:url:' \
                         '--priority[Task priority]:priority:(high normal low)'
                     ;;
                 council)
                     _arguments \
-                        '--space[lovyou.ai space slug]:slug:' \
-                        '--api[lovyou.ai API base URL]:url:' \
+                        '--space[transpara.ai space slug]:slug:' \
+                        '--api[transpara.ai API base URL]:url:' \
                         '--repo[Path to repo]:dir:_files -/' \
                         '--budget[Daily budget in USD]:budget:' \
                         '--topic[Focus the council on a specific question]:topic:'

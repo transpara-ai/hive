@@ -304,4 +304,3 @@ func TestPipelineTreeReflectorSkippedOnRevise(t *testing.T) {
 		t.Errorf("diagnostics written when reflector should have been skipped cleanly")
 	}
 }
-

@@ -45,9 +45,9 @@ apis:
   fly: token available
 
 paths:
-  codebase: /home/claude/lovyou
+  codebase: /home/claude/transpara
   logs: /tmp/hive.log
-  db: lovyou.db
+  db: transpara.db
   backups: ./backups
 ```
 

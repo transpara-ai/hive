@@ -28,7 +28,7 @@ Total operations fund = sum of all cuts
 
 ## Operations fund allocation
 The 10% cut funds:
-1. Infrastructure costs (Fly.io, etc.)
+1. Infrastructure costs (on-prem Platform, etc.)
 2. Self-improvement (hive development)
 3. Revenue apps (Opponyms, etc.)
 4. R&D (new roles, capabilities)

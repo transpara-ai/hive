@@ -77,8 +77,8 @@ Optional:
 - `--repo PATH` — working directory for `Operate()` calls
 - `--approve-requests` — auto-approve authority requests (file writes, git ops)
 - `--approve-roles` — auto-approve role proposals (skip Guardian)
-- `--space SLUG` — lovyou.ai space (default: `hive`)
-- `--api URL` — lovyou.ai API base
+- `--space SLUG` — transpara.ai space (default: `hive`)
+- `--api URL` — transpara.ai API base
 
 ### `hive civilization daemon` — multi-agent, long-running
 
@@ -120,7 +120,7 @@ Same flags as `pipeline run` plus:
 
 Positional: `<name>` ∈ `builder | scout | critic | monitor`.
 
-Same optional flags as `pipeline run` (this runner already shares the lovyou.ai API contract).
+Same optional flags as `pipeline run` (this runner already shares the transpara.ai API contract).
 
 ### `hive role <name> daemon` — single agent, continuous
 

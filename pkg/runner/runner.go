@@ -1,5 +1,5 @@
 // Package runner implements the hive agent tick loop.
-// One Runner per agent role. Polls lovyou.ai for tasks, dispatches to
+// One Runner per agent role. Polls transpara.ai for tasks, dispatches to
 // role-specific handlers, commits results, and tracks costs.
 package runner
 
@@ -25,8 +25,8 @@ import (
 // Config holds everything a Runner needs.
 type Config struct {
 	Role             string // e.g. "builder"
-	AgentID          string // lovyou.ai user ID for this agent (filters task assignment)
-	SpaceSlug        string // lovyou.ai space slug (e.g. "hive")
+	AgentID          string // transpara.ai user ID for this agent (filters task assignment)
+	SpaceSlug        string // transpara.ai space slug (e.g. "hive")
 	RepoPath         string // absolute path to the repo to operate on
 	HiveDir          string // path to hive repo (for state.md, role prompts)
 	APIClient        *api.Client

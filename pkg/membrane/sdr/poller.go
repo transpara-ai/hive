@@ -12,16 +12,16 @@ import (
 
 // Poller checks the ai-sdr API for drafts needing approval and lead state changes.
 type Poller struct {
-	client  membrane.ServiceClient
-	bridgeURL string // base URL of the site bridge API
+	client       membrane.ServiceClient
+	bridgeURL    string // base URL of the site bridge API
 	bridgeClient membrane.ServiceClient
 }
 
 // NewPoller creates an SDR poller that talks to the ai-sdr and bridge APIs.
 func NewPoller(sdrClient membrane.ServiceClient, bridgeURL string) *Poller {
 	return &Poller{
-		client:      sdrClient,
-		bridgeURL:   bridgeURL,
+		client:       sdrClient,
+		bridgeURL:    bridgeURL,
 		bridgeClient: membrane.NewHTTPServiceClient(bridgeURL, "bearer", nil),
 	}
 }
@@ -57,20 +57,20 @@ func (p *Poller) PollDrafts(ctx context.Context, trustScore float64, bands membr
 			Authority:   level.String(),
 			TargetHuman: "", // filled by escalation config
 			DomainData: map[string]interface{}{
-				"interaction_id": d.InteractionID,
-				"lead_id":        d.LeadID,
-				"lead_name":      d.LeadName,
-				"company":        d.Company,
-				"email":          d.Email,
-				"subject":        d.Subject,
-				"body_preview":   truncate(d.BodyText, 200),
-				"score_total":    d.ScoreTotal,
-				"score_company":  d.ScoreCompanyFit,
-				"score_pain":     d.ScorePainNeed,
+				"interaction_id":  d.InteractionID,
+				"lead_id":         d.LeadID,
+				"lead_name":       d.LeadName,
+				"company":         d.Company,
+				"email":           d.Email,
+				"subject":         d.Subject,
+				"body_preview":    truncate(d.BodyText, 200),
+				"score_total":     d.ScoreTotal,
+				"score_company":   d.ScoreCompanyFit,
+				"score_pain":      d.ScorePainNeed,
 				"score_authority": d.ScoreAuthority,
-				"score_timing":   d.ScoreTiming,
-				"stage":          d.CurrentState,
-				"internal_notes": d.InternalNotes,
+				"score_timing":    d.ScoreTiming,
+				"stage":           d.CurrentState,
+				"internal_notes":  d.InternalNotes,
 			},
 		}
 
@@ -108,14 +108,14 @@ func (p *Poller) PollLeadStates(ctx context.Context) error {
 			Authority:   "required", // handoffs always require approval
 			TargetHuman: "",
 			DomainData: map[string]interface{}{
-				"lead_id":  lead.ID,
-				"name":     lead.Name,
-				"company":  lead.Company,
-				"score":    lead.Score,
-				"stage":    lead.Stage,
-				"state":    lead.State,
-				"email":    lead.Email,
-				"title":    lead.Title,
+				"lead_id": lead.ID,
+				"name":    lead.Name,
+				"company": lead.Company,
+				"score":   lead.Score,
+				"stage":   lead.Stage,
+				"state":   lead.State,
+				"email":   lead.Email,
+				"title":   lead.Title,
 			},
 		}
 
@@ -175,33 +175,33 @@ func truncate(s string, n int) string {
 
 // Draft represents a co-pilot draft from the ai-sdr API.
 type Draft struct {
-	InteractionID  string  `json:"interaction_id"`
-	LeadID         string  `json:"lead_id"`
-	LeadName       string  `json:"lead_name"`
-	Company        string  `json:"company"`
-	Email          string  `json:"email"`
-	Subject        string  `json:"subject"`
-	BodyText       string  `json:"body_text"`
-	ScoreTotal     int     `json:"score_total"`
+	InteractionID   string `json:"interaction_id"`
+	LeadID          string `json:"lead_id"`
+	LeadName        string `json:"lead_name"`
+	Company         string `json:"company"`
+	Email           string `json:"email"`
+	Subject         string `json:"subject"`
+	BodyText        string `json:"body_text"`
+	ScoreTotal      int    `json:"score_total"`
 	ScoreCompanyFit int    `json:"score_company_fit"`
-	ScorePainNeed  int     `json:"score_pain_need"`
-	ScoreAuthority int     `json:"score_authority"`
-	ScoreTiming    int     `json:"score_timing"`
-	CurrentState   string  `json:"current_state"`
-	InternalNotes  string  `json:"internal_notes"`
-	CreatedAt      string  `json:"created_at"`
+	ScorePainNeed   int    `json:"score_pain_need"`
+	ScoreAuthority  int    `json:"score_authority"`
+	ScoreTiming     int    `json:"score_timing"`
+	CurrentState    string `json:"current_state"`
+	InternalNotes   string `json:"internal_notes"`
+	CreatedAt       string `json:"created_at"`
 }
 
 // LeadSummary matches the ai-sdr's LeadSummary response.
 type LeadSummary struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Company  string `json:"company"`
-	Title    string `json:"title"`
-	Email    string `json:"email"`
-	Score    int    `json:"score"`
-	Stage    string `json:"stage"`
-	State    string `json:"state"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Company string `json:"company"`
+	Title   string `json:"title"`
+	Email   string `json:"email"`
+	Score   int    `json:"score"`
+	Stage   string `json:"stage"`
+	State   string `json:"state"`
 }
 
 // DashboardStats matches the ai-sdr's /api/dashboard/stats response.

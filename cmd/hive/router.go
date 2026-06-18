@@ -98,8 +98,8 @@ func cmdCivilizationRun(args []string) error {
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -124,8 +124,8 @@ func cmdCivilizationDaemon(args []string) error {
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -162,10 +162,10 @@ func cmdPipeline(args []string) error {
 }
 
 func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, direct, prMode, worktrees, autoClone *bool) {
-	space = fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space = fs.String("space", "hive", "transpara.ai space slug")
+	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
-	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	storeDSN = fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repos = fs.String("repos", "", "Named repos: name=path,name=path")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
@@ -223,10 +223,10 @@ func cmdRole(args []string) error {
 }
 
 func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, direct, prMode *bool) {
-	space = fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase = fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space = fs.String("space", "hive", "transpara.ai space slug")
+	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
-	agentID = fs.String("agent-id", "", "Agent's lovyou.ai user ID (filters task assignment)")
+	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
 	direct = fs.Bool("direct", false, "Use legacy direct commit/push behavior instead of local PR proposal mode")
 	prMode = fs.Bool("pr", false, "Compatibility alias for legacy PR behavior when used with --direct")
@@ -255,8 +255,8 @@ func cmdRoleDaemon(role string, args []string) error {
 
 func cmdIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	space := fs.String("space", "hive", "lovyou.ai space slug")
-	apiBase := fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	space := fs.String("space", "hive", "transpara.ai space slug")
+	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	priority := fs.String("priority", "normal", "Task priority: high|normal|low")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -275,8 +275,8 @@ func cmdIngest(args []string) error {
 
 func newCouncilFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("council", flag.ContinueOnError)
-	fs.String("space", "hive", "lovyou.ai space slug")
-	fs.String("api", "https://lovyou.ai", "lovyou.ai API base URL")
+	fs.String("space", "hive", "transpara.ai space slug")
+	fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	fs.String("repo", "", "Path to repo (default: current dir)")
 	fs.Float64("budget", 10.0, "Daily budget in USD")
 	fs.String("topic", "", "Focus the council on a specific question")

@@ -130,13 +130,13 @@ Five repos, all compiling and tested:
 - **agent** — unified Agent with deterministic identity, FSM, causality tracking. Complete.
 - **work** — task store for hive agent coordination. Complete.
 - **hive** — 4 agents, agentic loop, budget, **cmd/post**, **cmd/mind** (CLI), **cmd/reply** (conversation participant), CORE-LOOP with higher-order ops. Has CI.
-- **site** — lovyou.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity. **Live conversation polling. Server-side auto-reply (Mind).**
+- **site** — transpara.ai on Fly.io. Production-ready. Has CI. Full agent integration stack with agent identity. **Live conversation polling. Server-side auto-reply (Mind).**
 
 **Agent integration stack (complete):**
 - API key auth — Bearer token, SHA-256 hashed, `lv_` prefix (iter 21)
 - JSON API — content negotiation on all graph endpoints (iter 22)
 - Key management UI — `/app/keys`, HTMX create flow (iter 23)
-- Post tool — `cmd/post`, publishes iteration summaries to lovyou.ai (iter 24)
+- Post tool — `cmd/post`, publishes iteration summaries to transpara.ai (iter 24)
 - Agent identity — real user records, visual badges (violet avatar + "agent" pill) (iter 25-27)
 
 **Post tool verified end-to-end:** Agent identity key created, Hive agent posts under its own identity with violet badge. Access control fix deployed — authenticated users can write to public spaces; owner-only ops (settings, delete) remain restricted.
@@ -207,7 +207,7 @@ Five repos, all compiling and tested:
 - Critic prompt updated with DUAL (root cause analysis)
 - Reflector prompt updated with FIXPOINT CHECK
 - Post 44 published with arity answer
-- Footer links updated on posts 42-44 with lovyou.ai
+- Footer links updated on posts 42-44 with transpara.ai
 
 Deploy: `fly deploy --remote-only` from site repo.
 
@@ -225,7 +225,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 - **Ship** (5): deploy fix (`--remote-only`)
 - **Discoverability** (6-8): landing page, SEO, sitemap
 - **Visitor Experience** (9): blog arc navigation
-- **SEO Canonicalization** (10): fly.dev → lovyou.ai redirect
+- **SEO Canonicalization** (10): fly.dev → transpara.ai redirect
 - **Hive Autonomy** (11-13): prompt files, run.sh, CI on hive + site
 - **Product Development** (14): public spaces
 - **Aesthetics** (15-20): warm copy, dark theme, discovery, space settings, mobile, animations
@@ -317,7 +317,7 @@ Deploy: `fly deploy --remote-only` from site repo.
 
 - **Entity: Role** (222): `KindRole` constant, `handleRoles` handler, `RolesView` template, sidebar + mobile nav, shield icon. Organize mode prerequisite. 11th entity kind.
 - **Entity: Team** (223): `KindTeam` constant, `handleTeams` handler, `TeamsView` template, sidebar + mobile nav, user-group icon. Organize mode now has Roles + Teams. 12th entity kind.
-- **Hive Runtime Phase 1** (224): `pkg/api/client.go` (lovyou.ai REST client), `pkg/runner/runner.go` (tick loop, builder flow, cost tracking, build verification, git commit/push), `cmd/hive` rewritten (dual-mode: `--role` runner / `--human` legacy). Retired cmd/loop/, cmd/daemon/, agents/.sessions/ (~1,050 lines). E2E tested: builder claimed task from board, Operated via Claude CLI (4m19s, $0.46), verified build, closed task. Agent identity filtering (`--agent-id`), one-shot mode (`--one-shot`).
+- **Hive Runtime Phase 1** (224): `pkg/api/client.go` (transpara.ai REST client), `pkg/runner/runner.go` (tick loop, builder flow, cost tracking, build verification, git commit/push), `cmd/hive` rewritten (dual-mode: `--role` runner / `--human` legacy). Retired cmd/loop/, cmd/daemon/, agents/.sessions/ (~1,050 lines). E2E tested: builder claimed task from board, Operated via Claude CLI (4m19s, $0.46), verified build, closed task. Agent identity filtering (`--agent-id`), one-shot mode (`--one-shot`).
 - **First Autonomous Code Commit** (225): Builder shipped Policy entity kind to production. 2m49s, $0.53. Fixed 3 critique issues (double prompt, recency tiebreak, changes-required guard). Human fixed one miss: KindPolicy not in intend allowlist. 13th entity kind. Deployed.
 - **Critic Role** (226): `pkg/runner/critic.go` — scans git log for `[hive:builder]` commits, reviews diffs via Reason() (haiku), creates fix tasks on REVISE. 170 lines + 9 tests. E2E: reviewed Policy commit in 1m16s ($0.16). Pipeline cost: $0.69/task (build + review).
 - **Scout Role** (227): `pkg/runner/scout.go` — reads state.md + git log + board, calls Reason() (haiku), creates concrete tasks. 175 lines + 4 tests. E2E: created task after 2 calls ($0.08). Throttle: max 3 agent tasks. **Autonomous loop closed: Scout → Builder → Critic.**
@@ -518,15 +518,15 @@ Add tests for the new format variants in `TestParseReflectorOutput`:
 
 Add a test for the early-return behavior: construct a mock `runReflector` scenario that produces empty sections and verify that `reflections.md` is NOT appended and the iteration counter in `state.md` is NOT incremented. (Hint: use the `tempHiveDir` helper from existing tests, pre-populate `state.md` with "Last updated: Iteration 100,", run, verify iteration stays at 100.)
 
-## Priority: Public Hive Activity Page — `/hive` on lovyou.ai
+## Priority: Public Hive Activity Page — `/hive` on transpara.ai
 
 **Target repo:** site
 
 **Why this now:**
-The pipeline is healthy (Reflector fixed, Tester wired). The site hasn't shipped product in several iterations — all recent Builder work was hive infrastructure. The backlog explicitly calls out a "spectator view" that the Designer, Storyteller, and Growth agents all asked for. Right now there is no way for a visitor to understand what the civilization is doing. A `/hive` page fixes that: it makes the autonomous pipeline visible to anyone who lands on lovyou.ai. This is the product's strongest differentiator made legible.
+The pipeline is healthy (Reflector fixed, Tester wired). The site hasn't shipped product in several iterations — all recent Builder work was hive infrastructure. The backlog explicitly calls out a "spectator view" that the Designer, Storyteller, and Growth agents all asked for. Right now there is no way for a visitor to understand what the civilization is doing. A `/hive` page fixes that: it makes the autonomous pipeline visible to anyone who lands on transpara.ai. This is the product's strongest differentiator made legible.
 
 **What to build:**
-A public `/hive` route on the site that shows the hive building itself in real time. The hive posts iteration summaries to the lovyou.ai board (via `cmd/post`) — this page reads those posts and renders them as a living build log.
+A public `/hive` route on the site that shows the hive building itself in real time. The hive posts iteration summaries to the transpara.ai board (via `cmd/post`) — this page reads those posts and renders them as a living build log.
 
 **Task 1 — Scout the data source**
 Read `site/handlers/` to understand how existing public pages (e.g. `/knowledge`, `/activity`, `/discover`) fetch nodes from the graph. The hive posts to a space with slug `hive` (or similar). Find the space slug by grepping `cmd/post/` for the slug it targets. Confirm the board stores post content as nodes. Identify the handler pattern.
@@ -665,7 +665,7 @@ Haiku produces 4917 tokens when asked for 100. Sonnet follows instructions in lo
 
 **Verify:** After the fix, run `go test ./pkg/runner/...` to confirm tests pass. Then trigger a Reflector run and confirm a clean iteration completes (no `empty_sections` diagnostic emitted).
 
-## Build the `/hive` Public Page on lovyou.ai
+## Build the `/hive` Public Page on transpara.ai
 
 **Target repo:** site
 

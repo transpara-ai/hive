@@ -311,7 +311,7 @@ Sources the MCP server indexes (read-only to start):
 - `/hive/loop/` — state, backlog, reflections, scout/build/critique reports (procedural + episodic)
 - `/hive/agents/` — role prompts, CONTEXT.md (declarative)
 - `/hive/docs/` — specs, design docs (declarative)
-- lovyou.ai API — tasks, goals, documents, conversations (procedural + declarative)
+- transpara.ai API — tasks, goals, documents, conversations (procedural + declarative)
 
 The tree is built from directory structure + content parsing + API queries. Agents call MCP tools to navigate. No migration needed — the server reads from all existing sources.
 
@@ -328,7 +328,7 @@ knowledge.primitives(layer?)        → primitives, optionally filtered by layer
 knowledge.grammar(name)             → grammar ops for a product layer
 ```
 
-**Why MCP first:** The existing `cmd/mcp-graph` wraps the lovyou.ai REST API. This new server wraps ALL knowledge sources — files, API, reference content, blog. Agents get one unified interface. The tree structure is computed, not stored. No schema changes. No migration. Just a server that reads what already exists and presents it as a navigable hierarchy.
+**Why MCP first:** The existing `cmd/mcp-graph` wraps the transpara.ai REST API. This new server wraps ALL knowledge sources — files, API, reference content, blog. Agents get one unified interface. The tree structure is computed, not stored. No schema changes. No migration. Just a server that reads what already exists and presents it as a navigable hierarchy.
 
 ### Phase 2: Graph-native artifacts (move writes to API)
 
@@ -442,7 +442,7 @@ No tasks = nothing triggers = zero cost. The graph is the bus. Agents are subscr
 
 **This is what the eventgraph was designed for.** The `event` package has event types, the `store` has append/subscribe, the bus exists. The pipeline bypasses its own architecture because the runner was built as a quick loop, not as an event consumer.
 
-**Implementation:** Each agent registers event subscriptions (like `AgentDef.WatchPatterns`). The daemon becomes an event loop: poll the graph for new events since last cursor, dispatch to matching agents. Or use webhooks from lovyou.ai — the site posts events, the hive reacts.
+**Implementation:** Each agent registers event subscriptions (like `AgentDef.WatchPatterns`). The daemon becomes an event loop: poll the graph for new events since last cursor, dispatch to matching agents. Or use webhooks from transpara.ai — the site posts events, the hive reacts.
 
 **Dependency:** Requires the knowledge graph migration (Phase 2) — once PM directives are goal nodes and Scout reports are document nodes on the graph, their creation IS the event that triggers the next agent. The .md files can't emit events. The graph can.
 

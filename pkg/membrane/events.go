@@ -34,10 +34,10 @@ func (membraneContent) Accept(event.EventContentVisitor) {}
 type ActionCreatedContent struct {
 	membraneContent
 	AgentName     string      `json:"AgentName"`
-	ActionType    string      `json:"ActionType"`   // "approval", "handoff", "escalation"
+	ActionType    string      `json:"ActionType"` // "approval", "handoff", "escalation"
 	Summary       string      `json:"Summary"`
-	Authority     string      `json:"Authority"`    // "required", "recommended", "notification"
-	TargetHuman   string      `json:"TargetHuman"`  // actor ID
+	Authority     string      `json:"Authority"`     // "required", "recommended", "notification"
+	TargetHuman   string      `json:"TargetHuman"`   // actor ID
 	DomainContext interface{} `json:"DomainContext"` // instance-specific payload
 }
 

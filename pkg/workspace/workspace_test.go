@@ -132,7 +132,7 @@ func initGitRepo(t *testing.T, dir string) {
 
 // TestCommitUsesAgentIdentity locks BOTH the author and committer of a product
 // commit to the transpara agent identity and guards against any reintroduction
-// of a lovyou identity — even when the product repo's local git config still
+// of a transpara identity — even when the product repo's local git config still
 // carries the old identity (a repo created before the migration). git records
 // the committer from repo config, so setting --author alone is not sufficient.
 func TestCommitUsesAgentIdentity(t *testing.T) {
@@ -140,7 +140,7 @@ func TestCommitUsesAgentIdentity(t *testing.T) {
 	initGitRepo(t, dir)
 	p := &Product{Name: "test", Dir: dir}
 
-	// Simulate a pre-migration product repo whose local config is still lovyou.
+	// Simulate a pre-migration product repo whose local config is still transpara.
 	setGit := func(k, v string) {
 		t.Helper()
 		c := exec.Command("git", "config", k, v)
@@ -150,7 +150,7 @@ func TestCommitUsesAgentIdentity(t *testing.T) {
 		}
 	}
 	setGit("user.name", "hive")
-	setGit("user.email", "hive@lovyou.ai")
+	setGit("user.email", "hive@transpara.ai")
 
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0644); err != nil {
 		t.Fatalf("write: %v", err)

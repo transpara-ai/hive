@@ -2,10 +2,10 @@
 
 ## One Service
 
-lovyou.ai is one Go binary. Not microservices. One event graph, one actor store, one database.
+transpara.ai is one Go binary. Not microservices. One event graph, one actor store, one database.
 
 ```
-lovyou.ai
+transpara.ai
 ├── Hive runtime (agent registration, spawning, event emission)
 ├── Agentic loop (observe → reason/operate → check stopping → repeat)
 ├── Agents (Strategist, Planner, Implementer, Guardian)
@@ -50,7 +50,7 @@ The agent society built on EventGraph + Agent.
 - **Resources** — budget enforcement (iterations, duration, tokens, cost)
 - **Workspace** — git management (clone, branch, commit, push, PR)
 
-### lovyou.ai (surface)
+### transpara.ai (surface)
 
 Separate repo (transpara-ai/site). Go + templ + HTMX + Tailwind.
 
@@ -58,7 +58,7 @@ Separate repo (transpara-ai/site). Go + templ + HTMX + Tailwind.
 - **Reference** — 201 primitives, 14 layers, grammars (cognitive, graph, layer), agent primitives
 - **Auth** — Google OAuth, session cookies
 - **Products** — unified graph product (spaces, nodes, grammar operations)
-- **Deployed** on Fly.io with Neon Postgres
+- **Deployed** on-prem (behind the firewall) with Postgres
 
 ## Agents
 
@@ -83,7 +83,7 @@ Supports `--mcp-config` for giving agents MCP tool access (not yet wired).
 
 ```
 Local dev:     Docker Postgres (docker-compose)
-Production:    Neon (serverless Postgres)
+Production:    on-prem Postgres (Supabase if cloud-hosted)
 Connection:    --store flag or DATABASE_URL env var
 In-memory:     default when no DSN provided
 ```

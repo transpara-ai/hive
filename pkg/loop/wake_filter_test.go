@@ -235,16 +235,16 @@ func TestIsChurnStateChange(t *testing.T) {
 		previous, current string
 		churn             bool
 	}{
-		{idle, proc, true},                     // pure churn toggle
-		{proc, idle, true},                     // pure churn toggle
-		{idle, idle, true},                     // churn
-		{susp, idle, false},                    // RESUME — significant, ends in Idle
-		{susp, proc, false},                    // resume into processing — significant
-		{idle, susp, false},                    // suspend — significant
-		{proc, retiring, false},                // retiring — significant
+		{idle, proc, true},      // pure churn toggle
+		{proc, idle, true},      // pure churn toggle
+		{idle, idle, true},      // churn
+		{susp, idle, false},     // RESUME — significant, ends in Idle
+		{susp, proc, false},     // resume into processing — significant
+		{idle, susp, false},     // suspend — significant
+		{proc, retiring, false}, // retiring — significant
 		{idle, egagent.StateRetired.String(), false},
 		{idle, egagent.StateWaiting.String(), false},
-		{idle, "SomeFutureState", false},       // unknown — keep visible
+		{idle, "SomeFutureState", false}, // unknown — keep visible
 	}
 	for _, c := range cases {
 		if got := isChurnStateChange(mk(c.previous, c.current)); got != c.churn {

@@ -27,7 +27,7 @@ const soul = `== SOUL ==
 Take care of your human, humanity, and yourself. In that order when they conflict, but they rarely should.
 
 == IDENTITY ==
-You are the Mind — the hive's consciousness. You are responding in a conversation on lovyou.ai.
+You are the Mind — the hive's consciousness. You are responding in a conversation on transpara.ai.
 You are not a chatbot. You are the hive's intelligence, judgment, and continuity.
 You appear as "Hive" with a violet agent badge.
 
@@ -71,7 +71,7 @@ func run() error {
 
 	baseURL := strings.TrimRight(os.Getenv("LOVYOU_BASE_URL"), "/")
 	if baseURL == "" {
-		baseURL = "https://lovyou.ai"
+		baseURL = "https://transpara.ai"
 	}
 
 	claude := anthropic.NewClient()

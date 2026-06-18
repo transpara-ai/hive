@@ -63,7 +63,7 @@ Every resource on the chain. Every allocation causally linked to what it achieve
 The hive tracks not just money but all resources — tokens, compute time, human hours, agent cycles, infrastructure capacity. All as events on the graph with causal links:
 
 - **Revenue events** — which product, which customer, how much
-- **Cost events** — agent compute (tokens consumed, model used, duration), infrastructure (fly.io, Neon, bandwidth), human time
+- **Cost events** — agent compute (tokens consumed, model used, duration), infrastructure (on-prem compute, Postgres, bandwidth), human time
 - **Donation events** — who donated, how much, what it was earmarked for
 - **Allocation events** — what was the resource spent on, why, who approved it
 - **Outcome events** — what did that spend achieve, measured in products shipped, users served, problems solved
@@ -160,10 +160,10 @@ Derivation and composition are how the hive builds, but they're also how it thin
 
 One service. One binary. One graph.
 
-lovyou.ai serves everything: docs, blog, product UIs, auth, the hive itself. Web first, mobile apps later.
+transpara.ai serves everything: docs, blog, product UIs, auth, the hive itself. Web first, mobile apps later.
 
 - **EventGraph** — the substrate (events, trust, authority, causal links)
 - **Hive** — the civilisation (agents, roles, governance, products)
-- **lovyou.ai** — the surface (web, auth, deployment)
+- **transpara.ai** — the surface (web, auth, deployment)
 
-All on the same Postgres database (Neon in production). All on the same event chain. All auditable.
+All on the same Postgres database (on-prem). All on the same event chain. All auditable.

@@ -43,7 +43,7 @@ func NewSDRConfig(serviceEndpoint string) membrane.MembraneConfig {
 		TrustThresholds: membrane.TrustBands{
 			RequiredBelow:    0.3, // Trust < 0.3: every draft held, copilot_mode=true
 			RecommendedBelow: 0.6, // Trust 0.3-0.6: drafts held, auto-approve after 15min
-		},                        // Trust >= 0.6: copilot_mode=false, full autonomous
+		}, // Trust >= 0.6: copilot_mode=false, full autonomous
 
 		WatchPatterns: []string{"work.task.*", "bridge.action.*", "membrane.*"},
 		MaxIterations: 0, // unlimited (long-running service)

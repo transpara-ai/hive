@@ -1,4 +1,4 @@
-// Command mcp-graph is an MCP server that exposes lovyou.ai graph operations
+// Command mcp-graph is an MCP server that exposes transpara.ai graph operations
 // as tools callable by Claude or any MCP-compatible client.
 //
 // The server speaks the MCP protocol over stdio (newline-delimited JSON-RPC 2.0).
@@ -14,8 +14,8 @@
 //
 // Configuration via environment variables:
 //
-//	LOVYOU_API_KEY   — required. Bearer token for lovyou.ai API.
-//	LOVYOU_BASE_URL  — optional. Defaults to https://lovyou.ai.
+//	LOVYOU_API_KEY   — required. Bearer token for transpara.ai API.
+//	LOVYOU_BASE_URL  — optional. Defaults to https://transpara.ai.
 //	LOVYOU_SPACE     — optional. Default space slug. Defaults to "hive".
 //
 // Usage:
@@ -41,10 +41,10 @@ import (
 // ────────────────────────────────────────────────────────────────────────────
 
 type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
+	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"` // nil for notifications
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	Method  string           `json:"method"`
+	Params  json.RawMessage  `json:"params,omitempty"`
 }
 
 type rpcResponse struct {
@@ -64,15 +64,15 @@ type rpcError struct {
 // ────────────────────────────────────────────────────────────────────────────
 
 type toolDef struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
 	InputSchema inputSchema `json:"inputSchema"`
 }
 
 type inputSchema struct {
-	Type       string                 `json:"type"`
-	Properties map[string]schemaProp  `json:"properties"`
-	Required   []string               `json:"required,omitempty"`
+	Type       string                `json:"type"`
+	Properties map[string]schemaProp `json:"properties"`
+	Required   []string              `json:"required,omitempty"`
 }
 
 type schemaProp struct {
@@ -113,7 +113,7 @@ func newServer() *server {
 	apiKey := os.Getenv("LOVYOU_API_KEY")
 	baseURL := strings.TrimRight(os.Getenv("LOVYOU_BASE_URL"), "/")
 	if baseURL == "" {
-		baseURL = "https://lovyou.ai"
+		baseURL = "https://transpara.ai"
 	}
 	defSpace := os.Getenv("LOVYOU_SPACE")
 	if defSpace == "" {
@@ -141,7 +141,7 @@ func (s *server) spaceFor(args map[string]any) string {
 var tools = []toolDef{
 	{
 		Name:        "graph.intend",
-		Description: "Create a task or node in a space on lovyou.ai. Returns the created node ID.",
+		Description: "Create a task or node in a space on transpara.ai. Returns the created node ID.",
 		InputSchema: inputSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{
