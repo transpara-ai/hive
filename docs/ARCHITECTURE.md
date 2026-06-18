@@ -58,7 +58,7 @@ Separate repo (transpara-ai/site). Go + templ + HTMX + Tailwind.
 - **Reference** — 201 primitives, 14 layers, grammars (cognitive, graph, layer), agent primitives
 - **Auth** — Google OAuth, session cookies
 - **Products** — unified graph product (spaces, nodes, grammar operations)
-- **Deployed** on Fly.io with Neon Postgres
+- **Deployed** on-prem (behind the firewall) with Postgres
 
 ## Agents
 
@@ -83,7 +83,7 @@ Supports `--mcp-config` for giving agents MCP tool access (not yet wired).
 
 ```
 Local dev:     Docker Postgres (docker-compose)
-Production:    Neon (serverless Postgres)
+Production:    on-prem Postgres (Supabase if cloud-hosted)
 Connection:    --store flag or DATABASE_URL env var
 In-memory:     default when no DSN provided
 ```
