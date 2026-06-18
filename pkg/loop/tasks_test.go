@@ -37,7 +37,7 @@ func TestIsMetaTaskBody(t *testing.T) {
 		{"Build authentication module", "implement OAuth2 flow", false},
 		{"Fix bug in task parser", "the parser drops empty lines", false},
 		{"Add tests for loop", "cover edge cases in signal parsing", false},
-		{"Deploy to production", "run fly deploy after build", false},
+		{"Deploy to production", "run deploy after build", false},
 		{"", "", false},
 	}
 

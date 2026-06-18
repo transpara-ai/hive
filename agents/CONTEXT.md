@@ -8,7 +8,7 @@ lovyou.ai is a platform for collective existence. Not a task tracker. Not a soci
 
 - **EventGraph** — the foundation. Signed, causal, hash-chained events. Trust scores. Authority levels.
 - **One graph, one grammar.** Every entity is a Node. Every operation is an Op. The grammar (intend, assign, claim, complete, endorse, respond, etc.) works on any node kind.
-- **Go + templ + HTMX + Tailwind.** Server-rendered. Fly.io. Postgres (Neon).
+- **Go + templ + HTMX + Tailwind.** Server-rendered. On-prem (private). Postgres (Neon).
 - **Four repos:** eventgraph (foundation), agent (abstraction), hive (this repo — agents + loop), site (lovyou.ai web app).
 
 ## The Product
@@ -96,5 +96,5 @@ export PATH="/c/Users/matt_/go-sdk/go/bin:/c/Users/matt_/sdk/go/bin:/c/Users/mat
 ```
 - templ: `/c/Users/matt_/go/bin/templ`
 - go build: `go.exe build -buildvcs=false`
-- Deploy: `cd site && ./ship.sh "iter N: description"`
+- Deploy: `cd site && ./deploy.sh`
 - API key: set LOVYOU_API_KEY for agent identity

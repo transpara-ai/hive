@@ -246,7 +246,7 @@ Default constraints for the transpara-ai deployment:
 - **Git remote:** `GIT_REMOTE` in config.env (default: `transpara-ai`). Never push to `origin` (upstream).
 - **Protected branches:** `PROTECTED_BRANCHES` in config.env (default: `main master`). Never commit directly.
 - **Posting:** `POST_ENABLED` in config.env (default: `false`). No external API calls unless enabled.
-- **Deployment:** `DEPLOY_ENABLED` in config.env (default: `false`). No fly deploy or ship.sh unless enabled.
+- **Deployment:** `DEPLOY_ENABLED` in config.env (default: `false`). No deploy (on-prem `DEPLOY_CMD`) unless enabled.
 - **PRs:** Use `gh pr create --repo ${GIT_ORG}/${REPO_NAME}` with values from config.env.
 - **Repo paths:** `${REPOS_BASE}/${REPO_*}` with values from config.env.
 

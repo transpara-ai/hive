@@ -486,7 +486,7 @@ func (sv *server) dashboard(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, html)
 }
 
-// health handles GET /health — used by Fly.io and load balancers to check liveness.
+// health handles GET /health — used by load balancers / health probes to check liveness.
 func (sv *server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

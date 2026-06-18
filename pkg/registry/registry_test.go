@@ -15,7 +15,7 @@ func TestLoadAndResolve(t *testing.T) {
 	os.WriteFile(filepath.Join(repoDir, "CLAUDE.md"), []byte("# My Repo\nArchitecture docs."), 0644)
 
 	// Write repos.json with a relative path.
-	config := `{"repos": [{"name": "myrepo", "url": "https://github.com/test/myrepo", "local_path": "myrepo", "language": "go", "build_cmd": "go build ./...", "test_cmd": "go test ./...", "deploy_target": "fly.io"}]}`
+	config := `{"repos": [{"name": "myrepo", "url": "https://github.com/test/myrepo", "local_path": "myrepo", "language": "go", "build_cmd": "go build ./...", "test_cmd": "go test ./...", "deploy_target": "npm"}]}`
 	configPath := filepath.Join(dir, "repos.json")
 	os.WriteFile(configPath, []byte(config), 0644)
 
@@ -119,13 +119,13 @@ func TestFromMap(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	reg := &Registry{Repos: []Repo{
-		{Name: "site", AbsPath: t.TempDir(), Language: "go", URL: "https://github.com/test/site", BuildCmd: "go build ./...", TestCmd: "go test ./...", DeployTarget: "fly.io"},
+		{Name: "site", AbsPath: t.TempDir(), Language: "go", URL: "https://github.com/test/site", BuildCmd: "go build ./...", TestCmd: "go test ./...", DeployTarget: "npm"},
 	}}
 	s := reg.Summary()
 	if s == "" {
 		t.Fatal("Summary empty")
 	}
-	if !contains(s, "site") || !contains(s, "fly.io") || !contains(s, "go build") {
+	if !contains(s, "site") || !contains(s, "npm") || !contains(s, "go build") {
 		t.Errorf("Summary missing expected content: %s", s)
 	}
 }

@@ -21,7 +21,7 @@ type Repo struct {
 	Language     string `json:"language"`      // "go", "typescript", etc.
 	BuildCmd     string `json:"build_cmd"`     // e.g. "go build -buildvcs=false ./..."
 	TestCmd      string `json:"test_cmd"`      // e.g. "go test ./..."
-	DeployTarget string `json:"deploy_target"` // "fly.io", "npm", "" (none)
+	DeployTarget string `json:"deploy_target"` // "npm", "" (none)
 
 	// Resolved at load time, not persisted.
 	AbsPath  string `json:"-"` // absolute path after Resolve()
