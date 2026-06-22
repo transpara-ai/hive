@@ -1,4 +1,4 @@
-.PHONY: build test vet verify
+.PHONY: build test vet verify verify-canonical-paths
 
 build:
 	go build ./...
@@ -9,4 +9,7 @@ test:
 vet:
 	go vet ./...
 
-verify: build test vet
+verify-canonical-paths:
+	! grep -R "/Transpara/transpara-ai/data/repos" loop pkg docs/OPERATOR-UI-CONTRACT.md
+
+verify: verify-canonical-paths build test vet

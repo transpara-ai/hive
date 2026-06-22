@@ -466,7 +466,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 
 	started := appendEvent(EventTypeRunStarted, RunStartedContent{
 		Idea:     "prove runtime evidence",
-		RepoPath: "/Transpara/transpara-ai/data/repos/hive",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
 	})
 	spawned := appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    "builder",
@@ -521,7 +521,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	if run.StartedEventID != started.ID().Value() || run.CompletedEventID != completed.ID().Value() {
 		t.Fatalf("run evidence = %+v", run)
 	}
-	if run.SeedIdea != "prove runtime evidence" || run.RepoPath != "/Transpara/transpara-ai/data/repos/hive" {
+	if run.SeedIdea != "prove runtime evidence" || run.RepoPath != "/Transpara/transpara-ai/repos/hive" {
 		t.Fatalf("run start metadata = %+v", run)
 	}
 	if run.CompletedAt == nil || run.AgentCount == nil || *run.AgentCount != 1 || run.DurationMs == nil || *run.DurationMs != 1234 || run.TotalCost == nil || *run.TotalCost != 0.25 {

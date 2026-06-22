@@ -111,7 +111,7 @@ POST /api/hive/approvals/{id}/resolve
       "conversation_id": "conv_hive_123",
       "started_at": "2026-06-17T12:00:00Z",
       "seed_idea": "Build onboarding flow",
-      "repo_path": "/Transpara/transpara-ai/data/repos/hive",
+      "repo_path": "/Transpara/transpara-ai/repos/hive",
       "completed_event_id": "evt_completed",
       "completed_at": "2026-06-17T12:10:00Z",
       "agent_count": 4,
