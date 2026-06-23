@@ -129,6 +129,7 @@ type OperatorRuntimeAgentEvents struct {
 	Stopped          int                            `json:"stopped"`
 	ObservedActive   int                            `json:"observed_active"`
 	ActiveAgents     []OperatorRuntimeAgentEvidence `json:"active_agents,omitempty"`
+	ObservedAgents   []OperatorRuntimeAgentEvidence `json:"observed_agents,omitempty"`
 	LastAgentEventID string                         `json:"last_agent_event_id,omitempty"`
 	LastAgentEventAt *time.Time                     `json:"last_agent_event_at,omitempty"`
 }
@@ -671,6 +672,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 
 	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
 	activeAgentKeysByNameRole := map[string][]string{}
+	observedAgents := map[string]OperatorRuntimeAgentEvidence{}
 	runClosed := false
 	for _, pe := range runEvents {
 		eventID := pe.event.ID().Value()
@@ -689,6 +691,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				SpawnedAt:      timestamp,
 			}
 			agentKey := runtimeAgentKey(content.ActorID, content.Name, content.Role, eventID)
+			observedAgents[agentKey] = agent
 			if _, exists := activeAgents[agentKey]; !exists {
 				nameRoleKey := runtimeAgentNameRoleKey(content.Name, content.Role)
 				activeAgentKeysByNameRole[nameRoleKey] = append(activeAgentKeysByNameRole[nameRoleKey], agentKey)
@@ -729,6 +732,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	}
 
 	evidence.AgentEvents.ActiveAgents = sortedRuntimeActiveAgents(activeAgents)
+	evidence.AgentEvents.ObservedAgents = sortedRuntimeActiveAgents(observedAgents)
 	evidence.AgentEvents.ObservedActive = len(evidence.AgentEvents.ActiveAgents)
 	return evidence
 }
