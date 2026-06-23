@@ -531,6 +531,68 @@ func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV02
+	delete(doc, "agent_execution_plan")
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	foundReadyStage := false
+	for _, rawStage := range stages {
+		stage, ok := rawStage.(map[string]any)
+		if !ok || stage["id"] != "surface_ready_for_Human_result_PR" {
+			continue
+		}
+		foundReadyStage = true
+		evidence, ok := stage["required_evidence"].([]any)
+		if !ok {
+			t.Fatalf("ready stage evidence = %#v, want array", stage["required_evidence"])
+		}
+		for i, item := range evidence {
+			if item == "ready_pr_url" {
+				evidence[i] = "draft_pr_url"
+			}
+		}
+	}
+	if !foundReadyStage {
+		t.Fatalf("development_lifecycle missing ready stage: %#v", stages)
+	}
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV02 {
+		t.Fatalf("metadata = kind %q version %q, want legacy issue-scan v0.2", kind, version)
+	}
+	if len(lifecycle) != 7 || len(agentPlan) != 0 {
+		t.Fatalf("legacy lifecycle = %+v plan = %+v, want 7 stages and no agent plan", lifecycle, agentPlan)
+	}
+	readyStage := queuedRunLifecycleStageByID(lifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil || !containsModelProjectionString(readyStage.RequiredEvidence, "draft_pr_url") || containsModelProjectionString(readyStage.RequiredEvidence, "ready_pr_url") {
+		t.Fatalf("legacy ready stage = %+v, want draft_pr_url evidence", readyStage)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefRejectsMutatedLifecycle(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",

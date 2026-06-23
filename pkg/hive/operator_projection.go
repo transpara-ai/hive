@@ -769,19 +769,15 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if brief.Kind != issueScanBriefKind {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
 	}
-	if brief.LifecycleVersion != issueScanLifecycleVersion {
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
 	}
 	expected := issueScanDevelopmentLifecycle()
-	expectedPlan, err := issueScanAgentExecutionPlan(expected)
-	if err != nil {
-		return "", "", nil, nil, err
+	if brief.LifecycleVersion == issueScanLifecycleVersionV02 {
+		expected = issueScanDevelopmentLifecycleV02()
 	}
 	if len(brief.DevelopmentLifecycle) != len(expected) {
 		return "", "", nil, nil, fmt.Errorf("lifecycle stage count %d does not match expected %d", len(brief.DevelopmentLifecycle), len(expected))
-	}
-	if len(brief.AgentExecutionPlan) != len(expectedPlan) {
-		return "", "", nil, nil, fmt.Errorf("agent execution plan step count %d does not match expected %d", len(brief.AgentExecutionPlan), len(expectedPlan))
 	}
 	roles := StarterRoleDefinitions()
 	lifecycle := make([]OperatorQueuedRunLifecycleStage, 0, len(brief.DevelopmentLifecycle))
@@ -798,6 +794,19 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 			CompletionGate:    stage.CompletionGate,
 			EvidenceStatus:    "expected_not_observed",
 		})
+	}
+	if brief.LifecycleVersion == issueScanLifecycleVersionV02 {
+		if len(brief.AgentExecutionPlan) != 0 {
+			return "", "", nil, nil, fmt.Errorf("agent execution plan is not supported by lifecycle version %q", brief.LifecycleVersion)
+		}
+		return brief.Kind, brief.LifecycleVersion, lifecycle, nil, nil
+	}
+	expectedPlan, err := issueScanAgentExecutionPlan(expected)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if len(brief.AgentExecutionPlan) != len(expectedPlan) {
+		return "", "", nil, nil, fmt.Errorf("agent execution plan step count %d does not match expected %d", len(brief.AgentExecutionPlan), len(expectedPlan))
 	}
 	agentPlan := make([]OperatorQueuedRunAgentPlanStep, 0, len(brief.AgentExecutionPlan))
 	for i, step := range brief.AgentExecutionPlan {

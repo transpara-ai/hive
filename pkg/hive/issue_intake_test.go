@@ -125,6 +125,9 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if !containsIssueScanValue(readyStage.RequiredRoles, "reviewer") {
 		t.Fatalf("ready stage roles = %+v, want reviewer for ready-state review evidence", readyStage.RequiredRoles)
 	}
+	if !containsIssueScanValue(readyStage.RequiredEvidence, "ready_pr_url") || containsIssueScanValue(readyStage.RequiredEvidence, "draft_pr_url") {
+		t.Fatalf("ready stage evidence = %+v, want ready_pr_url and no draft_pr_url", readyStage.RequiredEvidence)
+	}
 	implementStage := issueScanStageByID(brief.DevelopmentLifecycle, "implement_on_branch")
 	if implementStage == nil {
 		t.Fatalf("development lifecycle missing implementation stage: %+v", brief.DevelopmentLifecycle)
@@ -197,6 +200,35 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != request.ID() {
 		t.Fatalf("task causes = %+v, want factory.run.requested %s", causes, request.ID())
+	}
+}
+
+func TestIssueScanAgentExecutionPlanCoversEveryRequiredStageRole(t *testing.T) {
+	lifecycle := issueScanDevelopmentLifecycle()
+	plan, err := issueScanAgentExecutionPlan(lifecycle)
+	if err != nil {
+		t.Fatalf("issueScanAgentExecutionPlan: %v", err)
+	}
+
+	byStage := map[string]map[string]bool{}
+	for _, step := range plan {
+		if byStage[step.StageID] == nil {
+			byStage[step.StageID] = map[string]bool{}
+		}
+		if byStage[step.StageID][step.Role] {
+			t.Fatalf("duplicate step for stage %q role %q", step.StageID, step.Role)
+		}
+		byStage[step.StageID][step.Role] = true
+	}
+	for _, stage := range lifecycle {
+		if len(byStage[stage.ID]) != len(stage.RequiredRoles) {
+			t.Fatalf("stage %q plan roles = %+v, want %+v", stage.ID, byStage[stage.ID], stage.RequiredRoles)
+		}
+		for _, role := range stage.RequiredRoles {
+			if !byStage[stage.ID][role] {
+				t.Fatalf("stage %q missing role %q in plan %+v", stage.ID, role, plan)
+			}
+		}
 	}
 }
 

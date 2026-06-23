@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	IssueScanDefaultPolicyRef = "civilization/repo-issue-scan-to-factory-order-v0.1"
-	issueScanBriefKind        = "transpara_ai_github_issue_scan"
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.3"
-	issueScanSourceType       = "github.issue"
+	IssueScanDefaultPolicyRef    = "civilization/repo-issue-scan-to-factory-order-v0.1"
+	issueScanBriefKind           = "transpara_ai_github_issue_scan"
+	issueScanLifecycleVersionV02 = "civilization_issue_to_human_ready_pr_v0.2"
+	issueScanLifecycleVersion    = "civilization_issue_to_human_ready_pr_v0.3"
+	issueScanSourceType          = "github.issue"
 )
 
 type issueScanBriefIssuePayload struct {
@@ -359,7 +360,35 @@ func issueScanAgentExecutionPlan(lifecycle []issueScanLifecycleStage) ([]issueSc
 			return nil, err
 		}
 	}
+	if err := validateIssueScanAgentPlanCoverage(lifecycle, steps); err != nil {
+		return nil, err
+	}
 	return steps, nil
+}
+
+func validateIssueScanAgentPlanCoverage(lifecycle []issueScanLifecycleStage, steps []issueScanAgentPlanStep) error {
+	byStage := map[string]map[string]struct{}{}
+	for _, step := range steps {
+		if byStage[step.StageID] == nil {
+			byStage[step.StageID] = map[string]struct{}{}
+		}
+		if _, exists := byStage[step.StageID][step.Role]; exists {
+			return fmt.Errorf("agent execution plan has duplicate role %q for stage %q", step.Role, step.StageID)
+		}
+		byStage[step.StageID][step.Role] = struct{}{}
+	}
+	for _, stage := range lifecycle {
+		roles := byStage[stage.ID]
+		if len(roles) != len(stage.RequiredRoles) {
+			return fmt.Errorf("agent execution plan stage %q has %d roles, want %d", stage.ID, len(roles), len(stage.RequiredRoles))
+		}
+		for _, role := range stage.RequiredRoles {
+			if _, ok := roles[role]; !ok {
+				return fmt.Errorf("agent execution plan stage %q missing role %q", stage.ID, role)
+			}
+		}
+	}
+	return nil
 }
 
 func issueScanLifecycleStageByID(stages []issueScanLifecycleStage, id string) (issueScanLifecycleStage, bool) {
@@ -460,7 +489,7 @@ func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {
 			Name:          "Surface ready-for-Human result PR",
 			RequiredRoles: []string{"strategist", "reviewer", "guardian"},
 			RequiredEvidence: []string{
-				"draft_pr_url",
+				"ready_pr_url",
 				"ready_state_review",
 				"human_ready_summary",
 			},
@@ -468,6 +497,27 @@ func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {
 			CompletionGate:    "ready_pr_has_exact_head_evidence_and_waits_for_human",
 		},
 	}
+}
+
+func issueScanDevelopmentLifecycleV02() []issueScanLifecycleStage {
+	stages := issueScanDevelopmentLifecycle()
+	readyStage, ok := issueScanLifecycleStageByID(stages, "surface_ready_for_Human_result_PR")
+	if !ok {
+		return stages
+	}
+	evidence := append([]string(nil), readyStage.RequiredEvidence...)
+	for i, item := range evidence {
+		if item == "ready_pr_url" {
+			evidence[i] = "draft_pr_url"
+		}
+	}
+	for i := range stages {
+		if stages[i].ID == readyStage.ID {
+			stages[i].RequiredEvidence = evidence
+			break
+		}
+	}
+	return stages
 }
 
 func issueScanBriefIssue(issue GitHubIssueCandidate) issueScanBriefIssuePayload {
