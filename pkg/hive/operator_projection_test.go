@@ -362,6 +362,36 @@ func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderVerificationSourceL
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderLifecycleSourceLimit(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Bounded lifecycle provenance",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_lifecycle_limit_001",
+		RiskClass:      "medium",
+	})
+	appendEvent(work.EventTypeTaskLifecycleTransitioned, work.TaskLifecycleTransitionContent{
+		TaskID:    taskEvent.ID(),
+		FromState: work.StatusCreated,
+		ToState:   work.StatusReady,
+		Reason:    "first transition",
+		ChangedBy: actorID,
+	})
+	appendEvent(work.EventTypeTaskLifecycleTransitioned, work.TaskLifecycleTransitionContent{
+		TaskID:    taskEvent.ID(),
+		FromState: work.StatusReady,
+		ToState:   work.StatusRunning,
+		Reason:    "second transition",
+		ChangedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 1)
+
+	if !civilizationProjectionHasResidualRisk(projection, "factory_order_lifecycle_source_limit_01") {
+		t.Fatalf("residual risks = %+v, want factory_order_lifecycle_source_limit_01", projection.ResidualRiskSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionMergesFactoryOrderTaskRefs(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 	firstTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
@@ -402,6 +432,34 @@ func TestBuildCivilizationAssemblyProjectionMergesFactoryOrderTaskRefs(t *testin
 	for _, want := range []string{"ac_merge_001", "ac_merge_002"} {
 		if !containsString(order.AcceptanceCriterionRefs, want) {
 			t.Fatalf("acceptance refs = %+v, missing %s", order.AcceptanceCriterionRefs, want)
+		}
+	}
+}
+
+func TestCivilizationAssemblyFactoryOrderStatusRankCoversWorkStatuses(t *testing.T) {
+	tests := map[work.TaskStatus]int{
+		work.StatusCreated:             10,
+		work.StatusReady:               40,
+		work.StatusRunning:             80,
+		work.StatusBlocked:             100,
+		work.StatusFailed:              100,
+		work.StatusRepairRequired:      100,
+		work.StatusRepairRunning:       90,
+		work.StatusRepaired:            70,
+		work.StatusVerificationRunning: 80,
+		work.StatusVerified:            60,
+		work.StatusCertified:           60,
+		work.StatusRejected:            100,
+		work.StatusSuperseded:          20,
+		work.StatusPolicyBlocked:       100,
+	}
+	for status, wantRank := range tests {
+		statusString := "work_task_" + string(status)
+		if status == work.StatusCreated {
+			statusString = "work_task_seeded"
+		}
+		if got := civilizationAssemblyFactoryOrderStatusRank(statusString); got != wantRank {
+			t.Fatalf("rank(%s) = %d, want %d", statusString, got, wantRank)
 		}
 	}
 }

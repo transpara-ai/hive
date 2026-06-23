@@ -464,15 +464,17 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	byID := map[string]*CivilizationAssemblyFactoryOrder{}
 	taskStore := work.NewTaskStore(s, nil, nil)
 	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
-	lifecycleByTask, lifecycleTruncated, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
+	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
 	}
+	p.Errors = append(p.Errors, lifecycleErrors...)
 	workEvidence.LifecycleSourceTruncated = lifecycleTruncated
-	verificationByTask, verificationTruncated, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
+	verificationByTask, verificationTruncated, verificationErrors, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task verification evidence refs: %v", err))
 	}
+	p.Errors = append(p.Errors, verificationErrors...)
 	workEvidence.VerificationSourceTruncated = verificationTruncated
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskCreatedContent)
@@ -546,16 +548,18 @@ func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types
 	return taskProjection, legacyProjection, nil
 }
 
-func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, error) {
+func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, []string, error) {
 	page, err := s.ByType(work.EventTypeTaskLifecycleTransitioned, limit, types.None[types.Cursor]())
 	if err != nil {
-		return nil, false, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskLifecycleTransitioned.Value(), err)
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskLifecycleTransitioned.Value(), err)
 	}
 	byTask := map[types.EventID]civilizationAssemblyTaskLifecycleEvidence{}
+	projectionErrors := []string{}
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskLifecycleTransitionContent)
 		if !ok {
-			return nil, false, fmt.Errorf("%s", contentTypeError(ev, "work.TaskLifecycleTransitionContent"))
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskLifecycleTransitionContent"))
+			continue
 		}
 		evidence := byTask[content.TaskID]
 		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
@@ -565,19 +569,21 @@ func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (ma
 		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
 		byTask[taskID] = evidence
 	}
-	return byTask, page.HasMore(), nil
+	return byTask, page.HasMore(), projectionErrors, nil
 }
 
-func civilizationAssemblyWorkTaskVerificationEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskVerificationEvidence, bool, error) {
+func civilizationAssemblyWorkTaskVerificationEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskVerificationEvidence, bool, []string, error) {
 	page, err := s.ByType(work.EventTypeTaskVerificationAttached, limit, types.None[types.Cursor]())
 	if err != nil {
-		return nil, false, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskVerificationAttached.Value(), err)
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskVerificationAttached.Value(), err)
 	}
 	byTask := map[types.EventID]civilizationAssemblyTaskVerificationEvidence{}
+	projectionErrors := []string{}
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskVerificationAttachedContent)
 		if !ok {
-			return nil, false, fmt.Errorf("%s", contentTypeError(ev, "work.TaskVerificationAttachedContent"))
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskVerificationAttachedContent"))
+			continue
 		}
 		evidence := byTask[content.TaskID]
 		evidence.TestRunRefs = append(evidence.TestRunRefs, content.TestRunIDs...)
@@ -591,7 +597,7 @@ func civilizationAssemblyWorkTaskVerificationEvidence(s store.Store, limit int) 
 		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
 		byTask[taskID] = evidence
 	}
-	return byTask, page.HasMore(), nil
+	return byTask, page.HasMore(), projectionErrors, nil
 }
 
 func civilizationAssemblyFactoryOrderRiskClass(existing, candidate string) string {
