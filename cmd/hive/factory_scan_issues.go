@@ -47,7 +47,15 @@ func cmdFactoryScanIssues(args []string) error {
 	if *maxCostUSD < 0 {
 		return fmt.Errorf("--max-cost-usd must be zero or greater")
 	}
-	normalizedRepos, err := resolveIssueScanRepos(repos, *useRegistry, filepath.Join(findHiveDir(), "repos.json"))
+	registryPath := ""
+	if len(repos) == 0 && *useRegistry {
+		var err error
+		registryPath, err = issueScanRegistryPath()
+		if err != nil {
+			return err
+		}
+	}
+	normalizedRepos, err := resolveIssueScanRepos(repos, *useRegistry, registryPath)
 	if err != nil {
 		return err
 	}
@@ -121,6 +129,21 @@ func resolveIssueScanRepos(values []string, useRegistry bool, registryPath strin
 		return nil, fmt.Errorf("--repo is required unless --registry is set")
 	}
 	return issueScanReposFromRegistry(registryPath)
+}
+
+func issueScanRegistryPath() (string, error) {
+	hiveDir := findHiveDir()
+	if _, err := os.Stat(filepath.Join(hiveDir, "agents")); err != nil {
+		return "", fmt.Errorf("locate hive repo for --registry: agents directory not found from %s", hiveDir)
+	}
+	goMod, err := os.ReadFile(filepath.Join(hiveDir, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("locate hive repo for --registry: read go.mod: %w", err)
+	}
+	if !strings.Contains(string(goMod), "module github.com/transpara-ai/hive") {
+		return "", fmt.Errorf("locate hive repo for --registry: %s is not the Hive repo root", hiveDir)
+	}
+	return filepath.Join(hiveDir, "repos.json"), nil
 }
 
 func issueScanReposFromRegistry(registryPath string) ([]string, error) {

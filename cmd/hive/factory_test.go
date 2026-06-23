@@ -86,6 +86,15 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 	}
 }
 
+func TestIssueScanRegistryPathRejectsUntrustedCWD(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	_, err := issueScanRegistryPath()
+	if err == nil || !strings.Contains(err.Error(), "agents directory") {
+		t.Fatalf("expected untrusted cwd registry path error, got %v", err)
+	}
+}
+
 func TestIssueScanRepoSlugFromRegistryRepoNormalizesGitHubURL(t *testing.T) {
 	tests := map[string]string{
 		"https://github.com/transpara-ai/site":           "transpara-ai/site",
