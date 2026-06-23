@@ -16,6 +16,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/social"
 	"github.com/transpara-ai/work"
 )
 
@@ -45,8 +46,7 @@ func main() {
 	}
 	defer store.Close()
 
-	hive.RegisterEventTypes()
-	work.RegisterEventTypes()
+	registerOpsAPIEventTypes()
 
 	modelSelectionManager, err := hive.NewOperatorModelSelectionManager(*catalog, types.Now().Value(), *catalogReloadInterval > 0)
 	if err != nil {
@@ -69,6 +69,13 @@ func main() {
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
+}
+
+func registerOpsAPIEventTypes() {
+	hive.RegisterEventTypes()
+	social.RegisterEventTypes()
+	work.RegisterEventTypes()
+	event.SetFallbackUnmarshaler(event.RawFallback)
 }
 
 func runCatalogReloadLoop(ctx context.Context, manager *hive.OperatorModelSelectionManager, interval time.Duration) {

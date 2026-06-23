@@ -72,6 +72,51 @@ func TestOperatorProjectionServerReturnsProjectionJSON(t *testing.T) {
 	}
 }
 
+func TestOperatorProjectionServerReturnsCivilizationAssemblyProjectionJSON(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Guardian",
+		Role:             "guardian",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:governance",
+		RegistrationPath: "generated",
+	})
+
+	handler := NewOperatorProjectionServer(s, "secret", 50)
+	req := httptest.NewRequest(http.MethodGet, "/api/hive/civilization/assembly-projection", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status without token = %d, want %d", resp.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/hive/civilization/assembly-projection", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status with token = %d, want %d body=%s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	var projection CivilizationAssemblyProjection
+	if err := json.Unmarshal(resp.Body.Bytes(), &projection); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if projection.ProjectionSubject != civilizationAssemblyProjectionSubject {
+		t.Fatalf("subject = %q, want %q", projection.ProjectionSubject, civilizationAssemblyProjectionSubject)
+	}
+	if len(projection.ActorRoster) != 1 || projection.ActorRoster[0].ActorID != actorID.Value() {
+		t.Fatalf("actor roster = %+v, want one guardian actor", projection.ActorRoster)
+	}
+	if projection.SiteConsumerStatus.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("site consumer status = %+v, want available", projection.SiteConsumerStatus)
+	}
+}
+
 func TestOperatorProjectionServerReturnsConfiguredModelSelection(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	modelSelection := testModelSelectionConfigWithRoleDefault("guardian", "api-sonnet")
