@@ -357,7 +357,7 @@ func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemb
 		if actorID == "" || role == "" {
 			return
 		}
-		key := actorID + "\x00" + role + "\x00" + sourceType
+		key := actorID + "\x00" + role
 		if seen[key] {
 			return
 		}
@@ -386,26 +386,36 @@ func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemb
 }
 
 func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyLifecycleSummary {
-	out := make([]CivilizationAssemblyLifecycleSummary, 0, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
+	byActor := make(map[string]CivilizationAssemblyLifecycleSummary, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
 	for _, item := range p.Lifecycle {
-		out = append(out, CivilizationAssemblyLifecycleSummary{
+		actorID := strings.TrimSpace(item.ActorID)
+		if actorID == "" {
+			continue
+		}
+		byActor[actorID] = CivilizationAssemblyLifecycleSummary{
 			ID:      "lifecycle:" + item.ActorID,
-			ActorID: item.ActorID,
+			ActorID: actorID,
 			ToState: item.LifecycleStatus,
 			Status:  item.LifecycleStatus,
-		})
+		}
 	}
 	for _, item := range p.RuntimeEvidence.AgentEvents.ActiveAgents {
 		actorID := valueOr(item.ActorID, item.Name)
 		if actorID == "" {
 			continue
 		}
-		out = append(out, CivilizationAssemblyLifecycleSummary{
-			ID:      valueOr(item.SpawnedEventID, "runtime:"+actorID),
-			ActorID: actorID,
-			ToState: "active",
-			Status:  "active",
-		})
+		existing := byActor[actorID]
+		if existing.ID == "" {
+			existing.ID = valueOr(item.SpawnedEventID, "runtime:"+actorID)
+		}
+		existing.ActorID = actorID
+		existing.ToState = "active"
+		existing.Status = "active"
+		byActor[actorID] = existing
+	}
+	out := make([]CivilizationAssemblyLifecycleSummary, 0, len(byActor))
+	for _, item := range byActor {
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ActorID == out[j].ActorID {

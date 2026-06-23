@@ -148,6 +148,9 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "active") {
 		t.Fatalf("missing normalized active lifecycle status: %+v", projection.AgentLifecycleSummary)
 	}
+	if got := civilizationProjectionLifecycleCount(projection, actorID.Value()); got != 1 {
+		t.Fatalf("lifecycle rows for %s = %d, want 1: %+v", actorID.Value(), got, projection.AgentLifecycleSummary)
+	}
 	if projection.FactoryOrderSummary == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.ResidualRiskSummary == nil {
 		t.Fatalf("top-level slices must serialize as arrays, got factory=%#v bindings=%#v lifecycle=%#v risks=%#v", projection.FactoryOrderSummary, projection.RoleBindings, projection.AgentLifecycleSummary, projection.ResidualRiskSummary)
 	}
@@ -212,6 +215,16 @@ func civilizationProjectionHasLifecycleStatus(projection CivilizationAssemblyPro
 		}
 	}
 	return false
+}
+
+func civilizationProjectionLifecycleCount(projection CivilizationAssemblyProjection, actorID string) int {
+	count := 0
+	for _, lifecycle := range projection.AgentLifecycleSummary {
+		if lifecycle.ActorID == actorID {
+			count++
+		}
+	}
+	return count
 }
 
 func civilizationProjectionHasUnavailableField(projection CivilizationAssemblyProjection, field string) bool {
