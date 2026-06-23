@@ -1,10 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/transpara-ai/hive/pkg/hive"
+	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
 )
 
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
@@ -40,6 +43,66 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	}
 }
 
+func TestResolveIssueScanReposLoadsTransparaAIReposFromRegistry(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "repos.json")
+	if err := os.WriteFile(registryPath, []byte(`{
+		"repos": [
+			{"name": "site", "url": "https://github.com/transpara-ai/site"},
+			{"name": "hive", "url": "git@github.com:transpara-ai/hive.git"},
+			{"name": "hive-copy", "url": "https://github.com/transpara-ai/hive.git"},
+			{"name": "outside", "url": "https://github.com/example/outside"},
+			{"name": "work"}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write repos.json: %v", err)
+	}
+
+	repos, err := resolveIssueScanRepos(nil, true, registryPath)
+	if err != nil {
+		t.Fatalf("resolveIssueScanRepos: %v", err)
+	}
+	got := strings.Join(repos, ",")
+	want := "transpara-ai/site,transpara-ai/hive,transpara-ai/work"
+	if got != want {
+		t.Fatalf("repos = %q, want %q", got, want)
+	}
+}
+
+func TestResolveIssueScanReposPrefersExplicitReposOverRegistry(t *testing.T) {
+	repos, err := resolveIssueScanRepos([]string{"transpara-ai/hive", "transpara-ai/hive"}, true, "/does/not/exist")
+	if err != nil {
+		t.Fatalf("resolveIssueScanRepos explicit: %v", err)
+	}
+	if got := strings.Join(repos, ","); got != "transpara-ai/hive" {
+		t.Fatalf("repos = %q, want explicit hive only", got)
+	}
+}
+
+func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
+	_, err := resolveIssueScanRepos(nil, false, "")
+	if err == nil || !strings.Contains(err.Error(), "--registry") {
+		t.Fatalf("expected repo or registry error, got %v", err)
+	}
+}
+
+func TestIssueScanRepoSlugFromRegistryRepoNormalizesGitHubURL(t *testing.T) {
+	tests := map[string]string{
+		"https://github.com/transpara-ai/site":     "transpara-ai/site",
+		"git@github.com:transpara-ai/hive.git":     "transpara-ai/hive",
+		"ssh://git@github.com/transpara-ai/work":   "transpara-ai/work",
+		"http://github.com/transpara-ai/agent.git": "transpara-ai/agent",
+	}
+	for raw, want := range tests {
+		t.Run(raw, func(t *testing.T) {
+			got := issueScanRepoSlugFromRegistryRepo(registryRepoForTest(raw))
+			if got != want {
+				t.Fatalf("slug = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestNormalizeIssueScanReposRejectsOutsideOrg(t *testing.T) {
 	_, err := normalizeIssueScanRepos([]string{"example/hive"})
 	if err == nil || !strings.Contains(err.Error(), "transpara-ai") {
@@ -58,6 +121,10 @@ func TestSafeIssueScanOperatorIDRejectsWhitespace(t *testing.T) {
 	if safeIssueScanOperatorID("operator michael") {
 		t.Fatal("operator id with whitespace was accepted")
 	}
+}
+
+func registryRepoForTest(url string) hiveregistry.Repo {
+	return hiveregistry.Repo{URL: url}
 }
 
 func TestParseFactoryOrderModelOverrideFlags(t *testing.T) {

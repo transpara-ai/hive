@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/registry"
 )
 
 func cmdFactoryScanIssues(args []string) error {
@@ -25,18 +27,16 @@ func cmdFactoryScanIssues(args []string) error {
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
 	dispatch := fs.Bool("dispatch", false, "Immediately dispatch queued run into a FactoryOrder task")
+	useRegistry := fs.Bool("registry", false, "Scan every Transpara-AI GitHub repo in repos.json when --repo is omitted")
 	repos := repeatedStringFlag{}
 	labels := repeatedStringFlag{}
-	fs.Var(&repos, "repo", "Transpara-AI repo slug to scan, e.g. transpara-ai/hive (repeatable, required)")
+	fs.Var(&repos, "repo", "Transpara-AI repo slug to scan, e.g. transpara-ai/hive (repeatable; required unless --registry is set)")
 	fs.Var(&labels, "label", "GitHub issue label filter passed to gh issue list (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required")
-	}
-	if len(repos) == 0 {
-		return fmt.Errorf("--repo is required")
 	}
 	if *limit <= 0 {
 		return fmt.Errorf("--limit must be greater than zero")
@@ -47,7 +47,7 @@ func cmdFactoryScanIssues(args []string) error {
 	if *maxCostUSD < 0 {
 		return fmt.Errorf("--max-cost-usd must be zero or greater")
 	}
-	normalizedRepos, err := normalizeIssueScanRepos(repos)
+	normalizedRepos, err := resolveIssueScanRepos(repos, *useRegistry, filepath.Join(findHiveDir(), "repos.json"))
 	if err != nil {
 		return err
 	}
@@ -111,6 +111,60 @@ func cmdFactoryScanIssues(args []string) error {
 		}
 	}
 	return nil
+}
+
+func resolveIssueScanRepos(values []string, useRegistry bool, registryPath string) ([]string, error) {
+	if len(values) > 0 {
+		return normalizeIssueScanRepos(values)
+	}
+	if !useRegistry {
+		return nil, fmt.Errorf("--repo is required unless --registry is set")
+	}
+	return issueScanReposFromRegistry(registryPath)
+}
+
+func issueScanReposFromRegistry(registryPath string) ([]string, error) {
+	registryPath = strings.TrimSpace(registryPath)
+	if registryPath == "" {
+		return nil, fmt.Errorf("repos.json path is required")
+	}
+	reg, err := registry.Load(registryPath)
+	if err != nil {
+		return nil, fmt.Errorf("load issue-scan repo registry: %w", err)
+	}
+	out := make([]string, 0, len(reg.Repos))
+	seen := map[string]struct{}{}
+	for _, repo := range reg.Repos {
+		slug := issueScanRepoSlugFromRegistryRepo(repo)
+		if !hive.ValidTransparaAIRepo(slug) {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, slug)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("repos.json contains no scannable Transpara-AI GitHub repos")
+	}
+	return out, nil
+}
+
+func issueScanRepoSlugFromRegistryRepo(repo registry.Repo) string {
+	raw := strings.TrimSpace(repo.URL)
+	if raw == "" && strings.TrimSpace(repo.Name) != "" {
+		raw = "transpara-ai/" + strings.TrimSpace(repo.Name)
+	}
+	raw = strings.TrimSuffix(raw, ".git")
+	raw = strings.TrimPrefix(raw, "ssh://git@")
+	raw = strings.TrimPrefix(raw, "git@")
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "http://")
+	raw = strings.TrimPrefix(raw, "github.com:")
+	raw = strings.TrimPrefix(raw, "github.com/")
+	raw = strings.Trim(raw, "/")
+	return strings.ToLower(raw)
 }
 
 func normalizeIssueScanRepos(values []string) ([]string, error) {
