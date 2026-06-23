@@ -156,6 +156,8 @@ func issueScanRepoSlugFromRegistryRepo(repo registry.Repo) string {
 	if raw == "" && strings.TrimSpace(repo.Name) != "" {
 		raw = "transpara-ai/" + strings.TrimSpace(repo.Name)
 	}
+	raw = strings.ToLower(raw)
+	raw = strings.TrimRight(raw, "/")
 	raw = strings.TrimSuffix(raw, ".git")
 	raw = strings.TrimPrefix(raw, "ssh://git@")
 	raw = strings.TrimPrefix(raw, "git@")
@@ -164,7 +166,8 @@ func issueScanRepoSlugFromRegistryRepo(repo registry.Repo) string {
 	raw = strings.TrimPrefix(raw, "github.com:")
 	raw = strings.TrimPrefix(raw, "github.com/")
 	raw = strings.Trim(raw, "/")
-	return strings.ToLower(raw)
+	raw = strings.TrimSuffix(raw, ".git")
+	return raw
 }
 
 func normalizeIssueScanRepos(values []string) ([]string, error) {
