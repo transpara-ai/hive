@@ -44,6 +44,14 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	if task.FactoryOrderID != result.DispatchedOrderIDs[0] {
 		t.Fatalf("factory order id = %q, want %q", task.FactoryOrderID, result.DispatchedOrderIDs[0])
 	}
+	expectedOutputs := []string{
+		"draft pull request or governed execution artifact",
+		"validation evidence",
+		"operator-facing status update",
+	}
+	if strings.Join(task.ExpectedOutputs, "\n") != strings.Join(expectedOutputs, "\n") {
+		t.Fatalf("generic run-launch expected outputs = %+v, want %+v", task.ExpectedOutputs, expectedOutputs)
+	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
 		t.Fatalf("get task event: %v", err)
