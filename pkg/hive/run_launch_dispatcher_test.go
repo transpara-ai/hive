@@ -2,6 +2,7 @@ package hive
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -133,6 +134,80 @@ func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Fatalf("dispatch created task(s) despite stale override on %s: %+v", requestEvent.ID(), tasks)
+	}
+}
+
+func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	failing := &failOnceTaskArtifactAppendStore{Store: rt.store}
+	rt.store = failing
+	rt.tasks = work.NewTaskStore(failing, writer.factory, writer.signer)
+
+	first, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err == nil || !strings.Contains(err.Error(), "injected work.task.artifact append failure") {
+		t.Fatalf("first DispatchQueuedRunLaunch err = %v, want injected artifact failure", err)
+	}
+	if first.Dispatched != 0 || first.Failed != 1 {
+		t.Fatalf("first dispatch result = %+v, want failed partial dispatch", first)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks after partial dispatch: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count after partial dispatch = %d, want 1", len(tasks))
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after partial dispatch: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("artifacts after failed append = %+v, want none", artifacts)
+	}
+
+	second, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("second DispatchQueuedRunLaunch: %v", err)
+	}
+	if second.Dispatched != 0 || second.AlreadyDispatched != 1 || second.Failed != 0 {
+		t.Fatalf("second dispatch result = %+v, want repaired already-dispatched task", second)
+	}
+	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after repair: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
+		t.Fatalf("artifacts after repair = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+
+	third, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("third DispatchQueuedRunLaunch: %v", err)
+	}
+	if third.Dispatched != 0 || third.AlreadyDispatched != 1 || third.Failed != 0 {
+		t.Fatalf("third dispatch result = %+v, want idempotent already-dispatched task", third)
+	}
+	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after idempotent pass: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
+		t.Fatalf("artifacts after idempotent pass = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
 	}
 }
 
@@ -292,6 +367,29 @@ func appendValidatedRunLaunch(t *testing.T, s store.Store, writer *operatorRunLa
 	}
 	t.Fatalf("missing factory.run.requested for run %s", result.RunID)
 	return event.Event{}
+}
+
+type failOnceTaskArtifactAppendStore struct {
+	store.Store
+	failed bool
+}
+
+func (s *failOnceTaskArtifactAppendStore) Append(ev event.Event) (event.Event, error) {
+	if !s.failed && ev.Type() == work.EventTypeTaskArtifact {
+		s.failed = true
+		return event.Event{}, fmt.Errorf("injected work.task.artifact append failure")
+	}
+	return s.Store.Append(ev)
+}
+
+func countArtifactsWithLabel(artifacts []work.ArtifactEvent, label string) int {
+	count := 0
+	for _, artifact := range artifacts {
+		if artifact.Label == label {
+			count++
+		}
+	}
+	return count
 }
 
 func appendStaleRunLaunchRequest(t *testing.T, s store.Store, writer *operatorRunLaunchWriter) event.Event {

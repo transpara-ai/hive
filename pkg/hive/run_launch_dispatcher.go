@@ -104,6 +104,19 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			continue
 		}
 		if taskID, ok := dispatched[orderID]; ok {
+			planArtifactBody, hasPlanArtifact, err := issueScanExecutionPlanArtifactBody(content)
+			if err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
+				continue
+			}
+			if hasPlanArtifact {
+				if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), taskID, planArtifactBody); err != nil {
+					result.Failed++
+					errs = append(errs, fmt.Errorf("run %q: repair issue-scan execution plan artifact: %w", content.RunID, err))
+					continue
+				}
+			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
 			continue
@@ -128,7 +141,7 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			continue
 		}
 		if hasPlanArtifact {
-			if err := r.tasks.AddArtifact(r.humanID, task.ID, IssueScanExecutionPlanArtifactLabel, issueScanExecutionPlanArtifactMediaType, planArtifactBody, []types.EventID{request.ID(), task.ID}, convID); err != nil {
+			if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), task.ID, planArtifactBody); err != nil {
 				result.Failed++
 				errs = append(errs, fmt.Errorf("run %q: attach issue-scan execution plan artifact: %w", content.RunID, err))
 				continue
@@ -144,6 +157,27 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 	}
 
 	return result, errors.Join(errs...)
+}
+
+func (r *Runtime) ensureIssueScanExecutionPlanArtifact(content FactoryRunRequestedContent, requestID, taskID types.EventID, body string) error {
+	artifacts, err := r.tasks.ListArtifacts(taskID)
+	if err != nil {
+		return fmt.Errorf("list task artifacts: %w", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+			return nil
+		}
+	}
+	return r.tasks.AddArtifact(
+		r.humanID,
+		taskID,
+		IssueScanExecutionPlanArtifactLabel,
+		issueScanExecutionPlanArtifactMediaType,
+		body,
+		[]types.EventID{requestID, taskID},
+		runLaunchConversationID(content.RunID, r.convID),
+	)
 }
 
 func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (string, bool, error) {
@@ -166,15 +200,11 @@ func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (str
 	} else if len(lifecycle) == 0 && len(agentPlan) == 0 {
 		return "", false, nil
 	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return "", false, fmt.Errorf("decode issue-scan execution plan artifact: %w", err)
+	var encoded bytes.Buffer
+	if err := json.Indent(&encoded, raw, "", "  "); err != nil {
+		return "", false, fmt.Errorf("format issue-scan execution plan artifact: %w", err)
 	}
-	encoded, err := json.MarshalIndent(decoded, "", "  ")
-	if err != nil {
-		return "", false, fmt.Errorf("marshal issue-scan execution plan artifact: %w", err)
-	}
-	return string(encoded), true, nil
+	return encoded.String(), true, nil
 }
 
 func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Duration) {
