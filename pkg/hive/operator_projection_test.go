@@ -80,6 +80,85 @@ func TestBuildOperatorProjectionPendingAndDecisions(t *testing.T) {
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	appendEvent(EventTypeAuthorityRequestRecorded, AuthorityRequestRecordedContent{
+		RequestID:        requestID,
+		RequestingActor:  actorID,
+		RequestingRole:   "operator",
+		ActionName:       "pull_request.create",
+		Target:           "pr://transpara-ai/site/42",
+		Environment:      "review",
+		RiskClass:        "medium",
+		RequestedOutcome: "draft PR",
+		Justification:    "bounded implementation ready",
+		RiskSummary:      "protected GitHub write",
+		Scope:            []string{"repo:transpara-ai/site", "head:abc123"},
+	})
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/site",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude",
+		ActorID: actorID.Value(),
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.ProjectionSubject != civilizationAssemblyProjectionSubject {
+		t.Fatalf("subject = %q, want %q", projection.ProjectionSubject, civilizationAssemblyProjectionSubject)
+	}
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
+	}
+	if projection.AuthorityState.Status != civilizationAssemblyFieldAvailable || len(projection.AuthorityState.AuthorityRequests) != 1 {
+		t.Fatalf("authority state = %+v, want one available request", projection.AuthorityState)
+	}
+	if len(projection.ActorRoster) == 0 {
+		t.Fatalf("actor roster empty: %+v", projection)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "reviewer") {
+		t.Fatalf("missing reviewer role binding: %+v", projection.RoleBindings)
+	}
+	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
+	}
+	if len(projection.OpenGateSummary) != 1 || projection.OpenGateSummary[0].ID != requestID.Value() {
+		t.Fatalf("open gates = %+v, want pending request %s", projection.OpenGateSummary, requestID.Value())
+	}
+	if projection.SourceEventGraphHeadOrStateVersion == "" || projection.SourceEventGraphHeadOrStateVersion == "eventgraph head unavailable" {
+		t.Fatalf("source head unavailable: %q", projection.SourceEventGraphHeadOrStateVersion)
+	}
+	if !containsString(projection.BoundaryFlags, "read_only_site_consumer") || !containsString(projection.ValidationRefs, civilizationAssemblyReadOnlyRoutePath) {
+		t.Fatalf("missing read-only boundary evidence: flags=%+v validation=%+v", projection.BoundaryFlags, projection.ValidationRefs)
+	}
+}
+
+func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProjection, actorID, role string) bool {
+	for _, binding := range projection.RoleBindings {
+		if binding.ActorID == actorID && binding.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBuildOperatorProjectionPendingScansBeyondDecisionDisplayLimit(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 

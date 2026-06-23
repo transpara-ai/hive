@@ -105,6 +105,13 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 		}
 		writeOperatorProjectionJSON(w, BuildOperatorProjection(s, limit, options.projectionOptions...))
 	})
+	mux.HandleFunc("GET /api/hive/civilization/assembly-projection", func(w http.ResponseWriter, r *http.Request) {
+		if !operatorBearerOK(apiKey, r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writeOperatorProjectionJSON(w, BuildCivilizationAssemblyProjection(s, limit, options.projectionOptions...))
+	})
 	if options.writer != nil {
 		writer := options.writer
 		mux.HandleFunc("POST /api/hive/operator-decision", func(w http.ResponseWriter, r *http.Request) {
