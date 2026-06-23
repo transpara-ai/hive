@@ -26,6 +26,15 @@ type issueScanBriefIssuePayload struct {
 	Body   string   `json:"body_excerpt,omitempty"`
 }
 
+type issueScanLifecycleStage struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	RequiredRoles     []string `json:"required_roles"`
+	RequiredEvidence  []string `json:"required_evidence"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
 // GitHubIssueCandidate is one open Transpara-AI repo issue found by a scanner.
 // Scanner ordering is meaningful: QueueIssueScanRunLaunch selects the first
 // candidate after validating the whole batch, so a deterministic scanner policy
@@ -228,27 +237,23 @@ func issueScanSources(candidates []GitHubIssueCandidate) []RunLaunchSource {
 
 func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueCandidate) (json.RawMessage, error) {
 	brief := struct {
-		Kind                string                       `json:"kind"`
-		SelectedIssue       issueScanBriefIssuePayload   `json:"selected_issue"`
-		ScannedRepos        []string                     `json:"scanned_repos"`
-		ScannedIssueCount   int                          `json:"scanned_issue_count"`
-		CandidateIssues     []issueScanBriefIssuePayload `json:"candidate_issues"`
-		RequiredAgentFlow   []string                     `json:"required_agent_flow"`
-		AuthorityBoundaries []string                     `json:"authority_boundaries"`
+		Kind                 string                       `json:"kind"`
+		LifecycleVersion     string                       `json:"lifecycle_version"`
+		SelectedIssue        issueScanBriefIssuePayload   `json:"selected_issue"`
+		ScannedRepos         []string                     `json:"scanned_repos"`
+		ScannedIssueCount    int                          `json:"scanned_issue_count"`
+		CandidateIssues      []issueScanBriefIssuePayload `json:"candidate_issues"`
+		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanLifecycleStage    `json:"development_lifecycle"`
+		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
 	}{
-		Kind:              "transpara_ai_github_issue_scan",
-		SelectedIssue:     issueScanBriefIssue(selected),
-		ScannedRepos:      issueScanRepos(candidates),
-		ScannedIssueCount: len(candidates),
-		RequiredAgentFlow: []string{
-			"research_issue_and_repo_context",
-			"debate_with_correct_civic_roles",
-			"select_and_design_approach",
-			"implement_on_branch",
-			"run_adversarial_review",
-			"drive_blockers_to_zero",
-			"surface_ready_for_Human_result_PR",
-		},
+		Kind:                 "transpara_ai_github_issue_scan",
+		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.2",
+		SelectedIssue:        issueScanBriefIssue(selected),
+		ScannedRepos:         issueScanRepos(candidates),
+		ScannedIssueCount:    len(candidates),
+		RequiredAgentFlow:    issueScanRequiredAgentFlow(),
+		DevelopmentLifecycle: issueScanDevelopmentLifecycle(),
 		AuthorityBoundaries: []string{
 			"no_merge",
 			"no_deploy",
@@ -264,6 +269,105 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		return nil, fmt.Errorf("marshal issue scan brief: %w", err)
 	}
 	return encoded, nil
+}
+
+func issueScanRequiredAgentFlow() []string {
+	lifecycle := issueScanDevelopmentLifecycle()
+	flow := make([]string, 0, len(lifecycle))
+	for _, stage := range lifecycle {
+		flow = append(flow, stage.ID)
+	}
+	return flow
+}
+
+func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {
+	return []issueScanLifecycleStage{
+		{
+			ID:            "research_issue_and_repo_context",
+			Name:          "Research issue and repo context",
+			RequiredRoles: []string{"strategist", "planner"},
+			RequiredEvidence: []string{
+				"issue_snapshot",
+				"repo_context",
+				"risk_and_scope_notes",
+			},
+			AuthorityBoundary: "read_only",
+			CompletionGate:    "context_packet_recorded",
+		},
+		{
+			ID:            "debate_with_correct_civic_roles",
+			Name:          "Debate with correct civic roles",
+			RequiredRoles: []string{"strategist", "planner", "reviewer", "guardian"},
+			RequiredEvidence: []string{
+				"role_positions",
+				"decision_record",
+				"dissent_or_no_dissent_record",
+			},
+			AuthorityBoundary: "proposal_only_no_mutation",
+			CompletionGate:    "decision_record_has_reviewer_and_guardian_disposition",
+		},
+		{
+			ID:            "select_and_design_approach",
+			Name:          "Select and design approach",
+			RequiredRoles: []string{"planner", "reviewer", "guardian"},
+			RequiredEvidence: []string{
+				"selected_approach",
+				"definition_of_done",
+				"acceptance_criteria",
+				"test_plan",
+			},
+			AuthorityBoundary: "implementation_waits_for_authorized_task",
+			CompletionGate:    "implementation_task_has_readiness_artifacts",
+		},
+		{
+			ID:            "implement_on_branch",
+			Name:          "Implement on branch",
+			RequiredRoles: []string{"implementer"},
+			RequiredEvidence: []string{
+				"branch_name",
+				"commit_sha",
+				"changed_files",
+				"validation_output",
+			},
+			AuthorityBoundary: "no_merge_no_deploy",
+			CompletionGate:    "implementation_changes_validated_on_branch",
+		},
+		{
+			ID:            "run_adversarial_review",
+			Name:          "Run adversarial review",
+			RequiredRoles: []string{"reviewer", "guardian"},
+			RequiredEvidence: []string{
+				"exact_head_review_artifact",
+				"finding_disposition",
+			},
+			AuthorityBoundary: "review_is_blocking",
+			CompletionGate:    "review_artifact_returned_and_findings_classified",
+		},
+		{
+			ID:            "drive_blockers_to_zero",
+			Name:          "Drive blockers to zero",
+			RequiredRoles: []string{"implementer", "reviewer", "guardian"},
+			RequiredEvidence: []string{
+				"blocker_fixes",
+				"rerun_validation",
+				"rerun_review",
+			},
+			AuthorityBoundary: "accepted_findings_resolved_or_rejected_with_evidence",
+			CompletionGate:    "exact_head_review_has_zero_blockers",
+		},
+		{
+			ID:            "surface_ready_for_Human_result_PR",
+			Name:          "Surface ready-for-Human result PR",
+			RequiredRoles: []string{"strategist", "guardian"},
+			RequiredEvidence: []string{
+				"draft_pr_url",
+				"ready_state_review",
+				"human_ready_summary",
+			},
+			AuthorityBoundary: "human_approval_required_no_merge",
+			CompletionGate:    "ready_pr_has_exact_head_evidence_and_waits_for_human",
+		},
+	}
 }
 
 func issueScanBriefIssue(issue GitHubIssueCandidate) issueScanBriefIssuePayload {

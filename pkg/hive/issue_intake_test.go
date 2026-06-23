@@ -53,10 +53,12 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 
 	var brief struct {
-		Kind                string   `json:"kind"`
-		RequiredAgentFlow   []string `json:"required_agent_flow"`
-		AuthorityBoundaries []string `json:"authority_boundaries"`
-		SelectedIssue       struct {
+		Kind                 string                       `json:"kind"`
+		LifecycleVersion     string                       `json:"lifecycle_version"`
+		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
+		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
+		SelectedIssue        struct {
 			Repo   string `json:"repo"`
 			Number int    `json:"number"`
 			Title  string `json:"title"`
@@ -68,8 +70,51 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.Kind != "transpara_ai_github_issue_scan" || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
 		t.Fatalf("brief = %+v", brief)
 	}
+	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.2" {
+		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
+	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
+	}
+	if len(brief.DevelopmentLifecycle) != len(brief.RequiredAgentFlow) {
+		t.Fatalf("development lifecycle length = %d, required flow length = %d", len(brief.DevelopmentLifecycle), len(brief.RequiredAgentFlow))
+	}
+	for i, stage := range brief.DevelopmentLifecycle {
+		if stage.ID != brief.RequiredAgentFlow[i] {
+			t.Fatalf("stage[%d].id = %q, want required flow %q", i, stage.ID, brief.RequiredAgentFlow[i])
+		}
+	}
+	roles := StarterRoleDefinitions()
+	for _, stage := range brief.DevelopmentLifecycle {
+		for _, role := range stage.RequiredRoles {
+			if roles[role] == nil {
+				t.Fatalf("stage %q requires unknown role %q", stage.ID, role)
+			}
+		}
+	}
+	reviewStage := issueScanStageByID(brief.DevelopmentLifecycle, "run_adversarial_review")
+	if reviewStage == nil {
+		t.Fatalf("development lifecycle missing adversarial review stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if !containsIssueScanValue(reviewStage.RequiredRoles, "reviewer") || !containsIssueScanValue(reviewStage.RequiredRoles, "guardian") {
+		t.Fatalf("review stage roles = %+v", reviewStage.RequiredRoles)
+	}
+	if !containsIssueScanValue(reviewStage.RequiredEvidence, "exact_head_review_artifact") || !containsIssueScanValue(reviewStage.RequiredEvidence, "finding_disposition") {
+		t.Fatalf("review stage evidence = %+v", reviewStage.RequiredEvidence)
+	}
+	readyStage := issueScanStageByID(brief.DevelopmentLifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil {
+		t.Fatalf("development lifecycle missing ready-for-Human stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
+		t.Fatalf("ready stage authority boundary = %q", readyStage.AuthorityBoundary)
+	}
+	implementStage := issueScanStageByID(brief.DevelopmentLifecycle, "implement_on_branch")
+	if implementStage == nil {
+		t.Fatalf("development lifecycle missing implementation stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if !containsIssueScanValue(implementStage.RequiredRoles, "implementer") || !roles["implementer"].CanOperate {
+		t.Fatalf("implementation stage roles = %+v, implementer role = %+v", implementStage.RequiredRoles, roles["implementer"])
 	}
 	if !containsIssueScanValue(brief.AuthorityBoundaries, "no_merge") || !containsIssueScanValue(brief.AuthorityBoundaries, "ready_for_Human_result_PR_only") {
 		t.Fatalf("authority boundaries = %+v", brief.AuthorityBoundaries)
@@ -135,4 +180,21 @@ func containsIssueScanValue(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type issueScanBriefStageForTest struct {
+	ID                string   `json:"id"`
+	RequiredRoles     []string `json:"required_roles"`
+	RequiredEvidence  []string `json:"required_evidence"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+func issueScanStageByID(stages []issueScanBriefStageForTest, id string) *issueScanBriefStageForTest {
+	for i := range stages {
+		if stages[i].ID == id {
+			return &stages[i]
+		}
+	}
+	return nil
 }
