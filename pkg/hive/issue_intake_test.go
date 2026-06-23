@@ -57,6 +57,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		LifecycleVersion     string                       `json:"lifecycle_version"`
 		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
 		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
 		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
 		SelectedIssue        struct {
 			Repo   string `json:"repo"`
@@ -70,7 +71,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.Kind != "transpara_ai_github_issue_scan" || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
 		t.Fatalf("brief = %+v", brief)
 	}
-	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.2" {
+	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
 		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
@@ -131,6 +132,37 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if !containsIssueScanValue(implementStage.RequiredRoles, "implementer") || !roles["implementer"].CanOperate {
 		t.Fatalf("implementation stage roles = %+v, implementer role = %+v", implementStage.RequiredRoles, roles["implementer"])
 	}
+	if len(brief.AgentExecutionPlan) != 18 {
+		t.Fatalf("agent execution plan length = %d, want 18: %+v", len(brief.AgentExecutionPlan), brief.AgentExecutionPlan)
+	}
+	firstPlan := brief.AgentExecutionPlan[0]
+	if firstPlan.StageID != "research_issue_and_repo_context" || firstPlan.Role != "strategist" || firstPlan.CanOperate {
+		t.Fatalf("first agent plan step = %+v, want non-operating strategist research step", firstPlan)
+	}
+	implementPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementPlan == nil || !implementPlan.CanOperate || !containsIssueScanValue(implementPlan.RequiredOutputs, "validation_output") {
+		t.Fatalf("implementer plan step = %+v", implementPlan)
+	}
+	reviewPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "run_adversarial_review", "reviewer")
+	if reviewPlan == nil || reviewPlan.CanOperate || !containsIssueScanValue(reviewPlan.RequiredOutputs, "exact_head_review_artifact") {
+		t.Fatalf("reviewer plan step = %+v", reviewPlan)
+	}
+	guardianReadyPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "surface_ready_for_Human_result_PR", "guardian")
+	if guardianReadyPlan == nil || guardianReadyPlan.AuthorityBoundary != "human_approval_required_no_merge" || !containsIssueScanValue(guardianReadyPlan.RequiredOutputs, "human_approval_boundary_check") {
+		t.Fatalf("guardian ready plan step = %+v", guardianReadyPlan)
+	}
+	for _, step := range brief.AgentExecutionPlan {
+		role := roles[step.Role]
+		if role == nil {
+			t.Fatalf("agent plan step %q requires unknown role %q", step.ID, step.Role)
+		}
+		if role.CanOperate != step.CanOperate {
+			t.Fatalf("agent plan step %q can_operate=%v, role=%+v", step.ID, step.CanOperate, role)
+		}
+		if issueScanStageByID(brief.DevelopmentLifecycle, step.StageID) == nil {
+			t.Fatalf("agent plan step %q references missing stage %q", step.ID, step.StageID)
+		}
+	}
 	if !containsIssueScanValue(brief.AuthorityBoundaries, "no_merge") || !containsIssueScanValue(brief.AuthorityBoundaries, "ready_for_Human_result_PR_only") {
 		t.Fatalf("authority boundaries = %+v", brief.AuthorityBoundaries)
 	}
@@ -155,6 +187,9 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !strings.Contains(task.Description, "https://github.com/transpara-ai/hive/issues/321") {
 		t.Fatalf("task description does not include issue URL: %s", task.Description)
+	}
+	if !strings.Contains(task.Description, "\"agent_execution_plan\"") || !strings.Contains(task.Description, "human_approval_boundary_check") {
+		t.Fatalf("task description does not include agent execution plan: %s", task.Description)
 	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
@@ -205,10 +240,30 @@ type issueScanBriefStageForTest struct {
 	CompletionGate    string   `json:"completion_gate"`
 }
 
+type issueScanBriefPlanForTest struct {
+	ID                string   `json:"id"`
+	StageID           string   `json:"stage_id"`
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	RequiredInputs    []string `json:"required_inputs"`
+	RequiredOutputs   []string `json:"required_outputs"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
 func issueScanStageByID(stages []issueScanBriefStageForTest, id string) *issueScanBriefStageForTest {
 	for i := range stages {
 		if stages[i].ID == id {
 			return &stages[i]
+		}
+	}
+	return nil
+}
+
+func issueScanPlanStepByRole(steps []issueScanBriefPlanForTest, stageID, role string) *issueScanBriefPlanForTest {
+	for i := range steps {
+		if steps[i].StageID == stageID && steps[i].Role == role {
+			return &steps[i]
 		}
 	}
 	return nil

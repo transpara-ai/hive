@@ -15,7 +15,7 @@ import (
 const (
 	IssueScanDefaultPolicyRef = "civilization/repo-issue-scan-to-factory-order-v0.1"
 	issueScanBriefKind        = "transpara_ai_github_issue_scan"
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.2"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.3"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -33,6 +33,18 @@ type issueScanLifecycleStage struct {
 	Name              string   `json:"name"`
 	RequiredRoles     []string `json:"required_roles"`
 	RequiredEvidence  []string `json:"required_evidence"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+type issueScanAgentPlanStep struct {
+	ID                string   `json:"id"`
+	StageID           string   `json:"stage_id"`
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	Objective         string   `json:"objective"`
+	RequiredInputs    []string `json:"required_inputs"`
+	RequiredOutputs   []string `json:"required_outputs"`
 	AuthorityBoundary string   `json:"authority_boundary"`
 	CompletionGate    string   `json:"completion_gate"`
 }
@@ -239,6 +251,10 @@ func issueScanSources(candidates []GitHubIssueCandidate) []RunLaunchSource {
 
 func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueCandidate) (json.RawMessage, error) {
 	lifecycle := issueScanDevelopmentLifecycle()
+	agentPlan, err := issueScanAgentExecutionPlan(lifecycle)
+	if err != nil {
+		return nil, err
+	}
 	brief := struct {
 		Kind                 string                       `json:"kind"`
 		LifecycleVersion     string                       `json:"lifecycle_version"`
@@ -248,6 +264,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		CandidateIssues      []issueScanBriefIssuePayload `json:"candidate_issues"`
 		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
 		DevelopmentLifecycle []issueScanLifecycleStage    `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanAgentPlanStep     `json:"agent_execution_plan"`
 		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
 	}{
 		Kind:                 issueScanBriefKind,
@@ -257,6 +274,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		ScannedIssueCount:    len(candidates),
 		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
 		DevelopmentLifecycle: lifecycle,
+		AgentExecutionPlan:   agentPlan,
 		AuthorityBoundaries: []string{
 			"no_merge",
 			"no_deploy",
@@ -280,6 +298,86 @@ func issueScanLifecycleFlow(lifecycle []issueScanLifecycleStage) []string {
 		flow = append(flow, stage.ID)
 	}
 	return flow
+}
+
+func issueScanAgentExecutionPlan(lifecycle []issueScanLifecycleStage) ([]issueScanAgentPlanStep, error) {
+	roles := StarterRoleDefinitions()
+	steps := make([]issueScanAgentPlanStep, 0, 18)
+	add := func(stageID, role string, inputs, outputs []string, objective string) error {
+		stage, ok := issueScanLifecycleStageByID(lifecycle, stageID)
+		if !ok {
+			return fmt.Errorf("agent execution plan stage %q is not in lifecycle", stageID)
+		}
+		roleDef := roles[role]
+		if roleDef == nil {
+			return fmt.Errorf("agent execution plan role %q is not a starter role", role)
+		}
+		if !containsIssueScanString(stage.RequiredRoles, role) {
+			return fmt.Errorf("agent execution plan role %q is not required for stage %q", role, stageID)
+		}
+		steps = append(steps, issueScanAgentPlanStep{
+			ID:                fmt.Sprintf("%02d_%s_%s", len(steps)+1, stageID, role),
+			StageID:           stageID,
+			Role:              role,
+			CanOperate:        roleDef.CanOperate,
+			Objective:         objective,
+			RequiredInputs:    append([]string(nil), inputs...),
+			RequiredOutputs:   append([]string(nil), outputs...),
+			AuthorityBoundary: stage.AuthorityBoundary,
+			CompletionGate:    stage.CompletionGate,
+		})
+		return nil
+	}
+	additions := []struct {
+		stageID   string
+		role      string
+		inputs    []string
+		outputs   []string
+		objective string
+	}{
+		{"research_issue_and_repo_context", "strategist", []string{"selected_issue", "candidate_issues"}, []string{"issue_priority_rationale", "risk_and_scope_notes"}, "Decide why this issue should enter the Civilization factory loop now."},
+		{"research_issue_and_repo_context", "planner", []string{"selected_issue", "target_repo"}, []string{"repo_context_packet", "candidate_validation_commands"}, "Map the target repository context and identify the smallest viable validation surface."},
+		{"debate_with_correct_civic_roles", "strategist", []string{"issue_priority_rationale", "repo_context_packet"}, []string{"strategist_position"}, "Argue the value, sequencing, and scope of the proposed work."},
+		{"debate_with_correct_civic_roles", "planner", []string{"repo_context_packet"}, []string{"planner_position"}, "Argue the feasible implementation path and dependency order."},
+		{"debate_with_correct_civic_roles", "reviewer", []string{"candidate_validation_commands"}, []string{"reviewer_position", "test_risk_notes"}, "Identify correctness risks and the review evidence needed before ready state."},
+		{"debate_with_correct_civic_roles", "guardian", []string{"risk_and_scope_notes"}, []string{"guardian_position", "authority_boundary_disposition"}, "Identify authority, safety, and no-merge/no-deploy boundaries."},
+		{"select_and_design_approach", "planner", []string{"role_positions"}, []string{"selected_approach", "definition_of_done", "implementation_task_plan"}, "Select the concrete approach and convert debate output into implementable work."},
+		{"select_and_design_approach", "reviewer", []string{"selected_approach"}, []string{"acceptance_criteria", "test_plan"}, "Define the reviewable acceptance and validation criteria before implementation starts."},
+		{"select_and_design_approach", "guardian", []string{"selected_approach", "authority_boundary_disposition"}, []string{"authority_gate_requirements"}, "Confirm implementation can proceed only inside the recorded authority envelope."},
+		{"implement_on_branch", "implementer", []string{"implementation_task_plan", "acceptance_criteria"}, []string{"branch_name", "commit_sha", "validation_output"}, "Implement the selected approach on a branch and record exact validation evidence."},
+		{"run_adversarial_review", "reviewer", []string{"commit_sha", "validation_output"}, []string{"exact_head_review_artifact"}, "Run an exact-head adversarial review and produce a durable review artifact."},
+		{"run_adversarial_review", "guardian", []string{"exact_head_review_artifact"}, []string{"finding_disposition"}, "Classify findings against authority boundaries and reject or accept with evidence."},
+		{"drive_blockers_to_zero", "implementer", []string{"accepted_findings"}, []string{"blocker_fixes", "rerun_validation"}, "Fix accepted blockers and rerun the relevant validation commands."},
+		{"drive_blockers_to_zero", "reviewer", []string{"blocker_fixes", "rerun_validation"}, []string{"rerun_review"}, "Re-review the repaired exact head until blockers reach zero."},
+		{"drive_blockers_to_zero", "guardian", []string{"rerun_review"}, []string{"zero_blocker_gate_disposition"}, "Confirm all accepted blockers are resolved or rejected with evidence."},
+		{"surface_ready_for_Human_result_PR", "strategist", []string{"zero_blocker_gate_disposition"}, []string{"human_ready_summary"}, "Summarize the ready result for Human approval without merging or deploying."},
+		{"surface_ready_for_Human_result_PR", "reviewer", []string{"ready_pr_url", "human_ready_summary"}, []string{"ready_state_review"}, "Run or verify the ready-state exact-head review evidence."},
+		{"surface_ready_for_Human_result_PR", "guardian", []string{"ready_state_review"}, []string{"human_approval_boundary_check"}, "Confirm the result PR waits for Human approval and does not merge itself."},
+	}
+	for _, addition := range additions {
+		if err := add(addition.stageID, addition.role, addition.inputs, addition.outputs, addition.objective); err != nil {
+			return nil, err
+		}
+	}
+	return steps, nil
+}
+
+func issueScanLifecycleStageByID(stages []issueScanLifecycleStage, id string) (issueScanLifecycleStage, bool) {
+	for _, stage := range stages {
+		if stage.ID == id {
+			return stage, true
+		}
+	}
+	return issueScanLifecycleStage{}, false
+}
+
+func containsIssueScanString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {

@@ -466,7 +466,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if len(queued.TargetRepos) != 2 || queued.TargetRepos[0] != "transpara-ai/hive" {
 		t.Fatalf("queued target repos = %+v", queued.TargetRepos)
 	}
-	if queued.BriefKind != "transpara_ai_github_issue_scan" || queued.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.2" {
+	if queued.BriefKind != "transpara_ai_github_issue_scan" || queued.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
 		t.Fatalf("queued brief metadata = %+v", queued)
 	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
@@ -492,6 +492,24 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if readyStage == nil || readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
 		t.Fatalf("ready lifecycle stage = %+v", readyStage)
 	}
+	if len(queued.AgentExecutionPlan) != 18 {
+		t.Fatalf("agent execution plan = %+v, want 18 expected steps", queued.AgentExecutionPlan)
+	}
+	implementStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementStep == nil || !implementStep.CanOperate || implementStep.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("implementer plan step = %+v", implementStep)
+	}
+	if !containsModelProjectionString(implementStep.RequiredOutputs, "validation_output") {
+		t.Fatalf("implementer required outputs = %+v", implementStep.RequiredOutputs)
+	}
+	reviewStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "run_adversarial_review", "reviewer")
+	if reviewStep == nil || reviewStep.CanOperate || !containsModelProjectionString(reviewStep.RequiredOutputs, "exact_head_review_artifact") {
+		t.Fatalf("reviewer plan step = %+v", reviewStep)
+	}
+	readyGuardianStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "surface_ready_for_Human_result_PR", "guardian")
+	if readyGuardianStep == nil || readyGuardianStep.AuthorityBoundary != "human_approval_required_no_merge" || !containsModelProjectionString(readyGuardianStep.RequiredOutputs, "human_approval_boundary_check") {
+		t.Fatalf("ready guardian plan step = %+v", readyGuardianStep)
+	}
 	if runtimeEvidence.AgentEvents.Scope != "none" || runtimeEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("agent evidence = %+v, want no runtime agents", runtimeEvidence.AgentEvents)
 	}
@@ -504,12 +522,12 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 }
 
 func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
-	kind, version, lifecycle, err := queuedRunLifecycleFromBrief([]byte(`{"goal":"generic launch brief"}`))
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief([]byte(`{"goal":"generic launch brief"}`))
 	if err != nil {
 		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
 	}
-	if kind != "" || version != "" || len(lifecycle) != 0 {
-		t.Fatalf("metadata = kind %q version %q lifecycle %+v, want empty lifecycle", kind, version, lifecycle)
+	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle", kind, version, lifecycle, agentPlan)
 	}
 }
 
@@ -542,9 +560,9 @@ func TestQueuedRunLifecycleFromBriefRejectsMutatedLifecycle(t *testing.T) {
 		t.Fatalf("marshal mutated brief: %v", err)
 	}
 
-	_, _, lifecycle, err := queuedRunLifecycleFromBrief(mutated)
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(mutated)
 	if err == nil || !strings.Contains(err.Error(), "roles") {
-		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v; want role validation failure", err, lifecycle)
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want role validation failure", err, lifecycle, agentPlan)
 	}
 }
 
@@ -573,8 +591,8 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsBriefDecodeError(t *testin
 	if queued == nil || queued.RunID != "run_bad_brief" {
 		t.Fatalf("queued request = %+v, want run_bad_brief", queued)
 	}
-	if queued.LifecycleEvidenceKind != "" || len(queued.DevelopmentLifecycle) != 0 {
-		t.Fatalf("queued lifecycle = kind %q stages %+v, want empty on decode error", queued.LifecycleEvidenceKind, queued.DevelopmentLifecycle)
+	if queued.LifecycleEvidenceKind != "" || len(queued.DevelopmentLifecycle) != 0 || len(queued.AgentExecutionPlan) != 0 {
+		t.Fatalf("queued lifecycle = kind %q stages %+v plan %+v, want empty on decode error", queued.LifecycleEvidenceKind, queued.DevelopmentLifecycle, queued.AgentExecutionPlan)
 	}
 	if len(projection.Errors) == 0 || !strings.Contains(projection.Errors[0], "brief lifecycle projection") {
 		t.Fatalf("projection errors = %+v, want brief lifecycle projection error", projection.Errors)
@@ -1542,6 +1560,15 @@ func queuedRunLifecycleStageByID(stages []OperatorQueuedRunLifecycleStage, id st
 	for i := range stages {
 		if stages[i].ID == id {
 			return &stages[i]
+		}
+	}
+	return nil
+}
+
+func queuedRunAgentPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, stageID, role string) *OperatorQueuedRunAgentPlanStep {
+	for i := range steps {
+		if steps[i].StageID == stageID && steps[i].Role == role {
+			return &steps[i]
 		}
 	}
 	return nil
