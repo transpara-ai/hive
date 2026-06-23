@@ -41,6 +41,7 @@ type CivilizationAssemblyProjection struct {
 	AgentLifecycleSummary              []CivilizationAssemblyLifecycleSummary `json:"agent_lifecycle_summary"`
 	FactoryOrderSummary                []CivilizationAssemblyFactoryOrder     `json:"factory_order_summary"`
 	WorkEvidenceSummary                CivilizationAssemblyWorkEvidence       `json:"work_evidence_summary"`
+	QueuedRunRequest                   *CivilizationAssemblyQueuedRunRequest  `json:"queued_run_request,omitempty"`
 	SiteConsumerStatus                 CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
 	OpenGateSummary                    []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
 	ResidualRiskSummary                []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
@@ -157,6 +158,12 @@ type CivilizationAssemblyWorkEvidence struct {
 	SourceRefs      []string `json:"source_refs,omitempty"`
 }
 
+// CivilizationAssemblyQueuedRunRequest is the read-only issue-scan run intent
+// shown on the Site Civilization Assembly page. It intentionally reuses the
+// operator projection's queued-run contract so Site renders one canonical view
+// of expected lifecycle evidence.
+type CivilizationAssemblyQueuedRunRequest = OperatorQueuedRunRequestEvidence
+
 type CivilizationAssemblyGateSummary struct {
 	ID                 string   `json:"id"`
 	GateName           string   `json:"gate_name"`
@@ -225,6 +232,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		AgentLifecycleSummary:              civilizationAssemblyLifecycle(operatorProjection),
 		FactoryOrderSummary:                factoryOrders,
 		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection, factoryOrders, factoryOrderWorkEvidence),
+		QueuedRunRequest:                   operatorProjection.RuntimeEvidence.LastQueuedRunRequest,
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
