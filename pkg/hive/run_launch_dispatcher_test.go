@@ -163,6 +163,37 @@ func TestDispatchQueuedRunLaunchOnlyDispatchesRequestedRun(t *testing.T) {
 	}
 }
 
+func TestDispatchQueuedRunLaunchFindsRequestedRunBeyondDefaultWindow(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	target := appendValidatedRunLaunch(t, rt.store, writer, nil)
+	targetRunID := target.Content().(FactoryRunRequestedContent).RunID
+	for i := 0; i < defaultRunLaunchDispatchLimit; i++ {
+		appendValidatedRunLaunch(t, rt.store, writer, nil)
+	}
+
+	result, err := rt.DispatchQueuedRunLaunch(targetRunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if result.Dispatched != 1 || result.Failed != 0 || result.AlreadyDispatched != 0 {
+		t.Fatalf("dispatch result = %+v, want only requested old run dispatched", result)
+	}
+	tasks, err := rt.tasks.List(defaultRunLaunchDispatchLimit + 2)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want one targeted dispatch", len(tasks))
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != target.ID() {
+		t.Fatalf("task causes = %+v, want old selected run request %s", causes, target.ID())
+	}
+}
+
 func TestDispatchQueuedRunLaunchErrorsWhenRunIDMissing(t *testing.T) {
 	rt, _ := newRunLaunchDispatchRuntime(t)
 

@@ -66,11 +66,14 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		limit = defaultRunLaunchDispatchLimit
 	}
 
-	requests, err := fetchFactoryRunRequestedEvents(r.store, limit)
+	dispatched, err := dispatchedFactoryOrderIDs(r.store)
 	if err != nil {
 		return result, err
 	}
-	dispatched, err := dispatchedFactoryOrderIDs(r.store)
+	requests, err := fetchFactoryRunRequestedEvents(r.store, limit)
+	if onlyRunID != "" {
+		requests, err = fetchFactoryRunRequestedEventByRunID(r.store, onlyRunID)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -120,7 +123,7 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
 	}
 	if !matchedRequestedRun {
-		errs = append(errs, fmt.Errorf("queued run %q not found in dispatch window", onlyRunID))
+		errs = append(errs, fmt.Errorf("queued run %q not found", onlyRunID))
 	}
 
 	return result, errors.Join(errs...)
@@ -180,6 +183,30 @@ func fetchFactoryRunRequestedEvents(s store.Store, limit int) ([]event.Event, er
 		cursor = page.Cursor()
 	}
 	return out, nil
+}
+
+func fetchFactoryRunRequestedEventByRunID(s store.Store, runID string) ([]event.Event, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(EventTypeFactoryRunRequested, 100, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("fetch factory.run.requested events: %w", err)
+		}
+		for _, item := range page.Items() {
+			content, ok := item.Content().(FactoryRunRequestedContent)
+			if ok && content.RunID == runID {
+				return []event.Event{item}, nil
+			}
+		}
+		if !page.HasMore() {
+			return nil, nil
+		}
+		cursor = page.Cursor()
+	}
 }
 
 func dispatchedFactoryOrderIDs(s store.Store) (map[string]types.EventID, error) {
