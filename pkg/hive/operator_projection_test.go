@@ -146,6 +146,9 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "reviewer") {
 		t.Fatalf("missing reviewer role binding: %+v", projection.RoleBindings)
 	}
+	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "implementer") {
+		t.Fatalf("missing runtime implementer role binding: %+v", projection.RoleBindings)
+	}
 	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
 		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
 	}
@@ -166,6 +169,224 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	}
 	if !containsString(projection.BoundaryFlags, "read_only_site_consumer") || !containsString(projection.ValidationRefs, civilizationAssemblyReadOnlyRoutePath) {
 		t.Fatalf("missing read-only boundary evidence: flags=%+v validation=%+v", projection.BoundaryFlags, projection.ValidationRefs)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDerivesCompletedRuntimeRoster(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_runtime_builder",
+	})
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.ActorRoster) != 1 {
+		t.Fatalf("actor roster = %+v, want one runtime-observed actor", projection.ActorRoster)
+	}
+	actor := projection.ActorRoster[0]
+	if actor.ActorID != "actor_runtime_builder" || actor.IdentityMode != "runtime_observed" || actor.Status != "observed_completed_run" {
+		t.Fatalf("actor roster entry = %+v, want observed completed runtime actor", actor)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, "actor_runtime_builder", "implementer") {
+		t.Fatalf("missing completed-run implementer role binding: %+v", projection.RoleBindings)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_runtime_builder", "observed_completed_run") {
+		t.Fatalf("missing completed-run lifecycle status: %+v", projection.AgentLifecycleSummary)
+	}
+	if civilizationProjectionHasUnavailableField(projection, "actor_roster") {
+		t.Fatalf("actor_roster marked unavailable despite completed runtime evidence: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionRuntimeStatusOverridesLifecycleLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "observed_completed_run") {
+		t.Fatalf("runtime status did not override lifecycle liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed_run") {
+		t.Fatalf("runtime lifecycle status did not override stale active lifecycle: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionRunCompletionOverridesMidRunLifecycleLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	decisionID := newTestEventID(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeAgentLifecycleTransitioned, AgentLifecycleTransitionedContent{
+		ActorID:            actorID,
+		PreviousState:      "candidate",
+		RequestedState:     "active",
+		ResultingState:     "active",
+		RequestingActor:    actorID,
+		AuthorityRequestID: requestID,
+		DecisionEventID:    decisionID,
+		Reason:             "activated during run",
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "projected", "observed_completed_run") {
+		t.Fatalf("run completion did not override mid-run lifecycle liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed_run") {
+		t.Fatalf("run completion did not update lifecycle status: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionLaterLifecycleStatusOverridesRuntimeLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	decisionID := newTestEventID(t)
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeAgentLifecycleTransitioned, AgentLifecycleTransitionedContent{
+		ActorID:            actorID,
+		PreviousState:      "active",
+		RequestedState:     "retired",
+		ResultingState:     "retired",
+		RequestingActor:    actorID,
+		AuthorityRequestID: requestID,
+		DecisionEventID:    decisionID,
+		Reason:             "completed mandate",
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "retired") {
+		t.Fatalf("later lifecycle status did not override older runtime liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "retired") {
+		t.Fatalf("later lifecycle row did not remain terminal: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionClassifiesStoppedRunningAgentsAsObserved(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_active_builder",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: "actor_stopped_reviewer",
+	})
+	appendEvent(EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "reviewer",
+		Role:       "reviewer",
+		StopReason: "handoff",
+		Iterations: 1,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorStatus(projection, "actor_active_builder", "active") {
+		t.Fatalf("missing active runtime actor: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasActorModeStatus(projection, "actor_active_builder", "runtime", "active") {
+		t.Fatalf("active runtime actor did not keep runtime identity mode: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasActorStatus(projection, "actor_stopped_reviewer", "observed") {
+		t.Fatalf("missing observed stopped runtime actor: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasActorModeStatus(projection, "actor_stopped_reviewer", "runtime_observed", "observed") {
+		t.Fatalf("stopped runtime actor did not use observed identity mode: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_active_builder", "active") {
+		t.Fatalf("missing active lifecycle row: %+v", projection.AgentLifecycleSummary)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_stopped_reviewer", "observed") {
+		t.Fatalf("missing observed stopped lifecycle row: %+v", projection.AgentLifecycleSummary)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, "actor_active_builder", "implementer") || !civilizationProjectionHasRoleBinding(projection, "actor_stopped_reviewer", "reviewer") {
+		t.Fatalf("missing mixed runtime role bindings: %+v", projection.RoleBindings)
 	}
 }
 
@@ -552,6 +773,24 @@ func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProject
 	return false
 }
 
+func civilizationProjectionHasActorStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
+	for _, actor := range projection.ActorRoster {
+		if actor.ActorID == actorID && actor.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasActorModeStatus(projection CivilizationAssemblyProjection, actorID, identityMode, status string) bool {
+	for _, actor := range projection.ActorRoster {
+		if actor.ActorID == actorID && actor.IdentityMode == identityMode && actor.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
 func civilizationProjectionHasLifecycleStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
 	for _, lifecycle := range projection.AgentLifecycleSummary {
 		if lifecycle.ActorID == actorID && lifecycle.Status == status {
@@ -875,6 +1114,17 @@ func TestQueuedRunLifecycleFromBriefRejectsIssueScanBriefWithEmptyLifecycle(t *t
 	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
 	if err == nil || !strings.Contains(err.Error(), "missing development lifecycle") {
 		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want missing lifecycle error", err, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefAllowsLegacyKindOnlyIssueScanBrief(t *testing.T) {
+	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","required_agent_flow":["research_issue_and_repo_context"]}`)
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle for legacy kind-only issue scan", kind, version, lifecycle, agentPlan)
 	}
 }
 
@@ -1295,9 +1545,16 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	if len(runningEvidence.AgentEvents.ActiveAgents) != 1 {
 		t.Fatalf("active agents = %+v, want one agent", runningEvidence.AgentEvents.ActiveAgents)
 	}
+	if len(runningEvidence.AgentEvents.ObservedAgents) != 1 {
+		t.Fatalf("observed agents = %+v, want one observed agent", runningEvidence.AgentEvents.ObservedAgents)
+	}
 	active := runningEvidence.AgentEvents.ActiveAgents[0]
 	if active.Name != "builder" || active.ActorID != "actor_builder" || active.SpawnedEventID != spawned.ID().Value() {
 		t.Fatalf("active agent evidence = %+v", active)
+	}
+	observed := runningEvidence.AgentEvents.ObservedAgents[0]
+	if observed.Name != "builder" || observed.ActorID != "actor_builder" || observed.SpawnedEventID != spawned.ID().Value() {
+		t.Fatalf("observed agent evidence = %+v", observed)
 	}
 
 	stopped := appendEvent(EventTypeAgentStopped, AgentStoppedContent{
@@ -1332,6 +1589,16 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
+	}
+	if len(completedEvidence.AgentEvents.ActiveAgents) != 0 {
+		t.Fatalf("active agents after completion = %+v, want none", completedEvidence.AgentEvents.ActiveAgents)
+	}
+	if len(completedEvidence.AgentEvents.ObservedAgents) != 1 {
+		t.Fatalf("observed agents after completion = %+v, want completed-run agent retained", completedEvidence.AgentEvents.ObservedAgents)
+	}
+	observed = completedEvidence.AgentEvents.ObservedAgents[0]
+	if observed.Name != "builder" || observed.ActorID != "actor_builder" || observed.SpawnedEventID != spawned.ID().Value() {
+		t.Fatalf("completed observed agent evidence = %+v", observed)
 	}
 	if completedEvidence.AgentEvents.LastAgentEventID != stopped.ID().Value() {
 		t.Fatalf("last agent event = %q, want %q", completedEvidence.AgentEvents.LastAgentEventID, stopped.ID().Value())
@@ -1645,6 +1912,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *
 	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
 	}
+	if len(completedEvidence.AgentEvents.ObservedAgents) != 1 || completedEvidence.AgentEvents.ObservedAgents[0].SpawnedEventID != secondSpawned.ID().Value() {
+		t.Fatalf("completed observed agents = %+v, want second-run agent retained", completedEvidence.AgentEvents.ObservedAgents)
+	}
 
 	appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    "late-builder",
@@ -1659,6 +1929,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *
 	}
 	if afterLateSpawnEvidence.AgentEvents.ObservedActive != 0 || len(afterLateSpawnEvidence.AgentEvents.ActiveAgents) != 0 {
 		t.Fatalf("late spawn reopened active state: %+v", afterLateSpawnEvidence.AgentEvents)
+	}
+	if len(afterLateSpawnEvidence.AgentEvents.ObservedAgents) != 1 || afterLateSpawnEvidence.AgentEvents.ObservedAgents[0].SpawnedEventID != secondSpawned.ID().Value() {
+		t.Fatalf("late spawn changed completed-run observed agents: %+v", afterLateSpawnEvidence.AgentEvents.ObservedAgents)
 	}
 }
 
