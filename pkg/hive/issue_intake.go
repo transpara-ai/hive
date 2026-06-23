@@ -16,19 +16,29 @@ const (
 	IssueScanDefaultPolicyRef    = "civilization/repo-issue-scan-to-factory-order-v0.1"
 	issueScanBriefKind           = "transpara_ai_github_issue_scan"
 	issueScanLifecycleVersionV02 = "civilization_issue_to_human_ready_pr_v0.2"
+	issueScanLifecycleVersionV03 = "civilization_issue_to_human_ready_pr_v0.3"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, evidence, roles, boundaries, gates, or step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.3"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.4"
 	issueScanSourceType       = "github.issue"
 )
 
 type issueScanBriefIssuePayload struct {
+	Rank   int      `json:"rank,omitempty"`
 	Repo   string   `json:"repo"`
 	Number int      `json:"number"`
 	Title  string   `json:"title"`
 	URL    string   `json:"url"`
 	Labels []string `json:"labels,omitempty"`
 	Body   string   `json:"body_excerpt,omitempty"`
+}
+
+type issueScanSelectionPolicyPayload struct {
+	PolicyID       string   `json:"policy_id"`
+	SelectedRank   int      `json:"selected_rank"`
+	CandidateCount int      `json:"candidate_count"`
+	RankingInputs  []string `json:"ranking_inputs"`
+	Rationale      string   `json:"rationale"`
 }
 
 type issueScanLifecycleStage struct {
@@ -259,20 +269,22 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		return nil, err
 	}
 	brief := struct {
-		Kind                 string                       `json:"kind"`
-		LifecycleVersion     string                       `json:"lifecycle_version"`
-		SelectedIssue        issueScanBriefIssuePayload   `json:"selected_issue"`
-		ScannedRepos         []string                     `json:"scanned_repos"`
-		ScannedIssueCount    int                          `json:"scanned_issue_count"`
-		CandidateIssues      []issueScanBriefIssuePayload `json:"candidate_issues"`
-		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
-		DevelopmentLifecycle []issueScanLifecycleStage    `json:"development_lifecycle"`
-		AgentExecutionPlan   []issueScanAgentPlanStep     `json:"agent_execution_plan"`
-		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
+		Kind                 string                          `json:"kind"`
+		LifecycleVersion     string                          `json:"lifecycle_version"`
+		SelectedIssue        issueScanBriefIssuePayload      `json:"selected_issue"`
+		SelectionPolicy      issueScanSelectionPolicyPayload `json:"selection_policy"`
+		ScannedRepos         []string                        `json:"scanned_repos"`
+		ScannedIssueCount    int                             `json:"scanned_issue_count"`
+		CandidateIssues      []issueScanBriefIssuePayload    `json:"candidate_issues"`
+		RequiredAgentFlow    []string                        `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanLifecycleStage       `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanAgentPlanStep        `json:"agent_execution_plan"`
+		AuthorityBoundaries  []string                        `json:"authority_boundaries"`
 	}{
 		Kind:                 issueScanBriefKind,
 		LifecycleVersion:     issueScanLifecycleVersion,
-		SelectedIssue:        issueScanBriefIssue(selected),
+		SelectedIssue:        issueScanBriefIssue(selected, 1),
+		SelectionPolicy:      issueScanSelectionPolicy(candidates),
 		ScannedRepos:         issueScanRepos(candidates),
 		ScannedIssueCount:    len(candidates),
 		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
@@ -285,8 +297,8 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 			"ready_for_Human_result_PR_only",
 		},
 	}
-	for _, issue := range candidates {
-		brief.CandidateIssues = append(brief.CandidateIssues, issueScanBriefIssue(issue))
+	for i, issue := range candidates {
+		brief.CandidateIssues = append(brief.CandidateIssues, issueScanBriefIssue(issue, i+1))
 	}
 	encoded, err := json.Marshal(brief)
 	if err != nil {
@@ -522,8 +534,24 @@ func issueScanDevelopmentLifecycleV02() ([]issueScanLifecycleStage, error) {
 	return stages, nil
 }
 
-func issueScanBriefIssue(issue GitHubIssueCandidate) issueScanBriefIssuePayload {
+func issueScanSelectionPolicy(candidates []GitHubIssueCandidate) issueScanSelectionPolicyPayload {
+	return issueScanSelectionPolicyPayload{
+		PolicyID:       "scanner_order_first_candidate_v0.1",
+		SelectedRank:   1,
+		CandidateCount: len(candidates),
+		RankingInputs: []string{
+			"validated_transpara_ai_repo_scope",
+			"scanner_return_order",
+			"label_filters",
+			"repo_scan_order",
+		},
+		Rationale: "Select the first validated candidate after the scanner has applied repo, label, state, and limit filters; preserve all candidates and ranks for later civic debate.",
+	}
+}
+
+func issueScanBriefIssue(issue GitHubIssueCandidate, rank int) issueScanBriefIssuePayload {
 	return issueScanBriefIssuePayload{
+		Rank:   rank,
 		Repo:   issue.Repo,
 		Number: issue.Number,
 		Title:  issue.Title,
