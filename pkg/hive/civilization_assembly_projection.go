@@ -175,7 +175,19 @@ type CivilizationAssemblyResidualRisk struct {
 }
 
 type civilizationAssemblyFactoryOrderWorkEvidence struct {
-	TaskRefs       []string
+	TaskRefs                    []string
+	TestRunRefs                 []string
+	GateResultRefs              []string
+	SourceRefs                  []string
+	LifecycleSourceTruncated    bool
+	VerificationSourceTruncated bool
+}
+
+type civilizationAssemblyTaskLifecycleEvidence struct {
+	SourceRefs []string
+}
+
+type civilizationAssemblyTaskVerificationEvidence struct {
 	TestRunRefs    []string
 	GateResultRefs []string
 	SourceRefs     []string
@@ -212,7 +224,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 			SourceRefs: []string{civilizationAssemblyReadOnlyRoutePath},
 		},
 		OpenGateSummary:             civilizationAssemblyOpenGates(operatorProjection),
-		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection, factoryOrdersTruncated, limit),
+		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection, factoryOrdersTruncated, factoryOrderWorkEvidence, limit),
 		WithheldOrUnavailableFields: civilizationAssemblyUnavailableFields(operatorProjection, factoryOrders, factoryOrdersQueryFailed),
 		BoundaryFlags: []string{
 			"eventgraph_derived",
@@ -452,6 +464,16 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	byID := map[string]*CivilizationAssemblyFactoryOrder{}
 	taskStore := work.NewTaskStore(s, nil, nil)
 	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
+	lifecycleByTask, lifecycleTruncated, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
+	}
+	workEvidence.LifecycleSourceTruncated = lifecycleTruncated
+	verificationByTask, verificationTruncated, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task verification evidence refs: %v", err))
+	}
+	workEvidence.VerificationSourceTruncated = verificationTruncated
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskCreatedContent)
 		if !ok {
@@ -472,9 +494,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			}
 			byID[orderID] = order
 		}
-		if order.RiskClass == "unknown" && strings.TrimSpace(content.RiskClass) != "" {
-			order.RiskClass = strings.TrimSpace(content.RiskClass)
-		}
+		order.RiskClass = civilizationAssemblyFactoryOrderRiskClass(order.RiskClass, content.RiskClass)
 		order.RequirementRefs = compactStrings(append(order.RequirementRefs, content.RequirementIDs...))
 		order.AcceptanceCriterionRefs = compactStrings(append(order.AcceptanceCriterionRefs, content.AcceptanceCriterionIDs...))
 		order.TaskRefs = compactStrings(append(order.TaskRefs, ev.ID().Value()))
@@ -487,16 +507,14 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			continue
 		}
 		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
-		workEvidence.TestRunRefs = append(workEvidence.TestRunRefs, taskProjection.Verification.TestRunIDs...)
-		workEvidence.GateResultRefs = append(workEvidence.GateResultRefs, taskProjection.Verification.GateResultIDs...)
-		if !taskProjection.LastTransitionEvent.IsZero() {
-			workEvidence.SourceRefs = append(workEvidence.SourceRefs, taskProjection.LastTransitionEvent.Value())
+		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, lifecycleEvidence.SourceRefs...)
 		}
-		verificationSourceRefs, err := civilizationAssemblyWorkTaskVerificationSourceRefs(s, ev.ID())
-		if err != nil {
-			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s verification evidence source refs: %v", ev.ID().Value(), err))
+		if verificationEvidence, ok := verificationByTask[ev.ID()]; ok {
+			workEvidence.TestRunRefs = append(workEvidence.TestRunRefs, verificationEvidence.TestRunRefs...)
+			workEvidence.GateResultRefs = append(workEvidence.GateResultRefs, verificationEvidence.GateResultRefs...)
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, verificationEvidence.SourceRefs...)
 		}
-		workEvidence.SourceRefs = append(workEvidence.SourceRefs, verificationSourceRefs...)
 	}
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
 	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
@@ -528,20 +546,83 @@ func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types
 	return taskProjection, legacyProjection, nil
 }
 
-func civilizationAssemblyWorkTaskVerificationSourceRefs(s store.Store, taskID types.EventID) ([]string, error) {
-	page, err := s.ByType(work.EventTypeTaskVerificationAttached, 1000, types.None[types.Cursor]())
+func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, error) {
+	page, err := s.ByType(work.EventTypeTaskLifecycleTransitioned, limit, types.None[types.Cursor]())
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskVerificationAttached.Value(), err)
+		return nil, false, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskLifecycleTransitioned.Value(), err)
 	}
-	refs := []string{}
+	byTask := map[types.EventID]civilizationAssemblyTaskLifecycleEvidence{}
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskLifecycleTransitionContent)
+		if !ok {
+			return nil, false, fmt.Errorf("%s", contentTypeError(ev, "work.TaskLifecycleTransitionContent"))
+		}
+		evidence := byTask[content.TaskID]
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
+	}
+	for taskID, evidence := range byTask {
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), nil
+}
+
+func civilizationAssemblyWorkTaskVerificationEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskVerificationEvidence, bool, error) {
+	page, err := s.ByType(work.EventTypeTaskVerificationAttached, limit, types.None[types.Cursor]())
+	if err != nil {
+		return nil, false, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskVerificationAttached.Value(), err)
+	}
+	byTask := map[types.EventID]civilizationAssemblyTaskVerificationEvidence{}
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskVerificationAttachedContent)
-		if !ok || content.TaskID != taskID {
-			continue
+		if !ok {
+			return nil, false, fmt.Errorf("%s", contentTypeError(ev, "work.TaskVerificationAttachedContent"))
 		}
-		refs = append(refs, ev.ID().Value())
+		evidence := byTask[content.TaskID]
+		evidence.TestRunRefs = append(evidence.TestRunRefs, content.TestRunIDs...)
+		evidence.GateResultRefs = append(evidence.GateResultRefs, content.GateResultIDs...)
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
 	}
-	return compactStrings(refs), nil
+	for taskID, evidence := range byTask {
+		evidence.TestRunRefs = compactStrings(evidence.TestRunRefs)
+		evidence.GateResultRefs = compactStrings(evidence.GateResultRefs)
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), nil
+}
+
+func civilizationAssemblyFactoryOrderRiskClass(existing, candidate string) string {
+	existing = valueOr(existing, "unknown")
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return existing
+	}
+	if civilizationAssemblyRiskClassRank(candidate) > civilizationAssemblyRiskClassRank(existing) {
+		return candidate
+	}
+	return existing
+}
+
+func civilizationAssemblyRiskClassRank(riskClass string) int {
+	switch strings.ToLower(strings.TrimSpace(riskClass)) {
+	case "critical":
+		return 50
+	case "high":
+		return 40
+	case "medium":
+		return 30
+	case "low":
+		return 20
+	case "info", "informational":
+		return 10
+	case "unknown", "":
+		return 0
+	default:
+		return 5
+	}
 }
 
 func civilizationAssemblyProjectedWorkTaskStatus(taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection) string {
@@ -580,6 +661,9 @@ func civilizationAssemblyFactoryOrderStatus(existing, candidate string) string {
 	return existing
 }
 
+// FactoryOrder status is a highest-attention rollup across its Work task refs:
+// failure/blocking states dominate active work, which dominates terminal
+// success, then assignment/readiness/seeded states.
 func civilizationAssemblyFactoryOrderStatusRank(status string) int {
 	switch status {
 	case "work_task_failed", "work_task_repair_required", "work_task_rejected", "work_task_policy_blocked", "work_task_blocked":
@@ -660,8 +744,8 @@ func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyG
 	return gates
 }
 
-func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, limit int) []CivilizationAssemblyResidualRisk {
-	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+1)
+func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence, limit int) []CivilizationAssemblyResidualRisk {
+	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+3)
 	for i, limitation := range p.RuntimeEvidence.Limitations {
 		risks = append(risks, CivilizationAssemblyResidualRisk{
 			ID:       fmt.Sprintf("runtime_limitation_%02d", i+1),
@@ -690,6 +774,30 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Severity: "info",
 			Status:   "open",
 			Summary:  fmt.Sprintf("FactoryOrder summary is bounded to %d work.task.created events; records outside that projection page may be omitted.", limit),
+		})
+	}
+	if factoryOrderWorkEvidence.LifecycleSourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_lifecycle_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder lifecycle provenance is bounded to %d work.task.lifecycle.transitioned events; transition source refs outside that projection page may be omitted.", limit),
+		})
+	}
+	if factoryOrderWorkEvidence.VerificationSourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_verification_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder verification evidence is bounded to %d work.task.verification.attached events; evidence refs outside that projection page may be omitted.", limit),
 		})
 	}
 	return risks
@@ -727,14 +835,6 @@ func civilizationAssemblyUnavailableFields(p OperatorProjection, factoryOrders [
 		})
 	}
 	return fields
-}
-
-func civilizationAssemblyFactoryOrderSourceRefs(factoryOrders []CivilizationAssemblyFactoryOrder) []string {
-	refs := []string{}
-	for _, order := range factoryOrders {
-		refs = append(refs, order.TaskRefs...)
-	}
-	return compactStrings(refs)
 }
 
 func civilizationAssemblySourceRefs(p OperatorProjection) []string {

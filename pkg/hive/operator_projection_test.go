@@ -334,6 +334,34 @@ func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderSummaryLimit(t *tes
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderVerificationSourceLimit(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Bounded verification provenance",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_verification_limit_001",
+		RiskClass:      "medium",
+	})
+	appendEvent(work.EventTypeTaskVerificationAttached, work.TaskVerificationAttachedContent{
+		TaskID:        taskEvent.ID(),
+		TestRunIDs:    []string{"test_run_limit_001"},
+		GateResultIDs: []string{"gate_result_limit_001"},
+		AttachedBy:    actorID,
+	})
+	appendEvent(work.EventTypeTaskVerificationAttached, work.TaskVerificationAttachedContent{
+		TaskID:        taskEvent.ID(),
+		TestRunIDs:    []string{"test_run_limit_002"},
+		GateResultIDs: []string{"gate_result_limit_002"},
+		AttachedBy:    actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 1)
+
+	if !civilizationProjectionHasResidualRisk(projection, "factory_order_verification_source_limit_01") {
+		t.Fatalf("residual risks = %+v, want factory_order_verification_source_limit_01", projection.ResidualRiskSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionMergesFactoryOrderTaskRefs(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 	firstTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
@@ -375,6 +403,49 @@ func TestBuildCivilizationAssemblyProjectionMergesFactoryOrderTaskRefs(t *testin
 		if !containsString(order.AcceptanceCriterionRefs, want) {
 			t.Fatalf("acceptance refs = %+v, missing %s", order.AcceptanceCriterionRefs, want)
 		}
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionRollsUpFactoryOrderStatusAndRisk(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	certifiedTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Certified FactoryOrder task",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_rollup_001",
+		RiskClass:      "low",
+	})
+	failedTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Failed FactoryOrder task",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_rollup_001",
+		RiskClass:      "high",
+	})
+	appendEvent(work.EventTypeTaskLifecycleTransitioned, work.TaskLifecycleTransitionContent{
+		TaskID:    certifiedTask.ID(),
+		FromState: work.StatusCreated,
+		ToState:   work.StatusCertified,
+		Reason:    "certified for rollup test",
+		ChangedBy: actorID,
+	})
+	appendEvent(work.EventTypeTaskLifecycleTransitioned, work.TaskLifecycleTransitionContent{
+		TaskID:    failedTask.ID(),
+		FromState: work.StatusCreated,
+		ToState:   work.StatusFailed,
+		Reason:    "failure should dominate rollup",
+		ChangedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.FactoryOrderSummary) != 1 {
+		t.Fatalf("factory orders = %+v, want one merged order", projection.FactoryOrderSummary)
+	}
+	order := projection.FactoryOrderSummary[0]
+	if order.Status != "work_task_failed" {
+		t.Fatalf("rollup status = %q, want work_task_failed", order.Status)
+	}
+	if order.RiskClass != "high" {
+		t.Fatalf("rollup risk class = %q, want high", order.RiskClass)
 	}
 }
 
