@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.0.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.1.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
