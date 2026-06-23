@@ -113,6 +113,40 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	}
 }
 
+func TestDispatchQueuedRunLaunchesPreservesGenericNonObjectBrief(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_string_brief", json.RawMessage(`"dispatch this generic task"`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic non-object brief artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
 func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	requestEvent := appendStaleRunLaunchRequest(t, rt.store, writer)
@@ -367,6 +401,38 @@ func appendValidatedRunLaunch(t *testing.T, s store.Store, writer *operatorRunLa
 	}
 	t.Fatalf("missing factory.run.requested for run %s", result.RunID)
 	return event.Event{}
+}
+
+func appendRunLaunchRequestWithBrief(t *testing.T, s store.Store, writer *operatorRunLaunchWriter, runID string, brief json.RawMessage) event.Event {
+	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	content := FactoryRunRequestedContent{
+		RunID:      runID,
+		IntakeID:   "intake_" + runID,
+		OperatorID: "user_" + runID,
+		Title:      "Generic queued run",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "operator-launch",
+		},
+		Budget:      RunLaunchBudget{MaxIterations: 4, MaxCostUSD: 12.5},
+		TargetRepos: []string{"transpara-ai/hive"},
+		Sources:     []RunLaunchSource{{Type: "issue", Ref: "https://github.com/transpara-ai/hive/issues/142"}},
+		Brief:       append(json.RawMessage(nil), brief...),
+	}
+	ev, err := writer.factory.Create(EventTypeFactoryRunRequested, writer.human, content, []types.EventID{head.Unwrap().ID()}, writer.conv, s, writer.signer)
+	if err != nil {
+		t.Fatalf("create factory.run.requested with brief: %v", err)
+	}
+	stored, err := s.Append(ev)
+	if err != nil {
+		t.Fatalf("append factory.run.requested with brief: %v", err)
+	}
+	return stored
 }
 
 type failOnceTaskArtifactAppendStore struct {

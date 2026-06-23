@@ -140,6 +140,7 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			errs = append(errs, fmt.Errorf("run %q: seed factory order: %w", content.RunID, err))
 			continue
 		}
+		dispatched[orderID] = task.ID
 		if hasPlanArtifact {
 			if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), task.ID, planArtifactBody); err != nil {
 				result.Failed++
@@ -147,7 +148,6 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 				continue
 			}
 		}
-		dispatched[orderID] = task.ID
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
@@ -185,14 +185,16 @@ func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (str
 	if len(raw) == 0 {
 		return "", false, nil
 	}
+	if raw[0] != '{' {
+		return "", false, nil
+	}
 	var meta struct {
-		Kind             string `json:"kind"`
-		LifecycleVersion string `json:"lifecycle_version"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return "", false, fmt.Errorf("decode run launch brief for execution plan artifact: %w", err)
 	}
-	if meta.Kind != issueScanBriefKind {
+	if strings.TrimSpace(meta.Kind) != issueScanBriefKind {
 		return "", false, nil
 	}
 	if _, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw); err != nil {
