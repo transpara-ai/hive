@@ -188,14 +188,30 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if task.FactoryOrderID != result.DispatchedOrderIDs[0] {
 		t.Fatalf("task factory order = %q, want %q", task.FactoryOrderID, result.DispatchedOrderIDs[0])
 	}
-	if !containsIssueScanValue(task.ExpectedOutputs, "ready-for-Human result pull request") {
-		t.Fatalf("task expected outputs = %+v, want ready-for-Human result pull request", task.ExpectedOutputs)
+	expectedOutputs := []string{
+		"ready-for-Human result pull request",
+		"exact-head adversarial review with zero blockers",
+		"validation evidence and operator-facing status update",
 	}
-	if !containsIssueScanValue(task.ExpectedOutputs, "exact-head adversarial review with zero blockers") {
-		t.Fatalf("task expected outputs = %+v, want exact-head adversarial review with zero blockers", task.ExpectedOutputs)
+	if len(task.ExpectedOutputs) != len(expectedOutputs) {
+		t.Fatalf("task expected outputs = %+v, want exactly %+v", task.ExpectedOutputs, expectedOutputs)
 	}
-	if strings.Contains(strings.Join(task.ExpectedOutputs, "\n"), "draft pull request") {
-		t.Fatalf("task expected outputs = %+v, must not advertise draft PR as final output", task.ExpectedOutputs)
+	for _, expected := range expectedOutputs {
+		if !containsIssueScanValue(task.ExpectedOutputs, expected) {
+			t.Fatalf("task expected outputs = %+v, want %q", task.ExpectedOutputs, expected)
+		}
+	}
+	for _, rendered := range []struct {
+		field string
+		value string
+	}{
+		{field: "expected outputs", value: strings.Join(task.ExpectedOutputs, "\n")},
+		{field: "description", value: task.Description},
+	} {
+		lower := strings.ToLower(rendered.value)
+		if strings.Contains(lower, "draft") || strings.Contains(lower, "governed execution artifact") {
+			t.Fatalf("task %s = %q, must not advertise draft or governed execution artifact as final output", rendered.field, rendered.value)
+		}
 	}
 	if !strings.Contains(task.Description, "https://github.com/transpara-ai/hive/issues/321") {
 		t.Fatalf("task description does not include issue URL: %s", task.Description)

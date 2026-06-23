@@ -47,7 +47,15 @@ func cmdFactoryScanIssues(args []string) error {
 	if *maxCostUSD < 0 {
 		return fmt.Errorf("--max-cost-usd must be zero or greater")
 	}
-	normalizedRepos, err := resolveIssueScanRepos(repos, *useRegistry, filepath.Join(findHiveDir(), "repos.json"))
+	registryPath := ""
+	if len(repos) == 0 && *useRegistry {
+		var err error
+		registryPath, err = issueScanRegistryPath()
+		if err != nil {
+			return err
+		}
+	}
+	normalizedRepos, err := resolveIssueScanRepos(repos, *useRegistry, registryPath)
 	if err != nil {
 		return err
 	}
@@ -123,6 +131,30 @@ func resolveIssueScanRepos(values []string, useRegistry bool, registryPath strin
 	return issueScanReposFromRegistry(registryPath)
 }
 
+func issueScanRegistryPath() (string, error) {
+	hiveDir := findHiveDir()
+	if _, err := os.Stat(filepath.Join(hiveDir, "agents")); err != nil {
+		return "", fmt.Errorf("locate hive repo for --registry: agents directory not found from %s", hiveDir)
+	}
+	goMod, err := os.ReadFile(filepath.Join(hiveDir, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("locate hive repo for --registry: read go.mod: %w", err)
+	}
+	if !issueScanGoModDeclaresHiveModule(goMod) {
+		return "", fmt.Errorf("locate hive repo for --registry: %s is not the Hive repo root", hiveDir)
+	}
+	return filepath.Join(hiveDir, "repos.json"), nil
+}
+
+func issueScanGoModDeclaresHiveModule(goMod []byte) bool {
+	for _, line := range strings.Split(string(goMod), "\n") {
+		if strings.TrimSpace(line) == "module github.com/transpara-ai/hive" {
+			return true
+		}
+	}
+	return false
+}
+
 func issueScanReposFromRegistry(registryPath string) ([]string, error) {
 	registryPath = strings.TrimSpace(registryPath)
 	if registryPath == "" {
@@ -156,6 +188,8 @@ func issueScanRepoSlugFromRegistryRepo(repo registry.Repo) string {
 	if raw == "" && strings.TrimSpace(repo.Name) != "" {
 		raw = "transpara-ai/" + strings.TrimSpace(repo.Name)
 	}
+	raw = strings.ToLower(raw)
+	raw = strings.TrimRight(raw, "/")
 	raw = strings.TrimSuffix(raw, ".git")
 	raw = strings.TrimPrefix(raw, "ssh://git@")
 	raw = strings.TrimPrefix(raw, "git@")
@@ -164,7 +198,8 @@ func issueScanRepoSlugFromRegistryRepo(repo registry.Repo) string {
 	raw = strings.TrimPrefix(raw, "github.com:")
 	raw = strings.TrimPrefix(raw, "github.com/")
 	raw = strings.Trim(raw, "/")
-	return strings.ToLower(raw)
+	raw = strings.TrimSuffix(raw, ".git")
+	return raw
 }
 
 func normalizeIssueScanRepos(values []string) ([]string, error) {

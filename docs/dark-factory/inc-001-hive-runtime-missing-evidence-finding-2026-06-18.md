@@ -4,7 +4,7 @@
 
 This packet records the Hive-side runtime and deployment evidence posture for
 the Test 001 cross-repo runtime-doctrine drift tabletop tracked by
-`transpara-ai/civilization-operation`.
+`transpara-ai/operation`.
 
 It is a missing-evidence finding, not a runtime observation, deployment record,
 operator projection capture, EventGraph export, authority artifact, source-repo
@@ -85,7 +85,7 @@ This packet does not prove:
 
 Hive remains the runtime owner for Hive behavior. EventGraph remains the audit
 record for emitted events. Site remains the browser UI owner for `/ops/hive`
-and related operator routes. `civilization-operation` remains the incident
+and related operator routes. `operation` remains the incident
 record owner for cross-repository tabletop reconciliation.
 
 ## Validation Plan
@@ -96,6 +96,6 @@ The owning repo validation for this documentation packet is:
 make verify
 ```
 
-The packet should be cited by `civilization-operation` only after the PR that
+The packet should be cited by `operation` only after the PR that
 adds it has passed local validation, GitHub CI, exact-head adversarial review,
 and has been merged to `origin/main`.
