@@ -144,6 +144,9 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "reviewer") {
 		t.Fatalf("missing reviewer role binding: %+v", projection.RoleBindings)
 	}
+	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "implementer") {
+		t.Fatalf("missing runtime implementer role binding: %+v", projection.RoleBindings)
+	}
 	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
 		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
 	}
@@ -164,6 +167,44 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	}
 	if !containsString(projection.BoundaryFlags, "read_only_site_consumer") || !containsString(projection.ValidationRefs, civilizationAssemblyReadOnlyRoutePath) {
 		t.Fatalf("missing read-only boundary evidence: flags=%+v validation=%+v", projection.BoundaryFlags, projection.ValidationRefs)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDerivesCompletedRuntimeRoster(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_runtime_builder",
+	})
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.ActorRoster) != 1 {
+		t.Fatalf("actor roster = %+v, want one runtime-observed actor", projection.ActorRoster)
+	}
+	actor := projection.ActorRoster[0]
+	if actor.ActorID != "actor_runtime_builder" || actor.IdentityMode != "runtime_observed" || actor.Status != "observed_completed" {
+		t.Fatalf("actor roster entry = %+v, want observed completed runtime actor", actor)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, "actor_runtime_builder", "implementer") {
+		t.Fatalf("missing completed-run implementer role binding: %+v", projection.RoleBindings)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_runtime_builder", "observed_completed") {
+		t.Fatalf("missing completed-run lifecycle status: %+v", projection.AgentLifecycleSummary)
+	}
+	if civilizationProjectionHasUnavailableField(projection, "actor_roster") {
+		t.Fatalf("actor_roster marked unavailable despite completed runtime evidence: %+v", projection.WithheldOrUnavailableFields)
 	}
 }
 
@@ -671,9 +712,16 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	if len(runningEvidence.AgentEvents.ActiveAgents) != 1 {
 		t.Fatalf("active agents = %+v, want one agent", runningEvidence.AgentEvents.ActiveAgents)
 	}
+	if len(runningEvidence.AgentEvents.ObservedAgents) != 1 {
+		t.Fatalf("observed agents = %+v, want one observed agent", runningEvidence.AgentEvents.ObservedAgents)
+	}
 	active := runningEvidence.AgentEvents.ActiveAgents[0]
 	if active.Name != "builder" || active.ActorID != "actor_builder" || active.SpawnedEventID != spawned.ID().Value() {
 		t.Fatalf("active agent evidence = %+v", active)
+	}
+	observed := runningEvidence.AgentEvents.ObservedAgents[0]
+	if observed.Name != "builder" || observed.ActorID != "actor_builder" || observed.SpawnedEventID != spawned.ID().Value() {
+		t.Fatalf("observed agent evidence = %+v", observed)
 	}
 
 	stopped := appendEvent(EventTypeAgentStopped, AgentStoppedContent{
@@ -708,6 +756,16 @@ func TestBuildOperatorProjectionRuntimeEvidenceFromRunEvents(t *testing.T) {
 	}
 	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
+	}
+	if len(completedEvidence.AgentEvents.ActiveAgents) != 0 {
+		t.Fatalf("active agents after completion = %+v, want none", completedEvidence.AgentEvents.ActiveAgents)
+	}
+	if len(completedEvidence.AgentEvents.ObservedAgents) != 1 {
+		t.Fatalf("observed agents after completion = %+v, want completed-run agent retained", completedEvidence.AgentEvents.ObservedAgents)
+	}
+	observed = completedEvidence.AgentEvents.ObservedAgents[0]
+	if observed.Name != "builder" || observed.ActorID != "actor_builder" || observed.SpawnedEventID != spawned.ID().Value() {
+		t.Fatalf("completed observed agent evidence = %+v", observed)
 	}
 	if completedEvidence.AgentEvents.LastAgentEventID != stopped.ID().Value() {
 		t.Fatalf("last agent event = %q, want %q", completedEvidence.AgentEvents.LastAgentEventID, stopped.ID().Value())
@@ -1021,6 +1079,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *
 	if completedEvidence.AgentEvents.Spawned != 1 || completedEvidence.AgentEvents.Stopped != 1 || completedEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("completed agent events = %+v", completedEvidence.AgentEvents)
 	}
+	if len(completedEvidence.AgentEvents.ObservedAgents) != 1 || completedEvidence.AgentEvents.ObservedAgents[0].SpawnedEventID != secondSpawned.ID().Value() {
+		t.Fatalf("completed observed agents = %+v, want second-run agent retained", completedEvidence.AgentEvents.ObservedAgents)
+	}
 
 	appendOperatorProjectionEventWithConversation(t, s, actorID, secondConversation, EventTypeAgentSpawned, AgentSpawnedContent{
 		Name:    "late-builder",
@@ -1035,6 +1096,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceReanchorsToLatestConversation(t *
 	}
 	if afterLateSpawnEvidence.AgentEvents.ObservedActive != 0 || len(afterLateSpawnEvidence.AgentEvents.ActiveAgents) != 0 {
 		t.Fatalf("late spawn reopened active state: %+v", afterLateSpawnEvidence.AgentEvents)
+	}
+	if len(afterLateSpawnEvidence.AgentEvents.ObservedAgents) != 1 || afterLateSpawnEvidence.AgentEvents.ObservedAgents[0].SpawnedEventID != secondSpawned.ID().Value() {
+		t.Fatalf("late spawn changed completed-run observed agents: %+v", afterLateSpawnEvidence.AgentEvents.ObservedAgents)
 	}
 }
 
