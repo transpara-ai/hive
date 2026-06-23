@@ -323,9 +323,7 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 		}
 		status := civilizationAssemblyRuntimeAgentStatus(p.RuntimeEvidence.Status, actorID, activeActors)
 		if existing, ok := actors[actorID]; ok {
-			if existing.Status == "" || existing.Status == "projected" || status == "active" {
-				existing.Status = status
-			}
+			existing.Status = status
 			actors[actorID] = existing
 			continue
 		}
@@ -333,7 +331,7 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 			ID:           valueOr(item.SpawnedEventID, "runtime:"+actorID),
 			ActorID:      actorID,
 			ActorType:    "agent",
-			IdentityMode: "runtime_observed",
+			IdentityMode: civilizationAssemblyRuntimeIdentityMode(status),
 			Status:       status,
 		}
 	}
@@ -412,12 +410,8 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 			existing.ID = valueOr(item.SpawnedEventID, "runtime:"+actorID)
 		}
 		existing.ActorID = actorID
-		if existing.ToState == "" || existing.ToState == "projected" || status == "active" {
-			existing.ToState = status
-		}
-		if existing.Status == "" || existing.Status == "projected" || status == "active" {
-			existing.Status = status
-		}
+		existing.ToState = status
+		existing.Status = status
 		byActor[actorID] = existing
 	}
 	out := make([]CivilizationAssemblyLifecycleSummary, 0, len(byActor))
@@ -490,6 +484,13 @@ func civilizationAssemblyRuntimeAgentStatus(runtimeStatus, actorID string, activ
 		return "observed_completed"
 	}
 	return "observed"
+}
+
+func civilizationAssemblyRuntimeIdentityMode(status string) string {
+	if status == "active" {
+		return "runtime"
+	}
+	return "runtime_observed"
 }
 
 func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssemblyWorkEvidence {

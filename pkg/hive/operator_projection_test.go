@@ -208,6 +208,46 @@ func TestBuildCivilizationAssemblyProjectionDerivesCompletedRuntimeRoster(t *tes
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionRuntimeStatusOverridesLifecycleLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "observed_completed") {
+		t.Fatalf("runtime status did not override lifecycle liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed") {
+		t.Fatalf("runtime lifecycle status did not override stale active lifecycle: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionClassifiesStoppedRunningAgentsAsObserved(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeRunStarted, RunStartedContent{
@@ -238,8 +278,14 @@ func TestBuildCivilizationAssemblyProjectionClassifiesStoppedRunningAgentsAsObse
 	if !civilizationProjectionHasActorStatus(projection, "actor_active_builder", "active") {
 		t.Fatalf("missing active runtime actor: %+v", projection.ActorRoster)
 	}
+	if !civilizationProjectionHasActorModeStatus(projection, "actor_active_builder", "runtime", "active") {
+		t.Fatalf("active runtime actor did not keep runtime identity mode: %+v", projection.ActorRoster)
+	}
 	if !civilizationProjectionHasActorStatus(projection, "actor_stopped_reviewer", "observed") {
 		t.Fatalf("missing observed stopped runtime actor: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasActorModeStatus(projection, "actor_stopped_reviewer", "runtime_observed", "observed") {
+		t.Fatalf("stopped runtime actor did not use observed identity mode: %+v", projection.ActorRoster)
 	}
 	if !civilizationProjectionHasLifecycleStatus(projection, "actor_active_builder", "active") {
 		t.Fatalf("missing active lifecycle row: %+v", projection.AgentLifecycleSummary)
@@ -319,6 +365,15 @@ func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProject
 func civilizationProjectionHasActorStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
 	for _, actor := range projection.ActorRoster {
 		if actor.ActorID == actorID && actor.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasActorModeStatus(projection CivilizationAssemblyProjection, actorID, identityMode, status string) bool {
+	for _, actor := range projection.ActorRoster {
+		if actor.ActorID == actorID && actor.IdentityMode == identityMode && actor.Status == status {
 			return true
 		}
 	}
