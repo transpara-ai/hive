@@ -513,6 +513,41 @@ func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefRejectsMutatedLifecycle(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	first, ok := stages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first stage = %#v, want object", stages[0])
+	}
+	first["required_roles"] = []any{"unknown_role"}
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated brief: %v", err)
+	}
+
+	_, _, lifecycle, err := queuedRunLifecycleFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "roles") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v; want role validation failure", err, lifecycle)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceRecordsBriefDecodeError(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{

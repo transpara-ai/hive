@@ -14,6 +14,8 @@ import (
 
 const (
 	IssueScanDefaultPolicyRef = "civilization/repo-issue-scan-to-factory-order-v0.1"
+	issueScanBriefKind        = "transpara_ai_github_issue_scan"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.2"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -248,8 +250,8 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		DevelopmentLifecycle []issueScanLifecycleStage    `json:"development_lifecycle"`
 		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
 	}{
-		Kind:                 "transpara_ai_github_issue_scan",
-		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.2",
+		Kind:                 issueScanBriefKind,
+		LifecycleVersion:     issueScanLifecycleVersion,
 		SelectedIssue:        issueScanBriefIssue(selected),
 		ScannedRepos:         issueScanRepos(candidates),
 		ScannedIssueCount:    len(candidates),

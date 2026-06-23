@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
@@ -721,10 +722,6 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if len(raw) == 0 {
 		return "", "", nil, nil
 	}
-	// Projection is read-only: it copies lifecycle metadata from the stored
-	// brief and marks every stage expected_not_observed. Internal issue-scan
-	// generation validates roles before writing; future external producers must
-	// validate before recording their own development_lifecycle.
 	var brief struct {
 		Kind                 string `json:"kind"`
 		LifecycleVersion     string `json:"lifecycle_version"`
@@ -740,8 +737,25 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if err := json.Unmarshal(raw, &brief); err != nil {
 		return "", "", nil, fmt.Errorf("decode brief metadata: %w", err)
 	}
+	if len(brief.DevelopmentLifecycle) == 0 {
+		return "", "", nil, nil
+	}
+	if brief.Kind != issueScanBriefKind {
+		return "", "", nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
+	}
+	if brief.LifecycleVersion != issueScanLifecycleVersion {
+		return "", "", nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
+	}
+	expected := issueScanDevelopmentLifecycle()
+	if len(brief.DevelopmentLifecycle) != len(expected) {
+		return "", "", nil, fmt.Errorf("lifecycle stage count %d does not match expected %d", len(brief.DevelopmentLifecycle), len(expected))
+	}
+	roles := StarterRoleDefinitions()
 	lifecycle := make([]OperatorQueuedRunLifecycleStage, 0, len(brief.DevelopmentLifecycle))
-	for _, stage := range brief.DevelopmentLifecycle {
+	for i, stage := range brief.DevelopmentLifecycle {
+		if err := validateQueuedRunLifecycleStage(stage.ID, stage.Name, stage.RequiredRoles, stage.RequiredEvidence, stage.AuthorityBoundary, stage.CompletionGate, expected[i], roles); err != nil {
+			return "", "", nil, fmt.Errorf("stage[%d]: %w", i, err)
+		}
 		lifecycle = append(lifecycle, OperatorQueuedRunLifecycleStage{
 			ID:                stage.ID,
 			Name:              stage.Name,
@@ -753,6 +767,41 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 		})
 	}
 	return brief.Kind, brief.LifecycleVersion, lifecycle, nil
+}
+
+func validateQueuedRunLifecycleStage(id, name string, roles, evidence []string, authorityBoundary, completionGate string, expected issueScanLifecycleStage, starterRoles map[string]*modelconfig.RoleDefinition) error {
+	switch {
+	case id != expected.ID:
+		return fmt.Errorf("id %q does not match expected %q", id, expected.ID)
+	case name != expected.Name:
+		return fmt.Errorf("name %q does not match expected %q", name, expected.Name)
+	case !sameOperatorProjectionStrings(roles, expected.RequiredRoles):
+		return fmt.Errorf("roles %v do not match expected %v", roles, expected.RequiredRoles)
+	case !sameOperatorProjectionStrings(evidence, expected.RequiredEvidence):
+		return fmt.Errorf("required evidence %v does not match expected %v", evidence, expected.RequiredEvidence)
+	case authorityBoundary != expected.AuthorityBoundary:
+		return fmt.Errorf("authority boundary %q does not match expected %q", authorityBoundary, expected.AuthorityBoundary)
+	case completionGate != expected.CompletionGate:
+		return fmt.Errorf("completion gate %q does not match expected %q", completionGate, expected.CompletionGate)
+	}
+	for _, role := range roles {
+		if starterRoles[role] == nil {
+			return fmt.Errorf("unknown role %q", role)
+		}
+	}
+	return nil
+}
+
+func sameOperatorProjectionStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) ([]projectionEvent, bool) {
