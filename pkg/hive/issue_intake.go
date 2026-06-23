@@ -236,6 +236,7 @@ func issueScanSources(candidates []GitHubIssueCandidate) []RunLaunchSource {
 }
 
 func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueCandidate) (json.RawMessage, error) {
+	lifecycle := issueScanDevelopmentLifecycle()
 	brief := struct {
 		Kind                 string                       `json:"kind"`
 		LifecycleVersion     string                       `json:"lifecycle_version"`
@@ -252,8 +253,8 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		SelectedIssue:        issueScanBriefIssue(selected),
 		ScannedRepos:         issueScanRepos(candidates),
 		ScannedIssueCount:    len(candidates),
-		RequiredAgentFlow:    issueScanRequiredAgentFlow(),
-		DevelopmentLifecycle: issueScanDevelopmentLifecycle(),
+		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
+		DevelopmentLifecycle: lifecycle,
 		AuthorityBoundaries: []string{
 			"no_merge",
 			"no_deploy",
@@ -271,8 +272,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 	return encoded, nil
 }
 
-func issueScanRequiredAgentFlow() []string {
-	lifecycle := issueScanDevelopmentLifecycle()
+func issueScanLifecycleFlow(lifecycle []issueScanLifecycleStage) []string {
 	flow := make([]string, 0, len(lifecycle))
 	for _, stage := range lifecycle {
 		flow = append(flow, stage.ID)

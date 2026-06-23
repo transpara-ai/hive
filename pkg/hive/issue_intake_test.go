@@ -76,12 +76,24 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
 	}
-	if len(brief.DevelopmentLifecycle) != len(brief.RequiredAgentFlow) {
-		t.Fatalf("development lifecycle length = %d, required flow length = %d", len(brief.DevelopmentLifecycle), len(brief.RequiredAgentFlow))
+	expectedStageIDs := []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+		"implement_on_branch",
+		"run_adversarial_review",
+		"drive_blockers_to_zero",
+		"surface_ready_for_Human_result_PR",
+	}
+	if got := strings.Join(brief.RequiredAgentFlow, ","); got != strings.Join(expectedStageIDs, ",") {
+		t.Fatalf("required agent flow = %+v, want %+v", brief.RequiredAgentFlow, expectedStageIDs)
+	}
+	if len(brief.DevelopmentLifecycle) != len(expectedStageIDs) {
+		t.Fatalf("development lifecycle length = %d, want %d", len(brief.DevelopmentLifecycle), len(expectedStageIDs))
 	}
 	for i, stage := range brief.DevelopmentLifecycle {
-		if stage.ID != brief.RequiredAgentFlow[i] {
-			t.Fatalf("stage[%d].id = %q, want required flow %q", i, stage.ID, brief.RequiredAgentFlow[i])
+		if stage.ID != expectedStageIDs[i] {
+			t.Fatalf("stage[%d].id = %q, want %q", i, stage.ID, expectedStageIDs[i])
 		}
 	}
 	roles := StarterRoleDefinitions()
