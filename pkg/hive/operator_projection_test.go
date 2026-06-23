@@ -450,7 +450,7 @@ func TestCivilizationAssemblyFactoryOrderStatusRankCoversWorkStatuses(t *testing
 		work.StatusVerified:            60,
 		work.StatusCertified:           60,
 		work.StatusRejected:            100,
-		work.StatusSuperseded:          20,
+		work.StatusSuperseded:          10,
 		work.StatusPolicyBlocked:       100,
 	}
 	for status, wantRank := range tests {

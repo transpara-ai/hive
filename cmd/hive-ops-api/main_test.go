@@ -45,8 +45,6 @@ func TestRegisterOpsAPIEventTypesProjectsWorkFactoryOrderThroughRoute(t *testing
 	t.Cleanup(func() { event.SetFallbackUnmarshaler(nil) })
 
 	registry := event.DefaultRegistry()
-	hive.RegisterWithRegistry(registry)
-	work.RegisterWithRegistry(registry)
 	s := store.NewInMemoryStore()
 	actorID := types.MustActorID("actor_00000000000000000000000000000079")
 	signer := newOpsSigner("ops-api-work-factory-order-test")
@@ -57,12 +55,15 @@ func TestRegisterOpsAPIEventTypesProjectsWorkFactoryOrderThroughRoute(t *testing
 	if _, err := s.Append(bootstrap); err != nil {
 		t.Fatalf("append bootstrap: %v", err)
 	}
-	factory := event.NewEventFactory(registry)
 	head, err := s.Head()
 	if err != nil {
 		t.Fatalf("head: %v", err)
 	}
-	taskEvent, err := factory.Create(work.EventTypeTaskCreated, actorID, work.TaskCreatedContent{
+	taskID, err := types.NewEventIDFromNew()
+	if err != nil {
+		t.Fatalf("new task event id: %v", err)
+	}
+	taskContent := work.TaskCreatedContent{
 		Title:                  "Route-visible FactoryOrder",
 		Description:            "Ops API must decode Work task content through production registration.",
 		CreatedBy:              actorID,
@@ -70,10 +71,16 @@ func TestRegisterOpsAPIEventTypesProjectsWorkFactoryOrderThroughRoute(t *testing
 		RequirementIDs:         []string{"req_ops_api_route_001"},
 		AcceptanceCriterionIDs: []string{"ac_ops_api_route_001"},
 		RiskClass:              "high",
-	}, []types.EventID{head.Unwrap().ID()}, types.MustConversationID("conv_00000000000000000000000000000079"), s, signer)
-	if err != nil {
-		t.Fatalf("create task: %v", err)
 	}
+	causes := []types.EventID{head.Unwrap().ID()}
+	convID := types.MustConversationID("conv_00000000000000000000000000000079")
+	prevHash := head.Unwrap().Hash()
+	tmp := event.NewEvent(event.CurrentEventVersion, taskID, work.EventTypeTaskCreated, types.Now(), actorID, taskContent, causes, convID, types.ZeroHash(), prevHash, types.Signature{})
+	hash, err := event.ComputeHash(event.CanonicalForm(tmp))
+	if err != nil {
+		t.Fatalf("hash task: %v", err)
+	}
+	taskEvent := event.NewEvent(event.CurrentEventVersion, taskID, work.EventTypeTaskCreated, tmp.Timestamp(), actorID, taskContent, causes, convID, hash, prevHash, types.Signature{})
 	if _, err := s.Append(taskEvent); err != nil {
 		t.Fatalf("append task: %v", err)
 	}

@@ -502,13 +502,6 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		order.TaskRefs = compactStrings(append(order.TaskRefs, ev.ID().Value()))
 		workEvidence.TaskRefs = append(workEvidence.TaskRefs, ev.ID().Value())
 		workEvidence.SourceRefs = append(workEvidence.SourceRefs, ev.ID().Value())
-
-		taskProjection, legacyProjection, err := civilizationAssemblyProjectWorkTask(taskStore, ev.ID())
-		if err != nil {
-			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
-			continue
-		}
-		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
 		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, lifecycleEvidence.SourceRefs...)
 		}
@@ -517,6 +510,13 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			workEvidence.GateResultRefs = append(workEvidence.GateResultRefs, verificationEvidence.GateResultRefs...)
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, verificationEvidence.SourceRefs...)
 		}
+
+		taskProjection, legacyProjection, err := civilizationAssemblyProjectWorkTask(taskStore, ev.ID())
+		if err != nil {
+			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
+			continue
+		}
+		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
 	}
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
 	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
@@ -686,7 +686,7 @@ func civilizationAssemblyFactoryOrderStatusRank(status string) int {
 		return 50
 	case "work_task_ready":
 		return 40
-	case "work_task_seeded", "work_task_pending", "work_task_created":
+	case "work_task_seeded", "work_task_pending", "work_task_created", "work_task_superseded":
 		return 10
 	default:
 		return 20
@@ -782,7 +782,7 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Summary:  fmt.Sprintf("FactoryOrder summary is bounded to %d work.task.created events; records outside that projection page may be omitted.", limit),
 		})
 	}
-	if factoryOrderWorkEvidence.LifecycleSourceTruncated {
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.LifecycleSourceTruncated {
 		if limit <= 0 {
 			limit = defaultOperatorProjectionLimit
 		}
@@ -794,7 +794,7 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Summary:  fmt.Sprintf("FactoryOrder lifecycle provenance is bounded to %d work.task.lifecycle.transitioned events; transition source refs outside that projection page may be omitted.", limit),
 		})
 	}
-	if factoryOrderWorkEvidence.VerificationSourceTruncated {
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.VerificationSourceTruncated {
 		if limit <= 0 {
 			limit = defaultOperatorProjectionLimit
 		}
