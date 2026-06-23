@@ -60,6 +60,7 @@ func helpText() string {
 	b.WriteString("  council [--topic ...]    Convene one deliberation\n")
 	b.WriteString("  factory daemon           Always-on governing loop (Keepalive; block on bus)\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
+	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
 	b.WriteString("  factory request-pr       Raise a draft-PR authority request (gate holds)\n")
 	b.WriteString("  factory create-pr        Create the approved draft PR (gated GitHub step)\n")
 	b.WriteString("\nRun 'hive <verb> --help' for verb-specific flags.\n")

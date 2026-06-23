@@ -26,6 +26,40 @@ func TestFactoryOrderRequiresHuman(t *testing.T) {
 	}
 }
 
+func TestFactoryScanIssuesRequiresHumanBeforeGitHub(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "scan-issues", "--repo", "transpara-ai/hive"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael"})
+	if err == nil || !strings.Contains(err.Error(), "repo") {
+		t.Fatalf("expected missing --repo error, got %v", err)
+	}
+}
+
+func TestNormalizeIssueScanReposRejectsOutsideOrg(t *testing.T) {
+	_, err := normalizeIssueScanRepos([]string{"example/hive"})
+	if err == nil || !strings.Contains(err.Error(), "transpara-ai") {
+		t.Fatalf("expected transpara-ai repo rejection, got %v", err)
+	}
+}
+
+func TestNormalizeIssueScanReposRejectsUnsafeRepoBeforeGitHub(t *testing.T) {
+	_, err := normalizeIssueScanRepos([]string{"transpara-ai/../hive"})
+	if err == nil || !strings.Contains(err.Error(), "transpara-ai") {
+		t.Fatalf("expected unsafe repo rejection, got %v", err)
+	}
+}
+
+func TestSafeIssueScanOperatorIDRejectsWhitespace(t *testing.T) {
+	if safeIssueScanOperatorID("operator michael") {
+		t.Fatal("operator id with whitespace was accepted")
+	}
+}
+
 func TestParseFactoryOrderModelOverrideFlags(t *testing.T) {
 	flags := factoryOrderModelOverrideFlags{}
 	if err := flags.models.Set("guardian=api-sonnet"); err != nil {

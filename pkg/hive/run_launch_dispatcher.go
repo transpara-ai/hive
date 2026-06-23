@@ -40,6 +40,21 @@ type RunLaunchDispatchResult struct {
 // resolver before the FactoryOrder is seeded, and the later Operate path
 // revalidates the same structured override artifact before provider creation.
 func (r *Runtime) DispatchQueuedRunLaunches(limit int) (RunLaunchDispatchResult, error) {
+	return r.dispatchQueuedRunLaunches(limit, "")
+}
+
+// DispatchQueuedRunLaunch binds one queued factory.run.requested event into the
+// Work task path. It is intended for operator commands that queue a single run
+// and want to dispatch only that run instead of flushing the daemon backlog.
+func (r *Runtime) DispatchQueuedRunLaunch(runID string) (RunLaunchDispatchResult, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return RunLaunchDispatchResult{}, fmt.Errorf("run_id is required")
+	}
+	return r.dispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit, runID)
+}
+
+func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLaunchDispatchResult, error) {
 	var result RunLaunchDispatchResult
 	if r == nil || r.store == nil || r.tasks == nil {
 		return result, nil
@@ -51,22 +66,30 @@ func (r *Runtime) DispatchQueuedRunLaunches(limit int) (RunLaunchDispatchResult,
 		limit = defaultRunLaunchDispatchLimit
 	}
 
-	requests, err := fetchFactoryRunRequestedEvents(r.store, limit)
+	dispatched, err := dispatchedFactoryOrderIDs(r.store)
 	if err != nil {
 		return result, err
 	}
-	dispatched, err := dispatchedFactoryOrderIDs(r.store)
+	requests, err := fetchFactoryRunRequestedEvents(r.store, limit)
+	if onlyRunID != "" {
+		requests, err = fetchFactoryRunRequestedEventByRunID(r.store, onlyRunID)
+	}
 	if err != nil {
 		return result, err
 	}
 
 	var errs []error
+	matchedRequestedRun := onlyRunID == ""
 	for _, request := range requests {
 		result.Scanned++
 		content, ok := request.Content().(FactoryRunRequestedContent)
 		if !ok {
 			continue
 		}
+		if onlyRunID != "" && content.RunID != onlyRunID {
+			continue
+		}
+		matchedRequestedRun = true
 		if status := strings.TrimSpace(content.Status); status != "" && !strings.EqualFold(status, "queued") {
 			result.SkippedNonQueued++
 			continue
@@ -98,6 +121,9 @@ func (r *Runtime) DispatchQueuedRunLaunches(limit int) (RunLaunchDispatchResult,
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
+	}
+	if !matchedRequestedRun {
+		errs = append(errs, fmt.Errorf("queued run %q not found", onlyRunID))
 	}
 
 	return result, errors.Join(errs...)
@@ -157,6 +183,30 @@ func fetchFactoryRunRequestedEvents(s store.Store, limit int) ([]event.Event, er
 		cursor = page.Cursor()
 	}
 	return out, nil
+}
+
+func fetchFactoryRunRequestedEventByRunID(s store.Store, runID string) ([]event.Event, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(EventTypeFactoryRunRequested, 100, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("fetch factory.run.requested events: %w", err)
+		}
+		for _, item := range page.Items() {
+			content, ok := item.Content().(FactoryRunRequestedContent)
+			if ok && content.RunID == runID {
+				return []event.Event{item}, nil
+			}
+		}
+		if !page.HasMore() {
+			return nil, nil
+		}
+		cursor = page.Cursor()
+	}
 }
 
 func dispatchedFactoryOrderIDs(s store.Store) (map[string]types.EventID, error) {

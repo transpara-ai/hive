@@ -119,6 +119,93 @@ func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	}
 }
 
+func TestDispatchQueuedRunLaunchOnlyDispatchesRequestedRun(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	appendValidatedRunLaunch(t, rt.store, writer, nil)
+	second := appendValidatedRunLaunch(t, rt.store, writer, nil)
+	secondRunID := second.Content().(FactoryRunRequestedContent).RunID
+
+	result, err := rt.DispatchQueuedRunLaunch(secondRunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want only requested run dispatched", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want one targeted dispatch", len(tasks))
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != second.ID() {
+		t.Fatalf("task causes = %+v, want selected run request %s", causes, second.ID())
+	}
+
+	remaining, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches after targeted dispatch: %v", err)
+	}
+	if remaining.Dispatched != 1 || remaining.AlreadyDispatched != 1 {
+		t.Fatalf("remaining dispatch = %+v, want first dispatched and selected already dispatched", remaining)
+	}
+	tasks, err = rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks after remaining dispatch: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("task count after remaining dispatch = %d, want 2", len(tasks))
+	}
+}
+
+func TestDispatchQueuedRunLaunchFindsRequestedRunBeyondDefaultWindow(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	target := appendValidatedRunLaunch(t, rt.store, writer, nil)
+	targetRunID := target.Content().(FactoryRunRequestedContent).RunID
+	for i := 0; i < defaultRunLaunchDispatchLimit; i++ {
+		appendValidatedRunLaunch(t, rt.store, writer, nil)
+	}
+
+	result, err := rt.DispatchQueuedRunLaunch(targetRunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if result.Dispatched != 1 || result.Failed != 0 || result.AlreadyDispatched != 0 {
+		t.Fatalf("dispatch result = %+v, want only requested old run dispatched", result)
+	}
+	tasks, err := rt.tasks.List(defaultRunLaunchDispatchLimit + 2)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want one targeted dispatch", len(tasks))
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != target.ID() {
+		t.Fatalf("task causes = %+v, want old selected run request %s", causes, target.ID())
+	}
+}
+
+func TestDispatchQueuedRunLaunchErrorsWhenRunIDMissing(t *testing.T) {
+	rt, _ := newRunLaunchDispatchRuntime(t)
+
+	result, err := rt.DispatchQueuedRunLaunch("run_missing")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("DispatchQueuedRunLaunch error = %v, want not found", err)
+	}
+	if result.Dispatched != 0 || result.AlreadyDispatched != 0 {
+		t.Fatalf("dispatch result = %+v, want no dispatch for missing run", result)
+	}
+}
+
 func newRunLaunchDispatchRuntime(t *testing.T) (*Runtime, *operatorRunLaunchWriter) {
 	t.Helper()
 	registry := event.DefaultRegistry()
@@ -177,11 +264,17 @@ func appendValidatedRunLaunch(t *testing.T, s store.Store, writer *operatorRunLa
 	if err != nil {
 		t.Fatalf("appendRunLaunchEvents: %v", err)
 	}
-	events := requireRunLaunchEvents(t, s, EventTypeFactoryRunRequested, 1)
-	if events[0].Content().(FactoryRunRequestedContent).RunID != result.RunID {
-		t.Fatalf("run request id mismatch: event=%q result=%q", events[0].Content().(FactoryRunRequestedContent).RunID, result.RunID)
+	page, err := s.ByType(EventTypeFactoryRunRequested, 50, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("query factory.run.requested: %v", err)
 	}
-	return events[0]
+	for _, ev := range page.Items() {
+		if ev.Content().(FactoryRunRequestedContent).RunID == result.RunID {
+			return ev
+		}
+	}
+	t.Fatalf("missing factory.run.requested for run %s", result.RunID)
+	return event.Event{}
 }
 
 func appendStaleRunLaunchRequest(t *testing.T, s store.Store, writer *operatorRunLaunchWriter) event.Event {
