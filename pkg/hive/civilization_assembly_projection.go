@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.2.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.3.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
@@ -153,9 +153,10 @@ type CivilizationAssemblyFactoryOrder struct {
 }
 
 type CivilizationAssemblyWorkEvidence struct {
-	Status   string   `json:"status"`
-	Summary  string   `json:"summary"`
-	TaskRefs []string `json:"task_refs,omitempty"`
+	Status   string                             `json:"status"`
+	Summary  string                             `json:"summary"`
+	TaskRefs []string                           `json:"task_refs,omitempty"`
+	Tasks    []CivilizationAssemblyTaskEvidence `json:"tasks,omitempty"`
 	// ArtifactRefs are opaque evidence refs for display/audit. Runtime artifacts
 	// use their logical artifact ID when present; Work task artifacts have no
 	// separate logical artifact ID, so their EventGraph event ID is the ref.
@@ -167,6 +168,24 @@ type CivilizationAssemblyWorkEvidence struct {
 	GateResultRefs  []string                               `json:"gate_result_refs,omitempty"`
 	AuditReportRefs []string                               `json:"audit_report_refs,omitempty"`
 	SourceRefs      []string                               `json:"source_refs,omitempty"`
+}
+
+type CivilizationAssemblyTaskEvidence struct {
+	ID                      string   `json:"id"`
+	CanonicalTaskID         string   `json:"canonical_task_id,omitempty"`
+	FactoryOrderID          string   `json:"factory_order_id,omitempty"`
+	LifecycleStageID        string   `json:"lifecycle_stage_id,omitempty"`
+	Title                   string   `json:"title"`
+	Cell                    string   `json:"cell,omitempty"`
+	RiskClass               string   `json:"risk_class,omitempty"`
+	Status                  string   `json:"status"`
+	Ready                   bool     `json:"ready"`
+	Blocked                 bool     `json:"blocked"`
+	RequirementRefs         []string `json:"requirement_refs,omitempty"`
+	AcceptanceCriterionRefs []string `json:"acceptance_criterion_refs,omitempty"`
+	ExpectedOutputs         []string `json:"expected_outputs,omitempty"`
+	DependsOnRefs           []string `json:"depends_on_refs,omitempty"`
+	SourceRefs              []string `json:"source_refs,omitempty"`
 }
 
 type CivilizationAssemblyArtifactEvidence struct {
@@ -202,6 +221,7 @@ type CivilizationAssemblyResidualRisk struct {
 
 type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	TaskRefs                    []string
+	Tasks                       []CivilizationAssemblyTaskEvidence
 	ArtifactRefs                []string
 	Artifacts                   []CivilizationAssemblyArtifactEvidence
 	StageArtifactRefs           []civilizationAssemblyStageArtifactRef
@@ -209,6 +229,7 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	GateResultRefs              []string
 	SourceRefs                  []string
 	ArtifactSourceTruncated     bool
+	DependencySourceTruncated   bool
 	LifecycleSourceTruncated    bool
 	VerificationSourceTruncated bool
 }
@@ -228,6 +249,11 @@ type civilizationAssemblyStageArtifactRef struct {
 
 type civilizationAssemblyTaskLifecycleEvidence struct {
 	SourceRefs []string
+}
+
+type civilizationAssemblyTaskDependencyEvidence struct {
+	DependsOnRefs []string
+	SourceRefs    []string
 }
 
 type civilizationAssemblyTaskVerificationEvidence struct {
@@ -523,6 +549,12 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	}
 	p.Errors = append(p.Errors, artifactErrors...)
 	workEvidence.ArtifactSourceTruncated = artifactTruncated
+	dependencyByTask, dependencyTruncated, dependencyErrors, err := civilizationAssemblyWorkTaskDependencyEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task dependency source refs: %v", err))
+	}
+	p.Errors = append(p.Errors, dependencyErrors...)
+	workEvidence.DependencySourceTruncated = dependencyTruncated
 	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
@@ -567,6 +599,11 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			workEvidence.StageArtifactRefs = append(workEvidence.StageArtifactRefs, artifactEvidence.StageArtifactRefs...)
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, artifactEvidence.SourceRefs...)
 		}
+		var dependencyEvidence civilizationAssemblyTaskDependencyEvidence
+		if projectedDependencyEvidence, ok := dependencyByTask[ev.ID()]; ok {
+			dependencyEvidence = projectedDependencyEvidence
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, dependencyEvidence.SourceRefs...)
+		}
 		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, lifecycleEvidence.SourceRefs...)
 		}
@@ -581,9 +618,12 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
 			continue
 		}
+		taskEvidence := civilizationAssemblyTaskEvidence(ev.ID(), content, taskProjection, legacyProjection, dependencyEvidence.DependsOnRefs, dependencyEvidence.SourceRefs)
+		workEvidence.Tasks = append(workEvidence.Tasks, taskEvidence)
 		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
 	}
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
+	workEvidence.Tasks = compactCivilizationAssemblyTaskEvidence(workEvidence.Tasks)
 	workEvidence.ArtifactRefs = compactStrings(workEvidence.ArtifactRefs)
 	workEvidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(workEvidence.Artifacts)
 	workEvidence.StageArtifactRefs = compactCivilizationAssemblyStageArtifactRefs(workEvidence.StageArtifactRefs)
@@ -614,6 +654,62 @@ func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types
 		return work.TaskProjection{}, work.LegacyTaskProjection{}, err
 	}
 	return taskProjection, legacyProjection, nil
+}
+
+func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCreatedContent, taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection, dependencies []string, sourceRefs []string) CivilizationAssemblyTaskEvidence {
+	status := civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection)
+	ready, blocked := civilizationAssemblyProjectedWorkTaskReadiness(status, taskProjection, legacyProjection)
+	return CivilizationAssemblyTaskEvidence{
+		ID:                      taskID.Value(),
+		CanonicalTaskID:         strings.TrimSpace(content.CanonicalTaskID),
+		FactoryOrderID:          strings.TrimSpace(content.FactoryOrderID),
+		LifecycleStageID:        civilizationAssemblyTaskLifecycleStageID(content),
+		Title:                   strings.TrimSpace(content.Title),
+		Cell:                    strings.TrimSpace(content.Cell),
+		RiskClass:               strings.TrimSpace(content.RiskClass),
+		Status:                  status,
+		Ready:                   ready,
+		Blocked:                 blocked,
+		RequirementRefs:         compactStrings(content.RequirementIDs),
+		AcceptanceCriterionRefs: compactStrings(content.AcceptanceCriterionIDs),
+		ExpectedOutputs:         compactStrings(content.ExpectedOutputs),
+		DependsOnRefs:           compactStrings(dependencies),
+		SourceRefs:              compactStrings(append([]string{taskID.Value()}, sourceRefs...)),
+	}
+}
+
+func civilizationAssemblyTaskLifecycleStageID(content work.TaskCreatedContent) string {
+	canonicalTaskID := strings.TrimSpace(content.CanonicalTaskID)
+	factoryOrderID := strings.TrimSpace(content.FactoryOrderID)
+	factoryOrderSuffix := factoryOrderIDSuffix(factoryOrderID)
+	if canonicalTaskID == "" || factoryOrderSuffix == "" {
+		return ""
+	}
+	prefix := "tsk_" + factoryOrderSuffix + "_"
+	if !strings.HasPrefix(canonicalTaskID, prefix) {
+		return ""
+	}
+	stageID := strings.TrimSpace(strings.TrimPrefix(canonicalTaskID, prefix))
+	if stageID == "" || safeRunLaunchID(stageID) != stageID {
+		return ""
+	}
+	if !civilizationAssemblyIssueScanStageIDAllowed(stageID) {
+		return ""
+	}
+	return stageID
+}
+
+func civilizationAssemblyIssueScanStageIDAllowed(stageID string) bool {
+	stageID = safeRunLaunchID(stageID)
+	if stageID == "" {
+		return false
+	}
+	for _, stage := range issueScanDevelopmentLifecycle() {
+		if safeRunLaunchID(stage.ID) == stageID {
+			return true
+		}
+	}
+	return false
 }
 
 func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskArtifactEvidence, bool, []string, error) {
@@ -705,6 +801,32 @@ func civilizationAssemblyIssueScanStageArtifactKey(label string) (string, bool) 
 	}
 	stageID := safeRunLaunchID(suffix)
 	return stageID, stageID != ""
+}
+
+func civilizationAssemblyWorkTaskDependencyEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskDependencyEvidence, bool, []string, error) {
+	page, err := s.ByType(work.EventTypeTaskDependencyAdded, limit, types.None[types.Cursor]())
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskDependencyAdded.Value(), err)
+	}
+	byTask := map[types.EventID]civilizationAssemblyTaskDependencyEvidence{}
+	projectionErrors := []string{}
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskDependencyContent)
+		if !ok {
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskDependencyContent"))
+			continue
+		}
+		evidence := byTask[content.TaskID]
+		evidence.DependsOnRefs = append(evidence.DependsOnRefs, content.DependsOnID.Value())
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
+	}
+	for taskID, evidence := range byTask {
+		evidence.DependsOnRefs = compactStrings(evidence.DependsOnRefs)
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), projectionErrors, nil
 }
 
 func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, []string, error) {
@@ -811,6 +933,34 @@ func civilizationAssemblyProjectedWorkTaskStatus(taskProjection work.TaskProject
 		return "work_task_ready"
 	}
 	return "work_task_seeded"
+}
+
+func civilizationAssemblyProjectedWorkTaskReadiness(status string, taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection) (bool, bool) {
+	if taskProjection.Status != "" && taskProjection.Status != work.StatusCreated {
+		return civilizationAssemblyNormalizeTaskReadiness(status, taskProjection.Ready, taskProjection.Blocked)
+	}
+	switch legacyProjection.Status {
+	case work.LegacyStatusBlocked:
+		return civilizationAssemblyNormalizeTaskReadiness(status, false, true)
+	case work.LegacyStatusReady:
+		return civilizationAssemblyNormalizeTaskReadiness(status, true, false)
+	case work.LegacyStatusAssigned, work.LegacyStatusCompleted:
+		return civilizationAssemblyNormalizeTaskReadiness(status, false, false)
+	}
+	return civilizationAssemblyNormalizeTaskReadiness(status, taskProjection.Ready || legacyProjection.Ready, taskProjection.Blocked || legacyProjection.Blocked)
+}
+
+func civilizationAssemblyNormalizeTaskReadiness(status string, ready, blocked bool) (bool, bool) {
+	switch strings.TrimSpace(status) {
+	case "work_task_blocked", "work_task_policy_blocked":
+		return false, true
+	case "work_task_ready":
+		return true, false
+	}
+	if blocked {
+		return false, true
+	}
+	return ready, false
 }
 
 func civilizationAssemblyFactoryOrderStatus(existing, candidate string) string {
@@ -971,6 +1121,7 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []Civi
 		Status:         status,
 		Summary:        summary,
 		TaskRefs:       compactStrings(taskRefs),
+		Tasks:          compactCivilizationAssemblyTaskEvidence(factoryOrderWorkEvidence.Tasks),
 		ArtifactRefs:   compactStrings(append(artifactRefs, factoryOrderWorkEvidence.ArtifactRefs...)),
 		Artifacts:      compactCivilizationAssemblyArtifactEvidence(factoryOrderWorkEvidence.Artifacts),
 		TestRunRefs:    compactStrings(factoryOrderWorkEvidence.TestRunRefs),
@@ -1043,7 +1194,7 @@ func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyG
 }
 
 func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence, limit int) []CivilizationAssemblyResidualRisk {
-	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+3)
+	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+4)
 	for i, limitation := range p.RuntimeEvidence.Limitations {
 		risks = append(risks, CivilizationAssemblyResidualRisk{
 			ID:       fmt.Sprintf("runtime_limitation_%02d", i+1),
@@ -1084,6 +1235,18 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Severity: "info",
 			Status:   "open",
 			Summary:  fmt.Sprintf("FactoryOrder artifact evidence is bounded to %d work.task.artifact events; artifact refs outside that projection page may be omitted.", limit),
+		})
+	}
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.DependencySourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_dependency_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder task dependency evidence is bounded to %d work.task.dependency.added events; dependency refs outside that projection page may be omitted.", limit),
 		})
 	}
 	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.LifecycleSourceTruncated {
@@ -1193,6 +1356,78 @@ func compactStrings(values []string) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func compactCivilizationAssemblyTaskEvidence(values []CivilizationAssemblyTaskEvidence) []CivilizationAssemblyTaskEvidence {
+	byID := map[string]CivilizationAssemblyTaskEvidence{}
+	for _, value := range values {
+		value.ID = strings.TrimSpace(value.ID)
+		if value.ID == "" {
+			continue
+		}
+		value.CanonicalTaskID = strings.TrimSpace(value.CanonicalTaskID)
+		value.FactoryOrderID = strings.TrimSpace(value.FactoryOrderID)
+		value.LifecycleStageID = strings.TrimSpace(value.LifecycleStageID)
+		value.Title = strings.TrimSpace(value.Title)
+		value.Cell = strings.TrimSpace(value.Cell)
+		value.RiskClass = strings.TrimSpace(value.RiskClass)
+		value.Status = strings.TrimSpace(value.Status)
+		value.RequirementRefs = compactStrings(value.RequirementRefs)
+		value.AcceptanceCriterionRefs = compactStrings(value.AcceptanceCriterionRefs)
+		value.ExpectedOutputs = compactStrings(value.ExpectedOutputs)
+		value.DependsOnRefs = compactStrings(value.DependsOnRefs)
+		value.SourceRefs = compactStrings(value.SourceRefs)
+		if existing, ok := byID[value.ID]; ok {
+			value.SourceRefs = compactStrings(append(existing.SourceRefs, value.SourceRefs...))
+			value.DependsOnRefs = compactStrings(append(existing.DependsOnRefs, value.DependsOnRefs...))
+			if value.CanonicalTaskID == "" {
+				value.CanonicalTaskID = existing.CanonicalTaskID
+			}
+			if value.FactoryOrderID == "" {
+				value.FactoryOrderID = existing.FactoryOrderID
+			}
+			if value.LifecycleStageID == "" {
+				value.LifecycleStageID = existing.LifecycleStageID
+			}
+			if value.Title == "" {
+				value.Title = existing.Title
+			}
+			if value.Cell == "" {
+				value.Cell = existing.Cell
+			}
+			if value.RiskClass == "" {
+				value.RiskClass = existing.RiskClass
+			}
+			if value.Status == "" {
+				value.Status = existing.Status
+			}
+			value.Ready, value.Blocked = civilizationAssemblyNormalizeTaskReadiness(value.Status, value.Ready || existing.Ready, value.Blocked || existing.Blocked)
+			value.RequirementRefs = compactStrings(append(existing.RequirementRefs, value.RequirementRefs...))
+			value.AcceptanceCriterionRefs = compactStrings(append(existing.AcceptanceCriterionRefs, value.AcceptanceCriterionRefs...))
+			value.ExpectedOutputs = compactStrings(append(existing.ExpectedOutputs, value.ExpectedOutputs...))
+		}
+		byID[value.ID] = value
+	}
+	out := make([]CivilizationAssemblyTaskEvidence, 0, len(byID))
+	for _, value := range byID {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FactoryOrderID != out[j].FactoryOrderID {
+			return out[i].FactoryOrderID < out[j].FactoryOrderID
+		}
+		if out[i].LifecycleStageID != out[j].LifecycleStageID {
+			if out[i].LifecycleStageID == "" {
+				return true
+			}
+			if out[j].LifecycleStageID == "" {
+				return false
+			}
+			return out[i].LifecycleStageID < out[j].LifecycleStageID
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
