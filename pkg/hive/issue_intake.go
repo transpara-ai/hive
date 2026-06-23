@@ -16,8 +16,10 @@ const (
 	IssueScanDefaultPolicyRef    = "civilization/repo-issue-scan-to-factory-order-v0.1"
 	issueScanBriefKind           = "transpara_ai_github_issue_scan"
 	issueScanLifecycleVersionV02 = "civilization_issue_to_human_ready_pr_v0.2"
-	issueScanLifecycleVersion    = "civilization_issue_to_human_ready_pr_v0.3"
-	issueScanSourceType          = "github.issue"
+	// This version is a persisted brief contract. Bump it when lifecycle or
+	// agent-plan text, evidence, roles, boundaries, or gates change.
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.3"
+	issueScanSourceType       = "github.issue"
 )
 
 type issueScanBriefIssuePayload struct {

@@ -593,6 +593,52 @@ func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefRejectsLegacyV02WithAgentPlan(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV02
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	for _, rawStage := range stages {
+		stage, ok := rawStage.(map[string]any)
+		if !ok || stage["id"] != "surface_ready_for_Human_result_PR" {
+			continue
+		}
+		evidence, ok := stage["required_evidence"].([]any)
+		if !ok {
+			t.Fatalf("ready stage evidence = %#v, want array", stage["required_evidence"])
+		}
+		for i, item := range evidence {
+			if item == "ready_pr_url" {
+				evidence[i] = "draft_pr_url"
+			}
+		}
+	}
+	legacyWithPlan, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy brief: %v", err)
+	}
+
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacyWithPlan)
+	if err == nil || !strings.Contains(err.Error(), "agent execution plan is not supported") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want v0.2 agent plan rejection", err, lifecycle, agentPlan)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefRejectsMutatedLifecycle(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",
