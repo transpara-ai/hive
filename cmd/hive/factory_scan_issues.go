@@ -140,10 +140,19 @@ func issueScanRegistryPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate hive repo for --registry: read go.mod: %w", err)
 	}
-	if !strings.Contains(string(goMod), "module github.com/transpara-ai/hive") {
+	if !issueScanGoModDeclaresHiveModule(goMod) {
 		return "", fmt.Errorf("locate hive repo for --registry: %s is not the Hive repo root", hiveDir)
 	}
 	return filepath.Join(hiveDir, "repos.json"), nil
+}
+
+func issueScanGoModDeclaresHiveModule(goMod []byte) bool {
+	for _, line := range strings.Split(string(goMod), "\n") {
+		if strings.TrimSpace(line) == "module github.com/transpara-ai/hive" {
+			return true
+		}
+	}
+	return false
 }
 
 func issueScanReposFromRegistry(registryPath string) ([]string, error) {

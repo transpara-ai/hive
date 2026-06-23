@@ -95,6 +95,54 @@ func TestIssueScanRegistryPathRejectsUntrustedCWD(t *testing.T) {
 	}
 }
 
+func TestIssueScanRegistryPathAcceptsExactHiveModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o700); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/transpara-ai/hive\n"), 0o600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	t.Chdir(dir)
+
+	got, err := issueScanRegistryPath()
+	if err != nil {
+		t.Fatalf("issueScanRegistryPath: %v", err)
+	}
+	if got != filepath.Join(dir, "repos.json") {
+		t.Fatalf("registry path = %q, want %q", got, filepath.Join(dir, "repos.json"))
+	}
+}
+
+func TestIssueScanRegistryPathRejectsMissingGoMod(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o700); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	t.Chdir(dir)
+
+	_, err := issueScanRegistryPath()
+	if err == nil || !strings.Contains(err.Error(), "read go.mod") {
+		t.Fatalf("expected missing go.mod error, got %v", err)
+	}
+}
+
+func TestIssueScanRegistryPathRejectsLookalikeModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o700); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/transpara-ai/hive-evil\n"), 0o600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	t.Chdir(dir)
+
+	_, err := issueScanRegistryPath()
+	if err == nil || !strings.Contains(err.Error(), "not the Hive repo root") {
+		t.Fatalf("expected lookalike module rejection, got %v", err)
+	}
+}
+
 func TestIssueScanRepoSlugFromRegistryRepoNormalizesGitHubURL(t *testing.T) {
 	tests := map[string]string{
 		"https://github.com/transpara-ai/site":           "transpara-ai/site",
