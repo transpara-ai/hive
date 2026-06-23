@@ -358,7 +358,7 @@ func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {
 		{
 			ID:            "surface_ready_for_Human_result_PR",
 			Name:          "Surface ready-for-Human result PR",
-			RequiredRoles: []string{"strategist", "guardian"},
+			RequiredRoles: []string{"strategist", "reviewer", "guardian"},
 			RequiredEvidence: []string{
 				"draft_pr_url",
 				"ready_state_review",

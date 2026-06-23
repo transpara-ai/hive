@@ -121,6 +121,9 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
 		t.Fatalf("ready stage authority boundary = %q", readyStage.AuthorityBoundary)
 	}
+	if !containsIssueScanValue(readyStage.RequiredRoles, "reviewer") {
+		t.Fatalf("ready stage roles = %+v, want reviewer for ready-state review evidence", readyStage.RequiredRoles)
+	}
 	implementStage := issueScanStageByID(brief.DevelopmentLifecycle, "implement_on_branch")
 	if implementStage == nil {
 		t.Fatalf("development lifecycle missing implementation stage: %+v", brief.DevelopmentLifecycle)

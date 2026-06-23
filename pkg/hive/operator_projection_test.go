@@ -503,6 +503,49 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
+	kind, version, lifecycle, err := queuedRunLifecycleFromBrief([]byte(`{"goal":"generic launch brief"}`))
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != "" || version != "" || len(lifecycle) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v, want empty lifecycle", kind, version, lifecycle)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsBriefDecodeError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_bad_brief",
+		IntakeID:   "intake_bad_brief",
+		OperatorID: "operator_001",
+		Title:      "Bad brief still projects queued request",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "operator-launch",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 1,
+			MaxCostUSD:    0,
+		},
+		TargetRepos: []string{"transpara-ai/hive"},
+		Brief:       []byte(`{"development_lifecycle":{}}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil || queued.RunID != "run_bad_brief" {
+		t.Fatalf("queued request = %+v, want run_bad_brief", queued)
+	}
+	if queued.LifecycleEvidenceKind != "" || len(queued.DevelopmentLifecycle) != 0 {
+		t.Fatalf("queued lifecycle = kind %q stages %+v, want empty on decode error", queued.LifecycleEvidenceKind, queued.DevelopmentLifecycle)
+	}
+	if len(projection.Errors) == 0 || !strings.Contains(projection.Errors[0], "brief lifecycle projection") {
+		t.Fatalf("projection errors = %+v, want brief lifecycle projection error", projection.Errors)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceIgnoresEventsWithoutRunStart(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 

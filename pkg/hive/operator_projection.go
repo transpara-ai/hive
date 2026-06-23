@@ -721,6 +721,10 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if len(raw) == 0 {
 		return "", "", nil, nil
 	}
+	// Projection is read-only: it copies lifecycle metadata from the stored
+	// brief and marks every stage expected_not_observed. Internal issue-scan
+	// generation validates roles before writing; future external producers must
+	// validate before recording their own development_lifecycle.
 	var brief struct {
 		Kind                 string `json:"kind"`
 		LifecycleVersion     string `json:"lifecycle_version"`
