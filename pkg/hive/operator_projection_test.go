@@ -145,6 +145,9 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
 		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
 	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "active") {
+		t.Fatalf("missing normalized active lifecycle status: %+v", projection.AgentLifecycleSummary)
+	}
 	if projection.FactoryOrderSummary == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.ResidualRiskSummary == nil {
 		t.Fatalf("top-level slices must serialize as arrays, got factory=%#v bindings=%#v lifecycle=%#v risks=%#v", projection.FactoryOrderSummary, projection.RoleBindings, projection.AgentLifecycleSummary, projection.ResidualRiskSummary)
 	}
@@ -159,9 +162,61 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndArrays(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete", projection.DerivationStatus)
+	}
+	if projection.ActorRoster == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.FactoryOrderSummary == nil || projection.ResidualRiskSummary == nil {
+		t.Fatalf("top-level slices must be arrays, got actor=%#v bindings=%#v lifecycle=%#v factory=%#v risks=%#v", projection.ActorRoster, projection.RoleBindings, projection.AgentLifecycleSummary, projection.FactoryOrderSummary, projection.ResidualRiskSummary)
+	}
+	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldUnavailable || len(projection.WorkEvidenceSummary.SourceRefs) != 0 {
+		t.Fatalf("work evidence = %+v, want unavailable with no refs", projection.WorkEvidenceSummary)
+	}
+	if !civilizationProjectionHasUnavailableField(projection, "actor_roster") {
+		t.Fatalf("missing actor_roster unavailable field: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestCivilizationAssemblyTargetType(t *testing.T) {
+	tests := map[string]string{
+		"pr://transpara-ai/site/42": "pr",
+		"actor_123":                 "actor",
+		"repo:transpara-ai/site":    "repo",
+		"plain-target":              "target",
+		"":                          "",
+	}
+	for target, want := range tests {
+		if got := civilizationAssemblyTargetType(target); got != want {
+			t.Fatalf("target type for %q = %q, want %q", target, got, want)
+		}
+	}
+}
+
 func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProjection, actorID, role string) bool {
 	for _, binding := range projection.RoleBindings {
 		if binding.ActorID == actorID && binding.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasLifecycleStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
+	for _, lifecycle := range projection.AgentLifecycleSummary {
+		if lifecycle.ActorID == actorID && lifecycle.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasUnavailableField(projection CivilizationAssemblyProjection, field string) bool {
+	for _, item := range projection.WithheldOrUnavailableFields {
+		if item.Field == field {
 			return true
 		}
 	}

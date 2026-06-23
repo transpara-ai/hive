@@ -404,7 +404,7 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 			ID:      valueOr(item.SpawnedEventID, "runtime:"+actorID),
 			ActorID: actorID,
 			ToState: "active",
-			Status:  "hive.agent.spawned",
+			Status:  "active",
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -432,9 +432,10 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssembly
 	for _, event := range p.RuntimeEvidence.RunEvents {
 		refs = append(refs, event.EventID)
 	}
+	sourceRefs := compactStrings(refs)
 	status := civilizationAssemblyFieldUnavailable
 	summary := "Hive operator projection has not observed queued run or runtime evidence."
-	if len(refs) > 0 || p.RuntimeEvidence.Status != "" && p.RuntimeEvidence.Status != "not_observed" {
+	if len(sourceRefs) > 0 || p.RuntimeEvidence.Status != "" && p.RuntimeEvidence.Status != "not_observed" {
 		status = civilizationAssemblyFieldAvailable
 		summary = fmt.Sprintf("runtime evidence status %q derived from Hive operator projection", p.RuntimeEvidence.Status)
 	}
@@ -442,7 +443,7 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssembly
 		Status:       status,
 		Summary:      summary,
 		ArtifactRefs: compactStrings(artifactRefs),
-		SourceRefs:   compactStrings(refs),
+		SourceRefs:   sourceRefs,
 	}
 }
 
