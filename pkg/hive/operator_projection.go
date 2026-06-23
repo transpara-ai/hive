@@ -142,21 +142,35 @@ type OperatorRuntimeAgentEvidence struct {
 }
 
 type OperatorQueuedRunRequestEvidence struct {
-	EventID               string    `json:"event_id"`
-	ConversationID        string    `json:"conversation_id"`
-	RunID                 string    `json:"run_id"`
-	Title                 string    `json:"title"`
-	OperatorID            string    `json:"operator_id,omitempty"`
-	Status                string    `json:"status"`
-	TargetRepos           []string  `json:"target_repos,omitempty"`
-	AuthorityInitialLevel string    `json:"authority_initial_level,omitempty"`
-	AuthorityScope        string    `json:"authority_scope,omitempty"`
-	BudgetMaxIterations   *int      `json:"budget_max_iterations,omitempty"`
-	BudgetMaxCostUSD      *float64  `json:"budget_max_cost_usd,omitempty"`
-	SourceEventID         string    `json:"source_event_id,omitempty"`
-	BriefEventID          string    `json:"brief_event_id,omitempty"`
-	EvidenceKind          string    `json:"evidence_kind"`
-	CreatedAt             time.Time `json:"created_at"`
+	EventID               string                            `json:"event_id"`
+	ConversationID        string                            `json:"conversation_id"`
+	RunID                 string                            `json:"run_id"`
+	Title                 string                            `json:"title"`
+	OperatorID            string                            `json:"operator_id,omitempty"`
+	Status                string                            `json:"status"`
+	TargetRepos           []string                          `json:"target_repos,omitempty"`
+	AuthorityInitialLevel string                            `json:"authority_initial_level,omitempty"`
+	AuthorityScope        string                            `json:"authority_scope,omitempty"`
+	BudgetMaxIterations   *int                              `json:"budget_max_iterations,omitempty"`
+	BudgetMaxCostUSD      *float64                          `json:"budget_max_cost_usd,omitempty"`
+	SourceEventID         string                            `json:"source_event_id,omitempty"`
+	BriefEventID          string                            `json:"brief_event_id,omitempty"`
+	BriefKind             string                            `json:"brief_kind,omitempty"`
+	LifecycleVersion      string                            `json:"lifecycle_version,omitempty"`
+	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage `json:"development_lifecycle,omitempty"`
+	LifecycleEvidenceKind string                            `json:"lifecycle_evidence_kind,omitempty"`
+	EvidenceKind          string                            `json:"evidence_kind"`
+	CreatedAt             time.Time                         `json:"created_at"`
+}
+
+type OperatorQueuedRunLifecycleStage struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name,omitempty"`
+	RequiredRoles     []string `json:"required_roles,omitempty"`
+	RequiredEvidence  []string `json:"required_evidence,omitempty"`
+	AuthorityBoundary string   `json:"authority_boundary,omitempty"`
+	CompletionGate    string   `json:"completion_gate,omitempty"`
+	EvidenceStatus    string   `json:"evidence_status"`
 }
 
 type OperatorRuntimeArtifactEvidence struct {
@@ -564,6 +578,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
 			"runtime event order follows EventGraph store order, not wall-clock timestamp order",
 			"artifact and causal graph projections are bounded by the operator projection limit",
+			"queued run development_lifecycle stages are expected evidence, not completed stage proof",
 		},
 	}
 
@@ -579,6 +594,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		} else {
 			budgetMaxIterations := content.Budget.MaxIterations
 			budgetMaxCostUSD := content.Budget.MaxCostUSD
+			briefKind, lifecycleVersion, lifecycle, err := queuedRunLifecycleFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s brief lifecycle projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -593,8 +612,14 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				BudgetMaxCostUSD:      &budgetMaxCostUSD,
 				SourceEventID:         content.SourceEventID.Value(),
 				BriefEventID:          content.BriefEventID.Value(),
+				BriefKind:             briefKind,
+				LifecycleVersion:      lifecycleVersion,
+				DevelopmentLifecycle:  lifecycle,
 				EvidenceKind:          "queued_request_not_runtime_start",
 				CreatedAt:             timestamp,
+			}
+			if len(lifecycle) > 0 {
+				evidence.LastQueuedRunRequest.LifecycleEvidenceKind = "expected_lifecycle_not_runtime_progress"
 			}
 		}
 	}
@@ -690,6 +715,40 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	evidence.AgentEvents.ActiveAgents = sortedRuntimeActiveAgents(activeAgents)
 	evidence.AgentEvents.ObservedActive = len(evidence.AgentEvents.ActiveAgents)
 	return evidence
+}
+
+func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []OperatorQueuedRunLifecycleStage, error) {
+	if len(raw) == 0 {
+		return "", "", nil, nil
+	}
+	var brief struct {
+		Kind                 string `json:"kind"`
+		LifecycleVersion     string `json:"lifecycle_version"`
+		DevelopmentLifecycle []struct {
+			ID                string   `json:"id"`
+			Name              string   `json:"name"`
+			RequiredRoles     []string `json:"required_roles"`
+			RequiredEvidence  []string `json:"required_evidence"`
+			AuthorityBoundary string   `json:"authority_boundary"`
+			CompletionGate    string   `json:"completion_gate"`
+		} `json:"development_lifecycle"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return "", "", nil, fmt.Errorf("decode brief metadata: %w", err)
+	}
+	lifecycle := make([]OperatorQueuedRunLifecycleStage, 0, len(brief.DevelopmentLifecycle))
+	for _, stage := range brief.DevelopmentLifecycle {
+		lifecycle = append(lifecycle, OperatorQueuedRunLifecycleStage{
+			ID:                stage.ID,
+			Name:              stage.Name,
+			RequiredRoles:     append([]string(nil), stage.RequiredRoles...),
+			RequiredEvidence:  append([]string(nil), stage.RequiredEvidence...),
+			AuthorityBoundary: stage.AuthorityBoundary,
+			CompletionGate:    stage.CompletionGate,
+			EvidenceStatus:    "expected_not_observed",
+		})
+	}
+	return brief.Kind, brief.LifecycleVersion, lifecycle, nil
 }
 
 func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) ([]projectionEvent, bool) {

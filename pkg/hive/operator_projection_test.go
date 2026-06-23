@@ -403,6 +403,18 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	sourceEventID := newTestEventID(t)
 	briefEventID := newTestEventID(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+		Body:   "The Civilization should scan Transpara-AI repos, then surface a ready-for-Human PR.",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
 
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
 		RunID:      "run_queued",
@@ -423,6 +435,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 		TargetRepos:   []string{"transpara-ai/hive", "transpara-ai/eventgraph"},
 		SourceEventID: sourceEventID,
 		BriefEventID:  briefEventID,
+		Brief:         brief,
 	})
 
 	projection := BuildOperatorProjection(s, 50)
@@ -453,11 +466,40 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if len(queued.TargetRepos) != 2 || queued.TargetRepos[0] != "transpara-ai/hive" {
 		t.Fatalf("queued target repos = %+v", queued.TargetRepos)
 	}
+	if queued.BriefKind != "transpara_ai_github_issue_scan" || queued.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.2" {
+		t.Fatalf("queued brief metadata = %+v", queued)
+	}
+	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
+		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
+	}
+	if len(queued.DevelopmentLifecycle) != 7 {
+		t.Fatalf("development lifecycle = %+v, want 7 stages", queued.DevelopmentLifecycle)
+	}
+	if queued.DevelopmentLifecycle[0].ID != "research_issue_and_repo_context" || queued.DevelopmentLifecycle[0].EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("first lifecycle stage = %+v", queued.DevelopmentLifecycle[0])
+	}
+	reviewStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "run_adversarial_review")
+	if reviewStage == nil {
+		t.Fatalf("queued lifecycle missing review stage: %+v", queued.DevelopmentLifecycle)
+	}
+	if !containsModelProjectionString(reviewStage.RequiredRoles, "reviewer") || !containsModelProjectionString(reviewStage.RequiredRoles, "guardian") {
+		t.Fatalf("review stage roles = %+v", reviewStage.RequiredRoles)
+	}
+	if !containsModelProjectionString(reviewStage.RequiredEvidence, "exact_head_review_artifact") || !containsModelProjectionString(reviewStage.RequiredEvidence, "finding_disposition") {
+		t.Fatalf("review stage evidence = %+v", reviewStage.RequiredEvidence)
+	}
+	readyStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil || readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
+		t.Fatalf("ready lifecycle stage = %+v", readyStage)
+	}
 	if runtimeEvidence.AgentEvents.Scope != "none" || runtimeEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("agent evidence = %+v, want no runtime agents", runtimeEvidence.AgentEvents)
 	}
 	if !containsModelProjectionString(runtimeEvidence.Limitations, "factory.run.requested is queued launch intent, not runtime-start proof") {
 		t.Fatalf("limitations = %+v, want queued-intent boundary", runtimeEvidence.Limitations)
+	}
+	if !containsModelProjectionString(runtimeEvidence.Limitations, "queued run development_lifecycle stages are expected evidence, not completed stage proof") {
+		t.Fatalf("limitations = %+v, want lifecycle-not-complete boundary", runtimeEvidence.Limitations)
 	}
 }
 
@@ -1416,6 +1458,15 @@ func containsModelProjectionString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func queuedRunLifecycleStageByID(stages []OperatorQueuedRunLifecycleStage, id string) *OperatorQueuedRunLifecycleStage {
+	for i := range stages {
+		if stages[i].ID == id {
+			return &stages[i]
+		}
+	}
+	return nil
 }
 
 func findRuntimeEventEvidence(events []OperatorRuntimeEventEvidence, eventID string) (OperatorRuntimeEventEvidence, bool) {
