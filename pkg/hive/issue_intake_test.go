@@ -234,6 +234,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	var planArtifactBody string
 	var planArtifactID string
 	planArtifactIndex := -1
+	stageArtifactBodies := map[string]string{}
 	for i, artifact := range artifacts {
 		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
 			if artifact.TaskID != task.ID {
@@ -249,9 +250,24 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			planArtifactID = artifact.ID.Value()
 			planArtifactIndex = i
 		}
+		if strings.HasPrefix(artifact.Label, IssueScanLifecycleStageArtifactPrefix) {
+			if artifact.TaskID != task.ID {
+				t.Fatalf("stage artifact task id = %s, want %s", artifact.TaskID, task.ID)
+			}
+			if artifact.MediaType != issueScanExecutionPlanArtifactMediaType {
+				t.Fatalf("stage artifact media type = %q, want %q", artifact.MediaType, issueScanExecutionPlanArtifactMediaType)
+			}
+			if artifact.CreatedBy != writer.human {
+				t.Fatalf("stage artifact created_by = %s, want %s", artifact.CreatedBy, writer.human)
+			}
+			stageArtifactBodies[artifact.Label] = artifact.Body
+		}
 	}
 	if planArtifactBody == "" {
 		t.Fatalf("missing %s artifact in %+v", IssueScanExecutionPlanArtifactLabel, artifacts)
+	}
+	if len(stageArtifactBodies) != len(expectedStageIDs) {
+		t.Fatalf("stage artifacts = %+v, want %d issue-scan lifecycle stage artifacts", stageArtifactBodies, len(expectedStageIDs))
 	}
 	var artifactBrief struct {
 		Kind                 string                       `json:"kind"`
@@ -278,6 +294,51 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(artifactBrief.AuthorityBoundaries, "no_merge") {
 		t.Fatalf("artifact authority boundaries = %+v, want no_merge", artifactBrief.AuthorityBoundaries)
+	}
+	for i, stageID := range expectedStageIDs {
+		label := IssueScanLifecycleStageArtifactLabel(stageID)
+		body, ok := stageArtifactBodies[label]
+		if !ok {
+			t.Fatalf("missing stage artifact %q in labels %+v", label, stageArtifactBodies)
+		}
+		var stageArtifact struct {
+			Kind             string `json:"kind"`
+			LifecycleVersion string `json:"lifecycle_version"`
+			RunID            string `json:"run_id"`
+			StageIndex       int    `json:"stage_index"`
+			StageCount       int    `json:"stage_count"`
+			Stage            struct {
+				ID                string   `json:"id"`
+				RequiredRoles     []string `json:"required_roles"`
+				RequiredEvidence  []string `json:"required_evidence"`
+				AuthorityBoundary string   `json:"authority_boundary"`
+				CompletionGate    string   `json:"completion_gate"`
+				EvidenceStatus    string   `json:"evidence_status"`
+			} `json:"stage"`
+			AgentExecutionPlan []issueScanBriefPlanForTest `json:"agent_execution_plan"`
+			EvidenceKind       string                      `json:"evidence_kind"`
+			EvidenceStatus     string                      `json:"evidence_status"`
+		}
+		if err := json.Unmarshal([]byte(body), &stageArtifact); err != nil {
+			t.Fatalf("unmarshal stage artifact %q: %v", label, err)
+		}
+		if stageArtifact.Kind != "issue_scan_lifecycle_stage" || stageArtifact.LifecycleVersion != issueScanLifecycleVersion || stageArtifact.RunID != content.RunID {
+			t.Fatalf("stage artifact identity for %q = %+v", label, stageArtifact)
+		}
+		if stageArtifact.StageIndex != i+1 || stageArtifact.StageCount != len(expectedStageIDs) {
+			t.Fatalf("stage artifact order for %q = %d/%d, want %d/%d", label, stageArtifact.StageIndex, stageArtifact.StageCount, i+1, len(expectedStageIDs))
+		}
+		if stageArtifact.Stage.ID != stageID || stageArtifact.Stage.EvidenceStatus != "expected_not_observed" {
+			t.Fatalf("stage artifact stage for %q = %+v", label, stageArtifact.Stage)
+		}
+		if stageArtifact.EvidenceKind != "stage_declaration_not_completion" || stageArtifact.EvidenceStatus != "pending_runtime_evidence" {
+			t.Fatalf("stage artifact evidence status for %q = %+v", label, stageArtifact)
+		}
+		for _, role := range stageArtifact.Stage.RequiredRoles {
+			if issueScanPlanStepByRole(stageArtifact.AgentExecutionPlan, stageID, role) == nil {
+				t.Fatalf("stage artifact %q missing role %q in plan %+v", label, role, stageArtifact.AgentExecutionPlan)
+			}
+		}
 	}
 	storedArtifact, err := rt.store.Get(artifacts[planArtifactIndex].ID)
 	if err != nil {

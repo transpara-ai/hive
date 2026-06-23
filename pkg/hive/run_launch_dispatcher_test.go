@@ -68,6 +68,9 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
 			t.Fatalf("generic run launch created %s artifact: %+v", IssueScanExecutionPlanArtifactLabel, artifact)
 		}
+		if strings.HasPrefix(artifact.Label, IssueScanLifecycleStageArtifactPrefix) {
+			t.Fatalf("generic run launch created issue-scan lifecycle stage artifact: %+v", artifact)
+		}
 	}
 
 	projection, err := rt.tasks.ProjectTask(task.ID)
@@ -385,6 +388,9 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
 		t.Fatalf("artifacts after repair = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
 	}
+	if countArtifactsWithLabelPrefix(artifacts, IssueScanLifecycleStageArtifactPrefix) != len(issueScanDevelopmentLifecycle()) {
+		t.Fatalf("stage artifacts after repair = %+v, want %d issue-scan lifecycle stage artifacts", artifacts, len(issueScanDevelopmentLifecycle()))
+	}
 
 	third, err := rt.DispatchQueuedRunLaunch(queued.RunID)
 	if err != nil {
@@ -399,6 +405,36 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	}
 	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
 		t.Fatalf("artifacts after idempotent pass = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+	if countArtifactsWithLabelPrefix(artifacts, IssueScanLifecycleStageArtifactPrefix) != len(issueScanDevelopmentLifecycle()) {
+		t.Fatalf("stage artifacts after idempotent pass = %+v, want %d issue-scan lifecycle stage artifacts", artifacts, len(issueScanDevelopmentLifecycle()))
+	}
+}
+
+func TestIssueScanLifecycleStageArtifactsRejectsUnsafeLabels(t *testing.T) {
+	tests := []struct {
+		name      string
+		lifecycle []OperatorQueuedRunLifecycleStage
+		want      string
+	}{
+		{
+			name:      "empty sanitized stage id",
+			lifecycle: []OperatorQueuedRunLifecycleStage{{ID: "!!!"}},
+			want:      "does not produce a usable artifact label",
+		},
+		{
+			name:      "duplicate sanitized stage ids",
+			lifecycle: []OperatorQueuedRunLifecycleStage{{ID: "review!"}, {ID: "review?"}},
+			want:      "collides with stage id",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := issueScanLifecycleStageArtifactsFromLifecycle("run_label_guard", issueScanLifecycleVersion, tt.lifecycle, nil)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("issueScanLifecycleStageArtifactsFromLifecycle error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -609,6 +645,16 @@ func countArtifactsWithLabel(artifacts []work.ArtifactEvent, label string) int {
 	count := 0
 	for _, artifact := range artifacts {
 		if artifact.Label == label {
+			count++
+		}
+	}
+	return count
+}
+
+func countArtifactsWithLabelPrefix(artifacts []work.ArtifactEvent, prefix string) int {
+	count := 0
+	for _, artifact := range artifacts {
+		if strings.HasPrefix(artifact.Label, prefix) {
 			count++
 		}
 	}
