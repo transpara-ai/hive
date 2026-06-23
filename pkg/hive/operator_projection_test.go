@@ -557,6 +557,22 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 	if containsString(projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value()) {
 		t.Fatalf("artifact refs = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value())
 	}
+	artifactEvidence := civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, artifactEvent.ID().Value())
+	if artifactEvidence == nil {
+		t.Fatalf("artifact evidence = %+v, want FactoryOrder artifact %s", projection.WorkEvidenceSummary.Artifacts, artifactEvent.ID().Value())
+	}
+	if artifactEvidence.TaskRef != taskEvent.ID().Value() {
+		t.Fatalf("artifact task ref = %q, want %s", artifactEvidence.TaskRef, taskEvent.ID())
+	}
+	if artifactEvidence.Label != "Implementation artifact" || artifactEvidence.MediaType != "text/markdown" {
+		t.Fatalf("artifact metadata = %+v, want implementation markdown artifact", artifactEvidence)
+	}
+	if !containsString(artifactEvidence.SourceRefs, artifactEvent.ID().Value()) {
+		t.Fatalf("artifact source refs = %+v, want %s", artifactEvidence.SourceRefs, artifactEvent.ID())
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID().Value()) != nil {
+		t.Fatalf("artifact evidence = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID())
+	}
 	if !containsString(projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value()) {
 		t.Fatalf("source refs = %+v, want artifact event %s", projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value())
 	}
@@ -2521,6 +2537,15 @@ func findRuntimeArtifactEvidence(artifacts []OperatorRuntimeArtifactEvidence, ev
 		}
 	}
 	return OperatorRuntimeArtifactEvidence{}, false
+}
+
+func civilizationProjectionArtifactEvidenceByID(artifacts []CivilizationAssemblyArtifactEvidence, eventID string) *CivilizationAssemblyArtifactEvidence {
+	for i := range artifacts {
+		if artifacts[i].ID == eventID {
+			return &artifacts[i]
+		}
+	}
+	return nil
 }
 
 func hasRuntimeGraphEdge(edges []OperatorRuntimeCausalEdge, from, to, scope string) bool {

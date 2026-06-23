@@ -154,11 +154,20 @@ type CivilizationAssemblyWorkEvidence struct {
 	// ArtifactRefs are opaque evidence refs for display/audit. Runtime artifacts
 	// use their logical artifact ID when present; Work task artifacts have no
 	// separate logical artifact ID, so their EventGraph event ID is the ref.
-	ArtifactRefs    []string `json:"artifact_refs,omitempty"`
-	TestRunRefs     []string `json:"test_run_refs,omitempty"`
-	GateResultRefs  []string `json:"gate_result_refs,omitempty"`
-	AuditReportRefs []string `json:"audit_report_refs,omitempty"`
-	SourceRefs      []string `json:"source_refs,omitempty"`
+	ArtifactRefs    []string                               `json:"artifact_refs,omitempty"`
+	Artifacts       []CivilizationAssemblyArtifactEvidence `json:"artifacts,omitempty"`
+	TestRunRefs     []string                               `json:"test_run_refs,omitempty"`
+	GateResultRefs  []string                               `json:"gate_result_refs,omitempty"`
+	AuditReportRefs []string                               `json:"audit_report_refs,omitempty"`
+	SourceRefs      []string                               `json:"source_refs,omitempty"`
+}
+
+type CivilizationAssemblyArtifactEvidence struct {
+	ID         string   `json:"id"`
+	TaskRef    string   `json:"task_ref"`
+	Label      string   `json:"label"`
+	MediaType  string   `json:"media_type,omitempty"`
+	SourceRefs []string `json:"source_refs,omitempty"`
 }
 
 // CivilizationAssemblyQueuedRunRequest is the read-only issue-scan run intent
@@ -187,6 +196,7 @@ type CivilizationAssemblyResidualRisk struct {
 type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	TaskRefs                    []string
 	ArtifactRefs                []string
+	Artifacts                   []CivilizationAssemblyArtifactEvidence
 	TestRunRefs                 []string
 	GateResultRefs              []string
 	SourceRefs                  []string
@@ -197,6 +207,7 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 
 type civilizationAssemblyTaskArtifactEvidence struct {
 	ArtifactRefs []string
+	Artifacts    []CivilizationAssemblyArtifactEvidence
 	SourceRefs   []string
 }
 
@@ -537,6 +548,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		workEvidence.SourceRefs = append(workEvidence.SourceRefs, ev.ID().Value())
 		if artifactEvidence, ok := artifactByTask[ev.ID()]; ok {
 			workEvidence.ArtifactRefs = append(workEvidence.ArtifactRefs, artifactEvidence.ArtifactRefs...)
+			workEvidence.Artifacts = append(workEvidence.Artifacts, artifactEvidence.Artifacts...)
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, artifactEvidence.SourceRefs...)
 		}
 		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
@@ -557,6 +569,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	}
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
 	workEvidence.ArtifactRefs = compactStrings(workEvidence.ArtifactRefs)
+	workEvidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(workEvidence.Artifacts)
 	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
 	workEvidence.GateResultRefs = compactStrings(workEvidence.GateResultRefs)
 	workEvidence.SourceRefs = compactStrings(workEvidence.SourceRefs)
@@ -601,11 +614,19 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 		}
 		evidence := byTask[content.TaskID]
 		evidence.ArtifactRefs = append(evidence.ArtifactRefs, ev.ID().Value())
+		evidence.Artifacts = append(evidence.Artifacts, CivilizationAssemblyArtifactEvidence{
+			ID:         ev.ID().Value(),
+			TaskRef:    content.TaskID.Value(),
+			Label:      strings.TrimSpace(content.Label),
+			MediaType:  strings.TrimSpace(content.MediaType),
+			SourceRefs: []string{ev.ID().Value()},
+		})
 		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
 		byTask[content.TaskID] = evidence
 	}
 	for taskID, evidence := range byTask {
 		evidence.ArtifactRefs = compactStrings(evidence.ArtifactRefs)
+		evidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(evidence.Artifacts)
 		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
 		byTask[taskID] = evidence
 	}
@@ -877,6 +898,7 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []Civi
 		Summary:        summary,
 		TaskRefs:       compactStrings(taskRefs),
 		ArtifactRefs:   compactStrings(append(artifactRefs, factoryOrderWorkEvidence.ArtifactRefs...)),
+		Artifacts:      compactCivilizationAssemblyArtifactEvidence(factoryOrderWorkEvidence.Artifacts),
 		TestRunRefs:    compactStrings(factoryOrderWorkEvidence.TestRunRefs),
 		GateResultRefs: compactStrings(factoryOrderWorkEvidence.GateResultRefs),
 		SourceRefs:     sourceRefs,
@@ -1047,6 +1069,41 @@ func compactStrings(values []string) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func compactCivilizationAssemblyArtifactEvidence(values []CivilizationAssemblyArtifactEvidence) []CivilizationAssemblyArtifactEvidence {
+	byID := map[string]CivilizationAssemblyArtifactEvidence{}
+	for _, value := range values {
+		value.ID = strings.TrimSpace(value.ID)
+		if value.ID == "" {
+			continue
+		}
+		value.TaskRef = strings.TrimSpace(value.TaskRef)
+		value.Label = strings.TrimSpace(value.Label)
+		value.MediaType = strings.TrimSpace(value.MediaType)
+		value.SourceRefs = compactStrings(value.SourceRefs)
+		if existing, ok := byID[value.ID]; ok {
+			value.SourceRefs = compactStrings(append(existing.SourceRefs, value.SourceRefs...))
+			if value.TaskRef == "" {
+				value.TaskRef = existing.TaskRef
+			}
+			if value.Label == "" {
+				value.Label = existing.Label
+			}
+			if value.MediaType == "" {
+				value.MediaType = existing.MediaType
+			}
+		}
+		byID[value.ID] = value
+	}
+	out := make([]CivilizationAssemblyArtifactEvidence, 0, len(byID))
+	for _, value := range byID {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
