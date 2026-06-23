@@ -147,9 +147,12 @@ type CivilizationAssemblyFactoryOrder struct {
 }
 
 type CivilizationAssemblyWorkEvidence struct {
-	Status          string   `json:"status"`
-	Summary         string   `json:"summary"`
-	TaskRefs        []string `json:"task_refs,omitempty"`
+	Status   string   `json:"status"`
+	Summary  string   `json:"summary"`
+	TaskRefs []string `json:"task_refs,omitempty"`
+	// ArtifactRefs are opaque evidence refs for display/audit. Runtime artifacts
+	// use their logical artifact ID when present; Work task artifacts have no
+	// separate logical artifact ID, so their EventGraph event ID is the ref.
 	ArtifactRefs    []string `json:"artifact_refs,omitempty"`
 	TestRunRefs     []string `json:"test_run_refs,omitempty"`
 	GateResultRefs  []string `json:"gate_result_refs,omitempty"`
