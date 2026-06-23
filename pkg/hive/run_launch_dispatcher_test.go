@@ -147,6 +147,61 @@ func TestDispatchQueuedRunLaunchesPreservesGenericNonObjectBrief(t *testing.T) {
 	}
 }
 
+func TestDispatchQueuedRunLaunchesPreservesGenericObjectWithNonStringKind(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_object_kind_brief", json.RawMessage(`{"kind":{"name":"generic"},"goal":"dispatch this generic task"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic object brief artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
+func TestDispatchQueuedRunLaunchRejectsIssueScanBriefMissingLifecycle(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	runID := "run_bad_issue_scan_lifecycle"
+	appendRunLaunchRequestWithBrief(t, rt.store, writer, runID, json.RawMessage(`{"kind":"`+issueScanBriefKind+`","lifecycle_version":"`+issueScanLifecycleVersion+`"}`))
+
+	result, err := rt.DispatchQueuedRunLaunch(runID)
+	if err == nil || !strings.Contains(err.Error(), "issue scan brief missing development lifecycle") {
+		t.Fatalf("DispatchQueuedRunLaunch err = %v, want missing lifecycle failure", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 0 || result.Failed != 1 {
+		t.Fatalf("dispatch result = %+v, want one failed issue-scan dispatch", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after invalid issue-scan brief = %+v, want none", tasks)
+	}
+}
+
 func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	requestEvent := appendStaleRunLaunchRequest(t, rt.store, writer)

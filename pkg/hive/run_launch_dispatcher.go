@@ -189,12 +189,19 @@ func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (str
 		return "", false, nil
 	}
 	var meta struct {
-		Kind string `json:"kind"`
+		Kind json.RawMessage `json:"kind"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return "", false, fmt.Errorf("decode run launch brief for execution plan artifact: %w", err)
 	}
-	if strings.TrimSpace(meta.Kind) != issueScanBriefKind {
+	if len(meta.Kind) == 0 {
+		return "", false, nil
+	}
+	var kind string
+	if err := json.Unmarshal(meta.Kind, &kind); err != nil {
+		return "", false, nil
+	}
+	if strings.TrimSpace(kind) != issueScanBriefKind {
 		return "", false, nil
 	}
 	if _, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw); err != nil {
