@@ -76,6 +76,7 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 	}
 
 	var errs []error
+	matchedRequestedRun := onlyRunID == ""
 	for _, request := range requests {
 		result.Scanned++
 		content, ok := request.Content().(FactoryRunRequestedContent)
@@ -85,6 +86,7 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		if onlyRunID != "" && content.RunID != onlyRunID {
 			continue
 		}
+		matchedRequestedRun = true
 		if status := strings.TrimSpace(content.Status); status != "" && !strings.EqualFold(status, "queued") {
 			result.SkippedNonQueued++
 			continue
@@ -116,6 +118,9 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
+	}
+	if !matchedRequestedRun {
+		errs = append(errs, fmt.Errorf("queued run %q not found in dispatch window", onlyRunID))
 	}
 
 	return result, errors.Join(errs...)

@@ -163,6 +163,18 @@ func TestDispatchQueuedRunLaunchOnlyDispatchesRequestedRun(t *testing.T) {
 	}
 }
 
+func TestDispatchQueuedRunLaunchErrorsWhenRunIDMissing(t *testing.T) {
+	rt, _ := newRunLaunchDispatchRuntime(t)
+
+	result, err := rt.DispatchQueuedRunLaunch("run_missing")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("DispatchQueuedRunLaunch error = %v, want not found", err)
+	}
+	if result.Dispatched != 0 || result.AlreadyDispatched != 0 {
+		t.Fatalf("dispatch result = %+v, want no dispatch for missing run", result)
+	}
+}
+
 func newRunLaunchDispatchRuntime(t *testing.T) (*Runtime, *operatorRunLaunchWriter) {
 	t.Helper()
 	registry := event.DefaultRegistry()

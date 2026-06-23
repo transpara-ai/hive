@@ -28,8 +28,8 @@ type issueScanBriefIssuePayload struct {
 
 // GitHubIssueCandidate is one open Transpara-AI repo issue found by a scanner.
 // Scanner ordering is meaningful: QueueIssueScanRunLaunch selects the first
-// valid candidate so a deterministic scanner policy can rank candidates before
-// this package records the run request.
+// candidate after validating the whole batch, so a deterministic scanner policy
+// can rank candidates before this package records the run request.
 type GitHubIssueCandidate struct {
 	Repo   string
 	Number int
