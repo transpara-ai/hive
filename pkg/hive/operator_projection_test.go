@@ -1083,6 +1083,12 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("queued brief metadata = %+v", queued)
 	}
+	if queued.SelectionPolicy == nil || queued.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || queued.SelectionPolicy.SelectedRank != 1 || queued.SelectionPolicy.CandidateCount != 1 {
+		t.Fatalf("queued selection policy = %+v", queued.SelectionPolicy)
+	}
+	if !containsModelProjectionString(queued.SelectionPolicy.RankingInputs, "scanner_return_order") || !strings.Contains(queued.SelectionPolicy.Rationale, "civic debate") {
+		t.Fatalf("queued selection policy details = %+v", queued.SelectionPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
