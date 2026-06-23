@@ -88,11 +88,13 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 
 func TestIssueScanRepoSlugFromRegistryRepoNormalizesGitHubURL(t *testing.T) {
 	tests := map[string]string{
-		"https://github.com/transpara-ai/site":      "transpara-ai/site",
-		"HTTPS://github.com/transpara-ai/site.git/": "transpara-ai/site",
-		"git@github.com:transpara-ai/hive.git":      "transpara-ai/hive",
-		"ssh://git@github.com/transpara-ai/work":    "transpara-ai/work",
-		"http://github.com/transpara-ai/agent.git":  "transpara-ai/agent",
+		"https://github.com/transpara-ai/site":           "transpara-ai/site",
+		"HTTPS://github.com/transpara-ai/site.git/":      "transpara-ai/site",
+		"https://github.com/transpara-ai/site.git/.git":  "transpara-ai/site",
+		"https://github.com/transpara-ai/site.git/.git/": "transpara-ai/site",
+		"git@github.com:transpara-ai/hive.git":           "transpara-ai/hive",
+		"ssh://git@github.com/transpara-ai/work":         "transpara-ai/work",
+		"http://github.com/transpara-ai/agent.git":       "transpara-ai/agent",
 	}
 	for raw, want := range tests {
 		t.Run(raw, func(t *testing.T) {
@@ -126,6 +128,19 @@ func TestResolveIssueScanReposFailsClosedWhenRegistryMissing(t *testing.T) {
 	_, err := resolveIssueScanRepos(nil, true, filepath.Join(t.TempDir(), "missing-repos.json"))
 	if err == nil || !strings.Contains(err.Error(), "load issue-scan repo registry") {
 		t.Fatalf("expected registry load error, got %v", err)
+	}
+}
+
+func TestResolveIssueScanReposFailsClosedWhenRegistryMalformed(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "repos.json")
+	if err := os.WriteFile(registryPath, []byte(`{"repos": [`), 0o600); err != nil {
+		t.Fatalf("write repos.json: %v", err)
+	}
+
+	_, err := resolveIssueScanRepos(nil, true, registryPath)
+	if err == nil || !strings.Contains(err.Error(), "load issue-scan repo registry") {
+		t.Fatalf("expected registry parse error, got %v", err)
 	}
 }
 
