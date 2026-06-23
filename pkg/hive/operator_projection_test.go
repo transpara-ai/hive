@@ -242,6 +242,60 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrders(t *testing
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderLifecycleEvidence(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Research and implement issue scan",
+		Description:            "FactoryOrder lifecycle should be visible to Site.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         "fo_run_issue_scan_ready_001",
+		RequirementIDs:         []string{"req_issue_scan_ready_001"},
+		AcceptanceCriterionIDs: []string{"ac_issue_scan_ready_001"},
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+	transitionEvent := appendEvent(work.EventTypeTaskLifecycleTransitioned, work.TaskLifecycleTransitionContent{
+		TaskID:       taskEvent.ID(),
+		FromState:    work.StatusCreated,
+		ToState:      work.StatusReady,
+		Reason:       "FactoryOrder has enough evidence to schedule",
+		EvidenceRefs: []string{"readiness_evidence_001"},
+		ChangedBy:    actorID,
+	})
+	verificationEvent := appendEvent(work.EventTypeTaskVerificationAttached, work.TaskVerificationAttachedContent{
+		TaskID:        taskEvent.ID(),
+		TestRunIDs:    []string{"test_run_issue_scan_001"},
+		GateResultIDs: []string{"gate_result_issue_scan_001"},
+		Summary:       "readiness verification attached",
+		AttachedBy:    actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.FactoryOrderSummary) != 1 {
+		t.Fatalf("factory orders = %+v, want one", projection.FactoryOrderSummary)
+	}
+	order := projection.FactoryOrderSummary[0]
+	if order.Status != "work_task_ready" {
+		t.Fatalf("factory order status = %q, want work_task_ready", order.Status)
+	}
+	if !containsString(projection.WorkEvidenceSummary.TestRunRefs, "test_run_issue_scan_001") {
+		t.Fatalf("test run refs = %+v, want test_run_issue_scan_001", projection.WorkEvidenceSummary.TestRunRefs)
+	}
+	if !containsString(projection.WorkEvidenceSummary.GateResultRefs, "gate_result_issue_scan_001") {
+		t.Fatalf("gate result refs = %+v, want gate_result_issue_scan_001", projection.WorkEvidenceSummary.GateResultRefs)
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, taskEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want task event %s", projection.SourceEventIDsOrQueryWindow, taskEvent.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, transitionEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want transition event %s", projection.SourceEventIDsOrQueryWindow, transitionEvent.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, verificationEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want verification event %s", projection.SourceEventIDsOrQueryWindow, verificationEvent.ID().Value())
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionDistinguishesFactoryOrderQueryFailure(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	projection := BuildCivilizationAssemblyProjection(factoryOrderReadFailureStore{Store: s}, 50)
