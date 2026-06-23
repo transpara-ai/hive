@@ -548,6 +548,16 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 		Body:      "not part of the FactoryOrder",
 		CreatedBy: actorID,
 	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "render runtime artifact refs",
+		RepoPath: "/tmp/hive-runtime",
+	})
+	runtimeArtifact := appendEvent(EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:      "run_runtime_artifact_001",
+		ArtifactID: "runtime_artifact_001",
+		Label:      "Runtime artifact",
+		MediaType:  "text/markdown",
+	})
 
 	projection := BuildCivilizationAssemblyProjection(s, 50)
 
@@ -573,8 +583,20 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID().Value()) != nil {
 		t.Fatalf("artifact evidence = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID())
 	}
+	if !containsString(projection.WorkEvidenceSummary.ArtifactRefs, "runtime_artifact_001") {
+		t.Fatalf("artifact refs = %+v, want runtime artifact logical ref", projection.WorkEvidenceSummary.ArtifactRefs)
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, runtimeArtifact.ID().Value()) != nil {
+		t.Fatalf("artifact evidence = %+v, want no structured runtime artifact %s", projection.WorkEvidenceSummary.Artifacts, runtimeArtifact.ID())
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, "runtime_artifact_001") != nil {
+		t.Fatalf("artifact evidence = %+v, want no structured runtime artifact logical ref", projection.WorkEvidenceSummary.Artifacts)
+	}
 	if !containsString(projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value()) {
 		t.Fatalf("source refs = %+v, want artifact event %s", projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, runtimeArtifact.ID().Value()) {
+		t.Fatalf("source refs = %+v, want runtime artifact event %s", projection.SourceEventIDsOrQueryWindow, runtimeArtifact.ID().Value())
 	}
 	if containsString(projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value()) {
 		t.Fatalf("source refs = %+v, want no unrelated artifact %s", projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value())
