@@ -1,6 +1,8 @@
 package hive
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +80,183 @@ func TestBuildOperatorProjectionPendingAndDecisions(t *testing.T) {
 	if len(decision.Scope) != 1 || decision.Scope[0] != "agent.revoke" {
 		t.Fatalf("decision scope = %#v, want [agent.revoke]", decision.Scope)
 	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	appendEvent(EventTypeAuthorityRequestRecorded, AuthorityRequestRecordedContent{
+		RequestID:        requestID,
+		RequestingActor:  actorID,
+		RequestingRole:   "operator",
+		ActionName:       "pull_request.create",
+		Target:           "pr://transpara-ai/site/42",
+		Environment:      "review",
+		RiskClass:        "medium",
+		RequestedOutcome: "draft PR",
+		Justification:    "bounded implementation ready",
+		RiskSummary:      "protected GitHub write",
+		Scope:            []string{"repo:transpara-ai/site", "head:abc123"},
+	})
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/site",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude",
+		ActorID: actorID.Value(),
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.ProjectionSubject != civilizationAssemblyProjectionSubject {
+		t.Fatalf("subject = %q, want %q", projection.ProjectionSubject, civilizationAssemblyProjectionSubject)
+	}
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
+	}
+	if projection.AuthorityState.Status != civilizationAssemblyFieldAvailable || len(projection.AuthorityState.AuthorityRequests) != 1 {
+		t.Fatalf("authority state = %+v, want one available request", projection.AuthorityState)
+	}
+	if got := projection.AuthorityState.AuthorityRequests[0].TargetType; got != "pr" {
+		t.Fatalf("target type = %q, want pr", got)
+	}
+	if projection.ExternalCommitteeState.Status != civilizationAssemblyFieldUnavailable || len(projection.ExternalCommitteeState.DecisionRefs) != 0 {
+		t.Fatalf("external committee state = %+v, want unavailable with no Hive decision refs", projection.ExternalCommitteeState)
+	}
+	if len(projection.ActorRoster) == 0 {
+		t.Fatalf("actor roster empty: %+v", projection)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, actorID.Value(), "reviewer") {
+		t.Fatalf("missing reviewer role binding: %+v", projection.RoleBindings)
+	}
+	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "active") {
+		t.Fatalf("missing normalized active lifecycle status: %+v", projection.AgentLifecycleSummary)
+	}
+	if got := civilizationProjectionLifecycleCount(projection, actorID.Value()); got != 1 {
+		t.Fatalf("lifecycle rows for %s = %d, want 1: %+v", actorID.Value(), got, projection.AgentLifecycleSummary)
+	}
+	if projection.FactoryOrderSummary == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.ResidualRiskSummary == nil {
+		t.Fatalf("top-level slices must serialize as arrays, got factory=%#v bindings=%#v lifecycle=%#v risks=%#v", projection.FactoryOrderSummary, projection.RoleBindings, projection.AgentLifecycleSummary, projection.ResidualRiskSummary)
+	}
+	if len(projection.OpenGateSummary) != 1 || projection.OpenGateSummary[0].ID != requestID.Value() {
+		t.Fatalf("open gates = %+v, want pending request %s", projection.OpenGateSummary, requestID.Value())
+	}
+	if projection.SourceEventGraphHeadOrStateVersion == "" || projection.SourceEventGraphHeadOrStateVersion == "eventgraph head unavailable" {
+		t.Fatalf("source head unavailable: %q", projection.SourceEventGraphHeadOrStateVersion)
+	}
+	if !containsString(projection.BoundaryFlags, "read_only_site_consumer") || !containsString(projection.ValidationRefs, civilizationAssemblyReadOnlyRoutePath) {
+		t.Fatalf("missing read-only boundary evidence: flags=%+v validation=%+v", projection.BoundaryFlags, projection.ValidationRefs)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndArrays(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete", projection.DerivationStatus)
+	}
+	if projection.ActorRoster == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.FactoryOrderSummary == nil || projection.ResidualRiskSummary == nil {
+		t.Fatalf("top-level slices must be arrays, got actor=%#v bindings=%#v lifecycle=%#v factory=%#v risks=%#v", projection.ActorRoster, projection.RoleBindings, projection.AgentLifecycleSummary, projection.FactoryOrderSummary, projection.ResidualRiskSummary)
+	}
+	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldUnavailable || len(projection.WorkEvidenceSummary.SourceRefs) != 0 {
+		t.Fatalf("work evidence = %+v, want unavailable with no refs", projection.WorkEvidenceSummary)
+	}
+	if !civilizationProjectionHasUnavailableField(projection, "actor_roster") {
+		t.Fatalf("missing actor_roster unavailable field: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionToleratesOpaqueSharedStoreHead(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	opaqueHead := appendOpaqueSharedStoreEvent(t, s, actorID)
+
+	event.SetFallbackUnmarshaler(event.RawFallback)
+	t.Cleanup(func() { event.SetFallbackUnmarshaler(nil) })
+
+	serializedStore := serializationRoundTripStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(serializedStore, 50)
+
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
+	}
+	if len(projection.FailureReasons) != 0 {
+		t.Fatalf("failure reasons = %+v, want none", projection.FailureReasons)
+	}
+	if projection.SourceEventGraphHeadOrStateVersion != opaqueHead.ID().Value() {
+		t.Fatalf("source head = %q, want opaque head %q", projection.SourceEventGraphHeadOrStateVersion, opaqueHead.ID().Value())
+	}
+}
+
+func TestCivilizationAssemblyTargetType(t *testing.T) {
+	tests := map[string]string{
+		"pr://transpara-ai/site/42": "pr",
+		"actor_123":                 "actor",
+		"repo:transpara-ai/site":    "repo",
+		"plain-target":              "target",
+		"":                          "",
+	}
+	for target, want := range tests {
+		if got := civilizationAssemblyTargetType(target); got != want {
+			t.Fatalf("target type for %q = %q, want %q", target, got, want)
+		}
+	}
+}
+
+func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProjection, actorID, role string) bool {
+	for _, binding := range projection.RoleBindings {
+		if binding.ActorID == actorID && binding.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasLifecycleStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
+	for _, lifecycle := range projection.AgentLifecycleSummary {
+		if lifecycle.ActorID == actorID && lifecycle.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionLifecycleCount(projection CivilizationAssemblyProjection, actorID string) int {
+	count := 0
+	for _, lifecycle := range projection.AgentLifecycleSummary {
+		if lifecycle.ActorID == actorID {
+			count++
+		}
+	}
+	return count
+}
+
+func civilizationProjectionHasUnavailableField(projection CivilizationAssemblyProjection, field string) bool {
+	for _, item := range projection.WithheldOrUnavailableFields {
+		if item.Field == field {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildOperatorProjectionPendingScansBeyondDecisionDisplayLimit(t *testing.T) {
@@ -1022,6 +1201,150 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 	}
 
 	return s, actorID, appendEvent
+}
+
+func appendOpaqueSharedStoreEvent(t *testing.T, s *store.InMemoryStore, actorID types.ActorID) event.Event {
+	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	eventType := types.MustEventType("foreign.event.type")
+	content := foreignSharedStoreContent{Source: "shared-store"}
+	eventID := newTestEventID(t)
+	convID := types.MustConversationID("conv_00000000000000000000000000000088")
+	causes := []types.EventID{head.Unwrap().ID()}
+	prevHash := head.Unwrap().Hash()
+	tmp := event.NewEvent(event.CurrentEventVersion, eventID, eventType, types.Now(), actorID, content, causes, convID, types.ZeroHash(), prevHash, types.Signature{})
+	hash, err := event.ComputeHash(event.CanonicalForm(tmp))
+	if err != nil {
+		t.Fatalf("hash opaque event: %v", err)
+	}
+	ev := event.NewEvent(event.CurrentEventVersion, eventID, eventType, tmp.Timestamp(), actorID, content, causes, convID, hash, prevHash, types.Signature{})
+	stored, err := s.Append(ev)
+	if err != nil {
+		t.Fatalf("append opaque event: %v", err)
+	}
+	return stored
+}
+
+type foreignSharedStoreContent struct {
+	Source string `json:"source"`
+}
+
+func (c foreignSharedStoreContent) EventTypeName() string { return "foreign.event.type" }
+func (c foreignSharedStoreContent) Accept(event.EventContentVisitor) {
+}
+
+type serializationRoundTripStore struct {
+	store.Store
+}
+
+func (s serializationRoundTripStore) Head() (types.Option[event.Event], error) {
+	head, err := s.Store.Head()
+	if err != nil || !head.IsSome() {
+		return head, err
+	}
+	ev, err := roundTripEventContent(head.Unwrap())
+	if err != nil {
+		return types.None[event.Event](), err
+	}
+	return types.Some(ev), nil
+}
+
+func (s serializationRoundTripStore) Recent(limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.Recent(limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.ByType(eventType, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) BySource(source types.ActorID, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.BySource(source, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) ByConversation(id types.ConversationID, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.ByConversation(id, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) Since(afterID types.EventID, limit int) (types.Page[event.Event], error) {
+	page, err := s.Store.Since(afterID, limit)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) Ancestors(id types.EventID, maxDepth int) ([]event.Event, error) {
+	events, err := s.Store.Ancestors(id, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	return roundTripEvents(events)
+}
+
+func (s serializationRoundTripStore) Descendants(id types.EventID, maxDepth int) ([]event.Event, error) {
+	events, err := s.Store.Descendants(id, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	return roundTripEvents(events)
+}
+
+func roundTripEventPage(page types.Page[event.Event]) (types.Page[event.Event], error) {
+	events, err := roundTripEvents(page.Items())
+	if err != nil {
+		return types.Page[event.Event]{}, err
+	}
+	return types.NewPage(events, page.Cursor(), page.HasMore()), nil
+}
+
+func roundTripEvents(events []event.Event) ([]event.Event, error) {
+	roundTripped := make([]event.Event, 0, len(events))
+	for _, ev := range events {
+		next, err := roundTripEventContent(ev)
+		if err != nil {
+			return nil, err
+		}
+		roundTripped = append(roundTripped, next)
+	}
+	return roundTripped, nil
+}
+
+func roundTripEventContent(ev event.Event) (event.Event, error) {
+	contentJSON, err := json.Marshal(ev.Content())
+	if err != nil {
+		return event.Event{}, err
+	}
+	content, err := event.UnmarshalContent(ev.Type().Value(), contentJSON)
+	if err != nil {
+		return event.Event{}, err
+	}
+	if ev.IsBootstrap() {
+		bootstrap, ok := content.(event.BootstrapContent)
+		if !ok {
+			return event.Event{}, fmt.Errorf("bootstrap content type = %T, want event.BootstrapContent", content)
+		}
+		return event.NewBootstrapEvent(ev.Version(), ev.ID(), ev.Type(), ev.Timestamp(), ev.Source(), bootstrap, ev.ConversationID(), ev.Hash(), ev.Signature()), nil
+	}
+	return event.NewEvent(ev.Version(), ev.ID(), ev.Type(), ev.Timestamp(), ev.Source(), content, ev.Causes(), ev.ConversationID(), ev.Hash(), ev.PrevHash(), ev.Signature()), nil
 }
 
 func appendOperatorProjectionEventWithConversation(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent) event.Event {
