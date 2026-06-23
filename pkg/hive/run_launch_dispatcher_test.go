@@ -74,6 +74,9 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 		if strings.HasPrefix(artifact.Label, IssueScanLifecycleStageArtifactPrefix) {
 			t.Fatalf("generic run launch created issue-scan lifecycle stage artifact: %+v", artifact)
 		}
+		if artifact.Label == IssueScanStageRoleContractArtifactLabel || artifact.Label == IssueScanStageOutputContractArtifactLabel {
+			t.Fatalf("generic run launch created issue-scan stage task artifact: %+v", artifact)
+		}
 	}
 
 	projection, err := rt.tasks.ProjectTask(task.ID)

@@ -173,24 +173,36 @@ type CivilizationAssemblyWorkEvidence struct {
 }
 
 type CivilizationAssemblyTaskEvidence struct {
-	ID                      string                           `json:"id"`
-	CanonicalTaskID         string                           `json:"canonical_task_id,omitempty"`
-	FactoryOrderID          string                           `json:"factory_order_id,omitempty"`
-	LifecycleStageID        string                           `json:"lifecycle_stage_id,omitempty"`
-	Title                   string                           `json:"title"`
-	Cell                    string                           `json:"cell,omitempty"`
-	RiskClass               string                           `json:"risk_class,omitempty"`
-	Status                  string                           `json:"status"`
-	Ready                   bool                             `json:"ready"`
-	Blocked                 bool                             `json:"blocked"`
-	RequirementRefs         []string                         `json:"requirement_refs,omitempty"`
-	AcceptanceCriterionRefs []string                         `json:"acceptance_criterion_refs,omitempty"`
-	ExpectedOutputs         []string                         `json:"expected_outputs,omitempty"`
-	DependsOnRefs           []string                         `json:"depends_on_refs,omitempty"`
-	SourceRefs              []string                         `json:"source_refs,omitempty"`
-	RequiredRoles           []string                         `json:"required_roles,omitempty"`
-	RoleContractRefs        []string                         `json:"role_contract_refs,omitempty"`
-	AgentExecutionPlan      []OperatorQueuedRunAgentPlanStep `json:"agent_execution_plan,omitempty"`
+	ID                      string                                   `json:"id"`
+	CanonicalTaskID         string                                   `json:"canonical_task_id,omitempty"`
+	FactoryOrderID          string                                   `json:"factory_order_id,omitempty"`
+	LifecycleStageID        string                                   `json:"lifecycle_stage_id,omitempty"`
+	Title                   string                                   `json:"title"`
+	Cell                    string                                   `json:"cell,omitempty"`
+	RiskClass               string                                   `json:"risk_class,omitempty"`
+	Status                  string                                   `json:"status"`
+	Ready                   bool                                     `json:"ready"`
+	Blocked                 bool                                     `json:"blocked"`
+	RequirementRefs         []string                                 `json:"requirement_refs,omitempty"`
+	AcceptanceCriterionRefs []string                                 `json:"acceptance_criterion_refs,omitempty"`
+	ExpectedOutputs         []string                                 `json:"expected_outputs,omitempty"`
+	DependsOnRefs           []string                                 `json:"depends_on_refs,omitempty"`
+	SourceRefs              []string                                 `json:"source_refs,omitempty"`
+	RequiredRoles           []string                                 `json:"required_roles,omitempty"`
+	RoleContractRefs        []string                                 `json:"role_contract_refs,omitempty"`
+	AgentExecutionPlan      []OperatorQueuedRunAgentPlanStep         `json:"agent_execution_plan,omitempty"`
+	RequiredEvidence        []string                                 `json:"required_evidence,omitempty"`
+	OutputContractRefs      []string                                 `json:"output_contract_refs,omitempty"`
+	RoleOutputContracts     []CivilizationAssemblyRoleOutputContract `json:"role_output_contracts,omitempty"`
+}
+
+type CivilizationAssemblyRoleOutputContract struct {
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	RequiredOutputs   []string `json:"required_outputs,omitempty"`
+	AuthorityBoundary string   `json:"authority_boundary,omitempty"`
+	CompletionGate    string   `json:"completion_gate,omitempty"`
+	EvidenceStatus    string   `json:"evidence_status,omitempty"`
 }
 
 type CivilizationAssemblyArtifactEvidence struct {
@@ -240,12 +252,14 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 }
 
 type civilizationAssemblyTaskArtifactEvidence struct {
-	ArtifactRefs           []string
-	Artifacts              []CivilizationAssemblyArtifactEvidence
-	StageArtifactRefs      []civilizationAssemblyStageArtifactRef
-	RoleContract           civilizationAssemblyTaskRoleContract
-	RoleContractConflicted bool
-	SourceRefs             []string
+	ArtifactRefs             []string
+	Artifacts                []CivilizationAssemblyArtifactEvidence
+	StageArtifactRefs        []civilizationAssemblyStageArtifactRef
+	RoleContract             civilizationAssemblyTaskRoleContract
+	RoleContractConflicted   bool
+	OutputContract           civilizationAssemblyTaskOutputContract
+	OutputContractConflicted bool
+	SourceRefs               []string
 }
 
 type civilizationAssemblyStageArtifactRef struct {
@@ -260,6 +274,15 @@ type civilizationAssemblyTaskRoleContract struct {
 	RequiredRoles      []string
 	AgentExecutionPlan []OperatorQueuedRunAgentPlanStep
 	SourceRefs         []string
+}
+
+type civilizationAssemblyTaskOutputContract struct {
+	StageID             string
+	FactoryOrderID      string
+	RequiredEvidence    []string
+	ExpectedOutputs     []string
+	RoleOutputContracts []CivilizationAssemblyRoleOutputContract
+	SourceRefs          []string
 }
 
 type civilizationAssemblyTaskLifecycleEvidence struct {
@@ -634,10 +657,12 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 			continue
 		}
 		var roleContract civilizationAssemblyTaskRoleContract
+		var outputContract civilizationAssemblyTaskOutputContract
 		if artifactEvidence, ok := artifactByTask[ev.ID()]; ok {
 			roleContract = artifactEvidence.RoleContract
+			outputContract = artifactEvidence.OutputContract
 		}
-		taskEvidence := civilizationAssemblyTaskEvidence(ev.ID(), content, taskProjection, legacyProjection, dependencyEvidence.DependsOnRefs, dependencyEvidence.SourceRefs, roleContract)
+		taskEvidence := civilizationAssemblyTaskEvidence(ev.ID(), content, taskProjection, legacyProjection, dependencyEvidence.DependsOnRefs, dependencyEvidence.SourceRefs, roleContract, outputContract)
 		workEvidence.Tasks = append(workEvidence.Tasks, taskEvidence)
 		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
 	}
@@ -675,13 +700,20 @@ func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types
 	return taskProjection, legacyProjection, nil
 }
 
-func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCreatedContent, taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection, dependencies []string, sourceRefs []string, roleContract civilizationAssemblyTaskRoleContract) CivilizationAssemblyTaskEvidence {
+func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCreatedContent, taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection, dependencies []string, sourceRefs []string, roleContract civilizationAssemblyTaskRoleContract, outputContract civilizationAssemblyTaskOutputContract) CivilizationAssemblyTaskEvidence {
 	lifecycleStageID := civilizationAssemblyTaskLifecycleStageID(content)
 	if roleContract.StageID != "" && (safeRunLaunchID(roleContract.StageID) != safeRunLaunchID(lifecycleStageID) || roleContract.FactoryOrderID != strings.TrimSpace(content.FactoryOrderID)) {
 		roleContract = civilizationAssemblyTaskRoleContract{}
 	}
+	if outputContract.StageID != "" && (safeRunLaunchID(outputContract.StageID) != safeRunLaunchID(lifecycleStageID) || outputContract.FactoryOrderID != strings.TrimSpace(content.FactoryOrderID)) {
+		outputContract = civilizationAssemblyTaskOutputContract{}
+	}
 	status := civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection)
 	ready, blocked := civilizationAssemblyProjectedWorkTaskReadiness(status, taskProjection, legacyProjection)
+	expectedOutputs := compactStrings(content.ExpectedOutputs)
+	if len(outputContract.ExpectedOutputs) > 0 {
+		expectedOutputs = compactStrings(append(expectedOutputs, outputContract.ExpectedOutputs...))
+	}
 	return CivilizationAssemblyTaskEvidence{
 		ID:                      taskID.Value(),
 		CanonicalTaskID:         strings.TrimSpace(content.CanonicalTaskID),
@@ -695,12 +727,15 @@ func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCre
 		Blocked:                 blocked,
 		RequirementRefs:         compactStrings(content.RequirementIDs),
 		AcceptanceCriterionRefs: compactStrings(content.AcceptanceCriterionIDs),
-		ExpectedOutputs:         compactStrings(content.ExpectedOutputs),
+		ExpectedOutputs:         expectedOutputs,
 		DependsOnRefs:           compactStrings(dependencies),
-		SourceRefs:              compactStrings(append(append([]string{taskID.Value()}, sourceRefs...), roleContract.SourceRefs...)),
+		SourceRefs:              compactStrings(append(append(append([]string{taskID.Value()}, sourceRefs...), roleContract.SourceRefs...), outputContract.SourceRefs...)),
 		RequiredRoles:           compactStrings(roleContract.RequiredRoles),
 		RoleContractRefs:        compactStrings(roleContract.SourceRefs),
 		AgentExecutionPlan:      compactOperatorQueuedRunAgentPlanSteps(roleContract.AgentExecutionPlan),
+		RequiredEvidence:        compactStrings(outputContract.RequiredEvidence),
+		OutputContractRefs:      compactStrings(outputContract.SourceRefs),
+		RoleOutputContracts:     compactCivilizationAssemblyRoleOutputContracts(outputContract.RoleOutputContracts),
 	}
 }
 
@@ -780,6 +815,19 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 				evidence.RoleContract = merged
 			}
 		}
+		outputContract, ok, err := civilizationAssemblyIssueScanStageOutputContract(ev.ID().Value(), label, content.Body)
+		if err != nil {
+			projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan stage output contract %s: %v", ev.ID().Value(), err))
+		} else if ok && !evidence.OutputContractConflicted {
+			merged, diverged := mergeCivilizationAssemblyTaskOutputContract(evidence.OutputContract, outputContract)
+			if diverged {
+				projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan stage output contract %s: divergent output contract for task %s (existing stage=%q order=%q, candidate stage=%q order=%q)", ev.ID().Value(), content.TaskID.Value(), evidence.OutputContract.StageID, evidence.OutputContract.FactoryOrderID, outputContract.StageID, outputContract.FactoryOrderID))
+				evidence.OutputContract = civilizationAssemblyTaskOutputContract{}
+				evidence.OutputContractConflicted = true
+			} else {
+				evidence.OutputContract = merged
+			}
+		}
 		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
 		byTask[content.TaskID] = evidence
 	}
@@ -788,6 +836,7 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 		evidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(evidence.Artifacts)
 		evidence.StageArtifactRefs = compactCivilizationAssemblyStageArtifactRefs(evidence.StageArtifactRefs)
 		evidence.RoleContract = compactCivilizationAssemblyTaskRoleContract(evidence.RoleContract)
+		evidence.OutputContract = compactCivilizationAssemblyTaskOutputContract(evidence.OutputContract)
 		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
 		byTask[taskID] = evidence
 	}
@@ -892,6 +941,71 @@ func civilizationAssemblyIssueScanStageRoleContract(eventRef, label, body string
 		RequiredRoles:      compactStrings(payload.Stage.RequiredRoles),
 		AgentExecutionPlan: compactOperatorQueuedRunAgentPlanSteps(payload.AgentExecutionPlan),
 		SourceRefs:         compactStrings([]string{eventRef}),
+	}, true, nil
+}
+
+func civilizationAssemblyIssueScanStageOutputContract(eventRef, label, body string) (civilizationAssemblyTaskOutputContract, bool, error) {
+	if strings.TrimSpace(label) != IssueScanStageOutputContractArtifactLabel {
+		return civilizationAssemblyTaskOutputContract{}, false, nil
+	}
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("label %q has empty artifact body", label)
+	}
+	var payload struct {
+		Kind                string                                   `json:"kind"`
+		FactoryOrderID      string                                   `json:"factory_order_id"`
+		StageID             string                                   `json:"stage_id"`
+		Stage               OperatorQueuedRunLifecycleStage          `json:"stage"`
+		RequiredEvidence    []string                                 `json:"required_evidence"`
+		ExpectedOutputs     []string                                 `json:"expected_outputs"`
+		RoleOutputContracts []CivilizationAssemblyRoleOutputContract `json:"role_output_contracts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("decode artifact body: %w", err)
+	}
+	if strings.TrimSpace(payload.Kind) != issueScanStageOutputContractArtifactKind {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("kind %q does not match %q", payload.Kind, issueScanStageOutputContractArtifactKind)
+	}
+	stageID := strings.TrimSpace(payload.StageID)
+	if stageID == "" {
+		stageID = strings.TrimSpace(payload.Stage.ID)
+	}
+	if safeRunLaunchID(stageID) == "" {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("missing stage_id")
+	}
+	if payload.Stage.ID != "" && safeRunLaunchID(payload.Stage.ID) != safeRunLaunchID(stageID) {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("stage_id %q does not match stage.id %q", stageID, payload.Stage.ID)
+	}
+	factoryOrderID := strings.TrimSpace(payload.FactoryOrderID)
+	if factoryOrderID == "" {
+		return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("missing factory_order_id")
+	}
+	contractByRole := map[string]CivilizationAssemblyRoleOutputContract{}
+	for i, contract := range payload.RoleOutputContracts {
+		role := strings.TrimSpace(contract.Role)
+		if role == "" {
+			return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("role_output_contracts[%d].role is required", i)
+		}
+		contractByRole[role] = contract
+	}
+	for _, role := range payload.Stage.RequiredRoles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		if _, ok := contractByRole[role]; !ok {
+			return civilizationAssemblyTaskOutputContract{}, false, fmt.Errorf("missing role_output_contract for required role %q", role)
+		}
+	}
+	requiredEvidence := compactStrings(append(payload.RequiredEvidence, payload.Stage.RequiredEvidence...))
+	return civilizationAssemblyTaskOutputContract{
+		StageID:             stageID,
+		FactoryOrderID:      factoryOrderID,
+		RequiredEvidence:    requiredEvidence,
+		ExpectedOutputs:     compactStrings(payload.ExpectedOutputs),
+		RoleOutputContracts: compactCivilizationAssemblyRoleOutputContracts(payload.RoleOutputContracts),
+		SourceRefs:          compactStrings([]string{eventRef}),
 	}, true, nil
 }
 
@@ -1499,6 +1613,74 @@ func compactCivilizationAssemblyTaskRoleContract(value civilizationAssemblyTaskR
 	return value
 }
 
+func mergeCivilizationAssemblyTaskOutputContract(existing, candidate civilizationAssemblyTaskOutputContract) (civilizationAssemblyTaskOutputContract, bool) {
+	existing = compactCivilizationAssemblyTaskOutputContract(existing)
+	candidate = compactCivilizationAssemblyTaskOutputContract(candidate)
+	if existing.StageID == "" {
+		return candidate, false
+	}
+	if candidate.StageID == "" {
+		return existing, false
+	}
+	if safeRunLaunchID(existing.StageID) != safeRunLaunchID(candidate.StageID) || existing.FactoryOrderID != candidate.FactoryOrderID {
+		return existing, true
+	}
+	existing.RequiredEvidence = append(existing.RequiredEvidence, candidate.RequiredEvidence...)
+	existing.ExpectedOutputs = append(existing.ExpectedOutputs, candidate.ExpectedOutputs...)
+	existing.RoleOutputContracts = append(existing.RoleOutputContracts, candidate.RoleOutputContracts...)
+	existing.SourceRefs = append(existing.SourceRefs, candidate.SourceRefs...)
+	return compactCivilizationAssemblyTaskOutputContract(existing), false
+}
+
+func compactCivilizationAssemblyTaskOutputContract(value civilizationAssemblyTaskOutputContract) civilizationAssemblyTaskOutputContract {
+	value.StageID = strings.TrimSpace(value.StageID)
+	value.FactoryOrderID = strings.TrimSpace(value.FactoryOrderID)
+	value.RequiredEvidence = compactStrings(value.RequiredEvidence)
+	value.ExpectedOutputs = compactStrings(value.ExpectedOutputs)
+	value.RoleOutputContracts = compactCivilizationAssemblyRoleOutputContracts(value.RoleOutputContracts)
+	value.SourceRefs = compactStrings(value.SourceRefs)
+	if value.StageID == "" || value.FactoryOrderID == "" {
+		return civilizationAssemblyTaskOutputContract{}
+	}
+	return value
+}
+
+func compactCivilizationAssemblyRoleOutputContracts(values []CivilizationAssemblyRoleOutputContract) []CivilizationAssemblyRoleOutputContract {
+	byRole := map[string]CivilizationAssemblyRoleOutputContract{}
+	for _, value := range values {
+		value.Role = strings.TrimSpace(value.Role)
+		if value.Role == "" {
+			continue
+		}
+		value.RequiredOutputs = compactStrings(value.RequiredOutputs)
+		value.AuthorityBoundary = strings.TrimSpace(value.AuthorityBoundary)
+		value.CompletionGate = strings.TrimSpace(value.CompletionGate)
+		value.EvidenceStatus = strings.TrimSpace(value.EvidenceStatus)
+		if existing, ok := byRole[value.Role]; ok {
+			value.CanOperate = value.CanOperate || existing.CanOperate
+			value.RequiredOutputs = compactStrings(append(existing.RequiredOutputs, value.RequiredOutputs...))
+			if value.AuthorityBoundary == "" {
+				value.AuthorityBoundary = existing.AuthorityBoundary
+			}
+			if value.CompletionGate == "" {
+				value.CompletionGate = existing.CompletionGate
+			}
+			if value.EvidenceStatus == "" {
+				value.EvidenceStatus = existing.EvidenceStatus
+			}
+		}
+		byRole[value.Role] = value
+	}
+	out := make([]CivilizationAssemblyRoleOutputContract, 0, len(byRole))
+	for _, value := range byRole {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Role < out[j].Role
+	})
+	return out
+}
+
 func compactOperatorQueuedRunAgentPlanSteps(values []OperatorQueuedRunAgentPlanStep) []OperatorQueuedRunAgentPlanStep {
 	byID := map[string]OperatorQueuedRunAgentPlanStep{}
 	for _, value := range values {
@@ -1551,6 +1733,9 @@ func compactCivilizationAssemblyTaskEvidence(values []CivilizationAssemblyTaskEv
 		value.RequiredRoles = compactStrings(value.RequiredRoles)
 		value.RoleContractRefs = compactStrings(value.RoleContractRefs)
 		value.AgentExecutionPlan = compactOperatorQueuedRunAgentPlanSteps(value.AgentExecutionPlan)
+		value.RequiredEvidence = compactStrings(value.RequiredEvidence)
+		value.OutputContractRefs = compactStrings(value.OutputContractRefs)
+		value.RoleOutputContracts = compactCivilizationAssemblyRoleOutputContracts(value.RoleOutputContracts)
 		if existing, ok := byID[value.ID]; ok {
 			value.SourceRefs = compactStrings(append(existing.SourceRefs, value.SourceRefs...))
 			value.DependsOnRefs = compactStrings(append(existing.DependsOnRefs, value.DependsOnRefs...))
@@ -1582,6 +1767,9 @@ func compactCivilizationAssemblyTaskEvidence(values []CivilizationAssemblyTaskEv
 			value.RequiredRoles = compactStrings(append(existing.RequiredRoles, value.RequiredRoles...))
 			value.RoleContractRefs = compactStrings(append(existing.RoleContractRefs, value.RoleContractRefs...))
 			value.AgentExecutionPlan = compactOperatorQueuedRunAgentPlanSteps(append(existing.AgentExecutionPlan, value.AgentExecutionPlan...))
+			value.RequiredEvidence = compactStrings(append(existing.RequiredEvidence, value.RequiredEvidence...))
+			value.OutputContractRefs = compactStrings(append(existing.OutputContractRefs, value.OutputContractRefs...))
+			value.RoleOutputContracts = compactCivilizationAssemblyRoleOutputContracts(append(existing.RoleOutputContracts, value.RoleOutputContracts...))
 		}
 		byID[value.ID] = value
 	}
