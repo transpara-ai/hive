@@ -208,6 +208,50 @@ func TestBuildCivilizationAssemblyProjectionDerivesCompletedRuntimeRoster(t *tes
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionClassifiesStoppedRunningAgentsAsObserved(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "builder",
+		Role:    "implementer",
+		Model:   "claude-opus-4-6",
+		ActorID: "actor_active_builder",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: "actor_stopped_reviewer",
+	})
+	appendEvent(EventTypeAgentStopped, AgentStoppedContent{
+		Name:       "reviewer",
+		Role:       "reviewer",
+		StopReason: "handoff",
+		Iterations: 1,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorStatus(projection, "actor_active_builder", "active") {
+		t.Fatalf("missing active runtime actor: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasActorStatus(projection, "actor_stopped_reviewer", "observed") {
+		t.Fatalf("missing observed stopped runtime actor: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_active_builder", "active") {
+		t.Fatalf("missing active lifecycle row: %+v", projection.AgentLifecycleSummary)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_stopped_reviewer", "observed") {
+		t.Fatalf("missing observed stopped lifecycle row: %+v", projection.AgentLifecycleSummary)
+	}
+	if !civilizationProjectionHasRoleBinding(projection, "actor_active_builder", "implementer") || !civilizationProjectionHasRoleBinding(projection, "actor_stopped_reviewer", "reviewer") {
+		t.Fatalf("missing mixed runtime role bindings: %+v", projection.RoleBindings)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndArrays(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 
@@ -266,6 +310,15 @@ func TestCivilizationAssemblyTargetType(t *testing.T) {
 func civilizationProjectionHasRoleBinding(projection CivilizationAssemblyProjection, actorID, role string) bool {
 	for _, binding := range projection.RoleBindings {
 		if binding.ActorID == actorID && binding.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionHasActorStatus(projection CivilizationAssemblyProjection, actorID, status string) bool {
+	for _, actor := range projection.ActorRoster {
+		if actor.ActorID == actorID && actor.Status == status {
 			return true
 		}
 	}
