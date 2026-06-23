@@ -194,13 +194,13 @@ func TestBuildCivilizationAssemblyProjectionDerivesCompletedRuntimeRoster(t *tes
 		t.Fatalf("actor roster = %+v, want one runtime-observed actor", projection.ActorRoster)
 	}
 	actor := projection.ActorRoster[0]
-	if actor.ActorID != "actor_runtime_builder" || actor.IdentityMode != "runtime_observed" || actor.Status != "observed_completed" {
+	if actor.ActorID != "actor_runtime_builder" || actor.IdentityMode != "runtime_observed" || actor.Status != "observed_completed_run" {
 		t.Fatalf("actor roster entry = %+v, want observed completed runtime actor", actor)
 	}
 	if !civilizationProjectionHasRoleBinding(projection, "actor_runtime_builder", "implementer") {
 		t.Fatalf("missing completed-run implementer role binding: %+v", projection.RoleBindings)
 	}
-	if !civilizationProjectionHasLifecycleStatus(projection, "actor_runtime_builder", "observed_completed") {
+	if !civilizationProjectionHasLifecycleStatus(projection, "actor_runtime_builder", "observed_completed_run") {
 		t.Fatalf("missing completed-run lifecycle status: %+v", projection.AgentLifecycleSummary)
 	}
 	if civilizationProjectionHasUnavailableField(projection, "actor_roster") {
@@ -240,11 +240,53 @@ func TestBuildCivilizationAssemblyProjectionRuntimeStatusOverridesLifecycleLiven
 
 	projection := BuildCivilizationAssemblyProjection(s, 50)
 
-	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "observed_completed") {
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "observed_completed_run") {
 		t.Fatalf("runtime status did not override lifecycle liveness: %+v", projection.ActorRoster)
 	}
-	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed") {
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed_run") {
 		t.Fatalf("runtime lifecycle status did not override stale active lifecycle: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionRunCompletionOverridesMidRunLifecycleLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	decisionID := newTestEventID(t)
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeAgentLifecycleTransitioned, AgentLifecycleTransitionedContent{
+		ActorID:            actorID,
+		PreviousState:      "candidate",
+		RequestedState:     "active",
+		ResultingState:     "active",
+		RequestingActor:    actorID,
+		AuthorityRequestID: requestID,
+		DecisionEventID:    decisionID,
+		Reason:             "activated during run",
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeRunCompleted, RunCompletedContent{
+		AgentCount: 1,
+		DurationMs: 1234,
+		TotalCost:  0.25,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "projected", "observed_completed_run") {
+		t.Fatalf("run completion did not override mid-run lifecycle liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "observed_completed_run") {
+		t.Fatalf("run completion did not update lifecycle status: %+v", projection.AgentLifecycleSummary)
 	}
 }
 

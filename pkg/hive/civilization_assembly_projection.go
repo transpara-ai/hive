@@ -325,7 +325,7 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 		}
 		status := civilizationAssemblyRuntimeAgentStatus(p.RuntimeEvidence.Status, actorID, activeActors)
 		if existing, ok := actors[actorID]; ok {
-			if civilizationAssemblyRuntimeObservationSupersedesLifecycle(item, lifecycleUpdatedAt[actorID]) {
+			if civilizationAssemblyRuntimeObservationSupersedesLifecycle(p.RuntimeEvidence, item, lifecycleUpdatedAt[actorID]) {
 				existing.Status = status
 			}
 			actors[actorID] = existing
@@ -416,7 +416,7 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 			existing.ID = valueOr(item.SpawnedEventID, "runtime:"+actorID)
 		}
 		existing.ActorID = actorID
-		if civilizationAssemblyRuntimeObservationSupersedesLifecycle(item, lifecycleUpdatedAt[actorID]) {
+		if civilizationAssemblyRuntimeObservationSupersedesLifecycle(p.RuntimeEvidence, item, lifecycleUpdatedAt[actorID]) {
 			existing.ToState = status
 			existing.Status = status
 		}
@@ -489,7 +489,7 @@ func civilizationAssemblyRuntimeAgentStatus(runtimeStatus, actorID string, activ
 		return "active"
 	}
 	if runtimeStatus == "completed" {
-		return "observed_completed"
+		return "observed_completed_run"
 	}
 	return "observed"
 }
@@ -501,11 +501,20 @@ func civilizationAssemblyRuntimeIdentityMode(status string) string {
 	return "runtime_observed"
 }
 
-func civilizationAssemblyRuntimeObservationSupersedesLifecycle(agent OperatorRuntimeAgentEvidence, lifecycleUpdatedAt time.Time) bool {
-	if lifecycleUpdatedAt.IsZero() || agent.SpawnedAt.IsZero() {
+func civilizationAssemblyRuntimeObservationSupersedesLifecycle(runtimeEvidence OperatorRuntimeEvidence, agent OperatorRuntimeAgentEvidence, lifecycleUpdatedAt time.Time) bool {
+	runtimeObservedAt := civilizationAssemblyRuntimeObservedAt(runtimeEvidence, agent)
+	if lifecycleUpdatedAt.IsZero() || runtimeObservedAt.IsZero() {
 		return true
 	}
-	return !agent.SpawnedAt.Before(lifecycleUpdatedAt)
+	return !runtimeObservedAt.Before(lifecycleUpdatedAt)
+}
+
+func civilizationAssemblyRuntimeObservedAt(runtimeEvidence OperatorRuntimeEvidence, agent OperatorRuntimeAgentEvidence) time.Time {
+	observedAt := agent.SpawnedAt
+	if runtimeEvidence.LastRun != nil && runtimeEvidence.LastRun.CompletedAt != nil && runtimeEvidence.LastRun.CompletedAt.After(observedAt) {
+		observedAt = *runtimeEvidence.LastRun.CompletedAt
+	}
+	return observedAt
 }
 
 func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssemblyWorkEvidence {
