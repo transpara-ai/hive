@@ -565,11 +565,19 @@ func TestBuildCivilizationAssemblyProjectionProjectsIssueScanStageTaskDrafts(t *
 		RiskClass:              "high",
 		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "repo_context_packet"},
 	})
+	unrelatedStageTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Unrelated issue-scan stage: Implement on branch",
+		Description:     "Stage ID: implement_on_branch",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID("fo_run_issue_scan_other_001", "implement_on_branch"),
+		FactoryOrderID:  "fo_run_issue_scan_other_001",
+		ExpectedOutputs: []string{"implementation_patch"},
+	})
 
 	projection := BuildCivilizationAssemblyProjection(s, 50)
 
-	if len(projection.WorkEvidenceSummary.Tasks) != 5 {
-		t.Fatalf("task evidence = %+v, want two parents plus three stage task drafts", projection.WorkEvidenceSummary.Tasks)
+	if len(projection.WorkEvidenceSummary.Tasks) != 6 {
+		t.Fatalf("task evidence = %+v, want two parents plus four stage task drafts", projection.WorkEvidenceSummary.Tasks)
 	}
 	parentEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, parentTask.ID().Value())
 	if parentEvidence == nil || parentEvidence.LifecycleStageID != "" || parentEvidence.FactoryOrderID != orderID {
@@ -604,6 +612,26 @@ func TestBuildCivilizationAssemblyProjectionProjectsIssueScanStageTaskDrafts(t *
 	if !containsString(debateEvidence.SourceRefs, dependencyEvent.ID().Value()) {
 		t.Fatalf("debate task source refs = %+v, want dependency event %s", debateEvidence.SourceRefs, dependencyEvent.ID().Value())
 	}
+	queued := projection.QueuedRunRequest
+	if queued == nil {
+		t.Fatalf("queued run request = nil")
+	}
+	researchStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "research_issue_and_repo_context")
+	if researchStage == nil || researchStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("research stage = %+v, want task draft seeded evidence", researchStage)
+	}
+	debateStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "debate_with_correct_civic_roles")
+	if debateStage == nil || debateStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("debate stage = %+v, want task draft seeded evidence", debateStage)
+	}
+	implementStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "implement_on_branch")
+	if implementStage == nil || implementStage.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("implement stage = %+v, want no task draft evidence", implementStage)
+	}
+	strategistStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "research_issue_and_repo_context", "strategist")
+	if strategistStep == nil || strategistStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepTaskDraftStatus {
+		t.Fatalf("strategist step = %+v, want task draft seeded evidence", strategistStep)
+	}
 	if !containsString(projection.SourceEventIDsOrQueryWindow, dependencyEvent.ID().Value()) {
 		t.Fatalf("source refs = %+v, want dependency event %s", projection.SourceEventIDsOrQueryWindow, dependencyEvent.ID().Value())
 	}
@@ -614,6 +642,10 @@ func TestBuildCivilizationAssemblyProjectionProjectsIssueScanStageTaskDrafts(t *
 	secondResearchEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, secondResearchTask.ID().Value())
 	if secondResearchEvidence == nil || secondResearchEvidence.LifecycleStageID != "research_issue_and_repo_context" {
 		t.Fatalf("second research task evidence = %+v", secondResearchEvidence)
+	}
+	unrelatedStageEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, unrelatedStageTask.ID().Value())
+	if unrelatedStageEvidence == nil || unrelatedStageEvidence.LifecycleStageID != "implement_on_branch" || unrelatedStageEvidence.FactoryOrderID != "fo_run_issue_scan_other_001" {
+		t.Fatalf("unrelated stage task evidence = %+v", unrelatedStageEvidence)
 	}
 }
 
@@ -972,6 +1004,14 @@ func TestBuildCivilizationAssemblyProjectionMarksQueuedLifecycleStageDeclaration
 			"queued lifecycle stage declaration status",
 		},
 	})
+	appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Issue-scan stage: Research issue and repo context",
+		Description:     "Matching task draft should take precedence over declared stage artifact status.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID("fo_run_issue_scan_stage_declared_001", "research_issue_and_repo_context"),
+		FactoryOrderID:  "fo_run_issue_scan_stage_declared_001",
+		RiskClass:       "high",
+	})
 	stageArtifacts, err := issueScanLifecycleStageArtifacts(request)
 	if err != nil {
 		t.Fatalf("issueScanLifecycleStageArtifacts: %v", err)
@@ -987,11 +1027,19 @@ func TestBuildCivilizationAssemblyProjectionMarksQueuedLifecycleStageDeclaration
 		return issueScanDispatchArtifact{}
 	}
 	researchArtifact := stageArtifactByLabel(stageArtifacts, IssueScanLifecycleStageArtifactLabel("research_issue_and_repo_context"))
+	debateArtifact := stageArtifactByLabel(stageArtifacts, IssueScanLifecycleStageArtifactLabel("debate_with_correct_civic_roles"))
 	researchArtifactEvent := appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
 		TaskID:    taskEvent.ID(),
 		Label:     researchArtifact.Label,
 		MediaType: researchArtifact.MediaType,
 		Body:      researchArtifact.Body,
+		CreatedBy: actorID,
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     debateArtifact.Label,
+		MediaType: debateArtifact.MediaType,
+		Body:      debateArtifact.Body,
 		CreatedBy: actorID,
 	})
 	otherRunRequest := request
@@ -1016,16 +1064,24 @@ func TestBuildCivilizationAssemblyProjectionMarksQueuedLifecycleStageDeclaration
 		t.Fatalf("queued run request was not projected: %+v", projection)
 	}
 	researchStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "research_issue_and_repo_context")
-	if researchStage == nil || researchStage.EvidenceStatus != civilizationAssemblyQueuedStageDeclaredStatus {
-		t.Fatalf("research stage = %+v, want declared pending runtime evidence", researchStage)
+	if researchStage == nil || researchStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("research stage = %+v, want task draft seeded evidence", researchStage)
+	}
+	debateStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "debate_with_correct_civic_roles")
+	if debateStage == nil || debateStage.EvidenceStatus != civilizationAssemblyQueuedStageDeclaredStatus {
+		t.Fatalf("debate stage = %+v, want declared pending runtime evidence", debateStage)
 	}
 	implementStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "implement_on_branch")
 	if implementStage == nil || implementStage.EvidenceStatus != "expected_not_observed" {
 		t.Fatalf("implement stage = %+v, want unrelated run artifact ignored", implementStage)
 	}
 	strategistStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "research_issue_and_repo_context", "strategist")
-	if strategistStep == nil || strategistStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepDeclaredStatus {
-		t.Fatalf("strategist step = %+v, want declared pending runtime evidence", strategistStep)
+	if strategistStep == nil || strategistStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepTaskDraftStatus {
+		t.Fatalf("strategist step = %+v, want task draft seeded evidence", strategistStep)
+	}
+	debatePlannerStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "debate_with_correct_civic_roles", "planner")
+	if debatePlannerStep == nil || debatePlannerStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepDeclaredStatus {
+		t.Fatalf("debate planner step = %+v, want declared pending runtime evidence", debatePlannerStep)
 	}
 	implementStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "implement_on_branch", "implementer")
 	if implementStep == nil || implementStep.EvidenceStatus != "expected_not_observed" {
@@ -1055,8 +1111,9 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 	}
 
 	out := civilizationAssemblyQueuedRunRequestWithStageEvidence(queued, []civilizationAssemblyStageArtifactRef{
-		{RunID: "run_status_preservation", StageID: "runtime_completed_stage", EventRef: "artifact_runtime"},
 		{RunID: "run_status_preservation", StageID: "declared_stage", EventRef: "artifact_declared"},
+	}, []CivilizationAssemblyTaskEvidence{
+		{ID: "task_runtime_stage", FactoryOrderID: "fo_run_status_preservation", LifecycleStageID: "runtime_completed_stage"},
 	})
 	if out == nil {
 		t.Fatal("queued run with stage evidence returned nil")

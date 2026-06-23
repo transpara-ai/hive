@@ -23,9 +23,11 @@ const (
 	civilizationAssemblyReadOnlyRoutePath = "GET /api/hive/civilization/assembly-projection"
 	civilizationAssemblyWorkTaskRef       = "event_type:work.task.created field:FactoryOrderID"
 
-	civilizationAssemblyQueuedStageDeclaredStatus    = "declared_pending_runtime_evidence"
-	civilizationAssemblyQueuedPlanStepDeclaredStatus = "stage_declared_pending_runtime_evidence"
-	civilizationAssemblyIssueScanStageArtifactKind   = "issue_scan_lifecycle_stage"
+	civilizationAssemblyQueuedStageDeclaredStatus     = "declared_pending_runtime_evidence"
+	civilizationAssemblyQueuedPlanStepDeclaredStatus  = "stage_declared_pending_runtime_evidence"
+	civilizationAssemblyQueuedStageTaskDraftStatus    = "task_draft_seeded_pending_runtime_evidence"
+	civilizationAssemblyQueuedPlanStepTaskDraftStatus = "stage_task_draft_seeded_pending_runtime_evidence"
+	civilizationAssemblyIssueScanStageArtifactKind    = "issue_scan_lifecycle_stage"
 )
 
 // CivilizationAssemblyProjection is Hive's read-only Site-facing Civilization
@@ -287,7 +289,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		AgentLifecycleSummary:              civilizationAssemblyLifecycle(operatorProjection),
 		FactoryOrderSummary:                factoryOrders,
 		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection, factoryOrders, factoryOrderWorkEvidence),
-		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs),
+		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs, factoryOrderWorkEvidence.Tasks),
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
@@ -1130,7 +1132,7 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []Civi
 	}
 }
 
-func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueuedRunRequestEvidence, stageArtifactRefs []civilizationAssemblyStageArtifactRef) *CivilizationAssemblyQueuedRunRequest {
+func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueuedRunRequestEvidence, stageArtifactRefs []civilizationAssemblyStageArtifactRef, tasks []CivilizationAssemblyTaskEvidence) *CivilizationAssemblyQueuedRunRequest {
 	if queued == nil {
 		return nil
 	}
@@ -1148,23 +1150,41 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 	}
 
 	declaredStages := map[string]bool{}
+	stageTaskDrafts := map[string]bool{}
 	runID := safeRunLaunchID(out.RunID)
+	queuedFactoryOrderID, err := factoryOrderIDForRunLaunch(out.RunID)
+	if err != nil {
+		queuedFactoryOrderID = ""
+	}
 	for _, ref := range stageArtifactRefs {
 		if ref.RunID != runID || ref.StageID == "" || ref.EventRef == "" {
 			continue
 		}
 		declaredStages[ref.StageID] = true
 	}
-	if len(declaredStages) == 0 {
+	for _, task := range tasks {
+		stageID := safeRunLaunchID(task.LifecycleStageID)
+		if queuedFactoryOrderID == "" || strings.TrimSpace(task.FactoryOrderID) != queuedFactoryOrderID || stageID == "" || strings.TrimSpace(task.ID) == "" {
+			continue
+		}
+		stageTaskDrafts[stageID] = true
+	}
+	if len(declaredStages) == 0 && len(stageTaskDrafts) == 0 {
 		return &out
 	}
 	for i := range out.DevelopmentLifecycle {
-		if declaredStages[safeRunLaunchID(out.DevelopmentLifecycle[i].ID)] {
+		stageID := safeRunLaunchID(out.DevelopmentLifecycle[i].ID)
+		if stageTaskDrafts[stageID] {
+			out.DevelopmentLifecycle[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.DevelopmentLifecycle[i].EvidenceStatus, civilizationAssemblyQueuedStageTaskDraftStatus)
+		} else if declaredStages[stageID] {
 			out.DevelopmentLifecycle[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.DevelopmentLifecycle[i].EvidenceStatus, civilizationAssemblyQueuedStageDeclaredStatus)
 		}
 	}
 	for i := range out.AgentExecutionPlan {
-		if declaredStages[safeRunLaunchID(out.AgentExecutionPlan[i].StageID)] {
+		stageID := safeRunLaunchID(out.AgentExecutionPlan[i].StageID)
+		if stageTaskDrafts[stageID] {
+			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepTaskDraftStatus)
+		} else if declaredStages[stageID] {
 			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepDeclaredStatus)
 		}
 	}
