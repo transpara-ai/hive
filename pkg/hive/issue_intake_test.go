@@ -2,7 +2,6 @@ package hive
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -204,6 +203,20 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if task.FactoryOrderID != result.DispatchedOrderIDs[0] {
 		t.Fatalf("task factory order = %q, want %q", task.FactoryOrderID, result.DispatchedOrderIDs[0])
 	}
+	order := work.FactoryOrder{
+		ID:                     task.FactoryOrderID,
+		RiskClass:              task.RiskClass,
+		RequirementIDs:         append([]string(nil), task.RequirementIDs...),
+		AcceptanceCriterionIDs: append([]string(nil), task.AcceptanceCriterionIDs...),
+	}
+	stageDrafts, err := issueScanLifecycleStageTaskDrafts(content, order)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskDrafts: %v", err)
+	}
+	stageDraftsByStage := map[string]issueScanLifecycleStageTaskDraft{}
+	for _, draft := range stageDrafts {
+		stageDraftsByStage[draft.StageID] = draft
+	}
 	expectedOutputs := []string{
 		"ready-for-Human result pull request",
 		"exact-head adversarial review with zero blockers",
@@ -283,8 +296,35 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Readiness %s: %v", stageTask.ID, err)
 		}
-		if readiness.Ready {
-			t.Fatalf("stage task %q readiness = ready, want blocked draft with missing readiness gates", stageID)
+		if !readiness.Ready {
+			t.Fatalf("stage task %q readiness = %+v, want ready with stage gates", stageID, readiness)
+		}
+		stageTaskArtifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+		if err != nil {
+			t.Fatalf("ListArtifacts %s: %v", stageTask.ID, err)
+		}
+		stageTaskArtifactLabels := issueScanArtifactLabels(stageTaskArtifacts)
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+			if !containsIssueScanValue(stageTaskArtifactLabels, label) {
+				t.Fatalf("stage task %q artifact labels = %+v, want %s", stageID, stageTaskArtifactLabels, label)
+			}
+		}
+		draft, ok := stageDraftsByStage[safeRunLaunchID(stageID)]
+		if !ok {
+			t.Fatalf("missing stage draft %q in %+v", stageID, stageDraftsByStage)
+		}
+		if err := rt.attachIssueScanLifecycleStageTaskReadinessGates(content, order, draft, request.ID(), task.ID, stageTask.ID, writer.conv); err != nil {
+			t.Fatalf("reattach stage task %q readiness gates: %v", stageID, err)
+		}
+		stageTaskArtifacts, err = rt.tasks.ListArtifacts(stageTask.ID)
+		if err != nil {
+			t.Fatalf("ListArtifacts after reattach %s: %v", stageTask.ID, err)
+		}
+		stageTaskArtifactLabels = issueScanArtifactLabels(stageTaskArtifacts)
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+			if countIssueScanValues(stageTaskArtifactLabels, label) != 1 {
+				t.Fatalf("stage task %q artifact labels after reattach = %+v, want one %s", stageID, stageTaskArtifactLabels, label)
+			}
 		}
 		blocked, err := rt.tasks.IsBlocked(stageTask.ID)
 		if err != nil {
@@ -313,19 +353,57 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if err := rt.tasks.Complete(writer.human, task.ID, "parent FactoryOrder completed for stage draft barrier check", []types.EventID{task.ID}, writer.conv); err != nil {
 		t.Fatalf("Complete parent task: %v", err)
 	}
-	for _, stageID := range expectedStageIDs {
+	for i, stageID := range expectedStageIDs {
 		stageTaskID := stageTaskIDsByStage[stageID]
 		readiness, err := rt.tasks.Readiness(stageTaskID)
 		if err != nil {
 			t.Fatalf("Readiness after parent completion %s: %v", stageTaskID, err)
 		}
-		if readiness.Ready || len(readiness.MissingGates) == 0 {
-			t.Fatalf("stage task %q readiness after parent completion = %+v, want missing readiness gates", stageID, readiness)
+		if !readiness.Ready || len(readiness.MissingGates) != 0 {
+			t.Fatalf("stage task %q readiness after parent completion = %+v, want ready with stage gates", stageID, readiness)
+		}
+		blocked, err := rt.tasks.IsBlocked(stageTaskID)
+		if err != nil {
+			t.Fatalf("IsBlocked after parent completion %s: %v", stageTaskID, err)
+		}
+		if i == 0 && blocked {
+			t.Fatalf("first stage task %q is blocked after parent completion, want parent barrier released", stageID)
+		}
+		if i > 0 && !blocked {
+			t.Fatalf("stage task %q is not blocked after parent completion, want previous stage dependency barrier", stageID)
+		}
+	}
+	projection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	for i, stageID := range expectedStageIDs {
+		taskID := stageTaskIDsByStage[stageID]
+		taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, taskID.Value())
+		if taskEvidence == nil {
+			t.Fatalf("projection missing stage task %q evidence for %s", stageID, taskID)
+		}
+		if i == 0 {
+			if taskEvidence.Status != "work_task_ready" || !taskEvidence.Ready || taskEvidence.Blocked {
+				t.Fatalf("projected first stage task %q evidence = %+v, want ready and unblocked", stageID, taskEvidence)
+			}
+		} else if taskEvidence.Status != "work_task_blocked" || taskEvidence.Ready || !taskEvidence.Blocked {
+			t.Fatalf("projected dependent stage task %q evidence = %+v, want readiness gates plus dependency block", stageID, taskEvidence)
 		}
 	}
 	firstStageTaskID := stageTaskIDsByStage[expectedStageIDs[0]]
-	if err := rt.tasks.Complete(writer.human, firstStageTaskID, "stage draft must not complete without an artifact", []types.EventID{firstStageTaskID}, writer.conv); !errors.Is(err, work.ErrArtifactRequired) {
-		t.Fatalf("Complete first stage draft err = %v, want ErrArtifactRequired", err)
+	if err := rt.tasks.Complete(writer.human, firstStageTaskID, "stage draft bookkeeping completed with seeded readiness gate artifacts; runtime evidence remains pending", []types.EventID{firstStageTaskID}, writer.conv); err != nil {
+		t.Fatalf("Complete first stage draft: %v", err)
+	}
+	completedProjection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	firstStageEvidence := civilizationProjectionTaskEvidenceByID(completedProjection.WorkEvidenceSummary.Tasks, firstStageTaskID.Value())
+	if firstStageEvidence == nil || firstStageEvidence.Status != "work_task_completed" || firstStageEvidence.Ready || firstStageEvidence.Blocked {
+		t.Fatalf("projected completed first stage evidence = %+v, want completed Work task without ready/blocked flags", firstStageEvidence)
+	}
+	completedQueued := completedProjection.QueuedRunRequest
+	if completedQueued == nil {
+		t.Fatalf("completed projection queued run request = nil")
+	}
+	completedResearchStage := queuedRunLifecycleStageByID(completedQueued.DevelopmentLifecycle, expectedStageIDs[0])
+	if completedResearchStage == nil || completedResearchStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("completed research stage evidence = %+v, want task draft status still pending runtime evidence", completedResearchStage)
 	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
@@ -512,6 +590,14 @@ func TestIssueScanOperatorIDIsRunLaunchSafe(t *testing.T) {
 	}
 }
 
+func issueScanArtifactLabels(artifacts []work.ArtifactEvent) []string {
+	out := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		out = append(out, artifact.Label)
+	}
+	return out
+}
+
 func containsIssueScanValue(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -519,6 +605,16 @@ func containsIssueScanValue(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func countIssueScanValues(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }
 
 func containsEventID(values []types.EventID, want types.EventID) bool {
