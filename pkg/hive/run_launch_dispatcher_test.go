@@ -51,6 +51,15 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
 		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
 	}
+	artifacts, err := rt.tasks.ListArtifacts(task.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+			t.Fatalf("generic run launch created %s artifact: %+v", IssueScanExecutionPlanArtifactLabel, artifact)
+		}
+	}
 
 	projection, err := rt.tasks.ProjectTask(task.ID)
 	if err != nil {
