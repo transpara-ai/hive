@@ -333,11 +333,13 @@ func civilizationAssemblyCommitteeState(p OperatorProjection) CivilizationAssemb
 
 func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssemblyActorSummary {
 	actors := map[string]CivilizationAssemblyActorSummary{}
+	lifecycleUpdatedAt := map[string]time.Time{}
 	for _, item := range p.Lifecycle {
 		actorID := strings.TrimSpace(item.ActorID)
 		if actorID == "" {
 			continue
 		}
+		lifecycleUpdatedAt[actorID] = item.UpdatedAt
 		actors[actorID] = CivilizationAssemblyActorSummary{
 			ID:           "lifecycle:" + actorID,
 			ActorID:      actorID,
@@ -346,17 +348,16 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 			Status:       valueOr(item.LifecycleStatus, "projected"),
 		}
 	}
-	for _, item := range p.RuntimeEvidence.AgentEvents.ActiveAgents {
-		actorID := strings.TrimSpace(item.ActorID)
-		if actorID == "" {
-			actorID = strings.TrimSpace(item.Name)
-		}
+	activeActors := civilizationAssemblyActiveRuntimeActors(p.RuntimeEvidence.AgentEvents.ActiveAgents)
+	for _, item := range civilizationAssemblyRuntimeAgents(p.RuntimeEvidence.AgentEvents) {
+		actorID := civilizationAssemblyRuntimeActorID(item)
 		if actorID == "" {
 			continue
 		}
+		status := civilizationAssemblyRuntimeAgentStatus(p.RuntimeEvidence.Status, actorID, activeActors)
 		if existing, ok := actors[actorID]; ok {
-			if existing.Status == "" || existing.Status == "projected" {
-				existing.Status = "active"
+			if civilizationAssemblyRuntimeObservationSupersedesLifecycle(p.RuntimeEvidence, item, lifecycleUpdatedAt[actorID]) {
+				existing.Status = status
 			}
 			actors[actorID] = existing
 			continue
@@ -365,8 +366,8 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 			ID:           valueOr(item.SpawnedEventID, "runtime:"+actorID),
 			ActorID:      actorID,
 			ActorType:    "agent",
-			IdentityMode: "runtime",
-			Status:       "active",
+			IdentityMode: civilizationAssemblyRuntimeIdentityMode(status),
+			Status:       status,
 		}
 	}
 	out := make([]CivilizationAssemblyActorSummary, 0, len(actors))
@@ -380,7 +381,8 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 }
 
 func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemblyRoleBinding {
-	out := make([]CivilizationAssemblyRoleBinding, 0, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
+	runtimeAgents := civilizationAssemblyRuntimeAgents(p.RuntimeEvidence.AgentEvents)
+	out := make([]CivilizationAssemblyRoleBinding, 0, len(p.Lifecycle)+len(runtimeAgents))
 	seen := map[string]bool{}
 	add := func(actorID, role, sourceRef, sourceType string) {
 		actorID = strings.TrimSpace(actorID)
@@ -403,8 +405,8 @@ func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemb
 	for _, item := range p.Lifecycle {
 		add(item.ActorID, item.Role, item.LastEventType, "agent.lifecycle")
 	}
-	for _, item := range p.RuntimeEvidence.AgentEvents.ActiveAgents {
-		actorID := valueOr(item.ActorID, item.Name)
+	for _, item := range runtimeAgents {
+		actorID := civilizationAssemblyRuntimeActorID(item)
 		add(actorID, item.Role, item.SpawnedEventID, "hive.agent.spawned")
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -417,12 +419,16 @@ func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemb
 }
 
 func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyLifecycleSummary {
-	byActor := make(map[string]CivilizationAssemblyLifecycleSummary, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
+	runtimeAgents := civilizationAssemblyRuntimeAgents(p.RuntimeEvidence.AgentEvents)
+	activeActors := civilizationAssemblyActiveRuntimeActors(p.RuntimeEvidence.AgentEvents.ActiveAgents)
+	byActor := make(map[string]CivilizationAssemblyLifecycleSummary, len(p.Lifecycle)+len(runtimeAgents))
+	lifecycleUpdatedAt := map[string]time.Time{}
 	for _, item := range p.Lifecycle {
 		actorID := strings.TrimSpace(item.ActorID)
 		if actorID == "" {
 			continue
 		}
+		lifecycleUpdatedAt[actorID] = item.UpdatedAt
 		byActor[actorID] = CivilizationAssemblyLifecycleSummary{
 			ID:      "lifecycle:" + item.ActorID,
 			ActorID: actorID,
@@ -430,18 +436,21 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 			Status:  item.LifecycleStatus,
 		}
 	}
-	for _, item := range p.RuntimeEvidence.AgentEvents.ActiveAgents {
-		actorID := valueOr(item.ActorID, item.Name)
+	for _, item := range runtimeAgents {
+		actorID := civilizationAssemblyRuntimeActorID(item)
 		if actorID == "" {
 			continue
 		}
+		status := civilizationAssemblyRuntimeAgentStatus(p.RuntimeEvidence.Status, actorID, activeActors)
 		existing := byActor[actorID]
 		if existing.ID == "" {
 			existing.ID = valueOr(item.SpawnedEventID, "runtime:"+actorID)
 		}
 		existing.ActorID = actorID
-		existing.ToState = "active"
-		existing.Status = "active"
+		if civilizationAssemblyRuntimeObservationSupersedesLifecycle(p.RuntimeEvidence, item, lifecycleUpdatedAt[actorID]) {
+			existing.ToState = status
+			existing.Status = status
+		}
 		byActor[actorID] = existing
 	}
 	out := make([]CivilizationAssemblyLifecycleSummary, 0, len(byActor))
@@ -737,6 +746,88 @@ func civilizationAssemblyFactoryOrderStatusRank(status string) int {
 	}
 }
 
+func civilizationAssemblyRuntimeAgents(agentEvents OperatorRuntimeAgentEvents) []OperatorRuntimeAgentEvidence {
+	agentsByActor := map[string]OperatorRuntimeAgentEvidence{}
+	add := func(agent OperatorRuntimeAgentEvidence) {
+		actorID := civilizationAssemblyRuntimeActorID(agent)
+		if actorID == "" {
+			return
+		}
+		agentsByActor[actorID] = agent
+	}
+	for _, agent := range agentEvents.ObservedAgents {
+		add(agent)
+	}
+	for _, agent := range agentEvents.ActiveAgents {
+		add(agent)
+	}
+	out := make([]OperatorRuntimeAgentEvidence, 0, len(agentsByActor))
+	for _, agent := range agentsByActor {
+		out = append(out, agent)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := civilizationAssemblyRuntimeActorID(out[i])
+		right := civilizationAssemblyRuntimeActorID(out[j])
+		if left == right {
+			return out[i].SpawnedEventID < out[j].SpawnedEventID
+		}
+		return left < right
+	})
+	return out
+}
+
+func civilizationAssemblyActiveRuntimeActors(activeAgents []OperatorRuntimeAgentEvidence) map[string]bool {
+	active := map[string]bool{}
+	for _, agent := range activeAgents {
+		actorID := civilizationAssemblyRuntimeActorID(agent)
+		if actorID != "" {
+			active[actorID] = true
+		}
+	}
+	return active
+}
+
+func civilizationAssemblyRuntimeActorID(agent OperatorRuntimeAgentEvidence) string {
+	actorID := strings.TrimSpace(agent.ActorID)
+	if actorID == "" {
+		actorID = strings.TrimSpace(agent.Name)
+	}
+	return actorID
+}
+
+func civilizationAssemblyRuntimeAgentStatus(runtimeStatus, actorID string, activeActors map[string]bool) string {
+	if activeActors[actorID] {
+		return "active"
+	}
+	if runtimeStatus == "completed" {
+		return "observed_completed_run"
+	}
+	return "observed"
+}
+
+func civilizationAssemblyRuntimeIdentityMode(status string) string {
+	if status == "active" {
+		return "runtime"
+	}
+	return "runtime_observed"
+}
+
+func civilizationAssemblyRuntimeObservationSupersedesLifecycle(runtimeEvidence OperatorRuntimeEvidence, agent OperatorRuntimeAgentEvidence, lifecycleUpdatedAt time.Time) bool {
+	runtimeObservedAt := civilizationAssemblyRuntimeObservedAt(runtimeEvidence, agent)
+	if lifecycleUpdatedAt.IsZero() || runtimeObservedAt.IsZero() {
+		return true
+	}
+	return !runtimeObservedAt.Before(lifecycleUpdatedAt)
+}
+
+func civilizationAssemblyRuntimeObservedAt(runtimeEvidence OperatorRuntimeEvidence, agent OperatorRuntimeAgentEvidence) time.Time {
+	observedAt := agent.SpawnedAt
+	if runtimeEvidence.LastRun != nil && runtimeEvidence.LastRun.CompletedAt != nil && runtimeEvidence.LastRun.CompletedAt.After(observedAt) {
+		observedAt = *runtimeEvidence.LastRun.CompletedAt
+	}
+	return observedAt
+}
+
 func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []CivilizationAssemblyFactoryOrder, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence) CivilizationAssemblyWorkEvidence {
 	refs := []string{}
 	if queued := p.RuntimeEvidence.LastQueuedRunRequest; queued != nil {
@@ -889,11 +980,11 @@ func civilizationAssemblyUnavailableFields(p OperatorProjection, factoryOrders [
 		Status: civilizationAssemblyFieldUnavailable,
 		Reason: "Hive operator projection does not expose protected-action execution receipt records.",
 	})
-	if len(p.Lifecycle) == 0 && len(p.RuntimeEvidence.AgentEvents.ActiveAgents) == 0 {
+	if len(p.Lifecycle) == 0 && len(civilizationAssemblyRuntimeAgents(p.RuntimeEvidence.AgentEvents)) == 0 {
 		fields = append(fields, CivilizationAssemblyUnavailableField{
 			Field:  "actor_roster",
 			Status: civilizationAssemblyFieldUnavailable,
-			Reason: "no lifecycle or active runtime agent records were projected",
+			Reason: "no lifecycle or runtime agent records were projected",
 		})
 	}
 	return fields
