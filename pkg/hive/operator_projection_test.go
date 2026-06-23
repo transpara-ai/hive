@@ -2,6 +2,7 @@ package hive
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,7 +190,11 @@ func TestBuildCivilizationAssemblyProjectionToleratesOpaqueSharedStoreHead(t *te
 	s, actorID, _ := newOperatorProjectionStore(t)
 	opaqueHead := appendOpaqueSharedStoreEvent(t, s, actorID)
 
-	projection := BuildCivilizationAssemblyProjection(s, 50)
+	event.SetFallbackUnmarshaler(event.RawFallback)
+	t.Cleanup(func() { event.SetFallbackUnmarshaler(nil) })
+
+	serializedStore := serializationRoundTripStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(serializedStore, 50)
 
 	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
 		t.Fatalf("derivation status = %q, want complete; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
@@ -1205,10 +1210,7 @@ func appendOpaqueSharedStoreEvent(t *testing.T, s *store.InMemoryStore, actorID 
 		t.Fatalf("head: %v", err)
 	}
 	eventType := types.MustEventType("foreign.event.type")
-	content := event.RawContent{
-		TypeName: eventType.Value(),
-		Data:     json.RawMessage(`{"source":"shared-store"}`),
-	}
+	content := foreignSharedStoreContent{Source: "shared-store"}
 	eventID := newTestEventID(t)
 	convID := types.MustConversationID("conv_00000000000000000000000000000088")
 	causes := []types.EventID{head.Unwrap().ID()}
@@ -1224,6 +1226,125 @@ func appendOpaqueSharedStoreEvent(t *testing.T, s *store.InMemoryStore, actorID 
 		t.Fatalf("append opaque event: %v", err)
 	}
 	return stored
+}
+
+type foreignSharedStoreContent struct {
+	Source string `json:"source"`
+}
+
+func (c foreignSharedStoreContent) EventTypeName() string { return "foreign.event.type" }
+func (c foreignSharedStoreContent) Accept(event.EventContentVisitor) {
+}
+
+type serializationRoundTripStore struct {
+	store.Store
+}
+
+func (s serializationRoundTripStore) Head() (types.Option[event.Event], error) {
+	head, err := s.Store.Head()
+	if err != nil || !head.IsSome() {
+		return head, err
+	}
+	ev, err := roundTripEventContent(head.Unwrap())
+	if err != nil {
+		return types.None[event.Event](), err
+	}
+	return types.Some(ev), nil
+}
+
+func (s serializationRoundTripStore) Recent(limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.Recent(limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.ByType(eventType, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) BySource(source types.ActorID, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.BySource(source, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) ByConversation(id types.ConversationID, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	page, err := s.Store.ByConversation(id, limit, after)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) Since(afterID types.EventID, limit int) (types.Page[event.Event], error) {
+	page, err := s.Store.Since(afterID, limit)
+	if err != nil {
+		return page, err
+	}
+	return roundTripEventPage(page)
+}
+
+func (s serializationRoundTripStore) Ancestors(id types.EventID, maxDepth int) ([]event.Event, error) {
+	events, err := s.Store.Ancestors(id, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	return roundTripEvents(events)
+}
+
+func (s serializationRoundTripStore) Descendants(id types.EventID, maxDepth int) ([]event.Event, error) {
+	events, err := s.Store.Descendants(id, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	return roundTripEvents(events)
+}
+
+func roundTripEventPage(page types.Page[event.Event]) (types.Page[event.Event], error) {
+	events, err := roundTripEvents(page.Items())
+	if err != nil {
+		return types.Page[event.Event]{}, err
+	}
+	return types.NewPage(events, page.Cursor(), page.HasMore()), nil
+}
+
+func roundTripEvents(events []event.Event) ([]event.Event, error) {
+	roundTripped := make([]event.Event, 0, len(events))
+	for _, ev := range events {
+		next, err := roundTripEventContent(ev)
+		if err != nil {
+			return nil, err
+		}
+		roundTripped = append(roundTripped, next)
+	}
+	return roundTripped, nil
+}
+
+func roundTripEventContent(ev event.Event) (event.Event, error) {
+	contentJSON, err := json.Marshal(ev.Content())
+	if err != nil {
+		return event.Event{}, err
+	}
+	content, err := event.UnmarshalContent(ev.Type().Value(), contentJSON)
+	if err != nil {
+		return event.Event{}, err
+	}
+	if ev.IsBootstrap() {
+		bootstrap, ok := content.(event.BootstrapContent)
+		if !ok {
+			return event.Event{}, fmt.Errorf("bootstrap content type = %T, want event.BootstrapContent", content)
+		}
+		return event.NewBootstrapEvent(ev.Version(), ev.ID(), ev.Type(), ev.Timestamp(), ev.Source(), bootstrap, ev.ConversationID(), ev.Hash(), ev.Signature()), nil
+	}
+	return event.NewEvent(ev.Version(), ev.ID(), ev.Type(), ev.Timestamp(), ev.Source(), content, ev.Causes(), ev.ConversationID(), ev.Hash(), ev.PrevHash(), ev.Signature()), nil
 }
 
 func appendOperatorProjectionEventWithConversation(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent) event.Event {

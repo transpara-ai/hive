@@ -9,6 +9,7 @@ import (
 
 func TestRegisterOpsAPIEventTypesHandlesSharedStoreEvents(t *testing.T) {
 	registerOpsAPIEventTypes()
+	t.Cleanup(func() { event.SetFallbackUnmarshaler(nil) })
 
 	got, err := event.UnmarshalContent(social.EventTypePostCreated.Value(), []byte(`{"Author":"actor_00000000000000000000000000000077","Body":"hello"}`))
 	if err != nil {
@@ -24,5 +25,9 @@ func TestRegisterOpsAPIEventTypesHandlesSharedStoreEvents(t *testing.T) {
 	}
 	if _, ok := raw.(event.RawContent); !ok {
 		t.Fatalf("unknown event content type = %T, want event.RawContent", raw)
+	}
+
+	if _, err := event.UnmarshalContent(social.EventTypePostCreated.Value(), []byte(`{`)); err == nil {
+		t.Fatal("malformed registered social event decoded successfully; fallback must only handle unknown event types")
 	}
 }
