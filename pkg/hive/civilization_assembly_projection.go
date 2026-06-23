@@ -193,6 +193,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		ActorRoster:                        civilizationAssemblyActorRoster(operatorProjection),
 		RoleBindings:                       civilizationAssemblyRoleBindings(operatorProjection),
 		AgentLifecycleSummary:              civilizationAssemblyLifecycle(operatorProjection),
+		FactoryOrderSummary:                []CivilizationAssemblyFactoryOrder{},
 		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection),
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
@@ -256,7 +257,7 @@ func civilizationAssemblyAuthorityState(p OperatorProjection) CivilizationAssemb
 			ActorID:    request.RequestingActor,
 			ActorRole:  request.RequestingRole,
 			Action:     request.ActionName,
-			TargetType: request.Target,
+			TargetType: civilizationAssemblyTargetType(request.Target),
 			TargetID:   request.Target,
 			RiskClass:  request.RiskClass,
 			Status:     "pending",
@@ -292,14 +293,9 @@ func civilizationAssemblyAuthorityState(p OperatorProjection) CivilizationAssemb
 }
 
 func civilizationAssemblyCommitteeState(p OperatorProjection) CivilizationAssemblyCommitteeState {
-	refs := make([]string, 0, len(p.AuthorityDecisions))
-	for _, decision := range p.AuthorityDecisions {
-		refs = append(refs, decision.EventID)
-	}
 	return CivilizationAssemblyCommitteeState{
 		Status:         civilizationAssemblyFieldUnavailable,
 		Summary:        "External Committee approval records are not independently projected by Hive operator state.",
-		DecisionRefs:   compactStrings(refs),
 		CommitteeRoles: []string{"External Committee"},
 	}
 }
@@ -353,7 +349,7 @@ func civilizationAssemblyActorRoster(p OperatorProjection) []CivilizationAssembl
 }
 
 func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemblyRoleBinding {
-	var out []CivilizationAssemblyRoleBinding
+	out := make([]CivilizationAssemblyRoleBinding, 0, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
 	seen := map[string]bool{}
 	add := func(actorID, role, sourceRef, sourceType string) {
 		actorID = strings.TrimSpace(actorID)
@@ -390,14 +386,13 @@ func civilizationAssemblyRoleBindings(p OperatorProjection) []CivilizationAssemb
 }
 
 func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyLifecycleSummary {
-	var out []CivilizationAssemblyLifecycleSummary
+	out := make([]CivilizationAssemblyLifecycleSummary, 0, len(p.Lifecycle)+len(p.RuntimeEvidence.AgentEvents.ActiveAgents))
 	for _, item := range p.Lifecycle {
 		out = append(out, CivilizationAssemblyLifecycleSummary{
-			ID:         "lifecycle:" + item.ActorID,
-			ActorID:    item.ActorID,
-			ToState:    item.LifecycleStatus,
-			TrustLevel: item.AuthorityScope,
-			Status:     item.LastEventType,
+			ID:      "lifecycle:" + item.ActorID,
+			ActorID: item.ActorID,
+			ToState: item.LifecycleStatus,
+			Status:  item.LifecycleStatus,
 		})
 	}
 	for _, item := range p.RuntimeEvidence.AgentEvents.ActiveAgents {
@@ -465,7 +460,7 @@ func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyG
 }
 
 func civilizationAssemblyResidualRisks(p OperatorProjection) []CivilizationAssemblyResidualRisk {
-	var risks []CivilizationAssemblyResidualRisk
+	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors))
 	for i, limitation := range p.RuntimeEvidence.Limitations {
 		risks = append(risks, CivilizationAssemblyResidualRisk{
 			ID:       fmt.Sprintf("runtime_limitation_%02d", i+1),
@@ -562,6 +557,23 @@ func compactStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func civilizationAssemblyTargetType(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(target, "://"); ok && before != "" {
+		return before
+	}
+	if strings.HasPrefix(target, "actor_") || strings.HasPrefix(target, "actor-") {
+		return "actor"
+	}
+	if before, _, ok := strings.Cut(target, ":"); ok && before != "" {
+		return before
+	}
+	return "target"
 }
 
 func valueOr(value, fallback string) string {

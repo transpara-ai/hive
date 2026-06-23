@@ -130,6 +130,12 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	if projection.AuthorityState.Status != civilizationAssemblyFieldAvailable || len(projection.AuthorityState.AuthorityRequests) != 1 {
 		t.Fatalf("authority state = %+v, want one available request", projection.AuthorityState)
 	}
+	if got := projection.AuthorityState.AuthorityRequests[0].TargetType; got != "pr" {
+		t.Fatalf("target type = %q, want pr", got)
+	}
+	if projection.ExternalCommitteeState.Status != civilizationAssemblyFieldUnavailable || len(projection.ExternalCommitteeState.DecisionRefs) != 0 {
+		t.Fatalf("external committee state = %+v, want unavailable with no Hive decision refs", projection.ExternalCommitteeState)
+	}
 	if len(projection.ActorRoster) == 0 {
 		t.Fatalf("actor roster empty: %+v", projection)
 	}
@@ -138,6 +144,9 @@ func TestBuildCivilizationAssemblyProjectionDerivesOperatorRuntimeState(t *testi
 	}
 	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
 		t.Fatalf("work evidence = %+v, want available runtime evidence", projection.WorkEvidenceSummary)
+	}
+	if projection.FactoryOrderSummary == nil || projection.RoleBindings == nil || projection.AgentLifecycleSummary == nil || projection.ResidualRiskSummary == nil {
+		t.Fatalf("top-level slices must serialize as arrays, got factory=%#v bindings=%#v lifecycle=%#v risks=%#v", projection.FactoryOrderSummary, projection.RoleBindings, projection.AgentLifecycleSummary, projection.ResidualRiskSummary)
 	}
 	if len(projection.OpenGateSummary) != 1 || projection.OpenGateSummary[0].ID != requestID.Value() {
 		t.Fatalf("open gates = %+v, want pending request %s", projection.OpenGateSummary, requestID.Value())
