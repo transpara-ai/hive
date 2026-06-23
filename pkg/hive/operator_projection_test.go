@@ -581,6 +581,43 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 	}
 }
 
+func TestCompactCivilizationAssemblyArtifactEvidenceMergesAndSorts(t *testing.T) {
+	artifacts := compactCivilizationAssemblyArtifactEvidence([]CivilizationAssemblyArtifactEvidence{
+		{
+			ID:         "artifact_b",
+			TaskRef:    "task_b",
+			Label:      "Beta artifact",
+			MediaType:  "application/json",
+			SourceRefs: []string{"source_b"},
+		},
+		{
+			ID:         "artifact_a",
+			Label:      "Alpha artifact",
+			SourceRefs: []string{"source_a2"},
+		},
+		{
+			ID:         "artifact_a",
+			TaskRef:    "task_a",
+			MediaType:  "text/markdown",
+			SourceRefs: []string{"source_a1"},
+		},
+	})
+
+	if len(artifacts) != 2 {
+		t.Fatalf("artifact count = %d, want 2: %+v", len(artifacts), artifacts)
+	}
+	if artifacts[0].ID != "artifact_a" || artifacts[1].ID != "artifact_b" {
+		t.Fatalf("artifact order = %+v, want artifact_a then artifact_b", artifacts)
+	}
+	alpha := artifacts[0]
+	if alpha.TaskRef != "task_a" || alpha.Label != "Alpha artifact" || alpha.MediaType != "text/markdown" {
+		t.Fatalf("merged artifact_a = %+v, want backfilled task, label, media type", alpha)
+	}
+	if len(alpha.SourceRefs) != 2 || alpha.SourceRefs[0] != "source_a1" || alpha.SourceRefs[1] != "source_a2" {
+		t.Fatalf("artifact_a source refs = %+v, want sorted merged refs", alpha.SourceRefs)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	sourceEventID := newTestEventID(t)

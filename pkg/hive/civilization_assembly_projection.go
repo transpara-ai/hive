@@ -154,7 +154,9 @@ type CivilizationAssemblyWorkEvidence struct {
 	// ArtifactRefs are opaque evidence refs for display/audit. Runtime artifacts
 	// use their logical artifact ID when present; Work task artifacts have no
 	// separate logical artifact ID, so their EventGraph event ID is the ref.
-	ArtifactRefs    []string                               `json:"artifact_refs,omitempty"`
+	ArtifactRefs []string `json:"artifact_refs,omitempty"`
+	// Artifacts contains structured metadata for Work task artifacts only;
+	// runtime artifacts remain exposed through ArtifactRefs.
 	Artifacts       []CivilizationAssemblyArtifactEvidence `json:"artifacts,omitempty"`
 	TestRunRefs     []string                               `json:"test_run_refs,omitempty"`
 	GateResultRefs  []string                               `json:"gate_result_refs,omitempty"`
