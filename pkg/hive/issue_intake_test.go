@@ -304,9 +304,35 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			t.Fatalf("ListArtifacts %s: %v", stageTask.ID, err)
 		}
 		stageTaskArtifactLabels := issueScanArtifactLabels(stageTaskArtifacts)
-		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel} {
 			if !containsIssueScanValue(stageTaskArtifactLabels, label) {
 				t.Fatalf("stage task %q artifact labels = %+v, want %s", stageID, stageTaskArtifactLabels, label)
+			}
+		}
+		roleContract := issueScanArtifactByLabel(stageTaskArtifacts, IssueScanStageRoleContractArtifactLabel)
+		if roleContract == nil {
+			t.Fatalf("stage task %q missing role contract artifact in %+v", stageID, stageTaskArtifactLabels)
+		}
+		var decodedRoleContract struct {
+			Kind               string                      `json:"kind"`
+			FactoryOrderID     string                      `json:"factory_order_id"`
+			StageID            string                      `json:"stage_id"`
+			Stage              issueScanBriefStageForTest  `json:"stage"`
+			AgentExecutionPlan []issueScanBriefPlanForTest `json:"agent_execution_plan"`
+		}
+		if err := json.Unmarshal([]byte(roleContract.Body), &decodedRoleContract); err != nil {
+			t.Fatalf("unmarshal role contract for %q: %v", stageID, err)
+		}
+		if decodedRoleContract.Kind != issueScanStageRoleContractArtifactKind || decodedRoleContract.FactoryOrderID != task.FactoryOrderID || decodedRoleContract.StageID != stageID {
+			t.Fatalf("stage task %q role contract = %+v", stageID, decodedRoleContract)
+		}
+		expectedStage := issueScanStageByID(brief.DevelopmentLifecycle, stageID)
+		if expectedStage == nil {
+			t.Fatalf("missing expected stage %q", stageID)
+		}
+		for _, role := range expectedStage.RequiredRoles {
+			if !containsIssueScanValue(decodedRoleContract.Stage.RequiredRoles, role) || issueScanPlanStepByRole(decodedRoleContract.AgentExecutionPlan, stageID, role) == nil {
+				t.Fatalf("stage task %q role contract missing role %q: %+v", stageID, role, decodedRoleContract)
 			}
 		}
 		draft, ok := stageDraftsByStage[safeRunLaunchID(stageID)]
@@ -316,12 +342,15 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		if err := rt.attachIssueScanLifecycleStageTaskReadinessGates(content, order, draft, request.ID(), task.ID, stageTask.ID, writer.conv); err != nil {
 			t.Fatalf("reattach stage task %q readiness gates: %v", stageID, err)
 		}
+		if err := rt.attachIssueScanLifecycleStageTaskRoleContract(content, order, draft, request.ID(), task.ID, stageTask.ID, writer.conv); err != nil {
+			t.Fatalf("reattach stage task %q role contract: %v", stageID, err)
+		}
 		stageTaskArtifacts, err = rt.tasks.ListArtifacts(stageTask.ID)
 		if err != nil {
 			t.Fatalf("ListArtifacts after reattach %s: %v", stageTask.ID, err)
 		}
 		stageTaskArtifactLabels = issueScanArtifactLabels(stageTaskArtifacts)
-		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel} {
 			if countIssueScanValues(stageTaskArtifactLabels, label) != 1 {
 				t.Fatalf("stage task %q artifact labels after reattach = %+v, want one %s", stageID, stageTaskArtifactLabels, label)
 			}
@@ -379,6 +408,18 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, taskID.Value())
 		if taskEvidence == nil {
 			t.Fatalf("projection missing stage task %q evidence for %s", stageID, taskID)
+		}
+		expectedStage := issueScanStageByID(brief.DevelopmentLifecycle, stageID)
+		if expectedStage == nil {
+			t.Fatalf("missing expected stage %q", stageID)
+		}
+		for _, role := range expectedStage.RequiredRoles {
+			if !containsIssueScanValue(taskEvidence.RequiredRoles, role) || civilizationProjectionPlanStepByRole(taskEvidence.AgentExecutionPlan, stageID, role) == nil {
+				t.Fatalf("projected stage task %q role evidence missing %q: %+v", stageID, role, taskEvidence)
+			}
+		}
+		if len(taskEvidence.RoleContractRefs) == 0 {
+			t.Fatalf("projected stage task %q missing role contract refs: %+v", stageID, taskEvidence)
 		}
 		if i == 0 {
 			if taskEvidence.Status != "work_task_ready" || !taskEvidence.Ready || taskEvidence.Blocked {
@@ -598,6 +639,15 @@ func issueScanArtifactLabels(artifacts []work.ArtifactEvent) []string {
 	return out
 }
 
+func issueScanArtifactByLabel(artifacts []work.ArtifactEvent, label string) *work.ArtifactEvent {
+	for i := range artifacts {
+		if artifacts[i].Label == label {
+			return &artifacts[i]
+		}
+	}
+	return nil
+}
+
 func containsIssueScanValue(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -649,6 +699,15 @@ func issueScanStageByID(stages []issueScanBriefStageForTest, id string) *issueSc
 	for i := range stages {
 		if stages[i].ID == id {
 			return &stages[i]
+		}
+	}
+	return nil
+}
+
+func civilizationProjectionPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, stageID, role string) *OperatorQueuedRunAgentPlanStep {
+	for i := range steps {
+		if steps[i].StageID == stageID && steps[i].Role == role {
+			return &steps[i]
 		}
 	}
 	return nil
