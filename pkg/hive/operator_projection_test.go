@@ -778,6 +778,17 @@ func TestQueuedRunLifecycleFromBriefRejectsIssueScanBriefWithEmptyLifecycle(t *t
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefAllowsLegacyKindOnlyIssueScanBrief(t *testing.T) {
+	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","required_agent_flow":["research_issue_and_repo_context"]}`)
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle for legacy kind-only issue scan", kind, version, lifecycle, agentPlan)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",
