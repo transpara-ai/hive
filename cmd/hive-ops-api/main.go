@@ -72,9 +72,10 @@ func main() {
 }
 
 func registerOpsAPIEventTypes() {
-	hive.RegisterEventTypes()
-	social.RegisterEventTypes()
-	work.RegisterEventTypes()
+	registry := event.DefaultRegistry()
+	hive.RegisterWithRegistry(registry)
+	social.RegisterWithRegistry(registry)
+	work.RegisterWithRegistry(registry)
 	event.SetFallbackUnmarshaler(event.RawFallback)
 }
 

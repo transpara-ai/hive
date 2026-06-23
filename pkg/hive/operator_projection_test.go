@@ -2,6 +2,7 @@ package hive
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 func TestBuildOperatorProjectionPendingAndDecisions(t *testing.T) {
@@ -184,6 +186,142 @@ func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndA
 	if !civilizationProjectionHasUnavailableField(projection, "actor_roster") {
 		t.Fatalf("missing actor_roster unavailable field: %+v", projection.WithheldOrUnavailableFields)
 	}
+	if !civilizationProjectionHasUnavailableField(projection, "factory_order_summary") {
+		t.Fatalf("missing factory_order_summary unavailable field: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrders(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Implement issue scan result",
+		Description:            "Seeded from queued Hive run.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         "fo_run_issue_scan_001",
+		RequirementIDs:         []string{"req_run_issue_scan_001"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_001"},
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.FactoryOrderSummary) != 1 {
+		t.Fatalf("factory orders = %+v, want one", projection.FactoryOrderSummary)
+	}
+	order := projection.FactoryOrderSummary[0]
+	if order.ID != "fo_run_issue_scan_001" || order.Status != "work_task_seeded" {
+		t.Fatalf("factory order identity/status = %+v", order)
+	}
+	if order.RiskClass != "high" || order.ReleasePolicy != "human_required_before_merge" {
+		t.Fatalf("factory order policy = %+v", order)
+	}
+	if len(order.RequirementRefs) != 1 || order.RequirementRefs[0] != "req_run_issue_scan_001" {
+		t.Fatalf("requirement refs = %+v", order.RequirementRefs)
+	}
+	if len(order.AcceptanceCriterionRefs) != 1 || order.AcceptanceCriterionRefs[0] != "ac_run_issue_scan_001" {
+		t.Fatalf("acceptance refs = %+v", order.AcceptanceCriterionRefs)
+	}
+	if len(order.TaskRefs) != 1 || order.TaskRefs[0] != taskEvent.ID().Value() {
+		t.Fatalf("task refs = %+v, want %s", order.TaskRefs, taskEvent.ID().Value())
+	}
+	if projection.WorkEvidenceSummary.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("work evidence = %+v, want available", projection.WorkEvidenceSummary)
+	}
+	if !strings.Contains(projection.WorkEvidenceSummary.Summary, "no runtime run is observed") {
+		t.Fatalf("work evidence summary = %q, want no-runtime boundary", projection.WorkEvidenceSummary.Summary)
+	}
+	if !containsString(projection.WorkEvidenceSummary.TaskRefs, taskEvent.ID().Value()) {
+		t.Fatalf("work evidence task refs = %+v, want %s", projection.WorkEvidenceSummary.TaskRefs, taskEvent.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, taskEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want task event %s", projection.SourceEventIDsOrQueryWindow, taskEvent.ID().Value())
+	}
+	if civilizationProjectionHasUnavailableField(projection, "factory_order_summary") {
+		t.Fatalf("factory_order_summary marked unavailable despite Work seed task: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDistinguishesFactoryOrderQueryFailure(t *testing.T) {
+	s, _, _ := newOperatorProjectionStore(t)
+	projection := BuildCivilizationAssemblyProjection(factoryOrderReadFailureStore{Store: s}, 50)
+
+	if projection.DerivationStatus != civilizationAssemblyStatusPartial {
+		t.Fatalf("derivation status = %q, want partial; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
+	}
+	reason := civilizationProjectionUnavailableReason(projection, "factory_order_summary")
+	if !strings.Contains(reason, "query failed") {
+		t.Fatalf("factory_order_summary unavailable reason = %q, want query failure", reason)
+	}
+	if len(projection.FailureReasons) == 0 || !strings.Contains(projection.FailureReasons[0], "work.task.created") {
+		t.Fatalf("failure reasons = %+v, want work.task.created query failure", projection.FailureReasons)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderSummaryLimit(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "First FactoryOrder",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_limit_001",
+		RiskClass:      "medium",
+	})
+	appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Second FactoryOrder",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_limit_002",
+		RiskClass:      "medium",
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 1)
+
+	if !civilizationProjectionHasResidualRisk(projection, "factory_order_summary_limit_01") {
+		t.Fatalf("residual risks = %+v, want factory_order_summary_limit_01", projection.ResidualRiskSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionMergesFactoryOrderTaskRefs(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	firstTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "FactoryOrder shell",
+		CreatedBy:              actorID,
+		FactoryOrderID:         "fo_merge_001",
+		RequirementIDs:         []string{"req_merge_001"},
+		AcceptanceCriterionIDs: []string{"ac_merge_001"},
+	})
+	secondTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "FactoryOrder implementation",
+		CreatedBy:              actorID,
+		FactoryOrderID:         "fo_merge_001",
+		RequirementIDs:         []string{"req_merge_002"},
+		AcceptanceCriterionIDs: []string{"ac_merge_002"},
+		RiskClass:              "medium",
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.FactoryOrderSummary) != 1 {
+		t.Fatalf("factory orders = %+v, want one merged order", projection.FactoryOrderSummary)
+	}
+	order := projection.FactoryOrderSummary[0]
+	if order.RiskClass != "medium" {
+		t.Fatalf("risk class = %q, want medium after unknown upgrade", order.RiskClass)
+	}
+	for _, want := range []string{firstTask.ID().Value(), secondTask.ID().Value()} {
+		if !containsString(order.TaskRefs, want) {
+			t.Fatalf("task refs = %+v, missing %s", order.TaskRefs, want)
+		}
+	}
+	for _, want := range []string{"req_merge_001", "req_merge_002"} {
+		if !containsString(order.RequirementRefs, want) {
+			t.Fatalf("requirement refs = %+v, missing %s", order.RequirementRefs, want)
+		}
+	}
+	for _, want := range []string{"ac_merge_001", "ac_merge_002"} {
+		if !containsString(order.AcceptanceCriterionRefs, want) {
+			t.Fatalf("acceptance refs = %+v, missing %s", order.AcceptanceCriterionRefs, want)
+		}
+	}
 }
 
 func TestBuildCivilizationAssemblyProjectionToleratesOpaqueSharedStoreHead(t *testing.T) {
@@ -253,6 +391,24 @@ func civilizationProjectionLifecycleCount(projection CivilizationAssemblyProject
 func civilizationProjectionHasUnavailableField(projection CivilizationAssemblyProjection, field string) bool {
 	for _, item := range projection.WithheldOrUnavailableFields {
 		if item.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationProjectionUnavailableReason(projection CivilizationAssemblyProjection, field string) string {
+	for _, item := range projection.WithheldOrUnavailableFields {
+		if item.Field == field {
+			return item.Reason
+		}
+	}
+	return ""
+}
+
+func civilizationProjectionHasResidualRisk(projection CivilizationAssemblyProjection, id string) bool {
+	for _, item := range projection.ResidualRiskSummary {
+		if item.ID == id {
 			return true
 		}
 	}
@@ -1454,6 +1610,7 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 	RegisterEventTypes()
 	registry := event.DefaultRegistry()
 	RegisterWithRegistry(registry)
+	work.RegisterWithRegistry(registry)
 
 	s := store.NewInMemoryStore()
 	actorID := types.MustActorID("actor_00000000000000000000000000000077")
@@ -1519,6 +1676,17 @@ type foreignSharedStoreContent struct {
 
 func (c foreignSharedStoreContent) EventTypeName() string { return "foreign.event.type" }
 func (c foreignSharedStoreContent) Accept(event.EventContentVisitor) {
+}
+
+type factoryOrderReadFailureStore struct {
+	store.Store
+}
+
+func (s factoryOrderReadFailureStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	if eventType == work.EventTypeTaskCreated {
+		return types.NewPage[event.Event](nil, types.None[types.Cursor](), false), errors.New("work task query unavailable")
+	}
+	return s.Store.ByType(eventType, limit, after)
 }
 
 type serializationRoundTripStore struct {
