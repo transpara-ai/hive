@@ -201,8 +201,17 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			t.Fatalf("task expected outputs = %+v, want %q", task.ExpectedOutputs, expected)
 		}
 	}
-	if strings.Contains(strings.Join(task.ExpectedOutputs, "\n"), "draft pull request") {
-		t.Fatalf("task expected outputs = %+v, must not advertise draft PR as final output", task.ExpectedOutputs)
+	for _, rendered := range []struct {
+		field string
+		value string
+	}{
+		{field: "expected outputs", value: strings.Join(task.ExpectedOutputs, "\n")},
+		{field: "description", value: task.Description},
+	} {
+		lower := strings.ToLower(rendered.value)
+		if strings.Contains(lower, "draft") || strings.Contains(lower, "governed execution artifact") {
+			t.Fatalf("task %s = %q, must not advertise draft or governed execution artifact as final output", rendered.field, rendered.value)
+		}
 	}
 	if !strings.Contains(task.Description, "https://github.com/transpara-ai/hive/issues/321") {
 		t.Fatalf("task description does not include issue URL: %s", task.Description)
