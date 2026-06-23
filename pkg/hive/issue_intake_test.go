@@ -188,6 +188,15 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if task.FactoryOrderID != result.DispatchedOrderIDs[0] {
 		t.Fatalf("task factory order = %q, want %q", task.FactoryOrderID, result.DispatchedOrderIDs[0])
 	}
+	if !containsIssueScanValue(task.ExpectedOutputs, "ready-for-Human result pull request") {
+		t.Fatalf("task expected outputs = %+v, want ready-for-Human result pull request", task.ExpectedOutputs)
+	}
+	if !containsIssueScanValue(task.ExpectedOutputs, "exact-head adversarial review with zero blockers") {
+		t.Fatalf("task expected outputs = %+v, want exact-head adversarial review with zero blockers", task.ExpectedOutputs)
+	}
+	if strings.Contains(strings.Join(task.ExpectedOutputs, "\n"), "draft pull request") {
+		t.Fatalf("task expected outputs = %+v, must not advertise draft PR as final output", task.ExpectedOutputs)
+	}
 	if !strings.Contains(task.Description, "https://github.com/transpara-ai/hive/issues/321") {
 		t.Fatalf("task description does not include issue URL: %s", task.Description)
 	}

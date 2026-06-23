@@ -302,8 +302,12 @@ func factoryOrderFromRunLaunch(content FactoryRunRequestedContent, orderID strin
 		DefinitionOfDone:   runLaunchDefinitionOfDone(content),
 		AcceptanceCriteria: runLaunchAcceptanceCriteria(content),
 		TestPlan:           runLaunchTestPlan(content),
-		ExpectedOutputs:    []string{"draft pull request or governed execution artifact", "validation evidence", "operator-facing status update"},
-		ModelOverrides:     workModelOverridesFromRunLaunch(content.ModelOverrides),
+		ExpectedOutputs: []string{
+			"ready-for-Human result pull request",
+			"exact-head adversarial review with zero blockers",
+			"validation evidence and operator-facing status update",
+		},
+		ModelOverrides: workModelOverridesFromRunLaunch(content.ModelOverrides),
 	}
 }
 
