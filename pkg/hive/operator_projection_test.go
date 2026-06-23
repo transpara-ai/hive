@@ -296,6 +296,54 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderLifecycleEvi
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Implement issue scan result",
+		Description:            "FactoryOrder artifact should be visible to Site.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         "fo_run_issue_scan_artifact_001",
+		RequirementIDs:         []string{"req_issue_scan_artifact_001"},
+		AcceptanceCriterionIDs: []string{"ac_issue_scan_artifact_001"},
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+	artifactEvent := appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     "Implementation artifact",
+		MediaType: "text/markdown",
+		Body:      "commit: abc123",
+		CreatedBy: actorID,
+	})
+	unrelatedTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:     "Unrelated Work task",
+		CreatedBy: actorID,
+		RiskClass: "low",
+	})
+	unrelatedArtifact := appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    unrelatedTask.ID(),
+		Label:     "Unrelated artifact",
+		MediaType: "text/markdown",
+		Body:      "not part of the FactoryOrder",
+		CreatedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !containsString(projection.WorkEvidenceSummary.ArtifactRefs, artifactEvent.ID().Value()) {
+		t.Fatalf("artifact refs = %+v, want FactoryOrder artifact %s", projection.WorkEvidenceSummary.ArtifactRefs, artifactEvent.ID().Value())
+	}
+	if containsString(projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value()) {
+		t.Fatalf("artifact refs = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want artifact event %s", projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value())
+	}
+	if containsString(projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value()) {
+		t.Fatalf("source refs = %+v, want no unrelated artifact %s", projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value())
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionDistinguishesFactoryOrderQueryFailure(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	projection := BuildCivilizationAssemblyProjection(factoryOrderReadFailureStore{Store: s}, 50)
@@ -331,6 +379,36 @@ func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderSummaryLimit(t *tes
 
 	if !civilizationProjectionHasResidualRisk(projection, "factory_order_summary_limit_01") {
 		t.Fatalf("residual risks = %+v, want factory_order_summary_limit_01", projection.ResidualRiskSummary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionMarksFactoryOrderArtifactSourceLimit(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Bounded artifact provenance",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_artifact_limit_001",
+		RiskClass:      "medium",
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     "First artifact",
+		MediaType: "text/markdown",
+		Body:      "commit: abc123",
+		CreatedBy: actorID,
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     "Second artifact",
+		MediaType: "text/markdown",
+		Body:      "review: passed",
+		CreatedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 1)
+
+	if !civilizationProjectionHasResidualRisk(projection, "factory_order_artifact_source_limit_01") {
+		t.Fatalf("residual risks = %+v, want factory_order_artifact_source_limit_01", projection.ResidualRiskSummary)
 	}
 }
 

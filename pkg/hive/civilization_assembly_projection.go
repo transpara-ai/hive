@@ -176,11 +176,18 @@ type CivilizationAssemblyResidualRisk struct {
 
 type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	TaskRefs                    []string
+	ArtifactRefs                []string
 	TestRunRefs                 []string
 	GateResultRefs              []string
 	SourceRefs                  []string
+	ArtifactSourceTruncated     bool
 	LifecycleSourceTruncated    bool
 	VerificationSourceTruncated bool
+}
+
+type civilizationAssemblyTaskArtifactEvidence struct {
+	ArtifactRefs []string
+	SourceRefs   []string
 }
 
 type civilizationAssemblyTaskLifecycleEvidence struct {
@@ -464,6 +471,12 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	byID := map[string]*CivilizationAssemblyFactoryOrder{}
 	taskStore := work.NewTaskStore(s, nil, nil)
 	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
+	artifactByTask, artifactTruncated, artifactErrors, err := civilizationAssemblyWorkTaskArtifactEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task artifact refs: %v", err))
+	}
+	p.Errors = append(p.Errors, artifactErrors...)
+	workEvidence.ArtifactSourceTruncated = artifactTruncated
 	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
@@ -502,6 +515,10 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		order.TaskRefs = compactStrings(append(order.TaskRefs, ev.ID().Value()))
 		workEvidence.TaskRefs = append(workEvidence.TaskRefs, ev.ID().Value())
 		workEvidence.SourceRefs = append(workEvidence.SourceRefs, ev.ID().Value())
+		if artifactEvidence, ok := artifactByTask[ev.ID()]; ok {
+			workEvidence.ArtifactRefs = append(workEvidence.ArtifactRefs, artifactEvidence.ArtifactRefs...)
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, artifactEvidence.SourceRefs...)
+		}
 		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, lifecycleEvidence.SourceRefs...)
 		}
@@ -519,6 +536,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
 	}
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
+	workEvidence.ArtifactRefs = compactStrings(workEvidence.ArtifactRefs)
 	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
 	workEvidence.GateResultRefs = compactStrings(workEvidence.GateResultRefs)
 	workEvidence.SourceRefs = compactStrings(workEvidence.SourceRefs)
@@ -546,6 +564,32 @@ func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types
 		return work.TaskProjection{}, work.LegacyTaskProjection{}, err
 	}
 	return taskProjection, legacyProjection, nil
+}
+
+func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskArtifactEvidence, bool, []string, error) {
+	page, err := s.ByType(work.EventTypeTaskArtifact, limit, types.None[types.Cursor]())
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskArtifact.Value(), err)
+	}
+	byTask := map[types.EventID]civilizationAssemblyTaskArtifactEvidence{}
+	projectionErrors := []string{}
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskArtifactContent)
+		if !ok {
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskArtifactContent"))
+			continue
+		}
+		evidence := byTask[content.TaskID]
+		evidence.ArtifactRefs = append(evidence.ArtifactRefs, ev.ID().Value())
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
+	}
+	for taskID, evidence := range byTask {
+		evidence.ArtifactRefs = compactStrings(evidence.ArtifactRefs)
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), projectionErrors, nil
 }
 
 func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, []string, error) {
@@ -730,7 +774,7 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []Civi
 		Status:         status,
 		Summary:        summary,
 		TaskRefs:       compactStrings(taskRefs),
-		ArtifactRefs:   compactStrings(artifactRefs),
+		ArtifactRefs:   compactStrings(append(artifactRefs, factoryOrderWorkEvidence.ArtifactRefs...)),
 		TestRunRefs:    compactStrings(factoryOrderWorkEvidence.TestRunRefs),
 		GateResultRefs: compactStrings(factoryOrderWorkEvidence.GateResultRefs),
 		SourceRefs:     sourceRefs,
@@ -780,6 +824,18 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Severity: "info",
 			Status:   "open",
 			Summary:  fmt.Sprintf("FactoryOrder summary is bounded to %d work.task.created events; records outside that projection page may be omitted.", limit),
+		})
+	}
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.ArtifactSourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_artifact_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder artifact evidence is bounded to %d work.task.artifact events; artifact refs outside that projection page may be omitted.", limit),
 		})
 	}
 	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.LifecycleSourceTruncated {
