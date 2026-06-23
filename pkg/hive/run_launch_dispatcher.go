@@ -40,6 +40,21 @@ type RunLaunchDispatchResult struct {
 // resolver before the FactoryOrder is seeded, and the later Operate path
 // revalidates the same structured override artifact before provider creation.
 func (r *Runtime) DispatchQueuedRunLaunches(limit int) (RunLaunchDispatchResult, error) {
+	return r.dispatchQueuedRunLaunches(limit, "")
+}
+
+// DispatchQueuedRunLaunch binds one queued factory.run.requested event into the
+// Work task path. It is intended for operator commands that queue a single run
+// and want to dispatch only that run instead of flushing the daemon backlog.
+func (r *Runtime) DispatchQueuedRunLaunch(runID string) (RunLaunchDispatchResult, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return RunLaunchDispatchResult{}, fmt.Errorf("run_id is required")
+	}
+	return r.dispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit, runID)
+}
+
+func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLaunchDispatchResult, error) {
 	var result RunLaunchDispatchResult
 	if r == nil || r.store == nil || r.tasks == nil {
 		return result, nil
@@ -65,6 +80,9 @@ func (r *Runtime) DispatchQueuedRunLaunches(limit int) (RunLaunchDispatchResult,
 		result.Scanned++
 		content, ok := request.Content().(FactoryRunRequestedContent)
 		if !ok {
+			continue
+		}
+		if onlyRunID != "" && content.RunID != onlyRunID {
 			continue
 		}
 		if status := strings.TrimSpace(content.Status); status != "" && !strings.EqualFold(status, "queued") {

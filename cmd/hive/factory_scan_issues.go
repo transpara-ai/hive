@@ -101,7 +101,7 @@ func cmdFactoryScanIssues(args []string) error {
 
 	fmt.Printf("queued issue-scan run %s for %s#%d (first event %s)\n", queued.RunID, queued.Selected.Repo, queued.Selected.Number, queued.FirstEventID)
 	if *dispatch {
-		result, err := rt.DispatchQueuedRunLaunches(100)
+		result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
 		if err != nil {
 			return fmt.Errorf("dispatch queued run launches: %w", err)
 		}
