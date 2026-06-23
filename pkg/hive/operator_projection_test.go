@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,23 @@ func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndA
 	}
 	if !civilizationProjectionHasUnavailableField(projection, "actor_roster") {
 		t.Fatalf("missing actor_roster unavailable field: %+v", projection.WithheldOrUnavailableFields)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionToleratesOpaqueSharedStoreHead(t *testing.T) {
+	s, actorID, _ := newOperatorProjectionStore(t)
+	opaqueHead := appendOpaqueSharedStoreEvent(t, s, actorID)
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.DerivationStatus != civilizationAssemblyStatusComplete {
+		t.Fatalf("derivation status = %q, want complete; failures=%+v", projection.DerivationStatus, projection.FailureReasons)
+	}
+	if len(projection.FailureReasons) != 0 {
+		t.Fatalf("failure reasons = %+v, want none", projection.FailureReasons)
+	}
+	if projection.SourceEventGraphHeadOrStateVersion != opaqueHead.ID().Value() {
+		t.Fatalf("source head = %q, want opaque head %q", projection.SourceEventGraphHeadOrStateVersion, opaqueHead.ID().Value())
 	}
 }
 
@@ -1178,6 +1196,34 @@ func newOperatorProjectionStore(t *testing.T) (*store.InMemoryStore, types.Actor
 	}
 
 	return s, actorID, appendEvent
+}
+
+func appendOpaqueSharedStoreEvent(t *testing.T, s *store.InMemoryStore, actorID types.ActorID) event.Event {
+	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	eventType := types.MustEventType("foreign.event.type")
+	content := event.RawContent{
+		TypeName: eventType.Value(),
+		Data:     json.RawMessage(`{"source":"shared-store"}`),
+	}
+	eventID := newTestEventID(t)
+	convID := types.MustConversationID("conv_00000000000000000000000000000088")
+	causes := []types.EventID{head.Unwrap().ID()}
+	prevHash := head.Unwrap().Hash()
+	tmp := event.NewEvent(event.CurrentEventVersion, eventID, eventType, types.Now(), actorID, content, causes, convID, types.ZeroHash(), prevHash, types.Signature{})
+	hash, err := event.ComputeHash(event.CanonicalForm(tmp))
+	if err != nil {
+		t.Fatalf("hash opaque event: %v", err)
+	}
+	ev := event.NewEvent(event.CurrentEventVersion, eventID, eventType, tmp.Timestamp(), actorID, content, causes, convID, hash, prevHash, types.Signature{})
+	stored, err := s.Append(ev)
+	if err != nil {
+		t.Fatalf("append opaque event: %v", err)
+	}
+	return stored
 }
 
 func appendOperatorProjectionEventWithConversation(t *testing.T, s *store.InMemoryStore, actorID types.ActorID, convID types.ConversationID, eventType types.EventType, content event.EventContent) event.Event {
