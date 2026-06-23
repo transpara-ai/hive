@@ -248,6 +248,54 @@ func TestBuildCivilizationAssemblyProjectionRuntimeStatusOverridesLifecycleLiven
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionLaterLifecycleStatusOverridesRuntimeLiveness(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	requestID := newTestEventID(t)
+	decisionID := newTestEventID(t)
+	appendEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:          actorID,
+		DisplayName:      "Reviewer",
+		Role:             "reviewer",
+		PublicKey:        types.MustPublicKey(make([]byte, 32)),
+		KeyProvenance:    "generated",
+		Environment:      "review",
+		IdentityMode:     "persistent",
+		LifecycleStatus:  "active",
+		AuthorityScope:   "hive:review",
+		RegistrationPath: "generated",
+	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "runtime visualization",
+		RepoPath: "/Transpara/transpara-ai/repos/hive",
+	})
+	appendEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "reviewer",
+		Role:    "reviewer",
+		Model:   "gpt-5",
+		ActorID: actorID.Value(),
+	})
+	time.Sleep(time.Millisecond)
+	appendEvent(EventTypeAgentLifecycleTransitioned, AgentLifecycleTransitionedContent{
+		ActorID:            actorID,
+		PreviousState:      "active",
+		RequestedState:     "retired",
+		ResultingState:     "retired",
+		RequestingActor:    actorID,
+		AuthorityRequestID: requestID,
+		DecisionEventID:    decisionID,
+		Reason:             "completed mandate",
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if !civilizationProjectionHasActorModeStatus(projection, actorID.Value(), "persistent", "retired") {
+		t.Fatalf("later lifecycle status did not override older runtime liveness: %+v", projection.ActorRoster)
+	}
+	if !civilizationProjectionHasLifecycleStatus(projection, actorID.Value(), "retired") {
+		t.Fatalf("later lifecycle row did not remain terminal: %+v", projection.AgentLifecycleSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionClassifiesStoppedRunningAgentsAsObserved(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeRunStarted, RunStartedContent{
