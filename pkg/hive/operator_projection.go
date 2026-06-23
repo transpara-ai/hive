@@ -764,6 +764,9 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 		return "", "", nil, nil, fmt.Errorf("decode brief metadata: %w", err)
 	}
 	if len(brief.DevelopmentLifecycle) == 0 {
+		if brief.Kind == issueScanBriefKind || brief.LifecycleVersion != "" {
+			return "", "", nil, nil, fmt.Errorf("issue scan brief missing development lifecycle")
+		}
 		return "", "", nil, nil, nil
 	}
 	if brief.Kind != issueScanBriefKind {
@@ -774,7 +777,11 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	}
 	expected := issueScanDevelopmentLifecycle()
 	if brief.LifecycleVersion == issueScanLifecycleVersionV02 {
-		expected = issueScanDevelopmentLifecycleV02()
+		var err error
+		expected, err = issueScanDevelopmentLifecycleV02()
+		if err != nil {
+			return "", "", nil, nil, err
+		}
 	}
 	if len(brief.DevelopmentLifecycle) != len(expected) {
 		return "", "", nil, nil, fmt.Errorf("lifecycle stage count %d does not match expected %d", len(brief.DevelopmentLifecycle), len(expected))

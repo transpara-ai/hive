@@ -531,6 +531,14 @@ func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
 	}
 }
 
+func TestQueuedRunLifecycleFromBriefRejectsIssueScanBriefWithEmptyLifecycle(t *testing.T) {
+	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","lifecycle_version":"civilization_issue_to_human_ready_pr_v0.3","development_lifecycle":[]}`)
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err == nil || !strings.Contains(err.Error(), "missing development lifecycle") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want missing lifecycle error", err, lifecycle, agentPlan)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",
@@ -590,6 +598,37 @@ func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t
 	readyStage := queuedRunLifecycleStageByID(lifecycle, "surface_ready_for_Human_result_PR")
 	if readyStage == nil || !containsModelProjectionString(readyStage.RequiredEvidence, "draft_pr_url") || containsModelProjectionString(readyStage.RequiredEvidence, "ready_pr_url") {
 		t.Fatalf("legacy ready stage = %+v, want draft_pr_url evidence", readyStage)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefRejectsAgentPlanStepCountMismatch(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	plan, ok := doc["agent_execution_plan"].([]any)
+	if !ok || len(plan) == 0 {
+		t.Fatalf("agent_execution_plan = %#v, want plan steps", doc["agent_execution_plan"])
+	}
+	doc["agent_execution_plan"] = plan[:len(plan)-1]
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated brief: %v", err)
+	}
+
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "agent execution plan step count") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want plan count mismatch", err, lifecycle, agentPlan)
 	}
 }
 

@@ -17,7 +17,7 @@ const (
 	issueScanBriefKind           = "transpara_ai_github_issue_scan"
 	issueScanLifecycleVersionV02 = "civilization_issue_to_human_ready_pr_v0.2"
 	// This version is a persisted brief contract. Bump it when lifecycle or
-	// agent-plan text, evidence, roles, boundaries, or gates change.
+	// agent-plan text, evidence, roles, boundaries, gates, or step order change.
 	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.3"
 	issueScanSourceType       = "github.issue"
 )
@@ -501,11 +501,11 @@ func issueScanDevelopmentLifecycle() []issueScanLifecycleStage {
 	}
 }
 
-func issueScanDevelopmentLifecycleV02() []issueScanLifecycleStage {
+func issueScanDevelopmentLifecycleV02() ([]issueScanLifecycleStage, error) {
 	stages := issueScanDevelopmentLifecycle()
 	readyStage, ok := issueScanLifecycleStageByID(stages, "surface_ready_for_Human_result_PR")
 	if !ok {
-		return stages
+		return nil, fmt.Errorf("issue scan v0.2 lifecycle ready stage not found")
 	}
 	evidence := append([]string(nil), readyStage.RequiredEvidence...)
 	for i, item := range evidence {
@@ -519,7 +519,7 @@ func issueScanDevelopmentLifecycleV02() []issueScanLifecycleStage {
 			break
 		}
 	}
-	return stages
+	return stages, nil
 }
 
 func issueScanBriefIssue(issue GitHubIssueCandidate) issueScanBriefIssuePayload {
