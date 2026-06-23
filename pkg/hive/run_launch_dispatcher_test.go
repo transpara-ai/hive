@@ -270,6 +270,40 @@ func TestDispatchQueuedRunLaunchRejectsIssueScanBriefMissingLifecycle(t *testing
 	}
 }
 
+func TestDispatchQueuedRunLaunchAllowsLegacyIssueScanBriefWithoutPlanArtifact(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_legacy_issue_scan_brief", json.RawMessage(`{"kind":"`+issueScanBriefKind+`"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one legacy issue-scan dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("legacy issue-scan artifacts = %+v, want no %s without lifecycle or plan", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
 func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	requestEvent := appendStaleRunLaunchRequest(t, rt.store, writer)
