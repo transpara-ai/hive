@@ -3,6 +3,7 @@ package hive
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -1419,6 +1420,21 @@ func TestProgressIssueScanLifecycleCreatesConcreteImplementationTaskAfterDesign(
 			t.Fatalf("implementation task artifacts missing %s: %+v", label, artifacts)
 		}
 	}
+	if !strings.Contains(implementationTask.Description, "Selected issue:") ||
+		!strings.Contains(implementationTask.Description, "transpara-ai/hive#321") ||
+		!strings.Contains(implementationTask.Description, "The Civilization should scan Transpara-AI repos.") {
+		t.Fatalf("implementation task description does not carry selected issue context:\n%s", implementationTask.Description)
+	}
+	dod := issueScanArtifactByLabel(artifacts, work.GateDefinitionOfDone)
+	if dod == nil || !strings.Contains(dod.Body, "transpara-ai/hive#321") {
+		t.Fatalf("definition_of_done does not carry selected issue target: %+v", dod)
+	}
+	contextArtifact := issueScanArtifactByLabel(artifacts, IssueScanImplementationTaskContextArtifactLabel)
+	if contextArtifact == nil ||
+		!strings.Contains(contextArtifact.Body, `"repo": "transpara-ai/hive"`) ||
+		!strings.Contains(contextArtifact.Body, `"target_repos":`) {
+		t.Fatalf("implementation context artifact missing selected issue/target repos:\n%s", contextArtifact.Body)
+	}
 	if issueScanArtifactByLabel(artifacts, IssueScanStageRoleContractArtifactLabel) != nil || issueScanArtifactByLabel(artifacts, IssueScanStageOutputContractArtifactLabel) != nil {
 		t.Fatalf("implementation task carried issue-scan stage contract labels: %+v", artifacts)
 	}
@@ -1429,6 +1445,77 @@ func TestProgressIssueScanLifecycleCreatesConcreteImplementationTaskAfterDesign(
 	}
 	if !ready || !again.AlreadyExists || again.Created {
 		t.Fatalf("second ensure = %+v ready=%v, want idempotent already-existing task", again, ready)
+	}
+}
+
+func TestProgressIssueScanLifecycleRejectsWrongRepoImplementationTask(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	rt.repoPath = issueScanGitRepoWithOrigin(t, "https://github.com/transpara-ai/hive.git")
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/site",
+			Number: 109,
+			Title:  "Display Civilization runtime evidence",
+			URL:    "https://github.com/transpara-ai/site/issues/109",
+			Body:   "Site should show the runtime Civilization evidence for Transpara-AI operators.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	for _, stageID := range []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+	} {
+		if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, issueScanStageRuntimeEvidenceForTest(t, stageID), true); err != nil {
+			t.Fatalf("CompleteIssueScanLifecycleStage %s: %v", stageID, err)
+		}
+	}
+
+	_, err = rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "refusing wrong-repo implementation task") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want wrong-repo refusal", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if task, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID)); ok {
+		t.Fatalf("wrong-repo implementation task was created: %+v", task)
+	}
+}
+
+func TestTransparaAIRepoSlugFromRemoteURL(t *testing.T) {
+	tests := map[string]string{
+		"https://github.com/transpara-ai/site":      "transpara-ai/site",
+		"https://github.com/transpara-ai/site.git/": "transpara-ai/site",
+		"git@github.com:transpara-ai/hive.git":      "transpara-ai/hive",
+		"ssh://git@github.com/transpara-ai/work":    "transpara-ai/work",
+	}
+	for raw, want := range tests {
+		got, ok := transparaAIRepoSlugFromRemoteURL(raw)
+		if !ok || got != want {
+			t.Fatalf("transparaAIRepoSlugFromRemoteURL(%q) = %q ok=%v, want %q true", raw, got, ok, want)
+		}
+	}
+	for _, raw := range []string{"https://github.com/example/hive.git", "https://example.com/transpara-ai/hive", "../hive"} {
+		if got, ok := transparaAIRepoSlugFromRemoteURL(raw); ok {
+			t.Fatalf("transparaAIRepoSlugFromRemoteURL(%q) = %q ok=true, want rejection", raw, got)
+		}
 	}
 }
 
@@ -3251,4 +3338,23 @@ func issueScanOperatorPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, sta
 		}
 	}
 	return nil
+}
+
+func issueScanGitRepoWithOrigin(t *testing.T, remote string) string {
+	t.Helper()
+	dir := t.TempDir()
+	issueScanRunTestCommand(t, "", "git", "init", dir)
+	issueScanRunTestCommand(t, dir, "git", "remote", "add", "origin", remote)
+	return dir
+}
+
+func issueScanRunTestCommand(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, string(output))
+	}
 }

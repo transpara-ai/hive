@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -237,6 +239,13 @@ func (r *Runtime) EnsureIssueScanImplementationTask(runID string) (IssueScanImpl
 	if err := r.verifyIssueScanStageTaskContracts(designTarget); err != nil {
 		return result, false, err
 	}
+	brief, err := issueScanResearchBriefFromContent(content)
+	if err != nil {
+		return result, false, err
+	}
+	if err := r.verifyIssueScanImplementationWorkspace(content, brief.SelectedIssue); err != nil {
+		return result, false, err
+	}
 	evidence, evidenceArtifactID, ok, err := r.issueScanStageRuntimeEvidenceForCompletedStage(content, orderID, designTarget)
 	if err != nil {
 		return result, false, err
@@ -246,7 +255,7 @@ func (r *Runtime) EnsureIssueScanImplementationTask(runID string) (IssueScanImpl
 	}
 	result.DesignEvidenceArtifactID = evidenceArtifactID
 
-	taskID, created, already, err := r.ensureIssueScanImplementationTask(content, order, parentTaskID, designTarget, evidenceArtifactID, evidence, request.ID())
+	taskID, created, already, err := r.ensureIssueScanImplementationTask(content, order, parentTaskID, designTarget, evidenceArtifactID, evidence, request.ID(), brief.SelectedIssue)
 	if err != nil {
 		return result, false, err
 	}
@@ -321,7 +330,7 @@ func issueScanStageRuntimeEvidenceArtifact(label, body string) (IssueScanStageRu
 	return payload, true, nil
 }
 
-func (r *Runtime) ensureIssueScanImplementationTask(content FactoryRunRequestedContent, order work.FactoryOrder, parentTaskID types.EventID, designTarget *issueScanStageAdvanceTarget, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence, requestID types.EventID) (types.EventID, bool, bool, error) {
+func (r *Runtime) ensureIssueScanImplementationTask(content FactoryRunRequestedContent, order work.FactoryOrder, parentTaskID types.EventID, designTarget *issueScanStageAdvanceTarget, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence, requestID types.EventID, issue issueScanBriefIssuePayload) (types.EventID, bool, bool, error) {
 	canonicalTaskID := issueScanImplementationTaskCanonicalID(order.ID)
 	if canonicalTaskID == "" {
 		return types.EventID{}, false, false, fmt.Errorf("implementation task canonical id is empty for FactoryOrder %q", order.ID)
@@ -335,17 +344,17 @@ func (r *Runtime) ensureIssueScanImplementationTask(content FactoryRunRequestedC
 	}
 	created := false
 	if !exists {
-		task, err := r.tasks.CreateV39(r.humanID, issueScanImplementationTaskCreateOptions(content, order, evidence), compactEventIDs([]types.EventID{requestID, parentTaskID, designTarget.TaskID, evidenceArtifactID}), runLaunchConversationID(content.RunID, r.convID))
+		task, err := r.tasks.CreateV39(r.humanID, issueScanImplementationTaskCreateOptions(content, order, evidence, issue), compactEventIDs([]types.EventID{requestID, parentTaskID, designTarget.TaskID, evidenceArtifactID}), runLaunchConversationID(content.RunID, r.convID))
 		if err != nil {
 			return types.EventID{}, false, false, fmt.Errorf("create issue-scan implementation task: %w", err)
 		}
 		taskID = task.ID
 		created = true
 	}
-	if err := r.attachIssueScanImplementationTaskReadinessGates(content, order, taskID, designTarget.TaskID, evidenceArtifactID, evidence); err != nil {
+	if err := r.attachIssueScanImplementationTaskReadinessGates(content, order, taskID, designTarget.TaskID, evidenceArtifactID, evidence, issue); err != nil {
 		return types.EventID{}, false, false, err
 	}
-	if err := r.attachIssueScanImplementationTaskContext(content, order, taskID, designTarget.TaskID, evidenceArtifactID, evidence); err != nil {
+	if err := r.attachIssueScanImplementationTaskContext(content, order, taskID, designTarget.TaskID, evidenceArtifactID, evidence, issue); err != nil {
 		return types.EventID{}, false, false, err
 	}
 	return taskID, created, exists, nil
@@ -359,7 +368,7 @@ func issueScanImplementationTaskCanonicalID(orderID string) string {
 	return "tsk_" + suffix + "_" + issueScanConcreteImplementationTaskID
 }
 
-func issueScanImplementationTaskCreateOptions(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence) work.TaskCreateOptions {
+func issueScanImplementationTaskCreateOptions(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) work.TaskCreateOptions {
 	riskClass := valueOr(order.RiskClass, "high")
 	title := "Implement selected issue-scan approach"
 	if selected := issueScanEvidenceSummary(evidence, "selected_approach"); selected != "" {
@@ -367,7 +376,7 @@ func issueScanImplementationTaskCreateOptions(content FactoryRunRequestedContent
 	}
 	return work.TaskCreateOptions{
 		Title:                  title,
-		Description:            issueScanImplementationTaskDescription(content, order, evidence),
+		Description:            issueScanImplementationTaskDescription(content, order, evidence, issue),
 		CanonicalTaskID:        issueScanImplementationTaskCanonicalID(order.ID),
 		FactoryOrderID:         order.ID,
 		RequirementIDs:         factoryOrderRequirementIDs(order),
@@ -384,19 +393,20 @@ func issueScanImplementationTaskCreateOptions(content FactoryRunRequestedContent
 	}
 }
 
-func issueScanImplementationTaskDescription(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence) string {
+func issueScanImplementationTaskDescription(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Concrete implementation task for issue-scan run `%s` and FactoryOrder `%s`.\n\n", strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID))
+	appendIssueScanImplementationSelectedIssueSection(&b, issue)
 	appendIssueScanImplementationEvidenceSection(&b, "Selected approach", evidence, "selected_approach")
 	appendIssueScanImplementationEvidenceSection(&b, "Implementation task plan", evidence, "implementation_task_plan")
 	appendIssueScanImplementationEvidenceSection(&b, "Acceptance criteria", evidence, "acceptance_criteria")
 	appendIssueScanImplementationEvidenceSection(&b, "Test plan", evidence, "test_plan")
 	appendIssueScanImplementationEvidenceSection(&b, "Authority gate requirements", evidence, "authority_gate_requirements")
-	b.WriteString("Operate boundary: implement on a branch in the configured repository. Do not merge, deploy, request protected production actions, or claim Human approval.")
+	b.WriteString("Operate boundary: implement on a branch in the configured repository after the runtime has verified it matches the selected Transpara-AI repo. Do not merge, deploy, request protected production actions, or claim Human approval.")
 	return strings.TrimSpace(b.String())
 }
 
-func (r *Runtime) attachIssueScanImplementationTaskReadinessGates(content FactoryRunRequestedContent, order work.FactoryOrder, taskID, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence) error {
+func (r *Runtime) attachIssueScanImplementationTaskReadinessGates(content FactoryRunRequestedContent, order work.FactoryOrder, taskID, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) error {
 	artifacts, err := r.tasks.ListArtifacts(taskID)
 	if err != nil {
 		return fmt.Errorf("list implementation task artifacts: %w", err)
@@ -409,9 +419,9 @@ func (r *Runtime) attachIssueScanImplementationTaskReadinessGates(content Factor
 		label string
 		body  string
 	}{
-		{work.GateDefinitionOfDone, issueScanImplementationDefinitionOfDone(content, order, evidence)},
-		{work.GateAcceptanceCriteria, issueScanImplementationAcceptanceCriteria(content, order, evidence)},
-		{work.GateTestPlan, issueScanImplementationTestPlan(content, order, evidence)},
+		{work.GateDefinitionOfDone, issueScanImplementationDefinitionOfDone(content, order, evidence, issue)},
+		{work.GateAcceptanceCriteria, issueScanImplementationAcceptanceCriteria(content, order, evidence, issue)},
+		{work.GateTestPlan, issueScanImplementationTestPlan(content, order, evidence, issue)},
 	}
 	causes := compactEventIDs([]types.EventID{taskID, designStageTaskID, evidenceArtifactID})
 	for _, gate := range gates {
@@ -429,7 +439,7 @@ func (r *Runtime) attachIssueScanImplementationTaskReadinessGates(content Factor
 	return nil
 }
 
-func (r *Runtime) attachIssueScanImplementationTaskContext(content FactoryRunRequestedContent, order work.FactoryOrder, taskID, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence) error {
+func (r *Runtime) attachIssueScanImplementationTaskContext(content FactoryRunRequestedContent, order work.FactoryOrder, taskID, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) error {
 	artifacts, err := r.tasks.ListArtifacts(taskID)
 	if err != nil {
 		return fmt.Errorf("list implementation task context artifacts: %w", err)
@@ -439,7 +449,7 @@ func (r *Runtime) attachIssueScanImplementationTaskContext(content FactoryRunReq
 			return nil
 		}
 	}
-	body, err := issueScanImplementationTaskContextBody(content, order, designStageTaskID, evidenceArtifactID, evidence)
+	body, err := issueScanImplementationTaskContextBody(content, order, designStageTaskID, evidenceArtifactID, evidence, issue)
 	if err != nil {
 		return err
 	}
@@ -635,9 +645,10 @@ func issueScanImplementationRoleOutputFromCompletion(evidence issueScanOperateCo
 	}
 }
 
-func issueScanImplementationDefinitionOfDone(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence) string {
+func issueScanImplementationDefinitionOfDone(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Implementation for run `%s` / FactoryOrder `%s` is done when the selected approach is implemented on a branch and commit evidence is recorded.\n\n", strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID))
+	appendIssueScanImplementationSelectedIssueSection(&b, issue)
 	appendIssueScanImplementationEvidenceSection(&b, "Definition of done", evidence, "definition_of_done")
 	appendIssueScanImplementationEvidenceSection(&b, "Selected approach", evidence, "selected_approach")
 	appendIssueScanImplementationEvidenceSection(&b, "Implementation task plan", evidence, "implementation_task_plan")
@@ -646,9 +657,10 @@ func issueScanImplementationDefinitionOfDone(content FactoryRunRequestedContent,
 	return strings.TrimSpace(b.String())
 }
 
-func issueScanImplementationAcceptanceCriteria(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence) string {
+func issueScanImplementationAcceptanceCriteria(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Acceptance criteria for run `%s` / FactoryOrder `%s`.\n\n", strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID))
+	appendIssueScanImplementationSelectedIssueSection(&b, issue)
 	appendIssueScanImplementationEvidenceSection(&b, "Acceptance criteria", evidence, "acceptance_criteria")
 	appendIssueScanImplementationEvidenceSection(&b, "Selected approach", evidence, "selected_approach")
 	appendIssueScanImplementationEvidenceSection(&b, "Authority gate requirements", evidence, "authority_gate_requirements")
@@ -656,15 +668,18 @@ func issueScanImplementationAcceptanceCriteria(content FactoryRunRequestedConten
 	return strings.TrimSpace(b.String())
 }
 
-func issueScanImplementationTestPlan(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence) string {
+func issueScanImplementationTestPlan(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Validation plan for run `%s` / FactoryOrder `%s`.\n\n", strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID))
+	if repo := strings.TrimSpace(issue.Repo); repo != "" {
+		fmt.Fprintf(&b, "Target repo: %s\n\n", repo)
+	}
 	appendIssueScanImplementationEvidenceSection(&b, "Test plan", evidence, "test_plan")
 	b.WriteString("Record exact validation output after implementation. If validation cannot run, record the blocker instead of completing the task.")
 	return strings.TrimSpace(b.String())
 }
 
-func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, order work.FactoryOrder, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence) (string, error) {
+func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, order work.FactoryOrder, designStageTaskID, evidenceArtifactID types.EventID, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) (string, error) {
 	keys := []string{
 		"selected_approach",
 		"definition_of_done",
@@ -681,6 +696,8 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 		SourceStageID            string                              `json:"source_stage_id"`
 		SourceStageTaskID        string                              `json:"source_stage_task_id"`
 		SourceRuntimeEvidenceRef string                              `json:"source_runtime_evidence_ref"`
+		SelectedIssue            issueScanBriefIssuePayload          `json:"selected_issue"`
+		TargetRepos              []string                            `json:"target_repos"`
 		Outputs                  []IssueScanStageRuntimeEvidenceItem `json:"outputs"`
 		EvidenceKind             string                              `json:"evidence_kind"`
 		EvidenceStatus           string                              `json:"evidence_status"`
@@ -693,6 +710,8 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 		SourceStageID:            issueScanSelectAndDesignStageID,
 		SourceStageTaskID:        designStageTaskID.Value(),
 		SourceRuntimeEvidenceRef: evidenceArtifactID.Value(),
+		SelectedIssue:            issue,
+		TargetRepos:              append([]string(nil), content.TargetRepos...),
 		Outputs:                  issueScanEvidenceItemsForKeys(evidence, keys),
 		EvidenceKind:             "implementation_task_seeded_from_design_stage",
 		EvidenceStatus:           "ready_for_implementer",
@@ -709,6 +728,98 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 		return "", fmt.Errorf("marshal issue-scan implementation task context: %w", err)
 	}
 	return string(encoded), nil
+}
+
+func (r *Runtime) verifyIssueScanImplementationWorkspace(content FactoryRunRequestedContent, issue issueScanBriefIssuePayload) error {
+	targetRepo := strings.TrimSpace(issue.Repo)
+	if targetRepo == "" && len(content.TargetRepos) > 0 {
+		targetRepo = strings.TrimSpace(content.TargetRepos[0])
+	}
+	if targetRepo == "" {
+		return fmt.Errorf("issue-scan target repo is required before implementation task creation")
+	}
+	if r == nil || strings.TrimSpace(r.repoPath) == "" {
+		return nil
+	}
+	configuredRepo, ok, err := transparaAIRepoSlugForPath(r.repoPath)
+	if err != nil {
+		return fmt.Errorf("verify configured repo path for issue-scan implementation: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("configured repo path %q does not resolve to a Transpara-AI repo; cannot create executable implementation task for %q", r.repoPath, targetRepo)
+	}
+	if !strings.EqualFold(configuredRepo, targetRepo) {
+		return fmt.Errorf("configured repo path %q resolves to %q but issue-scan target repo is %q; refusing wrong-repo implementation task", r.repoPath, configuredRepo, targetRepo)
+	}
+	return nil
+}
+
+func transparaAIRepoSlugForPath(repoPath string) (string, bool, error) {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return "", false, nil
+	}
+	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, fmt.Errorf("git remote get-url origin: %w", err)
+	}
+	slug, ok := transparaAIRepoSlugFromRemoteURL(string(out))
+	return slug, ok, nil
+}
+
+func transparaAIRepoSlugFromRemoteURL(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	var path string
+	if strings.HasPrefix(raw, "git@github.com:") {
+		path = strings.TrimPrefix(raw, "git@github.com:")
+	} else if parsed, err := url.Parse(raw); err == nil && strings.EqualFold(parsed.Hostname(), "github.com") {
+		path = strings.TrimPrefix(parsed.Path, "/")
+	} else if strings.HasPrefix(raw, "github.com/") {
+		path = strings.TrimPrefix(raw, "github.com/")
+	}
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.ToLower(strings.TrimSpace(path))
+	if !ValidTransparaAIRepo(path) {
+		return "", false
+	}
+	return path, true
+}
+
+func appendIssueScanImplementationSelectedIssueSection(b *strings.Builder, issue issueScanBriefIssuePayload) {
+	repo := strings.TrimSpace(issue.Repo)
+	title := strings.TrimSpace(issue.Title)
+	if repo == "" && issue.Number <= 0 && title == "" {
+		return
+	}
+	number := ""
+	if issue.Number > 0 {
+		number = fmt.Sprintf("#%d", issue.Number)
+	}
+	fmt.Fprintf(b, "Selected issue:\n")
+	if repo != "" || number != "" {
+		fmt.Fprintf(b, "%s%s", repo, number)
+		if title != "" {
+			fmt.Fprintf(b, " - %s", title)
+		}
+		b.WriteString("\n")
+	} else if title != "" {
+		fmt.Fprintf(b, "%s\n", title)
+	}
+	if url := strings.TrimSpace(issue.URL); url != "" {
+		fmt.Fprintf(b, "URL: %s\n", url)
+	}
+	if labels := compactStrings(issue.Labels); len(labels) > 0 {
+		fmt.Fprintf(b, "Labels: %s\n", strings.Join(labels, ", "))
+	}
+	if body := strings.TrimSpace(issue.Body); body != "" {
+		fmt.Fprintf(b, "Body excerpt:\n%s\n", truncateRunLaunchText(body, 1200))
+	}
+	b.WriteString("\n")
 }
 
 func appendIssueScanImplementationEvidenceSection(b *strings.Builder, title string, evidence IssueScanStageRuntimeEvidence, key string) {
