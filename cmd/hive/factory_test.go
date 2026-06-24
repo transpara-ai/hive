@@ -984,7 +984,7 @@ func TestIssueScanCandidatePRReadyRequiresPositiveReadyLabel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := issueScanCandidatePRReady(hive.GitHubIssueCandidate{Labels: tt.labels})
+			got := hive.IssueScanCandidatePRReady(hive.GitHubIssueCandidate{Labels: tt.labels})
 			if got != tt.want {
 				t.Fatalf("issueScanCandidatePRReady(%v) = %v, want %v", tt.labels, got, tt.want)
 			}
@@ -1017,7 +1017,7 @@ func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
 	if got != "cc:intake,cc:pr-ready" {
 		t.Fatalf("labels = %q, want cc:intake,cc:pr-ready", got)
 	}
-	if !issueScanCandidatePRReady(issues[0]) {
+	if !hive.IssueScanCandidatePRReady(issues[0]) {
 		t.Fatalf("parsed issue should be PR-ready: %+v", issues[0])
 	}
 }

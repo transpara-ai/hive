@@ -78,7 +78,7 @@ func cmdFactoryScanIssues(args []string) error {
 		return fmt.Errorf("no open GitHub issues found for %s", strings.Join(normalizedRepos, ", "))
 	}
 	var skippedNotPRReady int
-	issues, skippedNotPRReady = filterIssueScanPRReadyCandidates(issues)
+	issues, skippedNotPRReady = hive.FilterIssueScanPRReadyCandidates(issues)
 	if len(issues) == 0 {
 		return fmt.Errorf("no PR-ready GitHub issues found for %s; skipped %d non-PR-ready issue(s); require cc:pr-ready without cc:pr-deferred or cc:needs-human-scope", strings.Join(normalizedRepos, ", "), skippedNotPRReady)
 	}

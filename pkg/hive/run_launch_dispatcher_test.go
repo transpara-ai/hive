@@ -347,6 +347,7 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
