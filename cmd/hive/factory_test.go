@@ -138,6 +138,30 @@ func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonDraftPRCreateRequiresGitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-create"})
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("expected missing GITHUB_TOKEN error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRCreateRejectsAutoApproveRequests(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-create", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected auto-approval guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRCreateRejectsAutoApproveRoles(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-create", "--approve-roles"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("expected auto-role guard error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonIssueScanIntervalRequiresRepoBeforeStart(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m"})
 	if err == nil || !strings.Contains(err.Error(), "--registry") {

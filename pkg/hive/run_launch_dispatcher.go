@@ -977,6 +977,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanBlockerRepairRuns(progress.BlockerRepairRuns); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan blocker repair runner: recorded %d repair result(s)\n", recorded)
 			}
+			if created := countCreatedIssueScanDraftPRs(progress.DraftPRCreations); created > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan draft PR creation runner: created %d approved draft PR(s)\n", created)
+			}
 			if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan ready PR evidence runner: recorded %d ready PR evidence packet(s)\n", recorded)
 			}
@@ -1002,6 +1005,7 @@ type IssueScanLifecycleProgress struct {
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
 	BlockerRepairRuns         []IssueScanBlockerRepairRunnerRecordResult
+	DraftPRCreations          []IssueScanDraftPRCreationResult
 	ReadyPRRuns               []IssueScanReadyPRRunnerRecordResult
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
 }
@@ -1009,9 +1013,9 @@ type IssueScanLifecycleProgress struct {
 type issueScanLifecycleProgress = IssueScanLifecycleProgress
 
 // ProgressIssueScanLifecycle advances all queued/dispatched issue-scan runs
-// through the evidence bridge. Daemon paths use this as a bounded local progress
-// pass; it never creates, marks ready, merges, deploys, or approves a PR by
-// itself.
+// through the evidence bridge. Daemon paths may run explicitly configured
+// external runners, including the approved draft-PR creator. It never marks a
+// PR ready, merges, deploys, or approves a PR by itself.
 func (r *Runtime) ProgressIssueScanLifecycle() (IssueScanLifecycleProgress, error) {
 	return r.progressIssueScanLifecycle()
 }
@@ -1163,6 +1167,24 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 		return progress, errors.Join(append(errs, ctx.Err())...)
 	default:
 	}
+	draftPRCreations, err := r.RunConfiguredIssueScanDraftPRCreations(ctx, dispatch)
+	progress.DraftPRCreations = draftPRCreations
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan draft PR creation runner: %w", err))
+	}
+	if len(draftPRCreations) > 0 {
+		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+		mergeIssueScanLifecycleProgress(&progress, after)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
 	readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
 	progress.ReadyPRRuns = readyPRRuns
 	if err != nil {
@@ -1288,6 +1310,7 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 	dst.ReviewRoleOutputs = append(dst.ReviewRoleOutputs, src.ReviewRoleOutputs...)
 	dst.BlockerRoleOutputs = append(dst.BlockerRoleOutputs, src.BlockerRoleOutputs...)
 	dst.BlockerRepairRuns = append(dst.BlockerRepairRuns, src.BlockerRepairRuns...)
+	dst.DraftPRCreations = append(dst.DraftPRCreations, src.DraftPRCreations...)
 	dst.ReadyPRRuns = append(dst.ReadyPRRuns, src.ReadyPRRuns...)
 	dst.ReadyRoleOutputs = append(dst.ReadyRoleOutputs, src.ReadyRoleOutputs...)
 }
@@ -1489,6 +1512,16 @@ func countRecordedIssueScanBlockerRepairRuns(values []IssueScanBlockerRepairRunn
 	count := 0
 	for _, value := range values {
 		if value.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countCreatedIssueScanDraftPRs(values []IssueScanDraftPRCreationResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Created {
 			count++
 		}
 	}

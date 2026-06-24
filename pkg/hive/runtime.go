@@ -86,6 +86,7 @@ type Runtime struct {
 	issueScanImplementationRunner    IssueScanImplementationRunner
 	issueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner
 	issueScanBlockerRepairRunner     IssueScanBlockerRepairRunner
+	issueScanDraftPRCreator          work.Epic11PullRequestCreator
 	issueScanReadyPRRunner           IssueScanReadyPRRunner
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
@@ -126,6 +127,7 @@ type Config struct {
 	IssueScanImplementationRunner    IssueScanImplementationRunner    // optional concrete issue-scan implementation runner
 	IssueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner // optional exact-head issue-scan review runner
 	IssueScanBlockerRepairRunner     IssueScanBlockerRepairRunner     // optional request_changes blocker repair runner
+	IssueScanDraftPRCreator          work.Epic11PullRequestCreator    // optional approved issue-scan draft-PR creator
 	IssueScanReadyPRRunner           IssueScanReadyPRRunner           // optional terminal ready-PR evidence runner
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
@@ -195,6 +197,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		issueScanImplementationRunner:    cfg.IssueScanImplementationRunner,
 		issueScanAdversarialReviewRunner: cfg.IssueScanAdversarialReviewRunner,
 		issueScanBlockerRepairRunner:     cfg.IssueScanBlockerRepairRunner,
+		issueScanDraftPRCreator:          cfg.IssueScanDraftPRCreator,
 		issueScanReadyPRRunner:           cfg.IssueScanReadyPRRunner,
 		telemetryWriter:                  cfg.TelemetryWriter,
 		apiClient:                        cfg.APIClient,
