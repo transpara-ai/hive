@@ -1894,6 +1894,38 @@ func TestRecordIssueScanAdversarialReviewReceiptEmitsExactHeadReview(t *testing.
 	}
 }
 
+func TestIssueScanAdversarialReviewRunContextCarriesExactOperateHead(t *testing.T) {
+	rt, _, queued, orderID, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	reviewContext, err := rt.IssueScanAdversarialReviewRunContext(queued.RunID)
+	if err != nil {
+		t.Fatalf("IssueScanAdversarialReviewRunContext: %v", err)
+	}
+	if reviewContext.Kind != issueScanAdversarialReviewContextKind {
+		t.Fatalf("kind = %q, want %q", reviewContext.Kind, issueScanAdversarialReviewContextKind)
+	}
+	if reviewContext.RunID != queued.RunID || reviewContext.FactoryOrderID != orderID {
+		t.Fatalf("context run/order = %q/%q, want %q/%q", reviewContext.RunID, reviewContext.FactoryOrderID, queued.RunID, orderID)
+	}
+	if reviewContext.Repository != "transpara-ai/hive" || reviewContext.SelectedIssue.Number != 321 {
+		t.Fatalf("selected issue = %+v repository=%q", reviewContext.SelectedIssue, reviewContext.Repository)
+	}
+	if reviewContext.ImplementationTaskID != implementationTask.ID.Value() {
+		t.Fatalf("implementation task = %q, want %s", reviewContext.ImplementationTaskID, implementationTask.ID)
+	}
+	if reviewContext.OperateCommit != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("operate commit = %q", reviewContext.OperateCommit)
+	}
+	if reviewContext.ExpectedReceipt.ReviewedHeadSHA != reviewContext.OperateCommit {
+		t.Fatalf("expected receipt head = %q, want operate commit %q", reviewContext.ExpectedReceipt.ReviewedHeadSHA, reviewContext.OperateCommit)
+	}
+	if reviewContext.ExpectedReceipt.TaskID != implementationTask.ID.Value() {
+		t.Fatalf("expected receipt task = %q, want %s", reviewContext.ExpectedReceipt.TaskID, implementationTask.ID)
+	}
+	if !containsIssueScanString(reviewContext.BoundaryDisclaimers, "reviewed_head_sha must match operate_commit") {
+		t.Fatalf("missing exact-head boundary disclaimer: %+v", reviewContext.BoundaryDisclaimers)
+	}
+}
+
 func TestRecordIssueScanAdversarialReviewReceiptRejectsHeadMismatch(t *testing.T) {
 	rt, _, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	_, err := rt.RecordIssueScanAdversarialReview(queued.RunID, IssueScanAdversarialReviewReceipt{

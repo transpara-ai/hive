@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/hive/pkg/hive"
 	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
@@ -47,6 +50,54 @@ func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
 		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-review", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestRunIssueScanReviewRunnerPassesContextAndParsesReceipt(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+printf '%s\n' '{"repository":"transpara-ai/hive","review_ref":"artifact://review/result.md","reviewed_head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"approve","summary":"no blockers","issues":[],"confidence":0.91}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	reviewContext := hive.IssueScanAdversarialReviewContext{
+		Kind:                 "issue_scan_adversarial_review_context",
+		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:                "run_issue_001",
+		FactoryOrderID:       "fo_run_issue_001",
+		Repository:           "transpara-ai/hive",
+		ImplementationTaskID: "evt_task",
+		OperateCommit:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+
+	receipt, err := runIssueScanReviewRunner(context.Background(), runner, []string{contextPath}, reviewContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanReviewRunner: %v", err)
+	}
+	if receipt.ReviewRef != "artifact://review/result.md" || receipt.Verdict != "approve" || receipt.ReviewedHeadSHA != reviewContext.OperateCommit {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanAdversarialReviewContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != reviewContext.RunID || sent.OperateCommit != reviewContext.OperateCommit {
+		t.Fatalf("sent context = %+v, want run/head from %+v", sent, reviewContext)
 	}
 }
 

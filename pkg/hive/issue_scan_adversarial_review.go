@@ -12,7 +12,42 @@ import (
 const (
 	IssueScanAdversarialReviewReceiptArtifactLabel = "issue_scan_adversarial_review_receipt"
 	issueScanAdversarialReviewReceiptArtifactKind  = "issue_scan_adversarial_review_receipt"
+	issueScanAdversarialReviewContextKind          = "issue_scan_adversarial_review_context"
 )
+
+// IssueScanAdversarialReviewIssue summarizes the selected issue for an external
+// review runner without exposing the package-internal issue-scan brief type.
+type IssueScanAdversarialReviewIssue struct {
+	Repo   string   `json:"repo"`
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	URL    string   `json:"url"`
+	Labels []string `json:"labels,omitempty"`
+}
+
+// IssueScanAdversarialReviewContext is the exact-head packet sent to an
+// external/adversarial review runner. The runner must return an
+// IssueScanAdversarialReviewReceipt; RecordIssueScanAdversarialReview performs
+// the authoritative validation before any review event is stored.
+type IssueScanAdversarialReviewContext struct {
+	Kind                  string                            `json:"kind"`
+	LifecycleVersion      string                            `json:"lifecycle_version"`
+	RunID                 string                            `json:"run_id"`
+	FactoryOrderID        string                            `json:"factory_order_id"`
+	Repository            string                            `json:"repository"`
+	SelectedIssue         IssueScanAdversarialReviewIssue   `json:"selected_issue"`
+	ImplementationTaskID  string                            `json:"implementation_task_id"`
+	ReviewStageTaskID     string                            `json:"review_stage_task_id"`
+	RepoPath              string                            `json:"repo_path,omitempty"`
+	ContainmentWatchRoots []string                          `json:"containment_watch_roots,omitempty"`
+	OperateBranch         string                            `json:"operate_branch"`
+	OperateCommit         string                            `json:"operate_commit"`
+	OperateRange          string                            `json:"operate_range,omitempty"`
+	ChangedFilesSummary   string                            `json:"changed_files_summary"`
+	ExpectedReceipt       IssueScanAdversarialReviewReceipt `json:"expected_receipt"`
+	SourceRefs            []string                          `json:"source_refs,omitempty"`
+	BoundaryDisclaimers   []string                          `json:"boundary_disclaimers,omitempty"`
+}
 
 // IssueScanAdversarialReviewReceipt is a durable external review packet for
 // the run_adversarial_review stage. It proves only that an exact-head review was
@@ -66,6 +101,119 @@ func IssueScanAdversarialReviewReceiptBody(receipt IssueScanAdversarialReviewRec
 		return "", fmt.Errorf("marshal issue-scan adversarial review receipt: %w", err)
 	}
 	return string(encoded), nil
+}
+
+// IssueScanAdversarialReviewRunContext returns the exact-head packet that a
+// configured review runner should inspect before producing a receipt.
+func (r *Runtime) IssueScanAdversarialReviewRunContext(runID string) (IssueScanAdversarialReviewContext, error) {
+	runID = strings.TrimSpace(runID)
+	if r == nil || r.store == nil || r.tasks == nil {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("runtime store and task store are required")
+	}
+	if runID == "" {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("run_id is required")
+	}
+	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	if len(requests) == 0 {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("queued run %q not found", runID)
+	}
+	content, ok := requests[0].Content().(FactoryRunRequestedContent)
+	if !ok {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("queued run %q event has unexpected content", runID)
+	}
+	if !isIssueScanRunLaunch(content) {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("queued run %q is not an issue-scan run", runID)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(content.RunID)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	order := factoryOrderFromRunLaunch(content, orderID)
+	if _, err := r.DispatchQueuedRunLaunch(runID); err != nil {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("dispatch queued issue-scan run %q before review context creation: %w", runID, err)
+	}
+	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	implementationStage, err := r.issueScanStageTargetByStageID(drafts, "implement_on_branch", orderID)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	reviewStage, err := r.issueScanStageTargetByStageID(drafts, "run_adversarial_review", orderID)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	if err := r.verifyIssueScanStageTaskContracts(reviewStage); err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	implementationTaskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, issueScanImplementationTaskCanonicalID(order.ID))
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("find concrete implementation task: %w", err)
+	}
+	if !exists {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("implementation task for FactoryOrder %q has not been created", orderID)
+	}
+	if strings.TrimSpace(factoryOrderID) != orderID {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("implementation task belongs to factory order %q, want %q", factoryOrderID, orderID)
+	}
+	completion, ok, err := r.issueScanImplementationCompletionEvidence(implementationTaskID, implementationStage.TaskID)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	if !ok {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("implementation task %s has no verified Operate completion evidence", implementationTaskID.Value())
+	}
+	brief, err := issueScanResearchBriefFromContent(content)
+	if err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	}
+	repo := strings.ToLower(strings.TrimSpace(brief.SelectedIssue.Repo))
+	if repo == "" && len(content.TargetRepos) > 0 {
+		repo = strings.ToLower(strings.TrimSpace(content.TargetRepos[0]))
+	}
+	if !ValidTransparaAIRepo(repo) {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("selected issue repository %q is not a Transpara-AI repo", repo)
+	}
+	receipt := IssueScanAdversarialReviewReceipt{
+		Kind:             issueScanAdversarialReviewReceiptArtifactKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            strings.TrimSpace(content.RunID),
+		FactoryOrderID:   orderID,
+		Repository:       repo,
+		TaskID:           implementationTaskID.Value(),
+		ReviewedHeadSHA:  completion.OperateCommit,
+		Issues:           []string{},
+	}
+	reviewContext := IssueScanAdversarialReviewContext{
+		Kind:                 issueScanAdversarialReviewContextKind,
+		LifecycleVersion:     issueScanLifecycleVersion,
+		RunID:                strings.TrimSpace(content.RunID),
+		FactoryOrderID:       orderID,
+		Repository:           repo,
+		SelectedIssue:        issueScanAdversarialReviewIssueFromBrief(brief.SelectedIssue),
+		ImplementationTaskID: implementationTaskID.Value(),
+		ReviewStageTaskID:    reviewStage.TaskID.Value(),
+		OperateBranch:        completion.OperateBranch,
+		OperateCommit:        completion.OperateCommit,
+		OperateRange:         completion.OperateRange,
+		ChangedFilesSummary:  completion.ChangedFilesSummary,
+		ExpectedReceipt:      receipt,
+		SourceRefs:           compactStrings([]string{requests[0].ID().Value(), implementationTaskID.Value(), implementationStage.TaskID.Value(), reviewStage.TaskID.Value(), completion.CompletionEventID.Value(), completion.OperateArtifactID.Value()}),
+		BoundaryDisclaimers: compactStrings([]string{
+			"review runner output is not Human approval",
+			"review runner output is not merge or deploy authorization",
+			"reviewed_head_sha must match operate_commit",
+		}),
+	}
+	if resolved, err := r.resolveIssueScanWorkspaceForRepo(repo); err == nil {
+		reviewContext.RepoPath = resolved.RepoPath
+		reviewContext.ContainmentWatchRoots = append([]string(nil), resolved.ContainmentWatchRoots...)
+	}
+	return reviewContext, nil
 }
 
 // RecordIssueScanAdversarialReview records an external/adversarial exact-head
@@ -349,4 +497,14 @@ func containsIssueScanEventID(values []types.EventID, want types.EventID) bool {
 		}
 	}
 	return false
+}
+
+func issueScanAdversarialReviewIssueFromBrief(issue issueScanBriefIssuePayload) IssueScanAdversarialReviewIssue {
+	return IssueScanAdversarialReviewIssue{
+		Repo:   strings.ToLower(strings.TrimSpace(issue.Repo)),
+		Number: issue.Number,
+		Title:  strings.TrimSpace(issue.Title),
+		URL:    strings.TrimSpace(issue.URL),
+		Labels: compactStrings(issue.Labels),
+	}
 }
