@@ -1083,6 +1083,12 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("queued brief metadata = %+v", queued)
 	}
+	if queued.SelectionPolicy == nil || queued.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || queued.SelectionPolicy.SelectedRank != 1 || queued.SelectionPolicy.CandidateCount != 1 {
+		t.Fatalf("queued selection policy = %+v", queued.SelectionPolicy)
+	}
+	if !containsModelProjectionString(queued.SelectionPolicy.RankingInputs, "scanner_return_order") || !strings.Contains(queued.SelectionPolicy.Rationale, "civic debate") {
+		t.Fatalf("queued selection policy details = %+v", queued.SelectionPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1936,7 +1942,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if len(queued.TargetRepos) != 2 || queued.TargetRepos[0] != "transpara-ai/hive" {
 		t.Fatalf("queued target repos = %+v", queued.TargetRepos)
 	}
-	if queued.BriefKind != "transpara_ai_github_issue_scan" || queued.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
+	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("queued brief metadata = %+v", queued)
 	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
@@ -2002,7 +2008,7 @@ func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
 }
 
 func TestQueuedRunLifecycleFromBriefRejectsIssueScanBriefWithEmptyLifecycle(t *testing.T) {
-	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","lifecycle_version":"civilization_issue_to_human_ready_pr_v0.3","development_lifecycle":[]}`)
+	raw := []byte(fmt.Sprintf(`{"kind":"%s","lifecycle_version":"%s","development_lifecycle":[]}`, issueScanBriefKind, issueScanLifecycleVersion))
 	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
 	if err == nil || !strings.Contains(err.Error(), "missing development lifecycle") {
 		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want missing lifecycle error", err, lifecycle, agentPlan)
@@ -2017,6 +2023,36 @@ func TestQueuedRunLifecycleFromBriefAllowsLegacyKindOnlyIssueScanBrief(t *testin
 	}
 	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
 		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle for legacy kind-only issue scan", kind, version, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefSupportsLegacyV03LifecycleWithAgentPlan(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	raw, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV03
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.3 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV03 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.3 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
 	}
 }
 

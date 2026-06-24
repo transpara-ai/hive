@@ -61,7 +61,15 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
 		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
 		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
-		SelectedIssue        struct {
+		SelectionPolicy      struct {
+			PolicyID       string   `json:"policy_id"`
+			SelectedRank   int      `json:"selected_rank"`
+			CandidateCount int      `json:"candidate_count"`
+			RankingInputs  []string `json:"ranking_inputs"`
+			Rationale      string   `json:"rationale"`
+		} `json:"selection_policy"`
+		SelectedIssue struct {
+			Rank   int    `json:"rank"`
 			Repo   string `json:"repo"`
 			Number int    `json:"number"`
 			Title  string `json:"title"`
@@ -73,8 +81,14 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.Kind != "transpara_ai_github_issue_scan" || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
 		t.Fatalf("brief = %+v", brief)
 	}
-	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
+	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.4" {
 		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
+	}
+	if brief.SelectedIssue.Rank != 1 || brief.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || brief.SelectionPolicy.SelectedRank != 1 || brief.SelectionPolicy.CandidateCount != 1 {
+		t.Fatalf("selection policy = %+v selected=%+v", brief.SelectionPolicy, brief.SelectedIssue)
+	}
+	if !containsIssueScanValue(brief.SelectionPolicy.RankingInputs, "scanner_return_order") || !strings.Contains(brief.SelectionPolicy.Rationale, "civic debate") {
+		t.Fatalf("selection policy rationale/inputs = %+v", brief.SelectionPolicy)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
@@ -555,8 +569,12 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		t.Fatalf("stage artifacts = %+v, want %d issue-scan lifecycle stage artifacts", stageArtifactBodies, len(expectedStageIDs))
 	}
 	var artifactBrief struct {
-		Kind                 string                       `json:"kind"`
-		LifecycleVersion     string                       `json:"lifecycle_version"`
+		Kind             string `json:"kind"`
+		LifecycleVersion string `json:"lifecycle_version"`
+		SelectionPolicy  struct {
+			PolicyID     string `json:"policy_id"`
+			SelectedRank int    `json:"selected_rank"`
+		} `json:"selection_policy"`
 		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
 		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
 		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
@@ -567,6 +585,9 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if artifactBrief.Kind != issueScanBriefKind || artifactBrief.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("artifact brief identity = %+v", artifactBrief)
+	}
+	if artifactBrief.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || artifactBrief.SelectionPolicy.SelectedRank != 1 {
+		t.Fatalf("artifact selection policy = %+v", artifactBrief.SelectionPolicy)
 	}
 	if !containsIssueScanValue(artifactBrief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("artifact required agent flow = %+v, want ready-for-Human PR stage", artifactBrief.RequiredAgentFlow)

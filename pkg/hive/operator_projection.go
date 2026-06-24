@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -159,11 +160,20 @@ type OperatorQueuedRunRequestEvidence struct {
 	BriefEventID          string                            `json:"brief_event_id,omitempty"`
 	BriefKind             string                            `json:"brief_kind,omitempty"`
 	LifecycleVersion      string                            `json:"lifecycle_version,omitempty"`
+	SelectionPolicy       *OperatorQueuedRunSelectionPolicy `json:"selection_policy,omitempty"`
 	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage `json:"development_lifecycle,omitempty"`
 	AgentExecutionPlan    []OperatorQueuedRunAgentPlanStep  `json:"agent_execution_plan,omitempty"`
 	LifecycleEvidenceKind string                            `json:"lifecycle_evidence_kind,omitempty"`
 	EvidenceKind          string                            `json:"evidence_kind"`
 	CreatedAt             time.Time                         `json:"created_at"`
+}
+
+type OperatorQueuedRunSelectionPolicy struct {
+	PolicyID       string   `json:"policy_id"`
+	SelectedRank   int      `json:"selected_rank"`
+	CandidateCount int      `json:"candidate_count"`
+	RankingInputs  []string `json:"ranking_inputs,omitempty"`
+	Rationale      string   `json:"rationale,omitempty"`
 }
 
 type OperatorQueuedRunLifecycleStage struct {
@@ -614,6 +624,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			if err != nil {
 				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s brief lifecycle projection: %v", content.RunID, err))
 			}
+			selectionPolicy, err := queuedRunSelectionPolicyFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s selection policy projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -630,6 +644,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				BriefEventID:          content.BriefEventID.Value(),
 				BriefKind:             briefKind,
 				LifecycleVersion:      lifecycleVersion,
+				SelectionPolicy:       selectionPolicy,
 				DevelopmentLifecycle:  lifecycle,
 				AgentExecutionPlan:    agentPlan,
 				EvidenceKind:          "queued_request_not_runtime_start",
@@ -776,7 +791,7 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if brief.Kind != issueScanBriefKind {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
 	}
-	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
 	}
 	expected := issueScanDevelopmentLifecycle()
@@ -838,6 +853,50 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 		})
 	}
 	return brief.Kind, brief.LifecycleVersion, lifecycle, agentPlan, nil
+}
+
+func queuedRunSelectionPolicyFromBrief(raw json.RawMessage) (*OperatorQueuedRunSelectionPolicy, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var brief struct {
+		Kind            string `json:"kind"`
+		SelectionPolicy *struct {
+			PolicyID       string   `json:"policy_id"`
+			SelectedRank   int      `json:"selected_rank"`
+			CandidateCount int      `json:"candidate_count"`
+			RankingInputs  []string `json:"ranking_inputs"`
+			Rationale      string   `json:"rationale"`
+		} `json:"selection_policy"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return nil, fmt.Errorf("decode selection policy metadata: %w", err)
+	}
+	if brief.Kind != issueScanBriefKind || brief.SelectionPolicy == nil {
+		return nil, nil
+	}
+	policy := OperatorQueuedRunSelectionPolicy{
+		PolicyID:       strings.TrimSpace(brief.SelectionPolicy.PolicyID),
+		SelectedRank:   brief.SelectionPolicy.SelectedRank,
+		CandidateCount: brief.SelectionPolicy.CandidateCount,
+		RankingInputs:  trimRunLaunchStrings(brief.SelectionPolicy.RankingInputs),
+		Rationale:      strings.TrimSpace(brief.SelectionPolicy.Rationale),
+	}
+	switch {
+	case policy.PolicyID == "":
+		return nil, fmt.Errorf("selection_policy.policy_id is required")
+	case policy.SelectedRank <= 0:
+		return nil, fmt.Errorf("selection_policy.selected_rank must be greater than zero")
+	case policy.CandidateCount <= 0:
+		return nil, fmt.Errorf("selection_policy.candidate_count must be greater than zero")
+	case policy.SelectedRank > policy.CandidateCount:
+		return nil, fmt.Errorf("selection_policy.selected_rank %d exceeds candidate_count %d", policy.SelectedRank, policy.CandidateCount)
+	case len(policy.RankingInputs) == 0:
+		return nil, fmt.Errorf("selection_policy.ranking_inputs is required")
+	case policy.Rationale == "":
+		return nil, fmt.Errorf("selection_policy.rationale is required")
+	}
+	return &policy, nil
 }
 
 func validateQueuedRunLifecycleStage(id, name string, roles, evidence []string, authorityBoundary, completionGate string, expected issueScanLifecycleStage, starterRoles map[string]*modelconfig.RoleDefinition) error {
