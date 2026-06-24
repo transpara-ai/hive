@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -138,6 +139,13 @@ func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonRequiresDraftPRRequestBeforeBase(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request-base=release/2026-06"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-draft-pr-request") {
+		t.Fatalf("expected missing draft PR request flag error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-review-runner") {
@@ -214,6 +222,148 @@ func TestFactoryDaemonDraftPRCreateRejectsAutoApproveRoles(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
 		t.Fatalf("expected auto-role guard error, got %v", err)
 	}
+}
+
+func TestFactoryDaemonDraftPRRequestRejectsAutoApproveRequests(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected auto-approval guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRRequestRejectsAutoApproveRoles(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--approve-roles"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("expected auto-role guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRRequestRequiresBase(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--issue-scan-draft-pr-request-base", ""})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-draft-pr-request-base") {
+		t.Fatalf("expected draft PR request base error, got %v", err)
+	}
+}
+
+func TestIssueScanDraftPRBaseRefNormalization(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		branch string
+		remote string
+	}{
+		{name: "default", input: "", branch: "main", remote: "origin/main"},
+		{name: "branch", input: "release/2026-06", branch: "release/2026-06", remote: "origin/release/2026-06"},
+		{name: "origin", input: "origin/main", branch: "main", remote: "origin/main"},
+		{name: "heads", input: "refs/heads/main", branch: "main", remote: "origin/main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gitBaseBranchRef(tt.input); got != tt.branch {
+				t.Fatalf("gitBaseBranchRef(%q) = %q, want %q", tt.input, got, tt.branch)
+			}
+			if got := gitRemoteBaseRef(tt.input); got != tt.remote {
+				t.Fatalf("gitRemoteBaseRef(%q) = %q, want %q", tt.input, got, tt.remote)
+			}
+		})
+	}
+}
+
+func TestIssueScanDraftPRBaseRefValidation(t *testing.T) {
+	valid := []string{"main", "release/2026-06", "feature.issue_scan_2026"}
+	for _, base := range valid {
+		t.Run("valid_"+strings.ReplaceAll(base, "/", "_"), func(t *testing.T) {
+			if err := validateGitBaseBranchRef(base); err != nil {
+				t.Fatalf("validateGitBaseBranchRef(%q): %v", base, err)
+			}
+		})
+	}
+	invalid := []string{"-main", "release//2026", "/main", "main/", "release..main", "release@{1}", "main.lock", "main:prod", "main\nprod"}
+	for _, base := range invalid {
+		t.Run("invalid_"+strings.NewReplacer("/", "_", "\n", "_").Replace(base), func(t *testing.T) {
+			if err := validateGitBaseBranchRef(base); err == nil {
+				t.Fatalf("validateGitBaseBranchRef(%q) succeeded, want error", base)
+			}
+		})
+	}
+}
+
+func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	source := filepath.Join(root, "source")
+	clone := filepath.Join(root, "clone")
+
+	runGitForTest(t, "", "init", "--bare", remote)
+	runGitForTest(t, "", "init", source)
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("issue-scan base\n"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForTest(t, source, "add", "README.md")
+	runGitForTest(t, source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
+	runGitForTest(t, source, "branch", "-M", "main")
+	runGitForTest(t, source, "remote", "add", "origin", remote)
+	runGitForTest(t, source, "push", "origin", "main")
+	runGitForTest(t, remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGitForTest(t, "", "clone", remote, clone)
+
+	want := strings.TrimSpace(runGitOutputForTest(t, source, "rev-parse", "HEAD"))
+	got, err := gitBaseCommitSHA(ctx, clone, "refs/heads/main")
+	if err != nil {
+		t.Fatalf("gitBaseCommitSHA: %v", err)
+	}
+	if got != want {
+		t.Fatalf("gitBaseCommitSHA = %q, want %q", got, want)
+	}
+}
+
+func TestIssueScanDraftPRAuthorityRequestLocalGitRunnerRequiresRepoPath(t *testing.T) {
+	runner := issueScanDraftPRAuthorityRequestLocalGitRunner("main")
+	_, err := runner(context.Background(), hive.IssueScanDraftPRAuthorityRequestRunnerContext{})
+	if err == nil || !strings.Contains(err.Error(), "resolved repository checkout") {
+		t.Fatalf("issueScanDraftPRAuthorityRequestLocalGitRunner error = %v, want resolved checkout guard", err)
+	}
+}
+
+func TestIssueScanDraftPRAuthorityNonceIsDeterministic(t *testing.T) {
+	requestContext := hive.IssueScanDraftPRAuthorityRequestRunnerContext{
+		RunID:          "run_issue_001",
+		FactoryOrderID: "order_issue_001",
+		Repository:     "transpara-ai/hive",
+		OperateBranch:  "codex/run-issue-001",
+		OperateCommit:  "cccccccccccccccccccccccccccccccccccccccc",
+	}
+	first := issueScanDraftPRAuthorityNonce(requestContext, "main", "dddddddddddddddddddddddddddddddddddddddd")
+	second := issueScanDraftPRAuthorityNonce(requestContext, "main", "dddddddddddddddddddddddddddddddddddddddd")
+	movedBase := issueScanDraftPRAuthorityNonce(requestContext, "main", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if first == "" || !strings.HasPrefix(first, "issue-scan-") {
+		t.Fatalf("nonce = %q, want issue-scan prefix", first)
+	}
+	if first != second {
+		t.Fatalf("nonce not deterministic: %q then %q", first, second)
+	}
+	if movedBase == first {
+		t.Fatalf("nonce did not change when base SHA changed: %q", movedBase)
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runGitOutputForTest(t, dir, args...)
+}
+
+func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out)
 }
 
 func TestFactoryDaemonIssueScanIntervalRequiresRepoBeforeStart(t *testing.T) {

@@ -138,6 +138,76 @@ func TestNewWiresIssueScanBlockerRepairRunner(t *testing.T) {
 	}
 }
 
+func TestNewWiresIssueScanDraftPRAuthorityRequester(t *testing.T) {
+	ctx := context.Background()
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	requester := func(context.Context, IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+		return IssueScanDraftPRAuthorityRequestRunnerResult{
+			BaseRef: "main",
+			BaseSHA: "abc123",
+			Nonce:   "nonce-test",
+		}, nil
+	}
+	rt, err := New(ctx, Config{
+		Store:                              store.NewInMemoryStore(),
+		Actors:                             actors,
+		HumanID:                            humanID,
+		IssueScanDraftPRAuthorityRequester: requester,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.issueScanDraftPRAuthorityRequester == nil {
+		t.Fatal("issueScanDraftPRAuthorityRequester was not wired from Config")
+	}
+	result, err := rt.issueScanDraftPRAuthorityRequester(ctx, IssueScanDraftPRAuthorityRequestRunnerContext{})
+	if err != nil {
+		t.Fatalf("configured requester returned error: %v", err)
+	}
+	if result.BaseSHA == "" || result.Nonce == "" {
+		t.Fatalf("configured requester result = %+v", result)
+	}
+}
+
+func TestNewRejectsIssueScanDraftPRAuthorityRequesterWithAutoApproval(t *testing.T) {
+	ctx := context.Background()
+	requester := func(context.Context, IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+		return IssueScanDraftPRAuthorityRequestRunnerResult{
+			BaseRef: "main",
+			BaseSHA: "abc123",
+			Nonce:   "nonce-test",
+		}, nil
+	}
+	tests := []struct {
+		name            string
+		approveRequests bool
+		approveRoles    bool
+		want            string
+	}{
+		{name: "requests", approveRequests: true, want: "ApproveRequests"},
+		{name: "roles", approveRoles: true, want: "ApproveRoles"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actors := actor.NewInMemoryActorStore()
+			humanID := registerTestHuman(t, actors, "Operator")
+			_, err := New(ctx, Config{
+				Store:                              store.NewInMemoryStore(),
+				Actors:                             actors,
+				HumanID:                            humanID,
+				ApproveRequests:                    tt.approveRequests,
+				ApproveRoles:                       tt.approveRoles,
+				IssueScanDraftPRAuthorityRequester: requester,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("New error = %v, want %s guard", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 	tests := []struct {
 		name          string

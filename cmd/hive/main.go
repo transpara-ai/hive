@@ -1201,7 +1201,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1288,24 +1288,25 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 	}
 
 	rt, err := hive.New(ctx, hive.Config{
-		Store:                            s,
-		Actors:                           actors,
-		HumanID:                          humanID,
-		ApproveRequests:                  approveRequests,
-		ApproveRoles:                     approveRoles,
-		RepoPath:                         repoPath,
-		RepoWorkspaceRoot:                repoWorkspaceRoot,
-		CatalogPath:                      catalogPath,
-		CatalogReloadInterval:            catalogReloadInterval,
-		Loop:                             loop,
-		IssueScanStageRoleOutputRunner:   issueScanStageRoleRunner,
-		IssueScanImplementationRunner:    issueScanImplementationRunner,
-		IssueScanAdversarialReviewRunner: issueScanReviewRunner,
-		IssueScanBlockerRepairRunner:     issueScanBlockerRepairRunner,
-		IssueScanDraftPRCreator:          issueScanDraftPRCreator,
-		IssueScanReadyPRRunner:           issueScanReadyPRRunner,
-		TelemetryWriter:                  tw,
-		APIClient:                        siteClient,
+		Store:                              s,
+		Actors:                             actors,
+		HumanID:                            humanID,
+		ApproveRequests:                    approveRequests,
+		ApproveRoles:                       approveRoles,
+		RepoPath:                           repoPath,
+		RepoWorkspaceRoot:                  repoWorkspaceRoot,
+		CatalogPath:                        catalogPath,
+		CatalogReloadInterval:              catalogReloadInterval,
+		Loop:                               loop,
+		IssueScanStageRoleOutputRunner:     issueScanStageRoleRunner,
+		IssueScanImplementationRunner:      issueScanImplementationRunner,
+		IssueScanAdversarialReviewRunner:   issueScanReviewRunner,
+		IssueScanBlockerRepairRunner:       issueScanBlockerRepairRunner,
+		IssueScanDraftPRAuthorityRequester: issueScanDraftPRAuthorityRequester,
+		IssueScanDraftPRCreator:            issueScanDraftPRCreator,
+		IssueScanReadyPRRunner:             issueScanReadyPRRunner,
+		TelemetryWriter:                    tw,
+		APIClient:                          siteClient,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: %w", err)

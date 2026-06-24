@@ -156,6 +156,9 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 	if recorded := countRecordedIssueScanBlockerRepairRunsForCLI(progress.BlockerRepairRuns); recorded > 0 {
 		fmt.Printf("issue-scan blocker repair runner records: %d\n", recorded)
 	}
+	if raised := countRaisedIssueScanDraftPRRequestsForCLI(progress.DraftPRRequests); raised > 0 {
+		fmt.Printf("issue-scan draft PR authority requests raised: %d\n", raised)
+	}
 	if created := countCreatedIssueScanDraftPRsForCLI(progress.DraftPRCreations); created > 0 {
 		fmt.Printf("issue-scan draft PR creations: %d\n", created)
 	}
@@ -241,6 +244,16 @@ func countRecordedIssueScanBlockerRepairRunsForCLI(runs []hive.IssueScanBlockerR
 	count := 0
 	for _, run := range runs {
 		if run.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRaisedIssueScanDraftPRRequestsForCLI(runs []hive.IssueScanDraftPRAuthorityRequestRunnerRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Raised {
 			count++
 		}
 	}
