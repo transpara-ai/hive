@@ -190,9 +190,38 @@ func (r *Runtime) issueScanDraftPRAuthorityRequestRunnerContext(runID string) (I
 	if stageCompleted {
 		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, nil
 	}
-	blockerStage, implementationTaskID, implementation, err := r.issueScanReadyPrerequisites(content, orderID, readyStage)
+	order := factoryOrderFromRunLaunch(content, orderID)
+	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
 	if err != nil {
 		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
+	}
+	blockerStage, err := r.issueScanStageTargetByStageID(drafts, "drive_blockers_to_zero", orderID)
+	if err != nil {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
+	}
+	blockerCompleted, err := r.issueScanStageTaskCompleted(blockerStage.TaskID)
+	if err != nil {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
+	}
+	if !blockerCompleted {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, nil
+	}
+	implementationTaskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, issueScanImplementationTaskCanonicalID(order.ID))
+	if err != nil {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, fmt.Errorf("find concrete implementation task: %w", err)
+	}
+	if !exists {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, nil
+	}
+	if strings.TrimSpace(factoryOrderID) != orderID {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, fmt.Errorf("implementation task belongs to factory order %q, want %q", factoryOrderID, orderID)
+	}
+	implementation, ok, err := r.issueScanImplementationCompletionEvidence(implementationTaskID, readyStage.TaskID)
+	if err != nil {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
+	}
+	if !ok {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, nil
 	}
 	if _, ready, err := r.issueScanReadyStageEvidence(content, orderID, implementationTaskID, blockerStage, readyStage); err != nil || ready {
 		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
