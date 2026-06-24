@@ -74,6 +74,13 @@ func TestFactoryRecordIssueScanReadyPRRequiresHumanBeforeFileRead(t *testing.T) 
 	}
 }
 
+func TestFactoryRunIssueScanReadyPRRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-ready-pr", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonRequiresReviewRunnerBeforeRunnerArg(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-review-runner-arg=--json"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-runner") {
