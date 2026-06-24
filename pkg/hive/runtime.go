@@ -141,6 +141,13 @@ type Config struct {
 
 // New creates a new hive Runtime.
 func New(ctx context.Context, cfg Config) (*Runtime, error) {
+	if cfg.IssueScanDraftPRAuthorityRequester != nil && cfg.ApproveRequests {
+		return nil, fmt.Errorf("IssueScanDraftPRAuthorityRequester cannot be combined with ApproveRequests")
+	}
+	if cfg.IssueScanDraftPRAuthorityRequester != nil && cfg.ApproveRoles {
+		return nil, fmt.Errorf("IssueScanDraftPRAuthorityRequester cannot be combined with ApproveRoles")
+	}
+
 	// Verify the human exists in the actor store.
 	human, err := cfg.Actors.Get(cfg.HumanID)
 	if err != nil {
