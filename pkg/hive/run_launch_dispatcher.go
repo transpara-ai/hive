@@ -23,7 +23,9 @@ const (
 
 	IssueScanExecutionPlanArtifactLabel     = "issue_scan_execution_plan"
 	IssueScanLifecycleStageArtifactPrefix   = "issue_scan_lifecycle_stage_"
+	IssueScanStageRoleContractArtifactLabel = "issue_scan_stage_role_contract"
 	issueScanExecutionPlanArtifactMediaType = "application/json"
+	issueScanStageRoleContractArtifactKind  = "issue_scan_stage_role_contract"
 )
 
 type issueScanDispatchArtifact struct {
@@ -390,6 +392,9 @@ func (r *Runtime) ensureIssueScanLifecycleStageTaskDrafts(content FactoryRunRequ
 		if err := r.attachIssueScanLifecycleStageTaskReadinessGates(content, order, draft, requestID, parentTaskID, stageTaskID, convID); err != nil {
 			return out, fmt.Errorf("attach stage task %q readiness gates: %w", draft.StageID, err)
 		}
+		if err := r.attachIssueScanLifecycleStageTaskRoleContract(content, order, draft, requestID, parentTaskID, stageTaskID, convID); err != nil {
+			return out, fmt.Errorf("attach stage task %q role contract: %w", draft.StageID, err)
+		}
 		if previous != (types.EventID{}) {
 			if err := r.ensureIssueScanStageTaskDependency(stageTaskID, previous, requestID, parentTaskID, convID); err != nil {
 				return out, fmt.Errorf("link stage task %q after previous stage: %w", draft.StageID, err)
@@ -592,6 +597,30 @@ func (r *Runtime) attachIssueScanLifecycleStageTaskReadinessGates(content Factor
 	return nil
 }
 
+func (r *Runtime) attachIssueScanLifecycleStageTaskRoleContract(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft, requestID, parentTaskID, stageTaskID types.EventID, convID types.ConversationID) error {
+	if r == nil || r.tasks == nil {
+		return nil
+	}
+	body, err := issueScanLifecycleStageTaskRoleContractBody(content, order, draft)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("stage task %q role contract body is empty", draft.StageID)
+	}
+	existingArtifacts, err := r.tasks.ListArtifacts(stageTaskID)
+	if err != nil {
+		return fmt.Errorf("list stage task %q artifacts: %w", draft.StageID, err)
+	}
+	for _, artifact := range existingArtifacts {
+		if strings.TrimSpace(artifact.Label) == IssueScanStageRoleContractArtifactLabel {
+			return nil
+		}
+	}
+	causes := []types.EventID{requestID, parentTaskID, stageTaskID}
+	return r.tasks.AddArtifact(r.humanID, stageTaskID, IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, body, causes, convID)
+}
+
 func issueScanLifecycleStageTaskTitle(stage OperatorQueuedRunLifecycleStage) string {
 	name := strings.TrimSpace(stage.Name)
 	if name == "" {
@@ -687,6 +716,40 @@ func issueScanLifecycleStageTaskTestPlan(content FactoryRunRequestedContent, ord
 	}
 	b.WriteString("5. Confirm no merge, deploy, or Human-approval claim is made unless this stage explicitly requires and records that evidence.")
 	return strings.TrimSpace(b.String())
+}
+
+func issueScanLifecycleStageTaskRoleContractBody(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft) (string, error) {
+	stage := draft.Stage
+	payload := struct {
+		Kind               string                           `json:"kind"`
+		LifecycleVersion   string                           `json:"lifecycle_version"`
+		RunID              string                           `json:"run_id"`
+		FactoryOrderID     string                           `json:"factory_order_id"`
+		StageID            string                           `json:"stage_id"`
+		StageIndex         int                              `json:"stage_index"`
+		StageCount         int                              `json:"stage_count"`
+		Stage              OperatorQueuedRunLifecycleStage  `json:"stage"`
+		AgentExecutionPlan []OperatorQueuedRunAgentPlanStep `json:"agent_execution_plan"`
+		EvidenceKind       string                           `json:"evidence_kind"`
+		EvidenceStatus     string                           `json:"evidence_status"`
+	}{
+		Kind:               issueScanStageRoleContractArtifactKind,
+		LifecycleVersion:   issueScanLifecycleVersion,
+		RunID:              strings.TrimSpace(content.RunID),
+		FactoryOrderID:     strings.TrimSpace(order.ID),
+		StageID:            strings.TrimSpace(stage.ID),
+		StageIndex:         draft.StageIndex,
+		StageCount:         draft.StageCount,
+		Stage:              stage,
+		AgentExecutionPlan: append([]OperatorQueuedRunAgentPlanStep(nil), draft.AgentExecutionPlan...),
+		EvidenceKind:       "required_role_contract_not_runtime_execution",
+		EvidenceStatus:     "pending_runtime_evidence",
+	}
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal issue-scan stage role contract %q: %w", draft.StageID, err)
+	}
+	return string(encoded), nil
 }
 
 func issueScanLifecycleStageTaskCanonicalID(orderID, stageID string) string {
