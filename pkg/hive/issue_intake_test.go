@@ -4036,17 +4036,97 @@ func TestCreateIssueScanDraftPRFromApprovedRequestRequiresApprovedDecision(t *te
 	}
 }
 
+func TestCreateIssueScanDraftPRFromApprovedRequestRejectsDeniedDecision(t *testing.T) {
+	rt, writer, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult, "denied", nil)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client); err == nil || !strings.Contains(err.Error(), `outcome "denied"`) {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest error = %v, want denied request refusal", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none after denied decision", client.calls)
+	}
+}
+
+func TestCreateIssueScanDraftPRFromApprovedRequestRejectsMismatchedApprovedHead(t *testing.T) {
+	rt, writer, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult, draftPRApprovedOutcome, func(target *DraftPRTarget) {
+		target.HeadSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	})
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client); err == nil || !strings.Contains(err.Error(), "head_sha") {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest error = %v, want approved head mismatch refusal", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none after approved head mismatch", client.calls)
+	}
+}
+
+func TestCreateIssueScanDraftPRFromApprovedRequestRefusesAfterReceipt(t *testing.T) {
+	rt, writer, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client); err != nil {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest: %v", err)
+	}
+	retryClient := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), retryClient); err == nil || !strings.Contains(err.Error(), "not ready") {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest retry error = %v, want not-ready refusal after receipt", err)
+	}
+	if retryClient.calls != 0 {
+		t.Fatalf("retry client calls = %d, want none after receipt", retryClient.calls)
+	}
+}
+
+func TestIssueScanDraftPRChangedFilesRequiresRepositoryPaths(t *testing.T) {
+	if _, err := issueScanDraftPRChangedFiles("2 files changed, 30 insertions(+), 2 deletions(-)"); err == nil || !strings.Contains(err.Error(), "repository-relative changed file paths") {
+		t.Fatalf("issueScanDraftPRChangedFiles error = %v, want missing path refusal", err)
+	}
+	got, err := issueScanDraftPRChangedFiles("pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++")
+	if err != nil {
+		t.Fatalf("issueScanDraftPRChangedFiles: %v", err)
+	}
+	want := []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}
+	if !equalStringSlices(got, want) {
+		t.Fatalf("changed files = %+v, want %+v", got, want)
+	}
+}
+
 func seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, requestResult IssueScanDraftPRAuthorityRequestResult) types.EventID {
 	t.Helper()
+	return seedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult, draftPRApprovedOutcome, nil)
+}
+
+func seedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, requestResult IssueScanDraftPRAuthorityRequestResult, outcome string, mutateTarget func(*DraftPRTarget)) types.EventID {
+	t.Helper()
+	target := requestResult.DraftPRTarget
+	if mutateTarget != nil {
+		mutateTarget(&target)
+	}
 	content := AuthorityDecisionRecordedContent{
 		DecisionID:       requestResult.RequestID.Value(),
 		RequestID:        requestResult.RequestID,
 		ApproverActor:    writer.human,
 		DeciderRole:      "human",
-		Outcome:          draftPRApprovedOutcome,
-		ApprovedTarget:   requestResult.DraftPRTarget.Repository + " " + requestResult.DraftPRTarget.HeadRef,
+		Outcome:          outcome,
+		ApprovedTarget:   target.Repository + " " + target.HeadRef,
 		ApprovedAction:   string(safety.ActionRepoPullRequestCreate),
-		Scope:            requestResult.DraftPRTarget.Scope(),
+		Scope:            target.Scope(),
 		EvidenceReviewed: []types.EventID{requestResult.ReadyStageTaskID, requestResult.ImplementationTaskID},
 		Rationale:        "approved issue-scan draft PR creation test target",
 	}

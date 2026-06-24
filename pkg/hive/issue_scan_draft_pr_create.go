@@ -56,8 +56,8 @@ func (r *Runtime) CreateIssueScanDraftPRFromApprovedRequest(ctx context.Context,
 	if err != nil {
 		return result, err
 	}
-	if !equalStringSlices(target.Scope(), requestContext.DraftPRTarget.Scope()) {
-		return result, fmt.Errorf("approved draft-PR target does not match issue-scan run-derived target")
+	if err := validateIssueScanApprovedDraftPRTarget(target, requestContext.DraftPRTarget); err != nil {
+		return result, err
 	}
 	if err := VerifyDraftPRContent(target, requestContext.DraftPRTitle, requestContext.DraftPRBody); err != nil {
 		return result, err
@@ -99,6 +99,38 @@ func (r *Runtime) CreateIssueScanDraftPRFromApprovedRequest(ctx context.Context,
 	result.Created = true
 	result.NoReadyReviewMergeDeploy = true
 	return result, nil
+}
+
+func validateIssueScanApprovedDraftPRTarget(approved, derived DraftPRTarget) error {
+	approved, err := normalizeTransparaAIDraftPRTarget(approved)
+	if err != nil {
+		return fmt.Errorf("approved draft-PR target: %w", err)
+	}
+	derived, err = normalizeTransparaAIDraftPRTarget(derived)
+	if err != nil {
+		return fmt.Errorf("issue-scan run-derived draft-PR target: %w", err)
+	}
+	for _, check := range []struct {
+		field    string
+		approved string
+		derived  string
+	}{
+		{"repository", approved.Repository, derived.Repository},
+		{"base_ref", approved.BaseRef, derived.BaseRef},
+		{"base_sha", approved.BaseSHA, derived.BaseSHA},
+		{"head_ref", approved.HeadRef, derived.HeadRef},
+		{"head_sha", approved.HeadSHA, derived.HeadSHA},
+		{"title_hash", approved.TitleHash, derived.TitleHash},
+		{"body_hash", approved.BodyHash, derived.BodyHash},
+		{"policy_bundle_id", approved.PolicyBundleID, derived.PolicyBundleID},
+		{"policy_bundle_hash", approved.PolicyBundleHash, derived.PolicyBundleHash},
+		{"single_use_nonce", approved.SingleUseNonce, derived.SingleUseNonce},
+	} {
+		if strings.TrimSpace(check.approved) != strings.TrimSpace(check.derived) {
+			return fmt.Errorf("approved draft-PR target %s %q does not match issue-scan run-derived %s %q", check.field, check.approved, check.field, check.derived)
+		}
+	}
+	return nil
 }
 
 func issueScanDraftPRChangedFiles(summary string) ([]string, error) {
