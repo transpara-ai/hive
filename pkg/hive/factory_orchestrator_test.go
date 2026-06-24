@@ -21,6 +21,7 @@ type fakePRClient struct {
 	resultURL      string
 	resultDraft    *bool
 	resultState    string
+	resultBaseSHA  string
 }
 
 func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11DraftPullRequestMutation) (work.Epic11DraftPullRequestResult, error) {
@@ -41,9 +42,13 @@ func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11Dr
 	if f.resultState != "" {
 		state = f.resultState
 	}
+	baseSHA := m.BaseSHA
+	if f.resultBaseSHA != "" {
+		baseSHA = f.resultBaseSHA
+	}
 	return work.Epic11DraftPullRequestResult{
 		Repository: repo, Number: 111, URL: url,
-		GitHubResponseIDOrEquivalent: "node111", BaseRef: m.BaseRef, BaseSHA: m.BaseSHA,
+		GitHubResponseIDOrEquivalent: "node111", BaseRef: m.BaseRef, BaseSHA: baseSHA,
 		HeadRef: m.HeadRef, HeadSHA: m.HeadSHA, Draft: draft, State: state,
 		CreatedAt: time.Now().UTC(),
 	}, nil
@@ -170,6 +175,44 @@ func TestCreateTransparaAIDraftPRFromApprovedDecision(t *testing.T) {
 	}
 	if strings.Join(receipt.ChangedFiles, ",") != "package.json,src/App.tsx" {
 		t.Fatalf("changed files = %+v, want sorted package/src files", receipt.ChangedFiles)
+	}
+}
+
+func TestCreateTransparaAIDraftPRAcceptsAdvancedBaseSHA(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	client := &fakePRClient{
+		preflightFiles: []string{"src/App.tsx"},
+		resultBaseSHA:  "live-base-sha",
+	}
+	title := "[codex] Display Civilization runtime evidence"
+	body := "## Summary\nDisplay runtime evidence for Transpara-AI operators.\n"
+	target := DraftPRTarget{
+		Repository:       "transpara-ai/site",
+		BaseRef:          "main",
+		BaseSHA:          "approved-base-sha",
+		HeadRef:          "codex/site-civilization-runtime",
+		HeadSHA:          "headsha",
+		TitleHash:        sha256HexPrefixed([]byte(title)),
+		BodyHash:         sha256HexPrefixed([]byte(body)),
+		PolicyBundleID:   TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash: TransparaAIDraftPRPolicyBundleHash(),
+		SingleUseNonce:   "nonce-site",
+	}
+
+	run, err := CreateTransparaAIDraftPRFromApprovedDecision(context.Background(), ts, source, conv, client, DraftPRArtifact{
+		Target:       target,
+		Title:        title,
+		Body:         body,
+		ChangedFiles: []string{"src/App.tsx"},
+	}, cause)
+	if err != nil {
+		t.Fatalf("CreateTransparaAIDraftPRFromApprovedDecision with advanced base SHA: %v", err)
+	}
+	if run.MutationResult.BaseSHA != "live-base-sha" {
+		t.Fatalf("mutation result base SHA = %q, want live base", run.MutationResult.BaseSHA)
+	}
+	if run.Receipt.BaseSHA != "approved-base-sha" {
+		t.Fatalf("receipt base SHA = %q, want approved base evidence", run.Receipt.BaseSHA)
 	}
 }
 

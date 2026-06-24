@@ -207,13 +207,17 @@ func validateTransparaAIDraftPRResult(target DraftPRTarget, result work.Epic11Dr
 	}
 	for field, gotWant := range map[string][2]string{
 		"base_ref": {result.BaseRef, target.BaseRef},
-		"base_sha": {result.BaseSHA, target.BaseSHA},
 		"head_ref": {result.HeadRef, target.HeadRef},
 		"head_sha": {result.HeadSHA, target.HeadSHA},
 	} {
 		if strings.TrimSpace(gotWant[0]) != strings.TrimSpace(gotWant[1]) {
 			return fmt.Errorf("created PR %s %q does not match approved %q", field, gotWant[0], gotWant[1])
 		}
+	}
+	// GitHub creates against the live base ref. That base SHA may advance after
+	// Human approval; the head SHA remains the authority-bearing invariant.
+	if strings.TrimSpace(result.BaseSHA) == "" {
+		return errors.New("created PR base_sha is empty")
 	}
 	if !result.Draft {
 		return errors.New("created PR is not draft")
