@@ -112,6 +112,10 @@ func cmdFactoryDaemon(args []string) error {
 	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
+	reviewRunner := fs.String("issue-scan-review-runner", "", "Executable exact-head issue-scan adversarial review runner; receives JSON context on stdin and returns receipt JSON")
+	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
+	reviewRunnerArgs := repeatedStringFlag{}
+	fs.Var(&reviewRunnerArgs, "issue-scan-review-runner-arg", "Argument passed to --issue-scan-review-runner (repeatable)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -122,13 +126,24 @@ func cmdFactoryDaemon(args []string) error {
 	if *human == "" {
 		return fmt.Errorf("--human is required")
 	}
+	var issueScanReviewRunner hive.IssueScanAdversarialReviewRunner
+	if strings.TrimSpace(*reviewRunner) == "" {
+		if len(reviewRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-review-runner is required when --issue-scan-review-runner-arg is set")
+		}
+	} else {
+		if *reviewTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-review-timeout must be greater than zero")
+		}
+		issueScanReviewRunner = issueScanReviewCommandRunner(*reviewRunner, reviewRunnerArgs, *reviewTimeout)
+	}
 	if *seedSpec != "" {
 		if err := runIngest(*seedSpec, *space, *apiBase, "high"); err != nil {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

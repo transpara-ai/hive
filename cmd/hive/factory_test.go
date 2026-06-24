@@ -60,6 +60,13 @@ func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonRequiresReviewRunnerBeforeRunnerArg(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-review-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-runner") {
+		t.Fatalf("expected missing review runner error, got %v", err)
+	}
+}
+
 func TestRunIssueScanReviewRunnerPassesContextAndParsesReceipt(t *testing.T) {
 	dir := t.TempDir()
 	contextPath := filepath.Join(dir, "context.json")

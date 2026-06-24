@@ -1,7 +1,9 @@
 package hive
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -48,6 +50,11 @@ type IssueScanAdversarialReviewContext struct {
 	SourceRefs            []string                          `json:"source_refs,omitempty"`
 	BoundaryDisclaimers   []string                          `json:"boundary_disclaimers,omitempty"`
 }
+
+// IssueScanAdversarialReviewRunner invokes an external exact-head review tool.
+// Runtime records the returned receipt only after validating it against the
+// verified Operate completion evidence for the implementation task.
+type IssueScanAdversarialReviewRunner func(context.Context, IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error)
 
 // IssueScanAdversarialReviewReceipt is a durable external review packet for
 // the run_adversarial_review stage. It proves only that an exact-head review was
@@ -214,6 +221,133 @@ func (r *Runtime) IssueScanAdversarialReviewRunContext(runID string) (IssueScanA
 		reviewContext.ContainmentWatchRoots = append([]string(nil), resolved.ContainmentWatchRoots...)
 	}
 	return reviewContext, nil
+}
+
+// RunConfiguredIssueScanAdversarialReviews invokes the optional runtime-level
+// exact-head review runner for issue-scan runs that have completed
+// implementation evidence and no current review for that completion.
+func (r *Runtime) RunConfiguredIssueScanAdversarialReviews(ctx context.Context, result RunLaunchDispatchResult) ([]IssueScanAdversarialReviewRecordResult, error) {
+	if r == nil || r.issueScanAdversarialReviewRunner == nil {
+		return nil, nil
+	}
+	runIDs := compactStrings(append(append([]string(nil), result.DispatchedIssueScanRunIDs...), result.AlreadyDispatchedIssueScanRunIDs...))
+	out := make([]IssueScanAdversarialReviewRecordResult, 0, len(runIDs))
+	var errs []error
+	for _, runID := range runIDs {
+		recorded, ready, err := r.RunConfiguredIssueScanAdversarialReview(ctx, runID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("run %q: %w", runID, err))
+			continue
+		}
+		if ready {
+			out = append(out, recorded)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// RunConfiguredIssueScanAdversarialReview runs the configured review command
+// for one issue-scan run, then records its returned receipt through the same
+// exact-head validation path used by the manual CLI command.
+func (r *Runtime) RunConfiguredIssueScanAdversarialReview(ctx context.Context, runID string) (IssueScanAdversarialReviewRecordResult, bool, error) {
+	runID = strings.TrimSpace(runID)
+	result := IssueScanAdversarialReviewRecordResult{RunID: runID}
+	if r == nil || r.issueScanAdversarialReviewRunner == nil {
+		return result, false, nil
+	}
+	shouldRun, err := r.issueScanAdversarialReviewRunnerShouldRun(runID)
+	if err != nil || !shouldRun {
+		return result, false, err
+	}
+	reviewContext, err := r.IssueScanAdversarialReviewRunContext(runID)
+	if err != nil {
+		return result, false, err
+	}
+	receipt, err := r.issueScanAdversarialReviewRunner(ctx, reviewContext)
+	if err != nil {
+		return result, true, err
+	}
+	recorded, err := r.RecordIssueScanAdversarialReview(runID, receipt)
+	return recorded, true, err
+}
+
+func (r *Runtime) issueScanAdversarialReviewRunnerShouldRun(runID string) (bool, error) {
+	runID = strings.TrimSpace(runID)
+	if r == nil || r.store == nil || r.tasks == nil {
+		return false, fmt.Errorf("runtime store and task store are required")
+	}
+	if runID == "" {
+		return false, fmt.Errorf("run_id is required")
+	}
+	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
+	if err != nil {
+		return false, err
+	}
+	if len(requests) == 0 {
+		return false, fmt.Errorf("queued run %q not found", runID)
+	}
+	content, ok := requests[0].Content().(FactoryRunRequestedContent)
+	if !ok {
+		return false, fmt.Errorf("queued run %q event has unexpected content", runID)
+	}
+	if !isIssueScanRunLaunch(content) {
+		return false, nil
+	}
+	orderID, err := factoryOrderIDForRunLaunch(content.RunID)
+	if err != nil {
+		return false, err
+	}
+	order := factoryOrderFromRunLaunch(content, orderID)
+	if _, err := r.DispatchQueuedRunLaunch(runID); err != nil {
+		return false, fmt.Errorf("dispatch queued issue-scan run %q before review runner: %w", runID, err)
+	}
+	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
+	if err != nil {
+		return false, err
+	}
+	implementationStage, err := r.issueScanStageTargetByStageID(drafts, "implement_on_branch", orderID)
+	if err != nil {
+		return false, err
+	}
+	reviewStage, err := r.issueScanStageTargetByStageID(drafts, "run_adversarial_review", orderID)
+	if err != nil {
+		return false, err
+	}
+	if err := r.verifyIssueScanStageTaskContracts(reviewStage); err != nil {
+		return false, err
+	}
+	implementationStageCompleted, err := r.issueScanStageTaskCompleted(implementationStage.TaskID)
+	if err != nil {
+		return false, err
+	}
+	if !implementationStageCompleted {
+		return false, nil
+	}
+	implementationTaskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, issueScanImplementationTaskCanonicalID(order.ID))
+	if err != nil {
+		return false, fmt.Errorf("find concrete implementation task: %w", err)
+	}
+	if !exists {
+		return false, nil
+	}
+	if strings.TrimSpace(factoryOrderID) != orderID {
+		return false, fmt.Errorf("implementation task belongs to factory order %q, want %q", factoryOrderID, orderID)
+	}
+	completion, ok, err := r.issueScanImplementationCompletionEvidence(implementationTaskID, implementationStage.TaskID)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("completed implementation stage %s has no verified Operate completion evidence", implementationStage.TaskID.Value())
+	}
+	_, _, reviewAt, hasReview, err := r.latestIssueScanCodeReviewForTask(implementationTaskID)
+	if err != nil {
+		return false, err
+	}
+	if hasReview && (completion.CompletionTimestamp.IsZero() || !reviewAt.Before(completion.CompletionTimestamp)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 // RecordIssueScanAdversarialReview records an external/adversarial exact-head

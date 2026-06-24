@@ -1200,7 +1200,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1287,18 +1287,19 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 	}
 
 	rt, err := hive.New(ctx, hive.Config{
-		Store:                 s,
-		Actors:                actors,
-		HumanID:               humanID,
-		ApproveRequests:       approveRequests,
-		ApproveRoles:          approveRoles,
-		RepoPath:              repoPath,
-		RepoWorkspaceRoot:     repoWorkspaceRoot,
-		CatalogPath:           catalogPath,
-		CatalogReloadInterval: catalogReloadInterval,
-		Loop:                  loop,
-		TelemetryWriter:       tw,
-		APIClient:             siteClient,
+		Store:                            s,
+		Actors:                           actors,
+		HumanID:                          humanID,
+		ApproveRequests:                  approveRequests,
+		ApproveRoles:                     approveRoles,
+		RepoPath:                         repoPath,
+		RepoWorkspaceRoot:                repoWorkspaceRoot,
+		CatalogPath:                      catalogPath,
+		CatalogReloadInterval:            catalogReloadInterval,
+		Loop:                             loop,
+		IssueScanAdversarialReviewRunner: issueScanReviewRunner,
+		TelemetryWriter:                  tw,
+		APIClient:                        siteClient,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: %w", err)

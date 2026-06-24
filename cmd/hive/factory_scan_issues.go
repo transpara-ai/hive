@@ -145,6 +145,9 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 		fmt.Printf("issue-scan implementation task already exists: %d\n", existing)
 	}
 	printIssueScanRoleOutputCount("implementation", progress.ImplementationRoleOutputs)
+	if recorded := countRecordedIssueScanAdversarialReviewRunsForCLI(progress.ReviewRuns); recorded > 0 {
+		fmt.Printf("issue-scan adversarial reviews recorded: %d\n", recorded)
+	}
 	printIssueScanRoleOutputCount("review", progress.ReviewRoleOutputs)
 	printIssueScanRoleOutputCount("blocker", progress.BlockerRoleOutputs)
 	printIssueScanRoleOutputCount("ready-PR", progress.ReadyRoleOutputs)
@@ -179,6 +182,16 @@ func countExistingIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImple
 	count := 0
 	for _, task := range tasks {
 		if task.AlreadyExists {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanAdversarialReviewRunsForCLI(runs []hive.IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Recorded {
 			count++
 		}
 	}

@@ -1926,6 +1926,117 @@ func TestIssueScanAdversarialReviewRunContextCarriesExactOperateHead(t *testing.
 	}
 }
 
+func TestProgressIssueScanLifecycleRunsConfiguredAdversarialReviewOnce(t *testing.T) {
+	rt, _, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	calls := 0
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		calls++
+		if reviewContext.RunID != queued.RunID {
+			t.Fatalf("review runner run id = %q, want %q", reviewContext.RunID, queued.RunID)
+		}
+		if reviewContext.ImplementationTaskID != implementationTask.ID.Value() {
+			t.Fatalf("review runner task id = %q, want %s", reviewContext.ImplementationTaskID, implementationTask.ID)
+		}
+		receipt := reviewContext.ExpectedReceipt
+		receipt.ReviewRef = "artifact://adversarial-review/configured-runner/result.md"
+		receipt.Verdict = "approve"
+		receipt.Summary = "configured runner approved the verified Operate head"
+		receipt.Issues = []string{}
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		return receipt, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with configured runner: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("review runner calls = %d, want 1", calls)
+	}
+	if len(progress.ReviewRuns) != 1 || !progress.ReviewRuns[0].Recorded {
+		t.Fatalf("review runs = %+v, want one recorded exact-head review", progress.ReviewRuns)
+	}
+	if progress.ReviewRuns[0].ReviewedHeadSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("reviewed head = %q", progress.ReviewRuns[0].ReviewedHeadSHA)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs) != 2 {
+		t.Fatalf("review role outputs = %+v, want reviewer and guardian", progress.ReviewRoleOutputs)
+	}
+
+	again, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("review runner calls after second progress = %d, want still 1", calls)
+	}
+	if len(again.ReviewRuns) != 0 {
+		t.Fatalf("second review runs = %+v, want none after current completion was reviewed", again.ReviewRuns)
+	}
+}
+
+func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.T) {
+	rt, writer, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	calls := 0
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		calls++
+		receipt := reviewContext.ExpectedReceipt
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		if calls == 1 {
+			receipt.ReviewRef = "artifact://adversarial-review/configured-runner/blocker.md"
+			receipt.Verdict = "request_changes"
+			receipt.Summary = "configured runner found a blocker"
+			receipt.Issues = []string{"missing regression test"}
+			return receipt, nil
+		}
+		receipt.ReviewRef = "artifact://adversarial-review/configured-runner/approved.md"
+		receipt.Verdict = "approve"
+		receipt.Summary = "configured runner approved repaired head"
+		receipt.Issues = []string{}
+		return receipt, nil
+	}
+
+	first, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("initial progressIssueScanLifecycle with configured runner: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("review runner calls = %d, want 1", calls)
+	}
+	if len(first.ReviewRuns) != 1 || first.ReviewRuns[0].Verdict != "request_changes" {
+		t.Fatalf("first review runs = %+v, want one request_changes review", first.ReviewRuns)
+	}
+
+	if err := rt.tasks.Reopen(writer.human, implementationTask.ID, "request_changes: missing regression test", []string{"missing regression test"}, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Reopen implementation task: %v", err)
+	}
+	repairedBody := issueScanOperateResultBodyForTestWith(
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccccccccccc",
+		"codex/run-issue-001-repair",
+		"pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++\n2 files changed, 30 insertions(+), 2 deletions(-)",
+	)
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", repairedBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact repaired Operate result: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, implementationTask.ID, "validation output: go test ./pkg/hive passed after repair", []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete repaired implementation task: %v", err)
+	}
+
+	second, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle after repair: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("review runner calls after repair = %d, want 2", calls)
+	}
+	if len(second.ReviewRuns) != 1 || second.ReviewRuns[0].ReviewedHeadSHA != "cccccccccccccccccccccccccccccccccccccccc" || second.ReviewRuns[0].Verdict != "approve" {
+		t.Fatalf("second review runs = %+v, want approved repaired head", second.ReviewRuns)
+	}
+}
+
 func TestRecordIssueScanAdversarialReviewReceiptRejectsHeadMismatch(t *testing.T) {
 	rt, _, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	_, err := rt.RecordIssueScanAdversarialReview(queued.RunID, IssueScanAdversarialReviewReceipt{

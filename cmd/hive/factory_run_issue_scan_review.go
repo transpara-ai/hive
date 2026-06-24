@@ -50,7 +50,7 @@ func cmdFactoryRunIssueScanReview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("build issue-scan adversarial review context: %w", err)
 	}
-	receipt, err := runIssueScanReviewRunner(ctx, *runner, runnerArgs, reviewContext, *timeout)
+	receipt, err := issueScanReviewCommandRunner(*runner, runnerArgs, *timeout)(ctx, reviewContext)
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,14 @@ func cmdFactoryRunIssueScanReview(args []string) error {
 	printIssueScanLifecycleProgress(progress)
 	fmt.Println("boundary: this runs a configured review command and records exact-head review evidence only; blocker repair, ready PR evidence, Human approval, merge, and deploy remain separate governed steps")
 	return nil
+}
+
+func issueScanReviewCommandRunner(runner string, args []string, timeout time.Duration) hive.IssueScanAdversarialReviewRunner {
+	runner = strings.TrimSpace(runner)
+	copiedArgs := append([]string(nil), args...)
+	return func(ctx context.Context, reviewContext hive.IssueScanAdversarialReviewContext) (hive.IssueScanAdversarialReviewReceipt, error) {
+		return runIssueScanReviewRunner(ctx, runner, copiedArgs, reviewContext, timeout)
+	}
 }
 
 func runIssueScanReviewRunner(ctx context.Context, runner string, args []string, reviewContext hive.IssueScanAdversarialReviewContext, timeout time.Duration) (hive.IssueScanAdversarialReviewReceipt, error) {

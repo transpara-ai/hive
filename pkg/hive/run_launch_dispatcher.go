@@ -940,7 +940,7 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			progress, err := r.progressIssueScanLifecycle()
+			progress, err := r.progressIssueScanLifecycleContext(ctx)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: run-launch dispatch failed closed: %v\n", err)
 			}
@@ -968,6 +968,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan implementation evidence bridge: recorded %d role output(s)\n", recorded)
 			}
+			if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan adversarial review runner: recorded %d exact-head review(s)\n", recorded)
+			}
 			if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan review evidence bridge: recorded %d role output(s)\n", recorded)
 			}
@@ -993,6 +996,7 @@ type IssueScanLifecycleProgress struct {
 	DesignRoleOutputs         []IssueScanStageRoleOutputResult
 	ImplementationTasks       []IssueScanImplementationTaskResult
 	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
+	ReviewRuns                []IssueScanAdversarialReviewRecordResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
@@ -1029,11 +1033,15 @@ func (r *Runtime) ProgressIssueScanRunLifecycle(runID string) (IssueScanLifecycl
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(&progress, dispatch, &errs)
+	r.progressDispatchedIssueScanLifecycle(context.Background(), &progress, dispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
 func (r *Runtime) progressIssueScanLifecycle() (IssueScanLifecycleProgress, error) {
+	return r.progressIssueScanLifecycleContext(context.Background())
+}
+
+func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueScanLifecycleProgress, error) {
 	var progress IssueScanLifecycleProgress
 	if r == nil {
 		return progress, nil
@@ -1047,11 +1055,11 @@ func (r *Runtime) progressIssueScanLifecycle() (IssueScanLifecycleProgress, erro
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(&progress, dispatch, &errs)
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
-func (r *Runtime) progressDispatchedIssueScanLifecycle(progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
+func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
 	if r == nil || progress == nil || errs == nil {
 		return
 	}
@@ -1110,6 +1118,11 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(progress *IssueScanLifecy
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-implementation auto-completion: %w", err))
 		}
+	}
+	reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
+	progress.ReviewRuns = reviewRuns
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
 	}
 	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(dispatch)
 	progress.ReviewRoleOutputs = reviewRoleOutputs
@@ -1186,6 +1199,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d implementation role output(s)\n", recorded)
 	}
+	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d exact-head review(s)\n", recorded)
+	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d review role output(s)\n", recorded)
 	}
@@ -1220,6 +1236,12 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d implementation role output(s)\n", recorded)
 	}
+	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d exact-head review(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d review role output(s)\n", recorded)
+	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d blocker role output(s)\n", recorded)
 	}
@@ -1249,6 +1271,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d design role output(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d exact-head review(s)\n", recorded)
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d review role output(s)\n", recorded)
@@ -1307,6 +1332,16 @@ func countCreatedIssueScanImplementationTasks(values []IssueScanImplementationTa
 }
 
 func countRecordedIssueScanRoleOutputs(values []IssueScanStageRoleOutputResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanAdversarialReviewRuns(values []IssueScanAdversarialReviewRecordResult) int {
 	count := 0
 	for _, value := range values {
 		if value.Recorded {
