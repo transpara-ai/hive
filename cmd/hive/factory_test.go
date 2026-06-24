@@ -299,6 +299,14 @@ func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
 	}
 }
 
+func TestIssueScanDraftPRAuthorityRequestLocalGitRunnerRequiresRepoPath(t *testing.T) {
+	runner := issueScanDraftPRAuthorityRequestLocalGitRunner("main")
+	_, err := runner(context.Background(), hive.IssueScanDraftPRAuthorityRequestRunnerContext{})
+	if err == nil || !strings.Contains(err.Error(), "resolved repository checkout") {
+		t.Fatalf("issueScanDraftPRAuthorityRequestLocalGitRunner error = %v, want resolved checkout guard", err)
+	}
+}
+
 func TestIssueScanDraftPRAuthorityNonceIsDeterministic(t *testing.T) {
 	requestContext := hive.IssueScanDraftPRAuthorityRequestRunnerContext{
 		RunID:          "run_issue_001",

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 const issueScanDraftPRAuthorityRequestRunnerContextKind = "issue_scan_draft_pr_authority_request_runner_context"
@@ -84,6 +85,11 @@ func (r *Runtime) RunConfiguredIssueScanDraftPRAuthorityRequest(ctx context.Cont
 	if err != nil || !ready {
 		return result, ready, err
 	}
+	if existing, found, err := r.existingIssueScanDraftPRAuthorityRequestForRunnerContext(runID, requestContext); err != nil {
+		return result, true, err
+	} else if found {
+		return existing, true, nil
+	}
 	runnerResult, err := r.issueScanDraftPRAuthorityRequester(ctx, requestContext)
 	if err != nil {
 		return result, true, err
@@ -111,6 +117,58 @@ func (r *Runtime) RunConfiguredIssueScanDraftPRAuthorityRequest(ctx context.Cont
 	result.HeldPendingApproval = raised.HeldPendingApproval
 	result.AutoApproved = raised.AutoApproved
 	return result, true, nil
+}
+
+func (r *Runtime) existingIssueScanDraftPRAuthorityRequestForRunnerContext(runID string, requestContext IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerRecordResult, bool, error) {
+	result := IssueScanDraftPRAuthorityRequestRunnerRecordResult{
+		RunID:          strings.TrimSpace(runID),
+		FactoryOrderID: requestContext.FactoryOrderID,
+		Repository:     requestContext.Repository,
+	}
+	if r == nil || r.store == nil {
+		return result, false, fmt.Errorf("runtime store is required")
+	}
+	events, err := eventsByTypePaginated(r.store, EventTypeAuthorityRequestRecorded, defaultOperatorProjectionLimit)
+	if err != nil {
+		return result, false, fmt.Errorf("load authority requests: %w", err)
+	}
+	for _, ev := range events {
+		content, ok := ev.Content().(AuthorityRequestRecordedContent)
+		if !ok || content.ActionName != string(safety.ActionRepoPullRequestCreate) {
+			continue
+		}
+		existingTarget, err := ParseDraftPRScope(content.Scope)
+		if err != nil {
+			continue
+		}
+		if !sameIssueScanDraftPRAuthorityRunnerTarget(existingTarget, requestContext) {
+			continue
+		}
+		derived, ready, err := r.issueScanDraftPRAuthorityRequestContext(runID, existingTarget.BaseRef, existingTarget.BaseSHA, existingTarget.SingleUseNonce)
+		if err != nil {
+			return result, false, err
+		}
+		if !ready {
+			return result, false, nil
+		}
+		if !sameIssueScanDraftPRAuthorityTarget(existingTarget, derived.DraftPRTarget) {
+			continue
+		}
+		result.RunID = derived.RunID
+		result.FactoryOrderID = derived.FactoryOrderID
+		result.Repository = derived.Repository
+		result.RequestID = content.RequestID
+		result.DraftPRTarget = existingTarget
+		result.AlreadyRaised = true
+		return result, true, nil
+	}
+	return result, false, nil
+}
+
+func sameIssueScanDraftPRAuthorityRunnerTarget(target DraftPRTarget, requestContext IssueScanDraftPRAuthorityRequestRunnerContext) bool {
+	return strings.EqualFold(strings.TrimSpace(target.Repository), strings.TrimSpace(requestContext.Repository)) &&
+		strings.TrimSpace(target.HeadRef) == strings.TrimSpace(requestContext.OperateBranch) &&
+		strings.TrimSpace(target.HeadSHA) == strings.TrimSpace(requestContext.OperateCommit)
 }
 
 func (r *Runtime) issueScanDraftPRAuthorityRequestRunnerContext(runID string) (IssueScanDraftPRAuthorityRequestRunnerContext, bool, error) {

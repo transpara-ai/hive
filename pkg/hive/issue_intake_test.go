@@ -3530,8 +3530,8 @@ func TestProgressIssueScanLifecycleRaisesConfiguredDraftPRAuthorityRequest(t *te
 	if err != nil {
 		t.Fatalf("second progressIssueScanLifecycle: %v", err)
 	}
-	if calls != 2 {
-		t.Fatalf("authority requester calls after second pass = %d, want idempotent target recheck", calls)
+	if calls != 1 {
+		t.Fatalf("authority requester calls after second pass = %d, want already-raised short-circuit", calls)
 	}
 	if len(again.DraftPRRequests) != 1 || !again.DraftPRRequests[0].AlreadyRaised || again.DraftPRRequests[0].Raised {
 		t.Fatalf("second draft PR authority requests = %+v, want already-raised without new request", again.DraftPRRequests)
@@ -4402,6 +4402,45 @@ func TestIssueScanDraftPRAuthorityRequestContextRequiresZeroBlockerStage(t *test
 	rt, _, queued, _, _ := issueScanCompletedImplementationFixtureForTest(t)
 	if _, err := rt.IssueScanDraftPRAuthorityRequestContext(queued.RunID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr"); err == nil || !strings.Contains(err.Error(), "drive_blockers_to_zero stage has not completed") {
 		t.Fatalf("IssueScanDraftPRAuthorityRequestContext error = %v, want blocker-stage gate", err)
+	}
+}
+
+func TestRunConfiguredIssueScanDraftPRAuthorityRequestRejectsEmptyRequesterResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		baseSHA    string
+		nonce      string
+		wantErrSub string
+	}{
+		{
+			name:       "base_sha",
+			nonce:      "nonce-configured-draft-pr-request",
+			wantErrSub: "empty base_sha",
+		},
+		{
+			name:       "nonce",
+			baseSHA:    "dddddddddddddddddddddddddddddddddddddddd",
+			wantErrSub: "empty nonce",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, _, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+			rt.issueScanDraftPRAuthorityRequester = func(ctx context.Context, requestContext IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+				return IssueScanDraftPRAuthorityRequestRunnerResult{
+					BaseRef: "main",
+					BaseSHA: tt.baseSHA,
+					Nonce:   tt.nonce,
+				}, nil
+			}
+			_, ready, err := rt.RunConfiguredIssueScanDraftPRAuthorityRequest(context.Background(), runID)
+			if !ready {
+				t.Fatalf("ready = false, want true")
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("RunConfiguredIssueScanDraftPRAuthorityRequest error = %v, want %q", err, tt.wantErrSub)
+			}
+		})
 	}
 }
 
