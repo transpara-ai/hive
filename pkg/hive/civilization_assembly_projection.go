@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 const (
@@ -18,6 +20,7 @@ const (
 	civilizationAssemblyFieldAvailable    = "available"
 	civilizationAssemblyFieldUnavailable  = "unavailable"
 	civilizationAssemblyReadOnlyRoutePath = "GET /api/hive/civilization/assembly-projection"
+	civilizationAssemblyWorkTaskRef       = "event_type:work.task.created field:FactoryOrderID"
 )
 
 // CivilizationAssemblyProjection is Hive's read-only Site-facing Civilization
@@ -171,12 +174,32 @@ type CivilizationAssemblyResidualRisk struct {
 	Summary  string `json:"summary"`
 }
 
+type civilizationAssemblyFactoryOrderWorkEvidence struct {
+	TaskRefs                    []string
+	TestRunRefs                 []string
+	GateResultRefs              []string
+	SourceRefs                  []string
+	LifecycleSourceTruncated    bool
+	VerificationSourceTruncated bool
+}
+
+type civilizationAssemblyTaskLifecycleEvidence struct {
+	SourceRefs []string
+}
+
+type civilizationAssemblyTaskVerificationEvidence struct {
+	TestRunRefs    []string
+	GateResultRefs []string
+	SourceRefs     []string
+}
+
 // BuildCivilizationAssemblyProjection derives the Site visualization projection
 // from the Hive operator projection. It is read-only and performs no EventGraph
 // writes, protected actions, or runtime execution.
 func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...OperatorProjectionOption) CivilizationAssemblyProjection {
 	operatorProjection := BuildOperatorProjection(s, limit, opts...)
-	sourceRefs := civilizationAssemblySourceRefs(operatorProjection)
+	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
+	sourceRefs := compactStrings(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)
 
@@ -193,16 +216,16 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		ActorRoster:                        civilizationAssemblyActorRoster(operatorProjection),
 		RoleBindings:                       civilizationAssemblyRoleBindings(operatorProjection),
 		AgentLifecycleSummary:              civilizationAssemblyLifecycle(operatorProjection),
-		FactoryOrderSummary:                []CivilizationAssemblyFactoryOrder{},
-		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection),
+		FactoryOrderSummary:                factoryOrders,
+		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection, factoryOrders, factoryOrderWorkEvidence),
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
 			SourceRefs: []string{civilizationAssemblyReadOnlyRoutePath},
 		},
 		OpenGateSummary:             civilizationAssemblyOpenGates(operatorProjection),
-		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection),
-		WithheldOrUnavailableFields: civilizationAssemblyUnavailableFields(operatorProjection),
+		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection, factoryOrdersTruncated, factoryOrderWorkEvidence, limit),
+		WithheldOrUnavailableFields: civilizationAssemblyUnavailableFields(operatorProjection, factoryOrders, factoryOrdersQueryFailed),
 		BoundaryFlags: []string{
 			"eventgraph_derived",
 			"hive_owned_projection",
@@ -214,6 +237,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		ProvenanceRefs: sourceRefs,
 		ValidationRefs: []string{
 			"BuildOperatorProjection",
+			civilizationAssemblyWorkTaskRef,
 			civilizationAssemblyReadOnlyRoutePath,
 		},
 		FailureReasons: append([]string(nil), operatorProjection.Errors...),
@@ -435,6 +459,249 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 	return out
 }
 
+func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, limit int) ([]CivilizationAssemblyFactoryOrder, civilizationAssemblyFactoryOrderWorkEvidence, bool, bool) {
+	if limit <= 0 {
+		limit = defaultOperatorProjectionLimit
+	}
+	page, err := s.ByType(work.EventTypeTaskCreated, limit, types.None[types.Cursor]())
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("read %s for civilization factory orders: %v", work.EventTypeTaskCreated.Value(), err))
+		return []CivilizationAssemblyFactoryOrder{}, civilizationAssemblyFactoryOrderWorkEvidence{}, false, true
+	}
+	truncated := page.HasMore()
+
+	byID := map[string]*CivilizationAssemblyFactoryOrder{}
+	taskStore := work.NewTaskStore(s, nil, nil)
+	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
+	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
+	}
+	p.Errors = append(p.Errors, lifecycleErrors...)
+	workEvidence.LifecycleSourceTruncated = lifecycleTruncated
+	verificationByTask, verificationTruncated, verificationErrors, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
+	if err != nil {
+		p.Errors = append(p.Errors, fmt.Sprintf("project Work task verification evidence refs: %v", err))
+	}
+	p.Errors = append(p.Errors, verificationErrors...)
+	workEvidence.VerificationSourceTruncated = verificationTruncated
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskCreatedContent)
+		if !ok {
+			p.Errors = append(p.Errors, contentTypeError(ev, "work.TaskCreatedContent"))
+			continue
+		}
+		orderID := strings.TrimSpace(content.FactoryOrderID)
+		if orderID == "" {
+			continue
+		}
+		order := byID[orderID]
+		if order == nil {
+			order = &CivilizationAssemblyFactoryOrder{
+				ID:            orderID,
+				Status:        "work_task_seeded",
+				RiskClass:     valueOr(content.RiskClass, "unknown"),
+				ReleasePolicy: "human_required_before_merge",
+			}
+			byID[orderID] = order
+		}
+		order.RiskClass = civilizationAssemblyFactoryOrderRiskClass(order.RiskClass, content.RiskClass)
+		order.RequirementRefs = compactStrings(append(order.RequirementRefs, content.RequirementIDs...))
+		order.AcceptanceCriterionRefs = compactStrings(append(order.AcceptanceCriterionRefs, content.AcceptanceCriterionIDs...))
+		order.TaskRefs = compactStrings(append(order.TaskRefs, ev.ID().Value()))
+		workEvidence.TaskRefs = append(workEvidence.TaskRefs, ev.ID().Value())
+		workEvidence.SourceRefs = append(workEvidence.SourceRefs, ev.ID().Value())
+		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, lifecycleEvidence.SourceRefs...)
+		}
+		if verificationEvidence, ok := verificationByTask[ev.ID()]; ok {
+			workEvidence.TestRunRefs = append(workEvidence.TestRunRefs, verificationEvidence.TestRunRefs...)
+			workEvidence.GateResultRefs = append(workEvidence.GateResultRefs, verificationEvidence.GateResultRefs...)
+			workEvidence.SourceRefs = append(workEvidence.SourceRefs, verificationEvidence.SourceRefs...)
+		}
+
+		taskProjection, legacyProjection, err := civilizationAssemblyProjectWorkTask(taskStore, ev.ID())
+		if err != nil {
+			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
+			continue
+		}
+		order.Status = civilizationAssemblyFactoryOrderStatus(order.Status, civilizationAssemblyProjectedWorkTaskStatus(taskProjection, legacyProjection))
+	}
+	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
+	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
+	workEvidence.GateResultRefs = compactStrings(workEvidence.GateResultRefs)
+	workEvidence.SourceRefs = compactStrings(workEvidence.SourceRefs)
+
+	out := make([]CivilizationAssemblyFactoryOrder, 0, len(byID))
+	for _, order := range byID {
+		sort.Strings(order.RequirementRefs)
+		sort.Strings(order.AcceptanceCriterionRefs)
+		sort.Strings(order.TaskRefs)
+		out = append(out, *order)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, workEvidence, truncated, false
+}
+
+func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types.EventID) (work.TaskProjection, work.LegacyTaskProjection, error) {
+	taskProjection, err := taskStore.ProjectTask(taskID)
+	if err != nil {
+		return work.TaskProjection{}, work.LegacyTaskProjection{}, err
+	}
+	legacyProjection, err := taskStore.ProjectLegacyTask(taskID)
+	if err != nil {
+		return work.TaskProjection{}, work.LegacyTaskProjection{}, err
+	}
+	return taskProjection, legacyProjection, nil
+}
+
+func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, []string, error) {
+	page, err := s.ByType(work.EventTypeTaskLifecycleTransitioned, limit, types.None[types.Cursor]())
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskLifecycleTransitioned.Value(), err)
+	}
+	byTask := map[types.EventID]civilizationAssemblyTaskLifecycleEvidence{}
+	projectionErrors := []string{}
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskLifecycleTransitionContent)
+		if !ok {
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskLifecycleTransitionContent"))
+			continue
+		}
+		evidence := byTask[content.TaskID]
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
+	}
+	for taskID, evidence := range byTask {
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), projectionErrors, nil
+}
+
+func civilizationAssemblyWorkTaskVerificationEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskVerificationEvidence, bool, []string, error) {
+	page, err := s.ByType(work.EventTypeTaskVerificationAttached, limit, types.None[types.Cursor]())
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("fetch %s events: %w", work.EventTypeTaskVerificationAttached.Value(), err)
+	}
+	byTask := map[types.EventID]civilizationAssemblyTaskVerificationEvidence{}
+	projectionErrors := []string{}
+	for _, ev := range page.Items() {
+		content, ok := ev.Content().(work.TaskVerificationAttachedContent)
+		if !ok {
+			projectionErrors = append(projectionErrors, contentTypeError(ev, "work.TaskVerificationAttachedContent"))
+			continue
+		}
+		evidence := byTask[content.TaskID]
+		evidence.TestRunRefs = append(evidence.TestRunRefs, content.TestRunIDs...)
+		evidence.GateResultRefs = append(evidence.GateResultRefs, content.GateResultIDs...)
+		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
+		byTask[content.TaskID] = evidence
+	}
+	for taskID, evidence := range byTask {
+		evidence.TestRunRefs = compactStrings(evidence.TestRunRefs)
+		evidence.GateResultRefs = compactStrings(evidence.GateResultRefs)
+		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+		byTask[taskID] = evidence
+	}
+	return byTask, page.HasMore(), projectionErrors, nil
+}
+
+func civilizationAssemblyFactoryOrderRiskClass(existing, candidate string) string {
+	existing = valueOr(existing, "unknown")
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return existing
+	}
+	if civilizationAssemblyRiskClassRank(candidate) > civilizationAssemblyRiskClassRank(existing) {
+		return candidate
+	}
+	return existing
+}
+
+func civilizationAssemblyRiskClassRank(riskClass string) int {
+	switch strings.ToLower(strings.TrimSpace(riskClass)) {
+	case "critical":
+		return 50
+	case "high":
+		return 40
+	case "medium":
+		return 30
+	case "low":
+		return 20
+	case "info", "informational":
+		return 10
+	case "unknown", "":
+		return 0
+	default:
+		return 5
+	}
+}
+
+func civilizationAssemblyProjectedWorkTaskStatus(taskProjection work.TaskProjection, legacyProjection work.LegacyTaskProjection) string {
+	if taskProjection.Status != "" && taskProjection.Status != work.StatusCreated {
+		return "work_task_" + string(taskProjection.Status)
+	}
+	switch legacyProjection.Status {
+	case work.LegacyStatusCompleted:
+		return "work_task_completed"
+	case work.LegacyStatusBlocked:
+		return "work_task_blocked"
+	case work.LegacyStatusAssigned:
+		return "work_task_assigned"
+	case work.LegacyStatusReady:
+		return "work_task_ready"
+	}
+	if taskProjection.Blocked || legacyProjection.Blocked {
+		return "work_task_blocked"
+	}
+	if taskProjection.Ready || legacyProjection.Ready {
+		return "work_task_ready"
+	}
+	return "work_task_seeded"
+}
+
+func civilizationAssemblyFactoryOrderStatus(existing, candidate string) string {
+	if existing == "" {
+		return candidate
+	}
+	if candidate == "" {
+		return existing
+	}
+	if civilizationAssemblyFactoryOrderStatusRank(candidate) > civilizationAssemblyFactoryOrderStatusRank(existing) {
+		return candidate
+	}
+	return existing
+}
+
+// FactoryOrder status is a highest-attention rollup across its Work task refs:
+// failure/blocking states dominate active work, which dominates terminal
+// success, then assignment/readiness/seeded states.
+func civilizationAssemblyFactoryOrderStatusRank(status string) int {
+	switch status {
+	case "work_task_failed", "work_task_repair_required", "work_task_rejected", "work_task_policy_blocked", "work_task_blocked":
+		return 100
+	case "work_task_repair_running":
+		return 90
+	case "work_task_running", "work_task_verification_running":
+		return 80
+	case "work_task_repaired":
+		return 70
+	case "work_task_certified", "work_task_verified", "work_task_completed":
+		return 60
+	case "work_task_assigned":
+		return 50
+	case "work_task_ready":
+		return 40
+	case "work_task_seeded", "work_task_pending", "work_task_created", "work_task_superseded":
+		return 10
+	default:
+		return 20
+	}
+}
+
 func civilizationAssemblyRuntimeAgents(agentEvents OperatorRuntimeAgentEvents) []OperatorRuntimeAgentEvidence {
 	agentsByActor := map[string]OperatorRuntimeAgentEvidence{}
 	add := func(agent OperatorRuntimeAgentEvidence) {
@@ -517,7 +784,7 @@ func civilizationAssemblyRuntimeObservedAt(runtimeEvidence OperatorRuntimeEviden
 	return observedAt
 }
 
-func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssemblyWorkEvidence {
+func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []CivilizationAssemblyFactoryOrder, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence) CivilizationAssemblyWorkEvidence {
 	refs := []string{}
 	if queued := p.RuntimeEvidence.LastQueuedRunRequest; queued != nil {
 		refs = append(refs, queued.EventID, queued.SourceEventID, queued.BriefEventID)
@@ -533,18 +800,31 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection) CivilizationAssembly
 	for _, event := range p.RuntimeEvidence.RunEvents {
 		refs = append(refs, event.EventID)
 	}
+	taskRefs := factoryOrderWorkEvidence.TaskRefs
+	refs = append(refs, factoryOrderWorkEvidence.SourceRefs...)
 	sourceRefs := compactStrings(refs)
 	status := civilizationAssemblyFieldUnavailable
 	summary := "Hive operator projection has not observed queued run or runtime evidence."
-	if len(sourceRefs) > 0 || p.RuntimeEvidence.Status != "" && p.RuntimeEvidence.Status != "not_observed" {
+	if len(factoryOrders) > 0 {
+		status = civilizationAssemblyFieldAvailable
+		runtimeStatus := strings.TrimSpace(p.RuntimeEvidence.Status)
+		if runtimeStatus == "" || runtimeStatus == "not_observed" {
+			summary = fmt.Sprintf("%d Work FactoryOrder seed task(s) projected; no runtime run is observed in this projection.", len(factoryOrders))
+		} else {
+			summary = fmt.Sprintf("%d Work FactoryOrder seed task(s) projected with runtime evidence status %q", len(factoryOrders), runtimeStatus)
+		}
+	} else if len(sourceRefs) > 0 || p.RuntimeEvidence.Status != "" && p.RuntimeEvidence.Status != "not_observed" {
 		status = civilizationAssemblyFieldAvailable
 		summary = fmt.Sprintf("runtime evidence status %q derived from Hive operator projection", p.RuntimeEvidence.Status)
 	}
 	return CivilizationAssemblyWorkEvidence{
-		Status:       status,
-		Summary:      summary,
-		ArtifactRefs: compactStrings(artifactRefs),
-		SourceRefs:   sourceRefs,
+		Status:         status,
+		Summary:        summary,
+		TaskRefs:       compactStrings(taskRefs),
+		ArtifactRefs:   compactStrings(artifactRefs),
+		TestRunRefs:    compactStrings(factoryOrderWorkEvidence.TestRunRefs),
+		GateResultRefs: compactStrings(factoryOrderWorkEvidence.GateResultRefs),
+		SourceRefs:     sourceRefs,
 	}
 }
 
@@ -561,8 +841,8 @@ func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyG
 	return gates
 }
 
-func civilizationAssemblyResidualRisks(p OperatorProjection) []CivilizationAssemblyResidualRisk {
-	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors))
+func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence, limit int) []CivilizationAssemblyResidualRisk {
+	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+3)
 	for i, limitation := range p.RuntimeEvidence.Limitations {
 		risks = append(risks, CivilizationAssemblyResidualRisk{
 			ID:       fmt.Sprintf("runtime_limitation_%02d", i+1),
@@ -581,27 +861,69 @@ func civilizationAssemblyResidualRisks(p OperatorProjection) []CivilizationAssem
 			Summary:  err,
 		})
 	}
+	if factoryOrdersTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_summary_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder summary is bounded to %d work.task.created events; records outside that projection page may be omitted.", limit),
+		})
+	}
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.LifecycleSourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_lifecycle_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder lifecycle provenance is bounded to %d work.task.lifecycle.transitioned events; transition source refs outside that projection page may be omitted.", limit),
+		})
+	}
+	if len(factoryOrderWorkEvidence.TaskRefs) > 0 && factoryOrderWorkEvidence.VerificationSourceTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "factory_order_verification_source_limit_01",
+			Kind:     "factory_order_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("FactoryOrder verification evidence is bounded to %d work.task.verification.attached events; evidence refs outside that projection page may be omitted.", limit),
+		})
+	}
 	return risks
 }
 
-func civilizationAssemblyUnavailableFields(p OperatorProjection) []CivilizationAssemblyUnavailableField {
+func civilizationAssemblyUnavailableFields(p OperatorProjection, factoryOrders []CivilizationAssemblyFactoryOrder, factoryOrdersQueryFailed bool) []CivilizationAssemblyUnavailableField {
 	fields := []CivilizationAssemblyUnavailableField{
 		{
 			Field:  "external_committee_state",
 			Status: civilizationAssemblyFieldUnavailable,
 			Reason: "Hive operator projection does not independently certify External Committee approval.",
 		},
-		{
+	}
+	if len(factoryOrders) == 0 {
+		reason := "No Work FactoryOrder seed task with FactoryOrderID has been observed in the projection window."
+		if factoryOrdersQueryFailed {
+			reason = "Work FactoryOrder seed task query failed; see FailureReasons and ResidualRiskSummary for the store error."
+		}
+		fields = append(fields, CivilizationAssemblyUnavailableField{
 			Field:  "factory_order_summary",
 			Status: civilizationAssemblyFieldUnavailable,
-			Reason: "Hive operator projection exposes queued factory run requests and runtime evidence, not first-class FactoryOrder records.",
-		},
-		{
-			Field:  "execution_receipts",
-			Status: civilizationAssemblyFieldUnavailable,
-			Reason: "Hive operator projection does not expose protected-action execution receipt records.",
-		},
+			Reason: reason,
+		})
 	}
+	fields = append(fields, CivilizationAssemblyUnavailableField{
+		Field:  "execution_receipts",
+		Status: civilizationAssemblyFieldUnavailable,
+		Reason: "Hive operator projection does not expose protected-action execution receipt records.",
+	})
 	if len(p.Lifecycle) == 0 && len(civilizationAssemblyRuntimeAgents(p.RuntimeEvidence.AgentEvents)) == 0 {
 		fields = append(fields, CivilizationAssemblyUnavailableField{
 			Field:  "actor_roster",
