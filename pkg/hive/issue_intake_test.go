@@ -1599,6 +1599,233 @@ func TestProgressIssueScanLifecycleRecordsBlockerRoleOutputsAndCompletesStage(t 
 	}
 }
 
+func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+		Summary:                "Ready-for-Human result PR is surfaced with exact-head ready-state review evidence and awaits Human approval.",
+		SourceRefs:             []string{"test://ready-pr"},
+	}
+	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, IssueScanReadyPREvidenceArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact ready PR evidence: %v", err)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after ready PR evidence: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 3 {
+		t.Fatalf("ready role outputs = %+v, want strategist/reviewer/guardian", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if !readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR stage was not completed")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(readyStage.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts ready stage: %v", err)
+	}
+	roleOutputs := issueScanRoleOutputArtifactsForTest(t, artifacts)
+	for _, role := range []string{"strategist", "reviewer", "guardian"} {
+		if roleOutputs[role] == nil {
+			t.Fatalf("missing %s ready role output in %+v", role, roleOutputs)
+		}
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["strategist"].Outputs, "ready_pr_url") == nil {
+		t.Fatalf("strategist ready role output missing ready_pr_url: %+v", roleOutputs["strategist"].Outputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["strategist"].Outputs, "human_ready_summary") == nil {
+		t.Fatalf("strategist ready role output missing human_ready_summary: %+v", roleOutputs["strategist"].Outputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["reviewer"].Outputs, "ready_state_review") == nil {
+		t.Fatalf("reviewer ready role output missing ready_state_review: %+v", roleOutputs["reviewer"].Outputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["guardian"].Outputs, "human_approval_boundary_check") == nil {
+		t.Fatalf("guardian ready role output missing human_approval_boundary_check: %+v", roleOutputs["guardian"].Outputs)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
+		t.Fatalf("missing ready runtime evidence artifact: %+v", artifacts)
+	}
+
+	progress, err = rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after ready completion: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 0 {
+		t.Fatalf("ready role outputs after completed stage = %+v, want no duplicate records", progress.ReadyRoleOutputs)
+	}
+}
+
+func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  true,
+		ReadyForReview:         false,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+	}
+	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, IssueScanReadyPREvidenceArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact draft ready PR evidence: %v", err)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "PR must be non-draft and ready_for_review") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want non-draft ready_for_review rejection", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 0 {
+		t.Fatalf("ready role outputs = %+v, want none for rejected draft evidence", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR completed from draft evidence")
+	}
+}
+
+func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, string, string, work.Task, work.Task) {
+	t.Helper()
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	for _, stageID := range []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+	} {
+		if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, issueScanStageRuntimeEvidenceForTest(t, stageID), true); err != nil {
+			t.Fatalf("CompleteIssueScanLifecycleStage %s: %v", stageID, err)
+		}
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle seed implementation task: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
+	if !ok {
+		t.Fatalf("missing implementation task in %+v", tasks)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", issueScanOperateResultBodyForTest(), []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact initial Operate result: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, implementationTask.ID, "validation output: go test ./pkg/hive passed", []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete initial implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle complete implementation stage: %v", err)
+	}
+	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "request_changes", "exact-head review found blockers", []string{"missing regression test"}); err != nil {
+		t.Fatalf("append request_changes review: %v", err)
+	}
+	if err := rt.tasks.Reopen(writer.human, implementationTask.ID, "request_changes (review 1 of 3): exact-head review found blockers", []string{"missing regression test"}, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Reopen implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after request_changes: %v", err)
+	}
+	repairedBody := issueScanOperateResultBodyForTestWith(
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccccccccccc",
+		"codex/run-issue-001-repair",
+		"pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++\n2 files changed, 30 insertions(+), 2 deletions(-)",
+	)
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", repairedBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact repaired Operate result: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, implementationTask.ID, "validation output: go test ./pkg/hive -run TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage passed", []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete repaired implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after repair completion: %v", err)
+	}
+	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "approve", "rerun review approved repaired exact head with zero blockers", nil); err != nil {
+		t.Fatalf("append approving review: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after approving rerun: %v", err)
+	}
+	tasks, err = rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks after blocker progress: %v", err)
+	}
+	readyStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "surface_ready_for_Human_result_PR"))
+	if !ok {
+		t.Fatalf("missing ready-for-Human stage task in %+v", tasks)
+	}
+	blocked, err := rt.tasks.IsBlocked(readyStage.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked ready stage: %v", err)
+	}
+	if blocked {
+		t.Fatalf("ready stage remains blocked before ready evidence is attached")
+	}
+	return rt, writer, queued.RunID, orderID, implementationTask, readyStage
+}
+
 func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{

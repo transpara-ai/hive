@@ -456,7 +456,10 @@ func (r *Runtime) issueScanImplementationCompletionEvidence(taskID, implementati
 	if err != nil {
 		return issueScanOperateCompletionEvidence{}, false, fmt.Errorf("list implementation task artifacts: %w", err)
 	}
-	operate, ok := latestIssueScanOperateResultArtifact(artifacts)
+	operate, ok := issueScanOperateResultArtifactByID(artifacts, completion.ArtifactRef)
+	if !ok {
+		operate, ok = latestIssueScanOperateResultArtifact(artifacts)
+	}
 	if !ok {
 		return issueScanOperateCompletionEvidence{}, false, fmt.Errorf("completed implementation task %s has no Operate result artifact", taskID.Value())
 	}
@@ -509,13 +512,32 @@ func (r *Runtime) liveIssueScanImplementationCompletion(taskID types.EventID) (t
 	return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, nil
 }
 
-func latestIssueScanOperateResultArtifact(artifacts []work.ArtifactEvent) (work.ArtifactEvent, bool) {
-	for i := len(artifacts) - 1; i >= 0; i-- {
-		if strings.EqualFold(strings.TrimSpace(artifacts[i].Label), "Operate result") {
-			return artifacts[i], true
+func issueScanOperateResultArtifactByID(artifacts []work.ArtifactEvent, id types.EventID) (work.ArtifactEvent, bool) {
+	if id == (types.EventID{}) {
+		return work.ArtifactEvent{}, false
+	}
+	for _, artifact := range artifacts {
+		if artifact.ID == id && strings.EqualFold(strings.TrimSpace(artifact.Label), "Operate result") {
+			return artifact, true
 		}
 	}
 	return work.ArtifactEvent{}, false
+}
+
+func latestIssueScanOperateResultArtifact(artifacts []work.ArtifactEvent) (work.ArtifactEvent, bool) {
+	var best work.ArtifactEvent
+	for _, artifact := range artifacts {
+		if !strings.EqualFold(strings.TrimSpace(artifact.Label), "Operate result") {
+			continue
+		}
+		if best.ID == (types.EventID{}) || artifact.Timestamp.After(best.Timestamp) || (artifact.Timestamp.Equal(best.Timestamp) && artifact.ID.Value() > best.ID.Value()) {
+			best = artifact
+		}
+	}
+	if best.ID == (types.EventID{}) {
+		return work.ArtifactEvent{}, false
+	}
+	return best, true
 }
 
 type parsedIssueScanOperateResult struct {

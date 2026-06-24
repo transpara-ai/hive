@@ -965,6 +965,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan blocker evidence bridge: recorded %d role output(s)\n", recorded)
 			}
+			if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan ready-PR evidence bridge: recorded %d role output(s)\n", recorded)
+			}
 		}
 	}
 }
@@ -977,6 +980,7 @@ type issueScanLifecycleProgress struct {
 	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
+	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
 }
 
 func (r *Runtime) progressIssueScanLifecycle() (issueScanLifecycleProgress, error) {
@@ -1044,6 +1048,18 @@ func (r *Runtime) progressIssueScanLifecycle() (issueScanLifecycleProgress, erro
 			errs = append(errs, fmt.Errorf("issue-scan lifecycle post-blocker auto-completion: %w", err))
 		}
 	}
+	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(dispatch)
+	progress.ReadyRoleOutputs = readyRoleOutputs
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan ready role-output recording: %w", err))
+	}
+	if len(readyRoleOutputs) > 0 {
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		progress.Completions = append(progress.Completions, moreCompletions...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("issue-scan lifecycle post-ready auto-completion: %w", err))
+		}
+	}
 	return progress, errors.Join(errs...)
 }
 
@@ -1081,6 +1097,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d blocker role output(s)\n", recorded)
 	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
+	}
 }
 
 func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summary string) {
@@ -1099,6 +1118,9 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d blocker role output(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
 	}
 	if len(progress.Completions) > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
@@ -1120,6 +1142,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d blocker role output(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
 	}
 	if len(progress.Completions) > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
