@@ -21,11 +21,13 @@ const (
 	defaultRunLaunchDispatchLimit    = 100
 	defaultRunLaunchDispatchInterval = 15 * time.Second
 
-	IssueScanExecutionPlanArtifactLabel     = "issue_scan_execution_plan"
-	IssueScanLifecycleStageArtifactPrefix   = "issue_scan_lifecycle_stage_"
-	IssueScanStageRoleContractArtifactLabel = "issue_scan_stage_role_contract"
-	issueScanExecutionPlanArtifactMediaType = "application/json"
-	issueScanStageRoleContractArtifactKind  = "issue_scan_stage_role_contract"
+	IssueScanExecutionPlanArtifactLabel       = "issue_scan_execution_plan"
+	IssueScanLifecycleStageArtifactPrefix     = "issue_scan_lifecycle_stage_"
+	IssueScanStageRoleContractArtifactLabel   = "issue_scan_stage_role_contract"
+	IssueScanStageOutputContractArtifactLabel = "issue_scan_stage_output_contract"
+	issueScanExecutionPlanArtifactMediaType   = "application/json"
+	issueScanStageRoleContractArtifactKind    = "issue_scan_stage_role_contract"
+	issueScanStageOutputContractArtifactKind  = "issue_scan_stage_output_contract"
 )
 
 type issueScanDispatchArtifact struct {
@@ -395,6 +397,9 @@ func (r *Runtime) ensureIssueScanLifecycleStageTaskDrafts(content FactoryRunRequ
 		if err := r.attachIssueScanLifecycleStageTaskRoleContract(content, order, draft, requestID, parentTaskID, stageTaskID, convID); err != nil {
 			return out, fmt.Errorf("attach stage task %q role contract: %w", draft.StageID, err)
 		}
+		if err := r.attachIssueScanLifecycleStageTaskOutputContract(content, order, draft, requestID, parentTaskID, stageTaskID, convID); err != nil {
+			return out, fmt.Errorf("attach stage task %q output contract: %w", draft.StageID, err)
+		}
 		if previous != (types.EventID{}) {
 			if err := r.ensureIssueScanStageTaskDependency(stageTaskID, previous, requestID, parentTaskID, convID); err != nil {
 				return out, fmt.Errorf("link stage task %q after previous stage: %w", draft.StageID, err)
@@ -621,6 +626,30 @@ func (r *Runtime) attachIssueScanLifecycleStageTaskRoleContract(content FactoryR
 	return r.tasks.AddArtifact(r.humanID, stageTaskID, IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, body, causes, convID)
 }
 
+func (r *Runtime) attachIssueScanLifecycleStageTaskOutputContract(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft, requestID, parentTaskID, stageTaskID types.EventID, convID types.ConversationID) error {
+	if r == nil || r.tasks == nil {
+		return nil
+	}
+	body, err := issueScanLifecycleStageTaskOutputContractBody(content, order, draft)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("stage task %q output contract body is empty", draft.StageID)
+	}
+	existingArtifacts, err := r.tasks.ListArtifacts(stageTaskID)
+	if err != nil {
+		return fmt.Errorf("list stage task %q artifacts: %w", draft.StageID, err)
+	}
+	for _, artifact := range existingArtifacts {
+		if strings.TrimSpace(artifact.Label) == IssueScanStageOutputContractArtifactLabel {
+			return nil
+		}
+	}
+	causes := []types.EventID{requestID, parentTaskID, stageTaskID}
+	return r.tasks.AddArtifact(r.humanID, stageTaskID, IssueScanStageOutputContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, body, causes, convID)
+}
+
 func issueScanLifecycleStageTaskTitle(stage OperatorQueuedRunLifecycleStage) string {
 	name := strings.TrimSpace(stage.Name)
 	if name == "" {
@@ -750,6 +779,59 @@ func issueScanLifecycleStageTaskRoleContractBody(content FactoryRunRequestedCont
 		return "", fmt.Errorf("marshal issue-scan stage role contract %q: %w", draft.StageID, err)
 	}
 	return string(encoded), nil
+}
+
+func issueScanLifecycleStageTaskOutputContractBody(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft) (string, error) {
+	stage := draft.Stage
+	payload := struct {
+		Kind                string                                   `json:"kind"`
+		LifecycleVersion    string                                   `json:"lifecycle_version"`
+		RunID               string                                   `json:"run_id"`
+		FactoryOrderID      string                                   `json:"factory_order_id"`
+		StageID             string                                   `json:"stage_id"`
+		StageIndex          int                                      `json:"stage_index"`
+		StageCount          int                                      `json:"stage_count"`
+		Stage               OperatorQueuedRunLifecycleStage          `json:"stage"`
+		RequiredEvidence    []string                                 `json:"required_evidence"`
+		ExpectedOutputs     []string                                 `json:"expected_outputs"`
+		RoleOutputContracts []CivilizationAssemblyRoleOutputContract `json:"role_output_contracts"`
+		EvidenceKind        string                                   `json:"evidence_kind"`
+		EvidenceStatus      string                                   `json:"evidence_status"`
+	}{
+		Kind:                issueScanStageOutputContractArtifactKind,
+		LifecycleVersion:    issueScanLifecycleVersion,
+		RunID:               strings.TrimSpace(content.RunID),
+		FactoryOrderID:      strings.TrimSpace(order.ID),
+		StageID:             strings.TrimSpace(stage.ID),
+		StageIndex:          draft.StageIndex,
+		StageCount:          draft.StageCount,
+		Stage:               stage,
+		RequiredEvidence:    compactStrings(stage.RequiredEvidence),
+		ExpectedOutputs:     issueScanLifecycleStageTaskExpectedOutputs(stage, draft.AgentExecutionPlan),
+		RoleOutputContracts: issueScanStageRoleOutputContracts(stage, draft.AgentExecutionPlan),
+		EvidenceKind:        "required_output_contract_not_runtime_execution",
+		EvidenceStatus:      "pending_runtime_evidence",
+	}
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal issue-scan stage output contract %q: %w", draft.StageID, err)
+	}
+	return string(encoded), nil
+}
+
+func issueScanStageRoleOutputContracts(stage OperatorQueuedRunLifecycleStage, steps []OperatorQueuedRunAgentPlanStep) []CivilizationAssemblyRoleOutputContract {
+	out := make([]CivilizationAssemblyRoleOutputContract, 0, len(steps))
+	for _, step := range steps {
+		out = append(out, CivilizationAssemblyRoleOutputContract{
+			Role:              strings.TrimSpace(step.Role),
+			CanOperate:        step.CanOperate,
+			RequiredOutputs:   compactStrings(step.RequiredOutputs),
+			AuthorityBoundary: valueOr(step.AuthorityBoundary, stage.AuthorityBoundary),
+			CompletionGate:    valueOr(step.CompletionGate, stage.CompletionGate),
+			EvidenceStatus:    "required_not_observed",
+		})
+	}
+	return compactCivilizationAssemblyRoleOutputContracts(out)
 }
 
 func issueScanLifecycleStageTaskCanonicalID(orderID, stageID string) string {

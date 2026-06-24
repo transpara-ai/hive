@@ -780,6 +780,82 @@ func TestBuildCivilizationAssemblyProjectionRejectsMismatchedRoleContracts(t *te
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionRejectsMismatchedOutputContracts(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	orderID := "fo_run_issue_scan_output_contracts_001"
+	stageID := "research_issue_and_repo_context"
+	task := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Issue-scan stage: Research issue and repo context",
+		Description:     "Stage task draft with a wrong-stage output contract.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID(orderID, stageID),
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    task.ID(),
+		Label:     IssueScanStageOutputContractArtifactLabel,
+		MediaType: issueScanExecutionPlanArtifactMediaType,
+		Body:      issueScanOutputContractBodyForProjectionTest(t, orderID, "run_adversarial_review", []string{"reviewer"}, []string{"exact_head_review_artifact"}),
+		CreatedBy: actorID,
+	})
+	wrongOrderTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Issue-scan stage: Research second issue",
+		Description:     "Stage task draft with a wrong-order output contract.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID(orderID, stageID),
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    wrongOrderTask.ID(),
+		Label:     IssueScanStageOutputContractArtifactLabel,
+		MediaType: issueScanExecutionPlanArtifactMediaType,
+		Body:      issueScanOutputContractBodyForProjectionTest(t, "fo_run_issue_scan_output_contracts_other", stageID, []string{"strategist"}, []string{"repo_context_packet"}),
+		CreatedBy: actorID,
+	})
+	divergentTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Issue-scan stage: Debate with correct civic roles",
+		Description:     "Stage task draft with duplicate divergent output contracts.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID(orderID, "debate_with_correct_civic_roles"),
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    divergentTask.ID(),
+		Label:     IssueScanStageOutputContractArtifactLabel,
+		MediaType: issueScanExecutionPlanArtifactMediaType,
+		Body:      issueScanOutputContractBodyForProjectionTest(t, orderID, "debate_with_correct_civic_roles", []string{"strategist", "guardian"}, []string{"decision_record"}),
+		CreatedBy: actorID,
+	})
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    divergentTask.ID(),
+		Label:     IssueScanStageOutputContractArtifactLabel,
+		MediaType: issueScanExecutionPlanArtifactMediaType,
+		Body:      issueScanOutputContractBodyForProjectionTest(t, "fo_run_issue_scan_output_contracts_other", "run_adversarial_review", []string{"reviewer"}, []string{"exact_head_review_artifact"}),
+		CreatedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	for _, taskID := range []types.EventID{task.ID(), wrongOrderTask.ID(), divergentTask.ID()} {
+		taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, taskID.Value())
+		if taskEvidence == nil {
+			t.Fatalf("projection missing task evidence for %s", taskID)
+		}
+		if len(taskEvidence.RequiredEvidence) != 0 || len(taskEvidence.OutputContractRefs) != 0 || len(taskEvidence.RoleOutputContracts) != 0 {
+			t.Fatalf("mismatched output contract projected for task %s: %+v", taskID, taskEvidence)
+		}
+	}
+	if !civilizationProjectionFailureContains(projection, "divergent output contract") {
+		t.Fatalf("failure reasons = %+v, want divergent output contract projection error", projection.FailureReasons)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderLifecycleEvidence(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
@@ -3113,6 +3189,55 @@ func issueScanRoleContractBodyForProjectionTest(t *testing.T, orderID, stageID s
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal role contract: %v", err)
+	}
+	return string(encoded)
+}
+
+func issueScanOutputContractBodyForProjectionTest(t *testing.T, orderID, stageID string, roles, evidence []string) string {
+	t.Helper()
+	roleContracts := make([]CivilizationAssemblyRoleOutputContract, 0, len(roles))
+	for _, role := range roles {
+		roleContracts = append(roleContracts, CivilizationAssemblyRoleOutputContract{
+			Role:              role,
+			RequiredOutputs:   []string{"projection_contract_" + safeRunLaunchID(role)},
+			EvidenceStatus:    "pending_runtime_evidence",
+			CompletionGate:    "evidence_refs_recorded",
+			AuthorityBoundary: "human_approval_required_no_merge",
+		})
+	}
+	payload := struct {
+		Kind                string                                   `json:"kind"`
+		LifecycleVersion    string                                   `json:"lifecycle_version"`
+		RunID               string                                   `json:"run_id"`
+		FactoryOrderID      string                                   `json:"factory_order_id"`
+		StageID             string                                   `json:"stage_id"`
+		Stage               OperatorQueuedRunLifecycleStage          `json:"stage"`
+		RequiredEvidence    []string                                 `json:"required_evidence"`
+		ExpectedOutputs     []string                                 `json:"expected_outputs"`
+		RoleOutputContracts []CivilizationAssemblyRoleOutputContract `json:"role_output_contracts"`
+		EvidenceKind        string                                   `json:"evidence_kind"`
+		EvidenceStatus      string                                   `json:"evidence_status"`
+	}{
+		Kind:             issueScanStageOutputContractArtifactKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            "run_issue_scan_output_contracts_001",
+		FactoryOrderID:   orderID,
+		StageID:          stageID,
+		Stage: OperatorQueuedRunLifecycleStage{
+			ID:               stageID,
+			RequiredRoles:    append([]string(nil), roles...),
+			RequiredEvidence: append([]string(nil), evidence...),
+			EvidenceStatus:   "expected_not_observed",
+		},
+		RequiredEvidence:    append([]string(nil), evidence...),
+		ExpectedOutputs:     append([]string(nil), evidence...),
+		RoleOutputContracts: roleContracts,
+		EvidenceKind:        "stage_output_contract_not_runtime_execution",
+		EvidenceStatus:      "pending_runtime_evidence",
+	}
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal output contract: %v", err)
 	}
 	return string(encoded)
 }

@@ -304,7 +304,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			t.Fatalf("ListArtifacts %s: %v", stageTask.ID, err)
 		}
 		stageTaskArtifactLabels := issueScanArtifactLabels(stageTaskArtifacts)
-		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel} {
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel, IssueScanStageOutputContractArtifactLabel} {
 			if !containsIssueScanValue(stageTaskArtifactLabels, label) {
 				t.Fatalf("stage task %q artifact labels = %+v, want %s", stageID, stageTaskArtifactLabels, label)
 			}
@@ -335,6 +335,41 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 				t.Fatalf("stage task %q role contract missing role %q: %+v", stageID, role, decodedRoleContract)
 			}
 		}
+		outputContract := issueScanArtifactByLabel(stageTaskArtifacts, IssueScanStageOutputContractArtifactLabel)
+		if outputContract == nil {
+			t.Fatalf("stage task %q missing output contract artifact in %+v", stageID, stageTaskArtifactLabels)
+		}
+		var decodedOutputContract struct {
+			Kind                string                                   `json:"kind"`
+			FactoryOrderID      string                                   `json:"factory_order_id"`
+			StageID             string                                   `json:"stage_id"`
+			RequiredEvidence    []string                                 `json:"required_evidence"`
+			ExpectedOutputs     []string                                 `json:"expected_outputs"`
+			RoleOutputContracts []CivilizationAssemblyRoleOutputContract `json:"role_output_contracts"`
+		}
+		if err := json.Unmarshal([]byte(outputContract.Body), &decodedOutputContract); err != nil {
+			t.Fatalf("unmarshal output contract for %q: %v", stageID, err)
+		}
+		if decodedOutputContract.Kind != issueScanStageOutputContractArtifactKind || decodedOutputContract.FactoryOrderID != task.FactoryOrderID || decodedOutputContract.StageID != stageID {
+			t.Fatalf("stage task %q output contract = %+v", stageID, decodedOutputContract)
+		}
+		for _, evidence := range expectedStage.RequiredEvidence {
+			if !containsIssueScanValue(decodedOutputContract.RequiredEvidence, evidence) || !containsIssueScanValue(decodedOutputContract.ExpectedOutputs, evidence) {
+				t.Fatalf("stage task %q output contract missing required evidence %q: %+v", stageID, evidence, decodedOutputContract)
+			}
+		}
+		for _, role := range expectedStage.RequiredRoles {
+			plan := issueScanPlanStepByRole(brief.AgentExecutionPlan, stageID, role)
+			outputs := issueScanRoleOutputContractByRole(decodedOutputContract.RoleOutputContracts, role)
+			if plan == nil || outputs == nil {
+				t.Fatalf("stage task %q output contract missing role %q: plan=%+v contract=%+v", stageID, role, plan, decodedOutputContract.RoleOutputContracts)
+			}
+			for _, output := range plan.RequiredOutputs {
+				if !containsIssueScanValue(outputs.RequiredOutputs, output) {
+					t.Fatalf("stage task %q output contract for role %q missing output %q: %+v", stageID, role, output, outputs)
+				}
+			}
+		}
 		draft, ok := stageDraftsByStage[safeRunLaunchID(stageID)]
 		if !ok {
 			t.Fatalf("missing stage draft %q in %+v", stageID, stageDraftsByStage)
@@ -345,12 +380,15 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		if err := rt.attachIssueScanLifecycleStageTaskRoleContract(content, order, draft, request.ID(), task.ID, stageTask.ID, writer.conv); err != nil {
 			t.Fatalf("reattach stage task %q role contract: %v", stageID, err)
 		}
+		if err := rt.attachIssueScanLifecycleStageTaskOutputContract(content, order, draft, request.ID(), task.ID, stageTask.ID, writer.conv); err != nil {
+			t.Fatalf("reattach stage task %q output contract: %v", stageID, err)
+		}
 		stageTaskArtifacts, err = rt.tasks.ListArtifacts(stageTask.ID)
 		if err != nil {
 			t.Fatalf("ListArtifacts after reattach %s: %v", stageTask.ID, err)
 		}
 		stageTaskArtifactLabels = issueScanArtifactLabels(stageTaskArtifacts)
-		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel} {
+		for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan, IssueScanStageRoleContractArtifactLabel, IssueScanStageOutputContractArtifactLabel} {
 			if countIssueScanValues(stageTaskArtifactLabels, label) != 1 {
 				t.Fatalf("stage task %q artifact labels after reattach = %+v, want one %s", stageID, stageTaskArtifactLabels, label)
 			}
@@ -420,6 +458,26 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		}
 		if len(taskEvidence.RoleContractRefs) == 0 {
 			t.Fatalf("projected stage task %q missing role contract refs: %+v", stageID, taskEvidence)
+		}
+		if len(taskEvidence.OutputContractRefs) == 0 {
+			t.Fatalf("projected stage task %q missing output contract refs: %+v", stageID, taskEvidence)
+		}
+		for _, evidence := range expectedStage.RequiredEvidence {
+			if !containsIssueScanValue(taskEvidence.RequiredEvidence, evidence) || !containsIssueScanValue(taskEvidence.ExpectedOutputs, evidence) {
+				t.Fatalf("projected stage task %q output evidence missing %q: %+v", stageID, evidence, taskEvidence)
+			}
+		}
+		for _, role := range expectedStage.RequiredRoles {
+			plan := issueScanPlanStepByRole(brief.AgentExecutionPlan, stageID, role)
+			outputs := issueScanRoleOutputContractByRole(taskEvidence.RoleOutputContracts, role)
+			if plan == nil || outputs == nil {
+				t.Fatalf("projected stage task %q output contract missing role %q: plan=%+v task=%+v", stageID, role, plan, taskEvidence)
+			}
+			for _, output := range plan.RequiredOutputs {
+				if !containsIssueScanValue(outputs.RequiredOutputs, output) {
+					t.Fatalf("projected stage task %q output contract for role %q missing output %q: %+v", stageID, role, output, outputs)
+				}
+			}
 		}
 		if i == 0 {
 			if taskEvidence.Status != "work_task_ready" || !taskEvidence.Ready || taskEvidence.Blocked {
@@ -708,6 +766,15 @@ func civilizationProjectionPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep
 	for i := range steps {
 		if steps[i].StageID == stageID && steps[i].Role == role {
 			return &steps[i]
+		}
+	}
+	return nil
+}
+
+func issueScanRoleOutputContractByRole(contracts []CivilizationAssemblyRoleOutputContract, role string) *CivilizationAssemblyRoleOutputContract {
+	for i := range contracts {
+		if contracts[i].Role == role {
+			return &contracts[i]
 		}
 	}
 	return nil
