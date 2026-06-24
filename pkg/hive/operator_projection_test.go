@@ -463,6 +463,208 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrders(t *testing
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionProjectsIssueScanStageTaskDrafts(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	sourceEventID := newTestEventID(t)
+	briefEventID := newTestEventID(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 323,
+		Title:  "Project issue-scan stage task drafts",
+		URL:    "https://github.com/transpara-ai/hive/issues/323",
+		Body:   "Stage task drafts should appear in the Civilization Work evidence projection.",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_stage_tasks_001",
+		IntakeID:   "intake_issue_scan_stage_tasks_001",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#323",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 12,
+			MaxCostUSD:    25,
+		},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: sourceEventID,
+		BriefEventID:  briefEventID,
+		Brief:         brief,
+	})
+	orderID := "fo_run_issue_scan_stage_tasks_001"
+	parentTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Resolve transpara-ai/hive#323",
+		Description:            "FactoryOrder seed task.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_stage_tasks_001"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_stage_tasks_001"},
+		Cell:                   "implementation",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+	researchTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Issue-scan stage: Research issue and repo context",
+		Description:            "Stage ID: research_issue_and_repo_context",
+		CreatedBy:              actorID,
+		CanonicalTaskID:        issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context"),
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_stage_tasks_001"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_stage_tasks_001"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "repo_context_packet"},
+	})
+	debateTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Issue-scan stage: Debate with correct civic roles",
+		Description:            "Stage ID: debate_with_correct_civic_roles",
+		CreatedBy:              actorID,
+		CanonicalTaskID:        issueScanLifecycleStageTaskCanonicalID(orderID, "debate_with_correct_civic_roles"),
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_stage_tasks_001"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_stage_tasks_001"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "decision_record"},
+	})
+	dependencyEvent := appendEvent(work.EventTypeTaskDependencyAdded, work.TaskDependencyContent{
+		TaskID:      debateTask.ID(),
+		DependsOnID: researchTask.ID(),
+		AddedBy:     actorID,
+	})
+	secondOrderID := "fo_run_issue_scan_stage_tasks_002"
+	secondParentTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Resolve transpara-ai/hive#324",
+		Description:            "Second FactoryOrder seed task.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         secondOrderID,
+		RequirementIDs:         []string{"req_run_issue_scan_stage_tasks_002"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_stage_tasks_002"},
+		Cell:                   "implementation",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+	secondResearchTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Issue-scan stage: Research second issue",
+		Description:            "Stage ID: research_issue_and_repo_context",
+		CreatedBy:              actorID,
+		CanonicalTaskID:        issueScanLifecycleStageTaskCanonicalID(secondOrderID, "research_issue_and_repo_context"),
+		FactoryOrderID:         secondOrderID,
+		RequirementIDs:         []string{"req_run_issue_scan_stage_tasks_002"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_stage_tasks_002"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "repo_context_packet"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.WorkEvidenceSummary.Tasks) != 5 {
+		t.Fatalf("task evidence = %+v, want two parents plus three stage task drafts", projection.WorkEvidenceSummary.Tasks)
+	}
+	parentEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, parentTask.ID().Value())
+	if parentEvidence == nil || parentEvidence.LifecycleStageID != "" || parentEvidence.FactoryOrderID != orderID {
+		t.Fatalf("parent task evidence = %+v", parentEvidence)
+	}
+	if parentEvidence.Status != "work_task_seeded" || parentEvidence.Ready || parentEvidence.Blocked {
+		t.Fatalf("parent task status/readiness = %+v", parentEvidence)
+	}
+	researchEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, researchTask.ID().Value())
+	if researchEvidence == nil || researchEvidence.LifecycleStageID != "research_issue_and_repo_context" {
+		t.Fatalf("research task evidence = %+v", researchEvidence)
+	}
+	if researchEvidence.Status != "work_task_seeded" || researchEvidence.Ready || researchEvidence.Blocked {
+		t.Fatalf("research task status/readiness = %+v", researchEvidence)
+	}
+	if researchEvidence.CanonicalTaskID != issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context") || researchEvidence.Cell != "planning" {
+		t.Fatalf("research task metadata = %+v", researchEvidence)
+	}
+	if !containsString(researchEvidence.ExpectedOutputs, "repo_context_packet") || len(researchEvidence.DependsOnRefs) != 0 {
+		t.Fatalf("research task outputs/deps = %+v", researchEvidence)
+	}
+	debateEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, debateTask.ID().Value())
+	if debateEvidence == nil || debateEvidence.LifecycleStageID != "debate_with_correct_civic_roles" {
+		t.Fatalf("debate task evidence = %+v", debateEvidence)
+	}
+	if debateEvidence.Status != "work_task_blocked" || debateEvidence.Ready || !debateEvidence.Blocked {
+		t.Fatalf("debate task status/readiness = %+v", debateEvidence)
+	}
+	if !containsString(debateEvidence.DependsOnRefs, researchTask.ID().Value()) {
+		t.Fatalf("debate task deps = %+v, want research task %s", debateEvidence.DependsOnRefs, researchTask.ID().Value())
+	}
+	if !containsString(debateEvidence.SourceRefs, dependencyEvent.ID().Value()) {
+		t.Fatalf("debate task source refs = %+v, want dependency event %s", debateEvidence.SourceRefs, dependencyEvent.ID().Value())
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, dependencyEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want dependency event %s", projection.SourceEventIDsOrQueryWindow, dependencyEvent.ID().Value())
+	}
+	secondParentEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, secondParentTask.ID().Value())
+	if secondParentEvidence == nil || secondParentEvidence.LifecycleStageID != "" || secondParentEvidence.FactoryOrderID != secondOrderID {
+		t.Fatalf("second parent task evidence = %+v", secondParentEvidence)
+	}
+	secondResearchEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, secondResearchTask.ID().Value())
+	if secondResearchEvidence == nil || secondResearchEvidence.LifecycleStageID != "research_issue_and_repo_context" {
+		t.Fatalf("second research task evidence = %+v", secondResearchEvidence)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDerivesStageTaskIDWithoutQueuedRun(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	orderID := "fo_run_issue_scan_stage_tasks_no_queue"
+	stageID := "research_issue_and_repo_context"
+	stageTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Issue-scan stage: Research issue and repo context",
+		Description:     "Stage task draft remains identifiable without queued runtime evidence.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID(orderID, stageID),
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+	unknownStageTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Non-issue-scan task with task-shaped canonical ID",
+		Description:     "Unknown stage IDs should not be projected as issue-scan lifecycle stages.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: "tsk_" + factoryOrderIDSuffix(orderID) + "_not_a_real_issue_scan_stage",
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+	mismatchedOrderTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:           "Task with another order's stage canonical ID",
+		Description:     "Canonical task IDs must match the task FactoryOrderID suffix.",
+		CreatedBy:       actorID,
+		CanonicalTaskID: issueScanLifecycleStageTaskCanonicalID("fo_other_issue_scan_order", stageID),
+		FactoryOrderID:  orderID,
+		Cell:            "planning",
+		RiskClass:       "high",
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	stageEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, stageTask.ID().Value())
+	if stageEvidence == nil || stageEvidence.LifecycleStageID != stageID {
+		t.Fatalf("stage task evidence = %+v, want lifecycle stage %q", stageEvidence, stageID)
+	}
+	unknownStageEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, unknownStageTask.ID().Value())
+	if unknownStageEvidence == nil || unknownStageEvidence.LifecycleStageID != "" {
+		t.Fatalf("unknown stage task evidence = %+v, want no lifecycle stage", unknownStageEvidence)
+	}
+	mismatchedOrderEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, mismatchedOrderTask.ID().Value())
+	if mismatchedOrderEvidence == nil || mismatchedOrderEvidence.LifecycleStageID != "" {
+		t.Fatalf("mismatched order task evidence = %+v, want no lifecycle stage", mismatchedOrderEvidence)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderLifecycleEvidence(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
@@ -2841,6 +3043,15 @@ func civilizationProjectionArtifactEvidenceByID(artifacts []CivilizationAssembly
 	for i := range artifacts {
 		if artifacts[i].ID == eventID {
 			return &artifacts[i]
+		}
+	}
+	return nil
+}
+
+func civilizationProjectionTaskEvidenceByID(tasks []CivilizationAssemblyTaskEvidence, eventID string) *CivilizationAssemblyTaskEvidence {
+	for i := range tasks {
+		if tasks[i].ID == eventID {
+			return &tasks[i]
 		}
 	}
 	return nil
