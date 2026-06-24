@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
 
@@ -454,6 +455,10 @@ func (r *Runtime) issueScanStageRecordedRuntimeRoleOutputs(taskID types.EventID,
 	if err != nil {
 		return nil, nil, fmt.Errorf("list issue-scan stage role output artifacts: %w", err)
 	}
+	creatorRoles, err := r.issueScanRoleOutputCreatorRoles()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve issue-scan role output creator roles: %w", err)
+	}
 	byRole := map[string]IssueScanStageRuntimeRoleOutput{}
 	refsByRole := map[string][]string{}
 	for _, artifact := range artifacts {
@@ -469,6 +474,9 @@ func (r *Runtime) issueScanStageRecordedRuntimeRoleOutputs(taskID types.EventID,
 			return nil, nil, fmt.Errorf("validate issue-scan role output artifact %s: %w", artifact.ID.Value(), err)
 		}
 		role := strings.TrimSpace(normalized.Role)
+		if !issueScanStageRoleOutputCreatorAccepted(artifact.CreatedBy, role, creatorRoles) {
+			continue
+		}
 		byRole[role] = IssueScanStageRuntimeRoleOutput{
 			Role:         role,
 			Summary:      strings.TrimSpace(normalized.Summary),
@@ -489,6 +497,69 @@ func (r *Runtime) issueScanStageRecordedRuntimeRoleOutputs(taskID types.EventID,
 		refs = append(refs, refsByRole[role]...)
 	}
 	return out, compactStrings(refs), nil
+}
+
+func issueScanStageRoleOutputCreatorAccepted(createdBy types.ActorID, claimedRole string, creatorRoles map[string]string) bool {
+	claimedRole = strings.TrimSpace(claimedRole)
+	// Preserve existing human/system artifact paths: role binding is enforced
+	// only when CreatedBy resolves to a known agent identity role.
+	if createdBy == (types.ActorID{}) || claimedRole == "" {
+		return true
+	}
+	creatorRole, ok := creatorRoles[createdBy.Value()]
+	if !ok || strings.TrimSpace(creatorRole) == "" {
+		return true
+	}
+	return strings.TrimSpace(creatorRole) == claimedRole
+}
+
+func (r *Runtime) issueScanRoleOutputCreatorRoles() (map[string]string, error) {
+	roles := map[string]string{}
+	if r == nil || r.store == nil {
+		return roles, nil
+	}
+	setRole := func(actorID string, role string) {
+		actorID = strings.TrimSpace(actorID)
+		role = strings.TrimSpace(role)
+		if actorID != "" && role != "" {
+			roles[actorID] = role
+		}
+	}
+
+	// Precedence is explicit: low-level EventGraph identity is the fallback,
+	// runtime spawn can refine it, and Hive's registered identity from
+	// hive.runtime.spawnAgent is canonical for managed runtime agents.
+	identityEvents, err := eventsByTypePaginated(r.store, event.EventTypeAgentIdentityCreated, defaultOperatorProjectionLimit)
+	if err != nil {
+		return nil, err
+	}
+	for _, ev := range identityEvents {
+		content, ok := ev.Content().(event.AgentIdentityCreatedContent)
+		if ok {
+			setRole(content.AgentID.Value(), content.AgentType)
+		}
+	}
+	spawnedEvents, err := eventsByTypePaginated(r.store, EventTypeAgentSpawned, defaultOperatorProjectionLimit)
+	if err != nil {
+		return nil, err
+	}
+	for _, ev := range spawnedEvents {
+		content, ok := ev.Content().(AgentSpawnedContent)
+		if ok {
+			setRole(content.ActorID, content.Role)
+		}
+	}
+	registeredEvents, err := eventsByTypePaginated(r.store, EventTypeAgentIdentityRegistered, defaultOperatorProjectionLimit)
+	if err != nil {
+		return nil, err
+	}
+	for _, ev := range registeredEvents {
+		content, ok := ev.Content().(AgentIdentityRegisteredContent)
+		if ok {
+			setRole(content.ActorID.Value(), content.Role)
+		}
+	}
+	return roles, nil
 }
 
 func issueScanStageRoleOutputArtifact(eventRef, label, body string) (IssueScanStageRoleOutputEvidence, bool, error) {
