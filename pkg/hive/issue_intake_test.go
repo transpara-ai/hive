@@ -3994,6 +3994,9 @@ func TestCreateIssueScanDraftPRFromApprovedRequestRecordsReceipt(t *testing.T) {
 	if !result.Created || !result.NoReadyReviewMergeDeploy {
 		t.Fatalf("result = %+v, want draft creation with no ready/review/merge/deploy claim", result)
 	}
+	if result.CreationReservationID.IsZero() {
+		t.Fatalf("missing draft PR creation reservation artifact: %+v", result)
+	}
 	if result.PRNumber != 111 || result.PRURL != "https://github.com/transpara-ai/hive/pull/111" || result.HeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
 		t.Fatalf("result PR fields = %+v", result)
 	}
@@ -4017,6 +4020,33 @@ func TestCreateIssueScanDraftPRFromApprovedRequestRecordsReceipt(t *testing.T) {
 	}
 	if len(receipts) != 1 || receipts[0].Receipt.AuthorityRequestID != requestResult.RequestID.Value() {
 		t.Fatalf("ready-stage receipts = %+v, want one tied to request %s", receipts, requestResult.RequestID)
+	}
+	reservations := 0
+	for _, artifact := range artifacts {
+		reservation, ok, err := issueScanDraftPRCreationReservationArtifact(artifact.Label, artifact.Body)
+		if err != nil {
+			t.Fatalf("parse draft PR creation reservation artifact %s: %v", artifact.ID, err)
+		}
+		if !ok {
+			continue
+		}
+		reservations++
+		if artifact.ID != result.CreationReservationID || reservation.RequestID != requestResult.RequestID.Value() || reservation.HeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
+			t.Fatalf("reservation artifact = id %s payload %+v, want id %s request %s", artifact.ID, reservation, result.CreationReservationID, requestResult.RequestID)
+		}
+	}
+	if reservations != 1 {
+		t.Fatalf("reservation artifact count = %d, want 1 in %+v", reservations, artifacts)
+	}
+	if _, err := rt.ProgressIssueScanRunLifecycleContext(context.Background(), runID); err != nil {
+		t.Fatalf("ProgressIssueScanRunLifecycleContext after draft receipt: %v", err)
+	}
+	readyCompleted, err = rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted after lifecycle progress: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed after draft receipt lifecycle progress")
 	}
 }
 
@@ -4090,6 +4120,34 @@ func TestCreateIssueScanDraftPRFromApprovedRequestRefusesAfterReceipt(t *testing
 	}
 	if retryClient.calls != 0 {
 		t.Fatalf("retry client calls = %d, want none after receipt", retryClient.calls)
+	}
+}
+
+func TestCreateIssueScanDraftPRFromApprovedRequestRefusesAfterReservationWithoutReceipt(t *testing.T) {
+	rt, writer, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	requestContext, err := rt.IssueScanDraftPRAuthorityRequestContext(runID, requestResult.DraftPRTarget.BaseRef, requestResult.DraftPRTarget.BaseSHA, requestResult.DraftPRTarget.SingleUseNonce)
+	if err != nil {
+		t.Fatalf("IssueScanDraftPRAuthorityRequestContext: %v", err)
+	}
+	reservationID, err := rt.reserveIssueScanDraftPRCreation(requestContext, requestResult.DraftPRTarget, requestResult.RequestID)
+	if err != nil {
+		t.Fatalf("reserveIssueScanDraftPRCreation: %v", err)
+	}
+	if reservationID.IsZero() {
+		t.Fatalf("reservation id is zero")
+	}
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client); err == nil || !strings.Contains(err.Error(), "manual reconciliation") {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest error = %v, want manual reconciliation stop after reservation", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none when unresolved reservation exists", client.calls)
 	}
 }
 

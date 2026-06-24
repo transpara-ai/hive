@@ -2,12 +2,21 @@ package hive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
 )
+
+const (
+	issueScanDraftPRCreationReservationArtifactLabel = "issue_scan_draft_pr_creation_reservation"
+	issueScanDraftPRCreationReservationKind          = "issue_scan_draft_pr_creation_reservation"
+)
+
+var issueScanDraftPRCreationReservationMu sync.Mutex
 
 // IssueScanDraftPRCreationResult summarizes creation of the draft PR that will
 // later be marked ready and reviewed before Human merge approval. This result
@@ -17,6 +26,7 @@ type IssueScanDraftPRCreationResult struct {
 	FactoryOrderID           string
 	Repository               string
 	RequestID                string
+	CreationReservationID    types.EventID
 	WorkTaskID               types.EventID
 	DraftPRReceipt           IssueScanDraftPRReceiptRecordResult
 	PRNumber                 int
@@ -24,6 +34,28 @@ type IssueScanDraftPRCreationResult struct {
 	HeadSHA                  string
 	Created                  bool
 	NoReadyReviewMergeDeploy bool
+}
+
+type IssueScanDraftPRCreationReservation struct {
+	Kind                     string `json:"kind"`
+	LifecycleVersion         string `json:"lifecycle_version"`
+	RunID                    string `json:"run_id"`
+	FactoryOrderID           string `json:"factory_order_id"`
+	ReadyStageTaskID         string `json:"ready_stage_task_id"`
+	RequestID                string `json:"request_id"`
+	Repository               string `json:"repository"`
+	BaseRef                  string `json:"base_ref"`
+	BaseSHA                  string `json:"base_sha"`
+	HeadRef                  string `json:"head_ref"`
+	HeadSHA                  string `json:"head_sha"`
+	TitleHash                string `json:"title_hash"`
+	BodyHash                 string `json:"body_hash"`
+	PolicyBundleID           string `json:"policy_bundle_id"`
+	PolicyBundleHash         string `json:"policy_bundle_hash"`
+	AuthorityNonce           string `json:"authority_nonce"`
+	Result                   string `json:"result"`
+	ManualReconciliationOn   string `json:"manual_reconciliation_on"`
+	NoReadyReviewMergeDeploy bool   `json:"no_ready_review_merge_deploy"`
 }
 
 // CreateIssueScanDraftPRFromApprovedRequest consumes an approved draft-PR
@@ -71,6 +103,10 @@ func (r *Runtime) CreateIssueScanDraftPRFromApprovedRequest(ctx context.Context,
 	if err != nil {
 		return result, fmt.Errorf("parse request id: %w", err)
 	}
+	reservationID, err := r.reserveIssueScanDraftPRCreation(requestContext, target, requestEventID)
+	if err != nil {
+		return result, err
+	}
 	causes := compactEventIDs([]types.EventID{requestEventID})
 	convID := runLaunchConversationID(requestContext.RunID, r.convID)
 	run, err := CreateTransparaAIDraftPRFromApprovedDecision(ctx, r.tasks, r.humanID, convID, client, DraftPRArtifact{
@@ -91,6 +127,7 @@ func (r *Runtime) CreateIssueScanDraftPRFromApprovedRequest(ctx context.Context,
 	}
 	result.FactoryOrderID = requestContext.FactoryOrderID
 	result.Repository = requestContext.Repository
+	result.CreationReservationID = reservationID
 	result.WorkTaskID = run.WorkTask.ID
 	result.DraftPRReceipt = receiptResult
 	result.PRNumber = receiptResult.PRNumber
@@ -131,6 +168,104 @@ func validateIssueScanApprovedDraftPRTarget(approved, derived DraftPRTarget) err
 		}
 	}
 	return nil
+}
+
+func (r *Runtime) reserveIssueScanDraftPRCreation(requestContext IssueScanDraftPRAuthorityRequestContext, target DraftPRTarget, requestID types.EventID) (types.EventID, error) {
+	issueScanDraftPRCreationReservationMu.Lock()
+	defer issueScanDraftPRCreationReservationMu.Unlock()
+
+	if r == nil || r.tasks == nil {
+		return types.EventID{}, fmt.Errorf("runtime task store is required")
+	}
+	if requestID.IsZero() {
+		return types.EventID{}, fmt.Errorf("request id is required to reserve issue-scan draft PR creation")
+	}
+	readyStageTaskID, err := types.NewEventID(requestContext.ReadyStageTaskID)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("parse ready stage task id: %w", err)
+	}
+	artifacts, err := r.tasks.ListArtifacts(readyStageTaskID)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("list issue-scan ready-stage artifacts before draft PR reservation: %w", err)
+	}
+	for _, artifact := range artifacts {
+		reservation, ok, err := issueScanDraftPRCreationReservationArtifact(artifact.Label, artifact.Body)
+		if err != nil {
+			return types.EventID{}, fmt.Errorf("parse issue-scan draft PR creation reservation artifact %s: %w", artifact.ID.Value(), err)
+		}
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(reservation.RequestID) == requestID.Value() || strings.TrimSpace(reservation.AuthorityNonce) == strings.TrimSpace(target.SingleUseNonce) {
+			return types.EventID{}, fmt.Errorf("issue-scan draft PR creation already has reservation artifact %s for request %s at head %s; manual reconciliation is required before retry to avoid duplicate draft PR creation", artifact.ID.Value(), reservation.RequestID, reservation.HeadSHA)
+		}
+	}
+	body, err := issueScanDraftPRCreationReservationBody(issueScanDraftPRCreationReservation(requestContext, target, requestID))
+	if err != nil {
+		return types.EventID{}, err
+	}
+	causes := compactEventIDs([]types.EventID{requestID, readyStageTaskID})
+	if err := r.tasks.AddArtifact(r.humanID, readyStageTaskID, issueScanDraftPRCreationReservationArtifactLabel, "application/json", body, causes, runLaunchConversationID(requestContext.RunID, r.convID)); err != nil {
+		return types.EventID{}, fmt.Errorf("reserve issue-scan draft PR creation: %w", err)
+	}
+	artifactID, exists, err := r.findIssueScanReadyStageArtifactID(readyStageTaskID, issueScanDraftPRCreationReservationArtifactLabel, body)
+	if err != nil {
+		return types.EventID{}, err
+	}
+	if !exists {
+		return types.EventID{}, fmt.Errorf("issue-scan draft PR creation reservation artifact was not found after append")
+	}
+	return artifactID, nil
+}
+
+func issueScanDraftPRCreationReservation(requestContext IssueScanDraftPRAuthorityRequestContext, target DraftPRTarget, requestID types.EventID) IssueScanDraftPRCreationReservation {
+	return IssueScanDraftPRCreationReservation{
+		Kind:                     issueScanDraftPRCreationReservationKind,
+		LifecycleVersion:         issueScanLifecycleVersion,
+		RunID:                    strings.TrimSpace(requestContext.RunID),
+		FactoryOrderID:           strings.TrimSpace(requestContext.FactoryOrderID),
+		ReadyStageTaskID:         strings.TrimSpace(requestContext.ReadyStageTaskID),
+		RequestID:                requestID.Value(),
+		Repository:               strings.TrimSpace(target.Repository),
+		BaseRef:                  strings.TrimSpace(target.BaseRef),
+		BaseSHA:                  strings.TrimSpace(target.BaseSHA),
+		HeadRef:                  strings.TrimSpace(target.HeadRef),
+		HeadSHA:                  strings.TrimSpace(target.HeadSHA),
+		TitleHash:                strings.TrimSpace(target.TitleHash),
+		BodyHash:                 strings.TrimSpace(target.BodyHash),
+		PolicyBundleID:           strings.TrimSpace(target.PolicyBundleID),
+		PolicyBundleHash:         strings.TrimSpace(target.PolicyBundleHash),
+		AuthorityNonce:           strings.TrimSpace(target.SingleUseNonce),
+		Result:                   "reserved",
+		ManualReconciliationOn:   "reservation_without_" + TransparaAIDraftPRReceiptArtifactLabel,
+		NoReadyReviewMergeDeploy: true,
+	}
+}
+
+func issueScanDraftPRCreationReservationBody(reservation IssueScanDraftPRCreationReservation) (string, error) {
+	body, err := json.MarshalIndent(reservation, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal issue-scan draft PR creation reservation: %w", err)
+	}
+	return string(body), nil
+}
+
+func issueScanDraftPRCreationReservationArtifact(label, body string) (IssueScanDraftPRCreationReservation, bool, error) {
+	if strings.TrimSpace(label) != issueScanDraftPRCreationReservationArtifactLabel {
+		return IssueScanDraftPRCreationReservation{}, false, nil
+	}
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return IssueScanDraftPRCreationReservation{}, false, fmt.Errorf("label %q has empty artifact body", label)
+	}
+	var payload IssueScanDraftPRCreationReservation
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return IssueScanDraftPRCreationReservation{}, false, fmt.Errorf("decode artifact body: %w", err)
+	}
+	if strings.TrimSpace(payload.Kind) != issueScanDraftPRCreationReservationKind {
+		return IssueScanDraftPRCreationReservation{}, false, fmt.Errorf("kind %q does not match %q", payload.Kind, issueScanDraftPRCreationReservationKind)
+	}
+	return payload, true, nil
 }
 
 func issueScanDraftPRChangedFiles(summary string) ([]string, error) {
