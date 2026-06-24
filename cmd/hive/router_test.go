@@ -48,6 +48,82 @@ func TestCmdCivilizationRunRequiresHuman(t *testing.T) {
 	}
 }
 
+func TestCmdCivilizationDaemonAcceptsIssueScanFlagsBeforeHumanValidation(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive"})
+	if err == nil || !strings.Contains(err.Error(), "--human") {
+		t.Fatalf("expected missing --human error after issue-scan flag parse, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("civilization daemon did not accept issue-scan flags: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonIssueScanIntervalRejectsAutoApproveRequests(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected issue-scan auto-approval guard error, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonRequiresIssueScanReviewRunnerBeforeRunnerArg(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-review-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-runner") {
+		t.Fatalf("expected missing review runner error, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-review-runner") {
+		t.Fatalf("expected missing ready PR review runner error, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonSeedSpecStillIngestsBeforeLoop(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--seed-spec", "/nonexistent/spec.md"})
+	if err == nil || !strings.Contains(err.Error(), "ingest seed-spec") || !strings.Contains(err.Error(), "read spec") {
+		t.Fatalf("expected seed-spec ingest error before daemon loop start, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonApproveRequestsWithoutIssueScanReachesSeedSpec(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--approve-requests", "--seed-spec", "/nonexistent/spec.md"})
+	if err == nil || !strings.Contains(err.Error(), "ingest seed-spec") || !strings.Contains(err.Error(), "read spec") {
+		t.Fatalf("expected legacy approve-requests path to reach seed-spec ingest, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("approve-requests without issue scanning should not be rejected, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonIssueScanAutoApproveRejectsBeforeSeedSpecIngest(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--approve-requests", "--seed-spec", "/nonexistent/spec.md"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected issue-scan auto-approval guard error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "ingest seed-spec") || strings.Contains(err.Error(), "read spec") {
+		t.Fatalf("issue-scan auto-approval guard must fire before seed-spec ingest, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonPreservesLegacySpaceAPIAndApproveRolesFlags(t *testing.T) {
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--space", "ops", "--api", "http://127.0.0.1:1", "--approve-roles", "--seed-spec", "/nonexistent/spec.md"})
+	if err == nil || !strings.Contains(err.Error(), "ingest seed-spec") || !strings.Contains(err.Error(), "read spec") {
+		t.Fatalf("expected legacy flags to parse before seed-spec ingest error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") || strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("legacy civilization daemon flags should remain accepted, got: %v", err)
+	}
+}
+
+func TestCmdCivilizationDaemonDraftPRCreateRequiresGitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-draft-pr-create"})
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("expected missing GITHUB_TOKEN error, got: %v", err)
+	}
+}
+
 func TestCmdCivilizationUnknownSubverb(t *testing.T) {
 	err := cmdCivilization([]string{"frob"})
 	if err == nil || !strings.Contains(err.Error(), "frob") {

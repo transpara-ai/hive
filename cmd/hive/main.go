@@ -7,7 +7,7 @@
 // Verbs:
 //
 //	hive civilization run         Multi-agent runtime, one-shot
-//	hive civilization daemon      Multi-agent runtime, long-running
+//	hive civilization daemon      Multi-agent runtime, long-running with governed issue-scan controls
 //	hive pipeline run             Scout→Builder→Critic, one cycle
 //	hive pipeline daemon          Scout→Builder→Critic, looping
 //	hive role <name> run          Single agent (builder|scout|critic|monitor), one task
