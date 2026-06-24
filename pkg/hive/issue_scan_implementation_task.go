@@ -50,6 +50,39 @@ type issueScanOperateCompletionEvidence struct {
 	ImplementationStageTask types.EventID
 }
 
+type issueScanImplementationTaskContextPayload struct {
+	Kind                     string                                     `json:"kind"`
+	LifecycleVersion         string                                     `json:"lifecycle_version"`
+	RunID                    string                                     `json:"run_id"`
+	FactoryOrderID           string                                     `json:"factory_order_id"`
+	SourceStageID            string                                     `json:"source_stage_id"`
+	SourceStageTaskID        string                                     `json:"source_stage_task_id"`
+	SourceRuntimeEvidenceRef string                                     `json:"source_runtime_evidence_ref"`
+	SelectedIssue            issueScanBriefIssuePayload                 `json:"selected_issue"`
+	TargetRepos              []string                                   `json:"target_repos"`
+	FactoryTaskContract      issueScanImplementationFactoryTaskContract `json:"factory_task_contract"`
+	Outputs                  []IssueScanStageRuntimeEvidenceItem        `json:"outputs"`
+	EvidenceKind             string                                     `json:"evidence_kind"`
+	EvidenceStatus           string                                     `json:"evidence_status"`
+	BoundaryDisclaimers      []string                                   `json:"boundary_disclaimers"`
+}
+
+type issueScanImplementationFactoryTaskContract struct {
+	Mission             string   `json:"mission"`
+	Repo                string   `json:"repo"`
+	Worktree            string   `json:"worktree"`
+	Branch              string   `json:"branch"`
+	OwnerRole           string   `json:"owner_role"`
+	ExitCriteria        []string `json:"exit_criteria"`
+	VerificationCommand string   `json:"verification_command"`
+	DocsImpact          string   `json:"docs_impact"`
+	ArtifactContract    []string `json:"artifact_contract"`
+	RiskLevel           string   `json:"risk_level"`
+	ApprovalPolicy      string   `json:"approval_policy"`
+	RollbackNote        string   `json:"rollback_note"`
+	AuthorityScope      string   `json:"authority_scope"`
+}
+
 // EnsureIssueScanImplementationTasks materializes concrete implementation work
 // for dispatched issue-scan runs whose select/design stage has completed.
 func (r *Runtime) EnsureIssueScanImplementationTasks(result RunLaunchDispatchResult) ([]IssueScanImplementationTaskResult, error) {
@@ -444,8 +477,8 @@ func (r *Runtime) attachIssueScanImplementationTaskContext(content FactoryRunReq
 	if err != nil {
 		return fmt.Errorf("list implementation task context artifacts: %w", err)
 	}
-	for _, artifact := range artifacts {
-		if strings.TrimSpace(artifact.Label) == IssueScanImplementationTaskContextArtifactLabel {
+	if artifact, ok := latestIssueScanImplementationTaskContextArtifact(artifacts); ok {
+		if _, err := parseIssueScanImplementationTaskContext(artifact.Body); err == nil {
 			return nil
 		}
 	}
@@ -688,21 +721,11 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 		"test_plan",
 		"authority_gate_requirements",
 	}
-	payload := struct {
-		Kind                     string                              `json:"kind"`
-		LifecycleVersion         string                              `json:"lifecycle_version"`
-		RunID                    string                              `json:"run_id"`
-		FactoryOrderID           string                              `json:"factory_order_id"`
-		SourceStageID            string                              `json:"source_stage_id"`
-		SourceStageTaskID        string                              `json:"source_stage_task_id"`
-		SourceRuntimeEvidenceRef string                              `json:"source_runtime_evidence_ref"`
-		SelectedIssue            issueScanBriefIssuePayload          `json:"selected_issue"`
-		TargetRepos              []string                            `json:"target_repos"`
-		Outputs                  []IssueScanStageRuntimeEvidenceItem `json:"outputs"`
-		EvidenceKind             string                              `json:"evidence_kind"`
-		EvidenceStatus           string                              `json:"evidence_status"`
-		BoundaryDisclaimers      []string                            `json:"boundary_disclaimers"`
-	}{
+	contract, err := buildIssueScanImplementationFactoryTaskContract(content, order, evidence, issue)
+	if err != nil {
+		return "", err
+	}
+	payload := issueScanImplementationTaskContextPayload{
 		Kind:                     issueScanImplementationTaskContextArtifactKind,
 		LifecycleVersion:         issueScanLifecycleVersion,
 		RunID:                    strings.TrimSpace(content.RunID),
@@ -712,6 +735,7 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 		SourceRuntimeEvidenceRef: evidenceArtifactID.Value(),
 		SelectedIssue:            issue,
 		TargetRepos:              append([]string(nil), content.TargetRepos...),
+		FactoryTaskContract:      contract,
 		Outputs:                  issueScanEvidenceItemsForKeys(evidence, keys),
 		EvidenceKind:             "implementation_task_seeded_from_design_stage",
 		EvidenceStatus:           "ready_for_implementer",
@@ -730,11 +754,210 @@ func issueScanImplementationTaskContextBody(content FactoryRunRequestedContent, 
 	return string(encoded), nil
 }
 
-func (r *Runtime) verifyIssueScanImplementationWorkspace(content FactoryRunRequestedContent, issue issueScanBriefIssuePayload) error {
-	targetRepo := strings.TrimSpace(issue.Repo)
-	if targetRepo == "" && len(content.TargetRepos) > 0 {
-		targetRepo = strings.TrimSpace(content.TargetRepos[0])
+func parseIssueScanImplementationTaskContext(body string) (issueScanImplementationTaskContextPayload, error) {
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return issueScanImplementationTaskContextPayload{}, fmt.Errorf("%s artifact is empty", IssueScanImplementationTaskContextArtifactLabel)
 	}
+	var payload issueScanImplementationTaskContextPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return issueScanImplementationTaskContextPayload{}, fmt.Errorf("decode %s artifact: %w", IssueScanImplementationTaskContextArtifactLabel, err)
+	}
+	if strings.TrimSpace(payload.Kind) != issueScanImplementationTaskContextArtifactKind {
+		return issueScanImplementationTaskContextPayload{}, fmt.Errorf("%s kind %q does not match %q", IssueScanImplementationTaskContextArtifactLabel, payload.Kind, issueScanImplementationTaskContextArtifactKind)
+	}
+	if strings.TrimSpace(payload.LifecycleVersion) != issueScanLifecycleVersion {
+		return issueScanImplementationTaskContextPayload{}, fmt.Errorf("%s lifecycle_version %q does not match %q", IssueScanImplementationTaskContextArtifactLabel, payload.LifecycleVersion, issueScanLifecycleVersion)
+	}
+	if err := validateIssueScanImplementationFactoryTaskContract(payload.FactoryTaskContract, payload.SelectedIssue, payload.TargetRepos); err != nil {
+		return issueScanImplementationTaskContextPayload{}, err
+	}
+	return payload, nil
+}
+
+func latestIssueScanImplementationTaskContextArtifact(artifacts []work.ArtifactEvent) (work.ArtifactEvent, bool) {
+	var latest work.ArtifactEvent
+	found := false
+	for _, artifact := range artifacts {
+		if strings.TrimSpace(artifact.Label) != IssueScanImplementationTaskContextArtifactLabel {
+			continue
+		}
+		if !found ||
+			artifact.Timestamp.After(latest.Timestamp) ||
+			(artifact.Timestamp.Equal(latest.Timestamp) && artifact.ID.Value() > latest.ID.Value()) {
+			latest = artifact
+			found = true
+		}
+	}
+	return latest, found
+}
+
+func issueScanImplementationTaskContextRunID(body string) (string, bool, error) {
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return "", false, fmt.Errorf("%s artifact is empty", IssueScanImplementationTaskContextArtifactLabel)
+	}
+	var payload struct {
+		Kind  string `json:"kind"`
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", false, fmt.Errorf("decode %s artifact: %w", IssueScanImplementationTaskContextArtifactLabel, err)
+	}
+	if strings.TrimSpace(payload.Kind) != issueScanImplementationTaskContextArtifactKind {
+		return "", false, fmt.Errorf("%s kind %q does not match %q", IssueScanImplementationTaskContextArtifactLabel, payload.Kind, issueScanImplementationTaskContextArtifactKind)
+	}
+	runID := strings.TrimSpace(payload.RunID)
+	if runID == "" {
+		return "", false, nil
+	}
+	return runID, true, nil
+}
+
+func buildIssueScanImplementationFactoryTaskContract(content FactoryRunRequestedContent, order work.FactoryOrder, evidence IssueScanStageRuntimeEvidence, issue issueScanBriefIssuePayload) (issueScanImplementationFactoryTaskContract, error) {
+	repo := issueScanImplementationTargetRepo(content, issue)
+	if !ValidTransparaAIRepo(repo) {
+		return issueScanImplementationFactoryTaskContract{}, fmt.Errorf("issue-scan implementation contract target repo %q is not a registered Transpara-AI repo", repo)
+	}
+	riskClass := normalizeIssueScanImplementationRiskLevel(order.RiskClass)
+	testPlan := valueOr(issueScanEvidenceSummary(evidence, "test_plan"), fmt.Sprintf("Run repository-native validation for %s and record exact commands and results.", repo))
+	authorityScope := issueScanImplementationAuthorityScope(content)
+	contract := issueScanImplementationFactoryTaskContract{
+		Mission:   valueOr(strings.TrimSpace(content.Title), fmt.Sprintf("Resolve selected issue for %s through the issue-scan FactoryOrder lifecycle.", repo)),
+		Repo:      repo,
+		Worktree:  "runtime-resolved Transpara-AI checkout for the selected repo; all writes must remain inside containment watch roots",
+		Branch:    "feature branch only; no default-branch push and no upstream push",
+		OwnerRole: "implementer",
+		ExitCriteria: compactStrings([]string{
+			issueScanEvidenceSummary(evidence, "definition_of_done"),
+			issueScanEvidenceSummary(evidence, "acceptance_criteria"),
+			"record branch_name, commit_sha, changed_files, and validation_output before completing implement_on_branch",
+		}),
+		VerificationCommand: testPlan,
+		DocsImpact:          "assess whether the selected implementation changes operator-facing or normative behavior; update docs only when the selected approach requires it and record not-applicable otherwise",
+		ArtifactContract: compactStrings([]string{
+			"Operate result artifact with branch, commit/head, and changed-file stat",
+			"Work completion evidence linked to the Operate result artifact",
+			"implement_on_branch role output with branch_name, commit_sha, changed_files, and validation_output",
+		}),
+		RiskLevel:      riskClass,
+		ApprovalPolicy: issueScanImplementationApprovalPolicy(authorityScope),
+		RollbackNote:   "rollback is branch/PR abandonment or a separately authorized repair task; this task must not merge, deploy, or mutate a protected branch",
+		AuthorityScope: authorityScope,
+	}
+	if err := validateIssueScanImplementationFactoryTaskContract(contract, issue, content.TargetRepos); err != nil {
+		return issueScanImplementationFactoryTaskContract{}, err
+	}
+	return contract, nil
+}
+
+func issueScanImplementationTargetRepo(content FactoryRunRequestedContent, issue issueScanBriefIssuePayload) string {
+	targetRepo := strings.ToLower(strings.TrimSpace(issue.Repo))
+	if targetRepo == "" && len(content.TargetRepos) > 0 {
+		targetRepo = strings.ToLower(strings.TrimSpace(content.TargetRepos[0]))
+	}
+	return targetRepo
+}
+
+func issueScanImplementationAuthorityScope(content FactoryRunRequestedContent) string {
+	scope := strings.TrimSpace(content.Authority.Scope)
+	if scope == "" {
+		scope = "transpara-ai issue scan to ready-for-Human PR; no merge or deploy"
+	}
+	return scope
+}
+
+func issueScanImplementationApprovalPolicy(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "transpara-ai issue scan to ready-for-Human PR; no merge or deploy"
+	}
+	return fmt.Sprintf("operate-on-branch only; no merge or deploy; authority scope %q; draft PR creation, ready state, Human approval, merge, and deploy remain separate governed gates", scope)
+}
+
+func validateIssueScanImplementationFactoryTaskContract(contract issueScanImplementationFactoryTaskContract, issue issueScanBriefIssuePayload, targetRepos []string) error {
+	if strings.TrimSpace(contract.Mission) == "" {
+		return fmt.Errorf("factory_task_contract mission is required")
+	}
+	repo := strings.ToLower(strings.TrimSpace(contract.Repo))
+	if !ValidTransparaAIRepo(repo) {
+		return fmt.Errorf("factory_task_contract repo %q is not a registered Transpara-AI repo", contract.Repo)
+	}
+	if issueRepo := strings.ToLower(strings.TrimSpace(issue.Repo)); issueRepo != "" && issueRepo != repo {
+		return fmt.Errorf("factory_task_contract repo %q does not match selected issue repo %q", repo, issueRepo)
+	}
+	if len(targetRepos) > 0 && !containsIssueScanStringFold(targetRepos, repo) {
+		return fmt.Errorf("factory_task_contract repo %q is outside target repos %v", repo, targetRepos)
+	}
+	required := map[string]string{
+		"worktree":             contract.Worktree,
+		"branch":               contract.Branch,
+		"owner_role":           contract.OwnerRole,
+		"verification_command": contract.VerificationCommand,
+		"docs_impact":          contract.DocsImpact,
+		"approval_policy":      contract.ApprovalPolicy,
+		"rollback_note":        contract.RollbackNote,
+		"authority_scope":      contract.AuthorityScope,
+	}
+	for name, value := range required {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("factory_task_contract %s is required", name)
+		}
+	}
+	if strings.TrimSpace(contract.OwnerRole) != "implementer" {
+		return fmt.Errorf("factory_task_contract owner_role %q must be implementer", contract.OwnerRole)
+	}
+	approvalPolicy := strings.ToLower(strings.TrimSpace(contract.ApprovalPolicy))
+	if !strings.Contains(approvalPolicy, "no merge or deploy") ||
+		!strings.Contains(approvalPolicy, "separate governed gates") {
+		return fmt.Errorf("factory_task_contract approval_policy must preserve no-merge/no-deploy and separate-gate boundaries")
+	}
+	rollbackNote := strings.ToLower(strings.TrimSpace(contract.RollbackNote))
+	if !strings.Contains(rollbackNote, "must not merge") {
+		return fmt.Errorf("factory_task_contract rollback_note must preserve no-merge boundary")
+	}
+	if len(compactStrings(contract.ExitCriteria)) == 0 {
+		return fmt.Errorf("factory_task_contract exit_criteria is required")
+	}
+	if len(compactStrings(contract.ArtifactContract)) == 0 {
+		return fmt.Errorf("factory_task_contract artifact_contract is required")
+	}
+	if !validIssueScanImplementationRiskLevel(contract.RiskLevel) {
+		return fmt.Errorf("factory_task_contract risk_level %q must be one of low, medium, high, critical", contract.RiskLevel)
+	}
+	return nil
+}
+
+func validIssueScanImplementationRiskLevel(riskLevel string) bool {
+	switch strings.ToLower(strings.TrimSpace(riskLevel)) {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeIssueScanImplementationRiskLevel(riskLevel string) string {
+	switch strings.ToLower(strings.TrimSpace(riskLevel)) {
+	case "low", "medium", "high", "critical":
+		return strings.ToLower(strings.TrimSpace(riskLevel))
+	default:
+		return "critical"
+	}
+}
+
+func containsIssueScanStringFold(values []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, value := range values {
+		if strings.ToLower(strings.TrimSpace(value)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) verifyIssueScanImplementationWorkspace(content FactoryRunRequestedContent, issue issueScanBriefIssuePayload) error {
+	targetRepo := issueScanImplementationTargetRepo(content, issue)
 	if targetRepo == "" {
 		return fmt.Errorf("issue-scan target repo is required before implementation task creation")
 	}
