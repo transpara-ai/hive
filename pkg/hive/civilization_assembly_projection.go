@@ -298,6 +298,8 @@ type civilizationAssemblyTaskRuntimeEvidence struct {
 	Status           string
 	RequiredEvidence []string
 	Roles            []string
+	RoleOutputRoles  []string
+	RoleOutputRefs   []string
 	SourceRefs       []string
 }
 
@@ -770,7 +772,7 @@ func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCre
 
 func civilizationAssemblyRoleOutputContractsWithRuntimeEvidence(contracts []CivilizationAssemblyRoleOutputContract, evidence civilizationAssemblyTaskRuntimeEvidence, runtimeStatus string) []CivilizationAssemblyRoleOutputContract {
 	out := compactCivilizationAssemblyRoleOutputContracts(contracts)
-	if evidence.StageID == "" || len(evidence.Roles) == 0 {
+	if evidence.StageID == "" || (len(evidence.Roles) == 0 && len(evidence.RoleOutputRoles) == 0) {
 		return out
 	}
 	evidenceStatus := civilizationAssemblyQueuedPlanStepRuntimeStatus
@@ -781,9 +783,18 @@ func civilizationAssemblyRoleOutputContractsWithRuntimeEvidence(contracts []Civi
 	for _, role := range evidence.Roles {
 		covered[strings.TrimSpace(role)] = true
 	}
+	roleOutputCovered := map[string]bool{}
+	for _, role := range evidence.RoleOutputRoles {
+		role = strings.TrimSpace(role)
+		covered[role] = true
+		roleOutputCovered[role] = true
+	}
 	for i := range out {
 		if covered[out[i].Role] {
 			out[i].EvidenceStatus = evidenceStatus
+		}
+		if roleOutputCovered[out[i].Role] && strings.TrimSpace(runtimeStatus) != civilizationAssemblyQueuedStageCompletedStatus {
+			out[i].EvidenceStatus = civilizationAssemblyQueuedPlanStepRuntimeStatus
 		}
 	}
 	return compactCivilizationAssemblyRoleOutputContracts(out)
@@ -869,6 +880,19 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 	}
 	byTask := map[types.EventID]civilizationAssemblyTaskArtifactEvidence{}
 	projectionErrors := []string{}
+	taskCreatedContentByID := map[types.EventID]work.TaskCreatedContent{}
+	taskCreatedPage, err := s.ByType(work.EventTypeTaskCreated, limit, types.None[types.Cursor]())
+	if err != nil {
+		projectionErrors = append(projectionErrors, fmt.Sprintf("fetch %s for task artifact identity fallback: %v", work.EventTypeTaskCreated.Value(), err))
+	} else {
+		for _, taskEvent := range taskCreatedPage.Items() {
+			taskContent, ok := taskEvent.Content().(work.TaskCreatedContent)
+			if !ok {
+				continue
+			}
+			taskCreatedContentByID[taskEvent.ID()] = taskContent
+		}
+	}
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(work.TaskArtifactContent)
 		if !ok {
@@ -924,6 +948,18 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 			merged, diverged := mergeCivilizationAssemblyTaskRuntimeEvidence(evidence.RuntimeEvidence, runtimeEvidence)
 			if diverged {
 				projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan stage runtime evidence %s: divergent runtime evidence for task %s (existing stage=%q order=%q, candidate stage=%q order=%q)", ev.ID().Value(), content.TaskID.Value(), evidence.RuntimeEvidence.StageID, evidence.RuntimeEvidence.FactoryOrderID, runtimeEvidence.StageID, runtimeEvidence.FactoryOrderID))
+				evidence.RuntimeEvidence = civilizationAssemblyTaskRuntimeEvidence{}
+			} else {
+				evidence.RuntimeEvidence = merged
+			}
+		}
+		roleOutputEvidence, ok, err := civilizationAssemblyIssueScanStageRoleOutput(ev.ID().Value(), label, content.Body, taskCreatedContentByID[content.TaskID])
+		if err != nil {
+			projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan stage role output %s: %v", ev.ID().Value(), err))
+		} else if ok {
+			merged, diverged := mergeCivilizationAssemblyTaskRuntimeEvidence(evidence.RuntimeEvidence, roleOutputEvidence)
+			if diverged {
+				projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan stage role output %s: divergent role output for task %s (existing stage=%q order=%q, candidate stage=%q order=%q)", ev.ID().Value(), content.TaskID.Value(), evidence.RuntimeEvidence.StageID, evidence.RuntimeEvidence.FactoryOrderID, roleOutputEvidence.StageID, roleOutputEvidence.FactoryOrderID))
 				evidence.RuntimeEvidence = civilizationAssemblyTaskRuntimeEvidence{}
 			} else {
 				evidence.RuntimeEvidence = merged
@@ -1160,6 +1196,43 @@ func civilizationAssemblyIssueScanStageRuntimeEvidence(eventRef, label, body str
 		RequiredEvidence: compactStrings(requiredEvidence),
 		Roles:            compactStrings(roles),
 		SourceRefs:       compactStrings(append([]string{strings.TrimSpace(eventRef)}, payload.SourceRefs...)),
+	}, true, nil
+}
+
+func civilizationAssemblyIssueScanStageRoleOutput(eventRef, label, body string, taskContent work.TaskCreatedContent) (civilizationAssemblyTaskRuntimeEvidence, bool, error) {
+	payload, ok, err := issueScanStageRoleOutputArtifact(eventRef, label, body)
+	if err != nil || !ok {
+		return civilizationAssemblyTaskRuntimeEvidence{}, ok, err
+	}
+	stageID := safeRunLaunchID(payload.StageID)
+	if stageID == "" {
+		stageID = safeRunLaunchID(civilizationAssemblyTaskLifecycleStageID(taskContent))
+	}
+	if stageID == "" {
+		return civilizationAssemblyTaskRuntimeEvidence{}, false, fmt.Errorf("missing stage_id")
+	}
+	factoryOrderID := strings.TrimSpace(payload.FactoryOrderID)
+	if factoryOrderID == "" {
+		factoryOrderID = strings.TrimSpace(taskContent.FactoryOrderID)
+	}
+	if factoryOrderID == "" {
+		return civilizationAssemblyTaskRuntimeEvidence{}, false, fmt.Errorf("missing factory_order_id")
+	}
+	role := strings.TrimSpace(payload.Role)
+	if role == "" {
+		return civilizationAssemblyTaskRuntimeEvidence{}, false, fmt.Errorf("missing role")
+	}
+	for i, output := range payload.Outputs {
+		if strings.TrimSpace(output.Key) == "" {
+			return civilizationAssemblyTaskRuntimeEvidence{}, false, fmt.Errorf("outputs[%d].key is required", i)
+		}
+	}
+	return civilizationAssemblyTaskRuntimeEvidence{
+		StageID:         stageID,
+		FactoryOrderID:  factoryOrderID,
+		RoleOutputRoles: compactStrings([]string{role}),
+		RoleOutputRefs:  compactStrings(payload.SourceRefs),
+		SourceRefs:      compactStrings(payload.SourceRefs),
 	}, true, nil
 }
 
@@ -1511,6 +1584,7 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 	stageTaskDrafts := map[string]bool{}
 	stageRuntimeEvidence := map[string]bool{}
 	stageCompletedRuntimeEvidence := map[string]bool{}
+	roleOutputRuntimeEvidence := map[string]bool{}
 	runID := safeRunLaunchID(out.RunID)
 	queuedFactoryOrderID, err := factoryOrderIDForRunLaunch(out.RunID)
 	if err != nil {
@@ -1534,6 +1608,15 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 		if strings.TrimSpace(task.RuntimeEvidenceStatus) == civilizationAssemblyQueuedStageCompletedStatus {
 			stageCompletedRuntimeEvidence[stageID] = true
 		}
+		for _, contract := range task.RoleOutputContracts {
+			role := strings.TrimSpace(contract.Role)
+			if role == "" {
+				continue
+			}
+			if strings.TrimSpace(contract.EvidenceStatus) == civilizationAssemblyQueuedPlanStepRuntimeStatus {
+				roleOutputRuntimeEvidence[stageID+"|"+role] = true
+			}
+		}
 	}
 	if len(declaredStages) == 0 && len(stageTaskDrafts) == 0 && len(stageRuntimeEvidence) == 0 && len(stageCompletedRuntimeEvidence) == 0 {
 		return &out
@@ -1552,9 +1635,12 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 	}
 	for i := range out.AgentExecutionPlan {
 		stageID := safeRunLaunchID(out.AgentExecutionPlan[i].StageID)
+		role := strings.TrimSpace(out.AgentExecutionPlan[i].Role)
 		if stageCompletedRuntimeEvidence[stageID] {
 			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepCompletedStatus)
 		} else if stageRuntimeEvidence[stageID] {
+			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepRuntimeStatus)
+		} else if roleOutputRuntimeEvidence[stageID+"|"+role] {
 			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepRuntimeStatus)
 		} else if stageTaskDrafts[stageID] {
 			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepTaskDraftStatus)
@@ -1830,6 +1916,8 @@ func mergeCivilizationAssemblyTaskRuntimeEvidence(existing, candidate civilizati
 	existing.Status = civilizationAssemblyTaskRuntimeStatus(existing.Status, candidate.Status)
 	existing.RequiredEvidence = append(existing.RequiredEvidence, candidate.RequiredEvidence...)
 	existing.Roles = append(existing.Roles, candidate.Roles...)
+	existing.RoleOutputRoles = append(existing.RoleOutputRoles, candidate.RoleOutputRoles...)
+	existing.RoleOutputRefs = append(existing.RoleOutputRefs, candidate.RoleOutputRefs...)
 	existing.SourceRefs = append(existing.SourceRefs, candidate.SourceRefs...)
 	return compactCivilizationAssemblyTaskRuntimeEvidence(existing), false
 }
@@ -1840,6 +1928,8 @@ func compactCivilizationAssemblyTaskRuntimeEvidence(value civilizationAssemblyTa
 	value.Status = civilizationAssemblyTaskRuntimeStatus(value.Status, "")
 	value.RequiredEvidence = compactStrings(value.RequiredEvidence)
 	value.Roles = compactStrings(value.Roles)
+	value.RoleOutputRoles = compactStrings(value.RoleOutputRoles)
+	value.RoleOutputRefs = compactStrings(value.RoleOutputRefs)
 	value.SourceRefs = compactStrings(value.SourceRefs)
 	if value.StageID == "" || value.FactoryOrderID == "" {
 		return civilizationAssemblyTaskRuntimeEvidence{}

@@ -41,6 +41,9 @@ import (
 //   advance-issue-scan
 //               → release the next issue-scan stage dependency barrier after
 //                  its lifecycle contracts are present.
+//   record-issue-scan-role-output
+//               → record one civic role's durable output evidence for an
+//                  issue-scan lifecycle stage without completing the stage.
 //   complete-issue-scan-stage
 //               → record governed runtime evidence for one issue-scan stage,
 //                  complete that stage task, and optionally release the next
@@ -54,7 +57,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -67,6 +70,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryScanIssues(rest)
 	case "advance-issue-scan":
 		return cmdFactoryAdvanceIssueScan(rest)
+	case "record-issue-scan-role-output":
+		return cmdFactoryRecordIssueScanRoleOutput(rest)
 	case "complete-issue-scan-stage":
 		return cmdFactoryCompleteIssueScanStage(rest)
 	case "request-pr":
@@ -74,11 +79,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 

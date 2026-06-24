@@ -195,6 +195,47 @@ func TestImplementerWatchesTaskArtifact(t *testing.T) {
 	}
 }
 
+func TestIssueScanStageRolesWakeForRoleOutputWork(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	byName := map[string]AgentDef{}
+	for _, agent := range agents {
+		byName[agent.Name] = agent
+	}
+	required := map[string][]string{
+		"strategist":  {"work.task.created", "work.task.artifact"},
+		"planner":     {"work.task.created", "work.task.artifact"},
+		"reviewer":    {"work.task.created", "work.task.artifact"},
+		"implementer": {"work.task.created", "work.task.artifact"},
+	}
+	for role, patterns := range required {
+		agent, ok := byName[role]
+		if !ok {
+			t.Fatalf("missing starter role %q", role)
+		}
+		for _, pattern := range patterns {
+			if !stringSliceContains(agent.WatchPatterns, pattern) {
+				t.Errorf("%s WatchPatterns = %+v, want %q for issue-scan stage role-output work", role, agent.WatchPatterns, pattern)
+			}
+		}
+	}
+	guardian, ok := byName["guardian"]
+	if !ok {
+		t.Fatal("missing guardian")
+	}
+	if len(guardian.WatchPatterns) != 0 {
+		t.Fatalf("guardian WatchPatterns = %+v, want empty/all-events subscription", guardian.WatchPatterns)
+	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestContractsEnforceScopeExclusivity guards the content-fidelity fix: the
 // Planner's authoritative-document acceptance_criteria and the Reviewer's
 // verify-against-source standard must enforce EXCLUSIVITY (a scope ceiling), not
@@ -440,6 +481,34 @@ func TestContractsEnforceCompletionDiscipline(t *testing.T) {
 	}
 	if !strings.Contains(promptFor("strategist"), "Decomposing a task is not completing it") {
 		t.Error("strategist contract must state that decomposing a task is not completing it")
+	}
+}
+
+func TestAgentPromptsCarryIssueScanRoleOutputConvention(t *testing.T) {
+	agents := StarterAgents("TestHuman")
+	for i := range agents {
+		p := agents[i].SystemPrompt
+		for _, phrase := range []string{
+			"Issue-scan lifecycle stage",
+			IssueScanStageRoleOutputArtifactLabel,
+			"issue_scan_stage_role_output",
+			"not",
+			"stage-completion",
+		} {
+			if !strings.Contains(p, phrase) {
+				t.Errorf("agent %q prompt missing issue-scan role-output phrase %q", agents[i].Name, phrase)
+			}
+		}
+	}
+	spawned := composeSpawnedPrompt("You are a bounded research role for issue-scan stages.")
+	for _, phrase := range []string{
+		IssueScanStageRoleOutputArtifactLabel,
+		"typed role-output artifact",
+		"stage completion",
+	} {
+		if !strings.Contains(spawned, phrase) {
+			t.Errorf("spawned prompt missing issue-scan role-output phrase %q", phrase)
+		}
 	}
 }
 

@@ -39,15 +39,17 @@ type issueScanDispatchArtifact struct {
 // RunLaunchDispatchResult summarizes one dispatcher pass over queued
 // factory.run.requested events.
 type RunLaunchDispatchResult struct {
-	Scanned                int
-	Dispatched             int
-	AlreadyDispatched      int
-	SkippedNonQueued       int
-	Failed                 int
-	DispatchedTaskIDs      []types.EventID
-	DispatchedStageTaskIDs []types.EventID
-	DispatchedOrderIDs     []string
-	AlreadyDispatchedIDs   []string
+	Scanned                          int
+	Dispatched                       int
+	AlreadyDispatched                int
+	SkippedNonQueued                 int
+	Failed                           int
+	DispatchedTaskIDs                []types.EventID
+	DispatchedStageTaskIDs           []types.EventID
+	DispatchedOrderIDs               []string
+	AlreadyDispatchedIDs             []string
+	DispatchedIssueScanRunIDs        []string
+	AlreadyDispatchedIssueScanRunIDs []string
 }
 
 // DispatchQueuedRunLaunches binds queued POST /api/hive/runs requests into the
@@ -148,6 +150,9 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
+			if isIssueScanRunLaunch(content) {
+				result.AlreadyDispatchedIssueScanRunIDs = append(result.AlreadyDispatchedIssueScanRunIDs, strings.TrimSpace(content.RunID))
+			}
 			continue
 		}
 		if err := r.validateRunLaunchDispatchModelOverrides(content); err != nil {
@@ -199,6 +204,9 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedStageTaskIDs = append(result.DispatchedStageTaskIDs, stageTaskIDs...)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
+		if isIssueScanRunLaunch(content) {
+			result.DispatchedIssueScanRunIDs = append(result.DispatchedIssueScanRunIDs, strings.TrimSpace(content.RunID))
+		}
 	}
 	if !matchedRequestedRun {
 		errs = append(errs, fmt.Errorf("queued run %q not found", onlyRunID))
@@ -680,6 +688,9 @@ func issueScanLifecycleStageTaskDescription(content FactoryRunRequestedContent, 
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+		b.WriteString("Each required role records its contribution as a `")
+		b.WriteString(IssueScanStageRoleOutputArtifactLabel)
+		b.WriteString("` Work artifact on this stage task before governed stage completion uses that role output. Include required role-output keys and any stage-required evidence keys your work substantiates in the artifact `outputs` array.\n\n")
 	}
 	b.WriteString("Status boundary: this task draft declares expected governed work for the stage. It is not runtime progress, blocker resolution, PR readiness, approval, merge, or deploy evidence.")
 	return strings.TrimSpace(b.String())
@@ -723,6 +734,7 @@ func issueScanLifecycleStageTaskAcceptanceCriteria(content FactoryRunRequestedCo
 			fmt.Fprintf(&b, "\n  - %s: %s", strings.TrimSpace(step.Role), strings.Join(outputs, ", "))
 		}
 		b.WriteString("\n")
+		fmt.Fprintf(&b, "- Each role output is recorded as a `%s` artifact with matching run, FactoryOrder, stage, role, output keys, and evidence refs.\n", IssueScanStageRoleOutputArtifactLabel)
 	}
 	b.WriteString("- Any blocker is recorded as blocked evidence instead of silently completing the task.")
 	return strings.TrimSpace(b.String())
@@ -743,7 +755,8 @@ func issueScanLifecycleStageTaskTestPlan(content FactoryRunRequestedContent, ord
 	} else {
 		b.WriteString("4. Confirm the stage has no required role outputs before marking it complete.\n")
 	}
-	b.WriteString("5. Confirm no merge, deploy, or Human-approval claim is made unless this stage explicitly requires and records that evidence.")
+	fmt.Fprintf(&b, "5. Verify any `%s` artifacts validate against the stage role/output contract.\n", IssueScanStageRoleOutputArtifactLabel)
+	b.WriteString("6. Confirm no merge, deploy, or Human-approval claim is made unless this stage explicitly requires and records that evidence.")
 	return strings.TrimSpace(b.String())
 }
 
@@ -927,15 +940,217 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit)
+			progress, err := r.progressIssueScanLifecycle()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: run-launch dispatch failed closed: %v\n", err)
 			}
-			if result.Dispatched > 0 {
-				fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d FactoryOrder task(s)\n", result.Dispatched)
+			if progress.Dispatch.Dispatched > 0 {
+				fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
+			}
+			if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle starter: released %d stage task(s)\n", released)
+			}
+			if len(progress.Completions) > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
+			}
+			if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan implementation task seeder: created %d implementation task(s)\n", created)
+			}
+			if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan implementation evidence bridge: recorded %d role output(s)\n", recorded)
+			}
+			if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan review evidence bridge: recorded %d role output(s)\n", recorded)
 			}
 		}
 	}
+}
+
+type issueScanLifecycleProgress struct {
+	Dispatch                  RunLaunchDispatchResult
+	Advances                  []IssueScanStageAdvanceResult
+	Completions               []IssueScanStageCompletionResult
+	ImplementationTasks       []IssueScanImplementationTaskResult
+	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
+	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
+}
+
+func (r *Runtime) progressIssueScanLifecycle() (issueScanLifecycleProgress, error) {
+	var progress issueScanLifecycleProgress
+	if r == nil {
+		return progress, nil
+	}
+	r.issueScanLifecycleMu.Lock()
+	defer r.issueScanLifecycleMu.Unlock()
+
+	var errs []error
+	dispatch, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit)
+	progress.Dispatch = dispatch
+	if err != nil {
+		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
+	}
+	advances, err := r.StartDispatchedIssueScanLifecycleStages(dispatch)
+	progress.Advances = advances
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan lifecycle start: %w", err))
+	}
+	completions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+	progress.Completions = completions
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan lifecycle auto-completion: %w", err))
+	}
+	implementationTasks, err := r.EnsureIssueScanImplementationTasks(dispatch)
+	progress.ImplementationTasks = implementationTasks
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan implementation task seeding: %w", err))
+	}
+	roleOutputs, err := r.RecordCompletedIssueScanImplementationRoleOutputs(dispatch)
+	progress.ImplementationRoleOutputs = roleOutputs
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan implementation role-output recording: %w", err))
+	}
+	if len(roleOutputs) > 0 {
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		progress.Completions = append(progress.Completions, moreCompletions...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("issue-scan lifecycle post-implementation auto-completion: %w", err))
+		}
+	}
+	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(dispatch)
+	progress.ReviewRoleOutputs = reviewRoleOutputs
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan review role-output recording: %w", err))
+	}
+	if len(reviewRoleOutputs) > 0 {
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		progress.Completions = append(progress.Completions, moreCompletions...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("issue-scan lifecycle post-review auto-completion: %w", err))
+		}
+	}
+	return progress, errors.Join(errs...)
+}
+
+func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Context, executed, total int) {
+	if executed <= 0 {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	progress, err := r.progressIssueScanLifecycle()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: post-task issue-scan lifecycle progress failed closed: %v\n", err)
+	}
+	if progress.Dispatch.Dispatched > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: seeded %d queued FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
+	}
+	if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: released %d stage task(s)\n", released)
+	}
+	if len(progress.Completions) > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
+	}
+	if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: created %d implementation task(s)\n", created)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d implementation role output(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d review role output(s)\n", recorded)
+	}
+}
+
+func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summary string) {
+	r.mirrorTaskCompletion(ctx, task, summary)
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	progress, err := r.progressIssueScanLifecycle()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: post-completion issue-scan lifecycle progress failed closed for task %s: %v\n", task.ID.Value(), err)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d implementation role output(s)\n", recorded)
+	}
+	if len(progress.Completions) > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
+	}
+}
+
+func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, taskID, verdict string) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	progress, err := r.progressIssueScanLifecycle()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: post-review issue-scan lifecycle progress failed closed for task %s verdict %s: %v\n", taskID, verdict, err)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d review role output(s)\n", recorded)
+	}
+	if len(progress.Completions) > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
+	}
+}
+
+// StartDispatchedIssueScanLifecycleStages releases the next runnable stage for
+// issue-scan runs seen by a dispatcher pass. It is intentionally a post-dispatch
+// step so it never runs while the dispatch mutex is held; Advance reuses the
+// dispatch path to repair missing stage tasks before releasing barriers.
+func (r *Runtime) StartDispatchedIssueScanLifecycleStages(result RunLaunchDispatchResult) ([]IssueScanStageAdvanceResult, error) {
+	runIDs := compactStrings(append(append([]string(nil), result.DispatchedIssueScanRunIDs...), result.AlreadyDispatchedIssueScanRunIDs...))
+	advances := make([]IssueScanStageAdvanceResult, 0, len(runIDs))
+	var errs []error
+	for _, runID := range runIDs {
+		advance, err := r.AdvanceIssueScanLifecycleStage(runID, "")
+		if err != nil {
+			if strings.Contains(err.Error(), "issue-scan lifecycle has no incomplete stages") {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("run %q: %w", runID, err))
+			continue
+		}
+		advances = append(advances, advance)
+	}
+	return advances, errors.Join(errs...)
+}
+
+func countReleasedIssueScanStageAdvances(values []IssueScanStageAdvanceResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Released {
+			count++
+		}
+	}
+	return count
+}
+
+func countCreatedIssueScanImplementationTasks(values []IssueScanImplementationTaskResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Created {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanRoleOutputs(values []IssueScanStageRoleOutputResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Recorded {
+			count++
+		}
+	}
+	return count
 }
 
 func effectiveRunLaunchDispatchInterval(configured time.Duration) time.Duration {

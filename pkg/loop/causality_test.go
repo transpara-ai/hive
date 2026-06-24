@@ -74,7 +74,7 @@ func TestCausality_LoopTaskCommandPath(t *testing.T) {
 		config: Config{TaskStore: ts, ConvID: convID},
 	}
 
-	l.processTaskCommands(`/task create {"title": "observe gap", "description": "handler missing"}`)
+	l.processTaskCommands(context.Background(), `/task create {"title": "observe gap", "description": "handler missing"}`)
 
 	tasks, err := ts.List(5)
 	if err != nil || len(tasks) == 0 {
@@ -86,6 +86,41 @@ func TestCausality_LoopTaskCommandPath(t *testing.T) {
 	}
 	if len(ev.Causes()) == 0 {
 		t.Error("CAUSALITY violated: loop task command created event with no causes")
+	}
+}
+
+func TestProcessTaskCommandsCallsPostCommitHook(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal": "IDLE"}`)
+	agent, g := agentWithGraph(t, provider)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_00000000000000000000000000000052")
+	called := 0
+	var gotExecuted, gotTotal int
+	l := &Loop{
+		agent: agent,
+		config: Config{
+			TaskStore: ts,
+			ConvID:    convID,
+			OnTaskCommandsExecuted: func(ctx context.Context, executed, total int) {
+				if ctx == nil {
+					t.Fatal("callback context is nil")
+				}
+				called++
+				gotExecuted = executed
+				gotTotal = total
+			},
+		},
+	}
+
+	l.processTaskCommands(context.Background(), `/task create {"title": "observe gap", "description": "handler missing"}`)
+
+	if called != 1 || gotExecuted != 1 || gotTotal != 1 {
+		t.Fatalf("callback called=%d executed=%d total=%d, want one successful post-commit hook", called, gotExecuted, gotTotal)
+	}
+	tasks, err := ts.List(5)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks after callback err=%v count=%d", err, len(tasks))
 	}
 }
 
@@ -141,7 +176,7 @@ func TestCausality_LoopTaskCommandPath_MultipleTasks(t *testing.T) {
 	response := `/task create {"title": "first task", "description": "do this"}
 /task create {"title": "second task", "description": "then this"}
 /task create {"title": "third task", "description": "finally this"}`
-	l.processTaskCommands(response)
+	l.processTaskCommands(context.Background(), response)
 
 	tasks, err := ts.List(10)
 	if err != nil {

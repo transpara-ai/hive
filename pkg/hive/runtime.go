@@ -79,6 +79,7 @@ type Runtime struct {
 	resolver                  *modelconfig.Resolver
 	modelSelectionManager     *OperatorModelSelectionManager
 	runLaunchDispatchMu       sync.Mutex
+	issueScanLifecycleMu      sync.Mutex
 	runLaunchDispatchInterval time.Duration
 	providerFactory           func(intelligence.Config) (intelligence.Provider, error)
 
@@ -314,10 +315,18 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	if r.catalogPath != "" && r.catalogReloadInterval > 0 {
 		go r.runCatalogReloadLoop(ctx, r.catalogReloadInterval)
 	}
-	if result, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit); err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: initial run-launch dispatch failed closed: %v\n", err)
-	} else if result.Dispatched > 0 {
-		fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d queued FactoryOrder task(s)\n", result.Dispatched)
+	if progress, err := r.progressIssueScanLifecycle(); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: initial issue-scan lifecycle progress failed closed: %v\n", err)
+	} else {
+		if progress.Dispatch.Dispatched > 0 {
+			fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d queued FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
+		}
+		if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
+			fmt.Fprintf(os.Stderr, "Issue-scan lifecycle starter: released %d stage task(s)\n", released)
+		}
+		if len(progress.Completions) > 0 {
+			fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
+		}
 	}
 	go r.runRunLaunchDispatchLoop(ctx, effectiveRunLaunchDispatchInterval(r.runLaunchDispatchInterval))
 
@@ -476,15 +485,17 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			Task:           seedIdea,
 
 			// Task coordination.
-			TaskStore:           r.tasks,
-			PhaseGateStore:      r.phaseGates,
-			ConvID:              r.convID,
-			OnTaskCompleted:     r.mirrorTaskCompletion,
-			CanOperate:          def.CanOperate,
-			RepoPath:            r.repoPath,
-			TaskOperateProvider: r.taskOperateProviderFor(def),
-			Keepalive:           r.loop,
-			KnowledgeStore:      r.knowledgeStore,
+			TaskStore:              r.tasks,
+			PhaseGateStore:         r.phaseGates,
+			ConvID:                 r.convID,
+			OnTaskCompleted:        r.handleTaskCompletion,
+			OnTaskCommandsExecuted: r.progressIssueScanLifecycleAfterTaskCommands,
+			OnReviewCompleted:      r.progressIssueScanLifecycleAfterReview,
+			CanOperate:             def.CanOperate,
+			RepoPath:               r.repoPath,
+			TaskOperateProvider:    r.taskOperateProviderFor(def),
+			Keepalive:              r.loop,
+			KnowledgeStore:         r.knowledgeStore,
 			CostSummaryFunc: func() string {
 				resolver := r.currentResolver()
 				entries := r.budgetRegistry.Snapshot()

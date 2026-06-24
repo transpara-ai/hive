@@ -114,6 +114,10 @@ func (r *Runtime) CompleteIssueScanLifecycleStage(runID, stageID string, evidenc
 	if err := r.verifyIssueScanStageTaskContracts(target); err != nil {
 		return result, err
 	}
+	evidence, err = r.issueScanStageEvidenceWithRecordedRoleOutputs(target.TaskID, content, orderID, target.Draft, evidence)
+	if err != nil {
+		return result, err
+	}
 	normalized, err := normalizeIssueScanStageRuntimeEvidence(content, orderID, target.Draft, evidence)
 	if err != nil {
 		return result, err

@@ -117,6 +117,24 @@ func cmdFactoryScanIssues(args []string) error {
 		if len(result.DispatchedOrderIDs) > 0 {
 			fmt.Printf("factory order(s): %s\n", strings.Join(result.DispatchedOrderIDs, ", "))
 		}
+		advances, err := rt.StartDispatchedIssueScanLifecycleStages(result)
+		if err != nil {
+			return fmt.Errorf("start issue-scan lifecycle: %w", err)
+		}
+		for _, advance := range advances {
+			if advance.Released {
+				fmt.Printf("issue-scan stage started: %s task %s\n", advance.StageID, advance.StageTaskID)
+			} else if advance.AlreadyReady {
+				fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
+			}
+		}
+		completions, err := rt.CompleteReadyIssueScanLifecycleStages(result)
+		if err != nil {
+			return fmt.Errorf("auto-complete ready issue-scan lifecycle stages: %w", err)
+		}
+		for _, completion := range completions {
+			fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
+		}
 	}
 	return nil
 }
