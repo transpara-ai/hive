@@ -69,6 +69,9 @@ import (
 //   run-issue-scan-ready-pr
 //               → invoke a configured terminal ready-PR evidence runner, then
 //                  record its draft receipt and ready-for-Human evidence.
+//   request-issue-scan-pr
+//               → derive the issue-scan draft-PR title/body/target and raise
+//                  the governed draft-PR authority request; the gate holds.
 //   complete-issue-scan-stage
 //               → record governed runtime evidence for one issue-scan stage,
 //                  complete that stage task, and optionally release the next
@@ -82,7 +85,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -113,6 +116,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryRecordIssueScanReadyPR(rest)
 	case "run-issue-scan-ready-pr":
 		return cmdFactoryRunIssueScanReadyPR(rest)
+	case "request-issue-scan-pr":
+		return cmdFactoryRequestIssueScanPR(rest)
 	case "complete-issue-scan-stage":
 		return cmdFactoryCompleteIssueScanStage(rest)
 	case "request-pr":
@@ -120,11 +125,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
