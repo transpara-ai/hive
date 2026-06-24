@@ -548,6 +548,16 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 		Body:      "not part of the FactoryOrder",
 		CreatedBy: actorID,
 	})
+	appendEvent(EventTypeRunStarted, RunStartedContent{
+		Idea:     "render runtime artifact refs",
+		RepoPath: "/tmp/hive-runtime",
+	})
+	runtimeArtifact := appendEvent(EventTypeFactoryArtifactCreated, FactoryArtifactCreatedContent{
+		RunID:      "run_runtime_artifact_001",
+		ArtifactID: "runtime_artifact_001",
+		Label:      "Runtime artifact",
+		MediaType:  "text/markdown",
+	})
 
 	projection := BuildCivilizationAssemblyProjection(s, 50)
 
@@ -557,11 +567,76 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 	if containsString(projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value()) {
 		t.Fatalf("artifact refs = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.ArtifactRefs, unrelatedArtifact.ID().Value())
 	}
+	artifactEvidence := civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, artifactEvent.ID().Value())
+	if artifactEvidence == nil {
+		t.Fatalf("artifact evidence = %+v, want FactoryOrder artifact %s", projection.WorkEvidenceSummary.Artifacts, artifactEvent.ID().Value())
+	}
+	if artifactEvidence.TaskRef != taskEvent.ID().Value() {
+		t.Fatalf("artifact task ref = %q, want %s", artifactEvidence.TaskRef, taskEvent.ID())
+	}
+	if artifactEvidence.Label != "Implementation artifact" || artifactEvidence.MediaType != "text/markdown" {
+		t.Fatalf("artifact metadata = %+v, want implementation markdown artifact", artifactEvidence)
+	}
+	if !containsString(artifactEvidence.SourceRefs, artifactEvent.ID().Value()) {
+		t.Fatalf("artifact source refs = %+v, want %s", artifactEvidence.SourceRefs, artifactEvent.ID())
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID().Value()) != nil {
+		t.Fatalf("artifact evidence = %+v, want no unrelated artifact %s", projection.WorkEvidenceSummary.Artifacts, unrelatedArtifact.ID())
+	}
+	if !containsString(projection.WorkEvidenceSummary.ArtifactRefs, "runtime_artifact_001") {
+		t.Fatalf("artifact refs = %+v, want runtime artifact logical ref", projection.WorkEvidenceSummary.ArtifactRefs)
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, runtimeArtifact.ID().Value()) != nil {
+		t.Fatalf("artifact evidence = %+v, want no structured runtime artifact %s", projection.WorkEvidenceSummary.Artifacts, runtimeArtifact.ID())
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, "runtime_artifact_001") != nil {
+		t.Fatalf("artifact evidence = %+v, want no structured runtime artifact logical ref", projection.WorkEvidenceSummary.Artifacts)
+	}
 	if !containsString(projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value()) {
 		t.Fatalf("source refs = %+v, want artifact event %s", projection.SourceEventIDsOrQueryWindow, artifactEvent.ID().Value())
 	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, runtimeArtifact.ID().Value()) {
+		t.Fatalf("source refs = %+v, want runtime artifact event %s", projection.SourceEventIDsOrQueryWindow, runtimeArtifact.ID().Value())
+	}
 	if containsString(projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value()) {
 		t.Fatalf("source refs = %+v, want no unrelated artifact %s", projection.SourceEventIDsOrQueryWindow, unrelatedArtifact.ID().Value())
+	}
+}
+
+func TestCompactCivilizationAssemblyArtifactEvidenceMergesAndSorts(t *testing.T) {
+	artifacts := compactCivilizationAssemblyArtifactEvidence([]CivilizationAssemblyArtifactEvidence{
+		{
+			ID:         "artifact_b",
+			TaskRef:    "task_b",
+			Label:      "Beta artifact",
+			MediaType:  "application/json",
+			SourceRefs: []string{"source_b"},
+		},
+		{
+			ID:         "artifact_a",
+			Label:      "Alpha artifact",
+			SourceRefs: []string{"source_a2"},
+		},
+		{
+			ID:         "artifact_a",
+			TaskRef:    "task_a",
+			MediaType:  "text/markdown",
+			SourceRefs: []string{"source_a1"},
+		},
+	})
+
+	if len(artifacts) != 2 {
+		t.Fatalf("artifact count = %d, want 2: %+v", len(artifacts), artifacts)
+	}
+	if artifacts[0].ID != "artifact_a" || artifacts[1].ID != "artifact_b" {
+		t.Fatalf("artifact order = %+v, want artifact_a then artifact_b", artifacts)
+	}
+	alpha := artifacts[0]
+	if alpha.TaskRef != "task_a" || alpha.Label != "Alpha artifact" || alpha.MediaType != "text/markdown" {
+		t.Fatalf("merged artifact_a = %+v, want backfilled task, label, media type", alpha)
+	}
+	if len(alpha.SourceRefs) != 2 || alpha.SourceRefs[0] != "source_a1" || alpha.SourceRefs[1] != "source_a2" {
+		t.Fatalf("artifact_a source refs = %+v, want sorted merged refs", alpha.SourceRefs)
 	}
 }
 
@@ -2521,6 +2596,15 @@ func findRuntimeArtifactEvidence(artifacts []OperatorRuntimeArtifactEvidence, ev
 		}
 	}
 	return OperatorRuntimeArtifactEvidence{}, false
+}
+
+func civilizationProjectionArtifactEvidenceByID(artifacts []CivilizationAssemblyArtifactEvidence, eventID string) *CivilizationAssemblyArtifactEvidence {
+	for i := range artifacts {
+		if artifacts[i].ID == eventID {
+			return &artifacts[i]
+		}
+	}
+	return nil
 }
 
 func hasRuntimeGraphEdge(edges []OperatorRuntimeCausalEdge, from, to, scope string) bool {
