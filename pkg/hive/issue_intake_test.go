@@ -4078,6 +4078,16 @@ func TestProgressIssueScanLifecycleCreatesApprovedIssueScanDraftPR(t *testing.T)
 	if readyCompleted {
 		t.Fatalf("ready stage completed after approved draft PR creation only")
 	}
+	secondProgress, err := rt.progressIssueScanLifecycleContext(context.Background())
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycleContext: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("client calls after second pass = %d, want one approved draft PR create", client.calls)
+	}
+	if countCreatedIssueScanDraftPRs(secondProgress.DraftPRCreations) != 0 {
+		t.Fatalf("second-pass draft PR creations = %+v, want none after receipt", secondProgress.DraftPRCreations)
+	}
 }
 
 func TestProgressIssueScanLifecycleDoesNotCreateDraftPRWithoutApproval(t *testing.T) {
@@ -4094,6 +4104,29 @@ func TestProgressIssueScanLifecycleDoesNotCreateDraftPRWithoutApproval(t *testin
 	}
 	if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 0 {
 		t.Fatalf("draft PR creations = %+v, want none without approval", progress.DraftPRCreations)
+	}
+}
+
+func TestProgressIssueScanLifecycleDoesNotCreateDraftPRForNonHumanDecision(t *testing.T) {
+	rt, writer, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedIssueScanDraftPRAuthorityDecisionWithRoleForTest(t, rt, writer, requestResult, draftPRApprovedOutcome, "operator", nil)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	rt.issueScanDraftPRCreator = client
+
+	progress, err := rt.progressIssueScanLifecycleContext(context.Background())
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycleContext: %v", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none for non-Human authority decision", client.calls)
+	}
+	if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 0 {
+		t.Fatalf("draft PR creations = %+v, want none for non-Human authority decision", progress.DraftPRCreations)
 	}
 }
 
@@ -4219,6 +4252,11 @@ func seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runt
 
 func seedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, requestResult IssueScanDraftPRAuthorityRequestResult, outcome string, mutateTarget func(*DraftPRTarget)) types.EventID {
 	t.Helper()
+	return seedIssueScanDraftPRAuthorityDecisionWithRoleForTest(t, rt, writer, requestResult, outcome, "human", mutateTarget)
+}
+
+func seedIssueScanDraftPRAuthorityDecisionWithRoleForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, requestResult IssueScanDraftPRAuthorityRequestResult, outcome string, deciderRole string, mutateTarget func(*DraftPRTarget)) types.EventID {
+	t.Helper()
 	target := requestResult.DraftPRTarget
 	if mutateTarget != nil {
 		mutateTarget(&target)
@@ -4227,7 +4265,7 @@ func seedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runtime, wri
 		DecisionID:       requestResult.RequestID.Value(),
 		RequestID:        requestResult.RequestID,
 		ApproverActor:    writer.human,
-		DeciderRole:      "human",
+		DeciderRole:      deciderRole,
 		Outcome:          outcome,
 		ApprovedTarget:   target.Repository + " " + target.HeadRef,
 		ApprovedAction:   string(safety.ActionRepoPullRequestCreate),

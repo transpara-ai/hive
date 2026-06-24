@@ -199,6 +199,12 @@ func cmdFactoryDaemon(args []string) error {
 	if *issueScanInterval > 0 && *approveRoles {
 		return fmt.Errorf("--issue-scan-interval cannot be combined with --approve-roles")
 	}
+	if *issueScanDraftPRCreate && *approveRequests {
+		return fmt.Errorf("--issue-scan-draft-pr-create cannot be combined with --approve-requests")
+	}
+	if *issueScanDraftPRCreate && *approveRoles {
+		return fmt.Errorf("--issue-scan-draft-pr-create cannot be combined with --approve-roles")
+	}
 	var issueScanScanner *issueScanScannerConfig
 	if *issueScanInterval > 0 {
 		if *issueScanLimit <= 0 {

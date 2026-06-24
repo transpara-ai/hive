@@ -65,6 +65,9 @@ func (r *Runtime) approvedIssueScanDraftPRAuthorityRequestForRun(runID string) (
 		if !ok || strings.TrimSpace(content.Outcome) != draftPRApprovedOutcome || strings.TrimSpace(content.ApprovedAction) != string(safety.ActionRepoPullRequestCreate) {
 			continue
 		}
+		if !strings.EqualFold(strings.TrimSpace(content.DeciderRole), "human") {
+			continue
+		}
 		target, err := ParseDraftPRScope(content.Scope)
 		if err != nil {
 			continue
