@@ -22,8 +22,15 @@ const (
 	defaultRunLaunchDispatchInterval = 15 * time.Second
 
 	IssueScanExecutionPlanArtifactLabel     = "issue_scan_execution_plan"
+	IssueScanLifecycleStageArtifactPrefix   = "issue_scan_lifecycle_stage_"
 	issueScanExecutionPlanArtifactMediaType = "application/json"
 )
+
+type issueScanDispatchArtifact struct {
+	Label     string
+	MediaType string
+	Body      string
+}
 
 // RunLaunchDispatchResult summarizes one dispatcher pass over queued
 // factory.run.requested events.
@@ -110,6 +117,12 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 				errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
 				continue
 			}
+			stageArtifacts, err := issueScanLifecycleStageArtifacts(content)
+			if err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
+				continue
+			}
 			if hasPlanArtifact {
 				if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), taskID, planArtifactBody); err != nil {
 					result.Failed++
@@ -117,11 +130,22 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 					continue
 				}
 			}
+			if err := r.ensureIssueScanDispatchArtifacts(content, request.ID(), taskID, stageArtifacts); err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: repair issue-scan lifecycle stage artifacts: %w", content.RunID, err))
+				continue
+			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
 			continue
 		}
 		if err := r.validateRunLaunchDispatchModelOverrides(content); err != nil {
+			result.Failed++
+			errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
+			continue
+		}
+		stageArtifacts, err := issueScanLifecycleStageArtifacts(content)
+		if err != nil {
 			result.Failed++
 			errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
 			continue
@@ -148,6 +172,11 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 				continue
 			}
 		}
+		if err := r.ensureIssueScanDispatchArtifacts(content, request.ID(), task.ID, stageArtifacts); err != nil {
+			result.Failed++
+			errs = append(errs, fmt.Errorf("run %q: attach issue-scan lifecycle stage artifacts: %w", content.RunID, err))
+			continue
+		}
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
@@ -160,24 +189,49 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 }
 
 func (r *Runtime) ensureIssueScanExecutionPlanArtifact(content FactoryRunRequestedContent, requestID, taskID types.EventID, body string) error {
+	return r.ensureIssueScanDispatchArtifact(content, requestID, taskID, issueScanDispatchArtifact{
+		Label:     IssueScanExecutionPlanArtifactLabel,
+		MediaType: issueScanExecutionPlanArtifactMediaType,
+		Body:      body,
+	})
+}
+
+func (r *Runtime) ensureIssueScanDispatchArtifacts(content FactoryRunRequestedContent, requestID, taskID types.EventID, artifacts []issueScanDispatchArtifact) error {
+	for _, artifact := range artifacts {
+		if err := r.ensureIssueScanDispatchArtifact(content, requestID, taskID, artifact); err != nil {
+			return fmt.Errorf("%s: %w", artifact.Label, err)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) ensureIssueScanDispatchArtifact(content FactoryRunRequestedContent, requestID, taskID types.EventID, artifact issueScanDispatchArtifact) error {
+	label := strings.TrimSpace(artifact.Label)
+	if label == "" {
+		return fmt.Errorf("artifact label is required")
+	}
 	artifacts, err := r.tasks.ListArtifacts(taskID)
 	if err != nil {
 		return fmt.Errorf("list task artifacts: %w", err)
 	}
-	for _, artifact := range artifacts {
-		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+	for _, existing := range artifacts {
+		if existing.Label == label {
 			return nil
 		}
 	}
 	return r.tasks.AddArtifact(
 		r.humanID,
 		taskID,
-		IssueScanExecutionPlanArtifactLabel,
-		issueScanExecutionPlanArtifactMediaType,
-		body,
+		label,
+		artifact.MediaType,
+		artifact.Body,
 		[]types.EventID{requestID, taskID},
 		runLaunchConversationID(content.RunID, r.convID),
 	)
+}
+
+func IssueScanLifecycleStageArtifactLabel(stageID string) string {
+	return IssueScanLifecycleStageArtifactPrefix + safeRunLaunchID(stageID)
 }
 
 func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (string, bool, error) {
@@ -214,6 +268,90 @@ func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (str
 		return "", false, fmt.Errorf("format issue-scan execution plan artifact: %w", err)
 	}
 	return encoded.String(), true, nil
+}
+
+func issueScanLifecycleStageArtifacts(content FactoryRunRequestedContent) ([]issueScanDispatchArtifact, error) {
+	raw := bytes.TrimSpace(content.Brief)
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if raw[0] != '{' {
+		return nil, nil
+	}
+	var meta struct {
+		Kind json.RawMessage `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, fmt.Errorf("decode run launch brief for lifecycle stage artifacts: %w", err)
+	}
+	if len(meta.Kind) == 0 {
+		return nil, nil
+	}
+	var kind string
+	if err := json.Unmarshal(meta.Kind, &kind); err != nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(kind) != issueScanBriefKind {
+		return nil, nil
+	}
+	briefKind, lifecycleVersion, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err != nil {
+		return nil, fmt.Errorf("derive issue-scan lifecycle stage artifacts: %w", err)
+	}
+	if briefKind != issueScanBriefKind || len(lifecycle) == 0 {
+		return nil, nil
+	}
+	return issueScanLifecycleStageArtifactsFromLifecycle(content.RunID, lifecycleVersion, lifecycle, agentPlan)
+}
+
+func issueScanLifecycleStageArtifactsFromLifecycle(runID, lifecycleVersion string, lifecycle []OperatorQueuedRunLifecycleStage, agentPlan []OperatorQueuedRunAgentPlanStep) ([]issueScanDispatchArtifact, error) {
+	planByStage := map[string][]OperatorQueuedRunAgentPlanStep{}
+	for _, step := range agentPlan {
+		planByStage[step.StageID] = append(planByStage[step.StageID], step)
+	}
+	out := make([]issueScanDispatchArtifact, 0, len(lifecycle))
+	labelsByStageID := map[string]string{}
+	for i, stage := range lifecycle {
+		label := IssueScanLifecycleStageArtifactLabel(stage.ID)
+		if label == IssueScanLifecycleStageArtifactPrefix {
+			return nil, fmt.Errorf("stage[%d] id %q does not produce a usable artifact label", i, stage.ID)
+		}
+		if existingStageID, ok := labelsByStageID[label]; ok {
+			return nil, fmt.Errorf("stage[%d] id %q collides with stage id %q for artifact label %q", i, stage.ID, existingStageID, label)
+		}
+		labelsByStageID[label] = stage.ID
+		body := struct {
+			Kind               string                           `json:"kind"`
+			LifecycleVersion   string                           `json:"lifecycle_version"`
+			RunID              string                           `json:"run_id"`
+			StageIndex         int                              `json:"stage_index"`
+			StageCount         int                              `json:"stage_count"`
+			Stage              OperatorQueuedRunLifecycleStage  `json:"stage"`
+			AgentExecutionPlan []OperatorQueuedRunAgentPlanStep `json:"agent_execution_plan,omitempty"`
+			EvidenceKind       string                           `json:"evidence_kind"`
+			EvidenceStatus     string                           `json:"evidence_status"`
+		}{
+			Kind:               "issue_scan_lifecycle_stage",
+			LifecycleVersion:   lifecycleVersion,
+			RunID:              runID,
+			StageIndex:         i + 1,
+			StageCount:         len(lifecycle),
+			Stage:              stage,
+			AgentExecutionPlan: append([]OperatorQueuedRunAgentPlanStep(nil), planByStage[stage.ID]...),
+			EvidenceKind:       "stage_declaration_not_completion",
+			EvidenceStatus:     "pending_runtime_evidence",
+		}
+		encoded, err := json.MarshalIndent(body, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("marshal issue-scan lifecycle stage artifact %q: %w", stage.ID, err)
+		}
+		out = append(out, issueScanDispatchArtifact{
+			Label:     label,
+			MediaType: issueScanExecutionPlanArtifactMediaType,
+			Body:      string(encoded),
+		})
+	}
+	return out, nil
 }
 
 func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Duration) {
