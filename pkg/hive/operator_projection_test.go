@@ -565,6 +565,88 @@ func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrderArtifacts(t 
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	sourceEventID := newTestEventID(t)
+	briefEventID := newTestEventID(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+		Body:   "The Civilization should scan Transpara-AI repos, then surface a ready-for-Human PR.",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	requestEvent := appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_001",
+		IntakeID:   "intake_issue_scan_001",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#321",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 12,
+			MaxCostUSD:    25,
+		},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: sourceEventID,
+		BriefEventID:  briefEventID,
+		Brief:         brief,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	queued := projection.QueuedRunRequest
+	if queued == nil {
+		t.Fatalf("queued run request was not projected: %+v", projection)
+	}
+	if queued.RunID != "run_issue_scan_001" || queued.EvidenceKind != "queued_request_not_runtime_start" {
+		t.Fatalf("queued run request = %+v", queued)
+	}
+	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
+		t.Fatalf("queued brief metadata = %+v", queued)
+	}
+	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
+		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
+	}
+	if len(queued.DevelopmentLifecycle) != 7 {
+		t.Fatalf("queued lifecycle = %+v, want 7 stages", queued.DevelopmentLifecycle)
+	}
+	readyStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil || readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
+		t.Fatalf("ready stage = %+v", readyStage)
+	}
+	if len(queued.AgentExecutionPlan) != 18 {
+		t.Fatalf("queued agent plan = %+v, want 18 steps", queued.AgentExecutionPlan)
+	}
+	implementStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementStep == nil || !implementStep.CanOperate || !containsModelProjectionString(implementStep.RequiredOutputs, "validation_output") {
+		t.Fatalf("implementer step = %+v", implementStep)
+	}
+	reviewStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "run_adversarial_review", "reviewer")
+	if reviewStep == nil || reviewStep.CanOperate || !containsModelProjectionString(reviewStep.RequiredOutputs, "exact_head_review_artifact") {
+		t.Fatalf("reviewer step = %+v", reviewStep)
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, requestEvent.ID().Value()) {
+		t.Fatalf("source refs = %+v, want queued request event %s", projection.SourceEventIDsOrQueryWindow, requestEvent.ID().Value())
+	}
+	if !containsString(projection.WorkEvidenceSummary.SourceRefs, sourceEventID.Value()) || !containsString(projection.WorkEvidenceSummary.SourceRefs, briefEventID.Value()) {
+		t.Fatalf("work evidence source refs = %+v, want source %s and brief %s", projection.WorkEvidenceSummary.SourceRefs, sourceEventID.Value(), briefEventID.Value())
+	}
+	if !civilizationProjectionHasResidualRisk(projection, "runtime_limitation_06") {
+		t.Fatalf("residual risks = %+v, want queued lifecycle limitation", projection.ResidualRiskSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionDistinguishesFactoryOrderQueryFailure(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	projection := BuildCivilizationAssemblyProjection(factoryOrderReadFailureStore{Store: s}, 50)
