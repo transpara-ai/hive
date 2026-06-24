@@ -776,15 +776,6 @@ func TestProgressIssueScanLifecycleCreatesStageContractsWithoutFabricatingRoleOu
 	if released := countReleasedIssueScanStageAdvances(progress.Advances); released != 1 {
 		t.Fatalf("advances = %+v, want exactly one released first stage", progress.Advances)
 	}
-	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 0 {
-		t.Fatalf("research role outputs = %+v, want none fabricated by runtime", progress.ResearchRoleOutputs)
-	}
-	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 0 {
-		t.Fatalf("debate role outputs = %+v, want none fabricated by runtime", progress.DebateRoleOutputs)
-	}
-	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 0 {
-		t.Fatalf("design role outputs = %+v, want none fabricated by runtime", progress.DesignRoleOutputs)
-	}
 	if len(progress.Completions) != 0 {
 		t.Fatalf("completions = %+v, want no stage completion without recorded role outputs", progress.Completions)
 	}
@@ -872,15 +863,6 @@ func TestProgressIssueScanLifecycleCreatesStageContractsWithoutFabricatingRoleOu
 	progress, err = rt.progressIssueScanLifecycle()
 	if err != nil {
 		t.Fatalf("progressIssueScanLifecycle second pass: %v", err)
-	}
-	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 0 {
-		t.Fatalf("research role outputs second pass = %+v, want no duplicates", progress.ResearchRoleOutputs)
-	}
-	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 0 {
-		t.Fatalf("debate role outputs second pass = %+v, want no duplicates", progress.DebateRoleOutputs)
-	}
-	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 0 {
-		t.Fatalf("design role outputs second pass = %+v, want no duplicates", progress.DesignRoleOutputs)
 	}
 }
 

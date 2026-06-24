@@ -135,9 +135,6 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 			fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
 		}
 	}
-	printIssueScanRoleOutputCount("research", progress.ResearchRoleOutputs)
-	printIssueScanRoleOutputCount("debate", progress.DebateRoleOutputs)
-	printIssueScanRoleOutputCount("design", progress.DesignRoleOutputs)
 	if created := countCreatedIssueScanImplementationTasksForCLI(progress.ImplementationTasks); created > 0 {
 		fmt.Printf("issue-scan implementation task created: %d\n", created)
 	}

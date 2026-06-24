@@ -953,15 +953,6 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if len(progress.Completions) > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
 			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan research evidence bridge: recorded %d role output(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan debate evidence bridge: recorded %d role output(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan design evidence bridge: recorded %d role output(s)\n", recorded)
-			}
 			if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan implementation task seeder: created %d implementation task(s)\n", created)
 			}
@@ -994,9 +985,6 @@ type IssueScanLifecycleProgress struct {
 	Dispatch                  RunLaunchDispatchResult
 	Advances                  []IssueScanStageAdvanceResult
 	Completions               []IssueScanStageCompletionResult
-	ResearchRoleOutputs       []IssueScanStageRoleOutputResult
-	DebateRoleOutputs         []IssueScanStageRoleOutputResult
-	DesignRoleOutputs         []IssueScanStageRoleOutputResult
 	ImplementationTasks       []IssueScanImplementationTaskResult
 	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
 	ReviewRuns                []IssueScanAdversarialReviewRecordResult
@@ -1209,9 +1197,6 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 	}
 	dst.Advances = append(dst.Advances, src.Advances...)
 	dst.Completions = append(dst.Completions, src.Completions...)
-	dst.ResearchRoleOutputs = append(dst.ResearchRoleOutputs, src.ResearchRoleOutputs...)
-	dst.DebateRoleOutputs = append(dst.DebateRoleOutputs, src.DebateRoleOutputs...)
-	dst.DesignRoleOutputs = append(dst.DesignRoleOutputs, src.DesignRoleOutputs...)
 	dst.ImplementationTasks = append(dst.ImplementationTasks, src.ImplementationTasks...)
 	dst.ImplementationRoleOutputs = append(dst.ImplementationRoleOutputs, src.ImplementationRoleOutputs...)
 	dst.ReviewRuns = append(dst.ReviewRuns, src.ReviewRuns...)
@@ -1242,15 +1227,6 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	}
 	if len(progress.Completions) > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d research role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d debate role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d design role output(s)\n", recorded)
 	}
 	if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: created %d implementation task(s)\n", created)
@@ -1286,15 +1262,6 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-completion issue-scan lifecycle progress failed closed for task %s: %v\n", task.ID.Value(), err)
 	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d research role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d debate role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d design role output(s)\n", recorded)
-	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d implementation role output(s)\n", recorded)
 	}
@@ -1327,15 +1294,6 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	progress, err := r.progressIssueScanLifecycleInlineContext(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-review issue-scan lifecycle progress failed closed for task %s verdict %s: %v\n", taskID, verdict, err)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d research role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d debate role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d design role output(s)\n", recorded)
 	}
 	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d exact-head review(s)\n", recorded)
