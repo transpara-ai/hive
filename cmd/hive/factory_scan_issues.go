@@ -80,7 +80,7 @@ func cmdFactoryScanIssues(args []string) error {
 	var skippedNotPRReady int
 	issues, skippedNotPRReady = hive.FilterIssueScanPRReadyCandidates(issues)
 	if len(issues) == 0 {
-		return fmt.Errorf("no PR-ready GitHub issues found for %s; skipped %d non-PR-ready issue(s); require cc:pr-ready without cc:pr-deferred or cc:needs-human-scope", strings.Join(normalizedRepos, ", "), skippedNotPRReady)
+		return fmt.Errorf("no PR-ready GitHub issues found for %s; skipped %d non-PR-ready issue(s); require %s without %s or %s", strings.Join(normalizedRepos, ", "), skippedNotPRReady, hive.IssueScanPRReadyLabel, hive.IssueScanPRDeferredLabel, hive.IssueScanNeedsHumanScopeLabel)
 	}
 
 	var (
