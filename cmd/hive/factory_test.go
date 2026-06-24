@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -138,6 +139,13 @@ func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonRequiresDraftPRRequestBeforeBase(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request-base=release/2026-06"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-draft-pr-request") {
+		t.Fatalf("expected missing draft PR request flag error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-review-runner") {
@@ -259,6 +267,76 @@ func TestIssueScanDraftPRBaseRefNormalization(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	source := filepath.Join(root, "source")
+	clone := filepath.Join(root, "clone")
+
+	runGitForTest(t, "", "init", "--bare", remote)
+	runGitForTest(t, "", "init", source)
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("issue-scan base\n"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForTest(t, source, "add", "README.md")
+	runGitForTest(t, source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
+	runGitForTest(t, source, "branch", "-M", "main")
+	runGitForTest(t, source, "remote", "add", "origin", remote)
+	runGitForTest(t, source, "push", "origin", "main")
+	runGitForTest(t, remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGitForTest(t, "", "clone", remote, clone)
+
+	want := strings.TrimSpace(runGitOutputForTest(t, source, "rev-parse", "HEAD"))
+	got, err := gitBaseCommitSHA(ctx, clone, "refs/heads/main")
+	if err != nil {
+		t.Fatalf("gitBaseCommitSHA: %v", err)
+	}
+	if got != want {
+		t.Fatalf("gitBaseCommitSHA = %q, want %q", got, want)
+	}
+}
+
+func TestIssueScanDraftPRAuthorityNonceIsDeterministic(t *testing.T) {
+	requestContext := hive.IssueScanDraftPRAuthorityRequestRunnerContext{
+		RunID:          "run_issue_001",
+		FactoryOrderID: "order_issue_001",
+		Repository:     "transpara-ai/hive",
+		OperateBranch:  "codex/run-issue-001",
+		OperateCommit:  "cccccccccccccccccccccccccccccccccccccccc",
+	}
+	first := issueScanDraftPRAuthorityNonce(requestContext, "main", "dddddddddddddddddddddddddddddddddddddddd")
+	second := issueScanDraftPRAuthorityNonce(requestContext, "main", "dddddddddddddddddddddddddddddddddddddddd")
+	movedBase := issueScanDraftPRAuthorityNonce(requestContext, "main", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if first == "" || !strings.HasPrefix(first, "issue-scan-") {
+		t.Fatalf("nonce = %q, want issue-scan prefix", first)
+	}
+	if first != second {
+		t.Fatalf("nonce not deterministic: %q then %q", first, second)
+	}
+	if movedBase == first {
+		t.Fatalf("nonce did not change when base SHA changed: %q", movedBase)
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runGitOutputForTest(t, dir, args...)
+}
+
+func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out)
 }
 
 func TestFactoryDaemonIssueScanIntervalRequiresRepoBeforeStart(t *testing.T) {

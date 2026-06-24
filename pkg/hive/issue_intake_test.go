@@ -3487,9 +3487,13 @@ func TestProgressIssueScanLifecycleRaisesConfiguredDraftPRAuthorityRequest(t *te
 		if !containsIssueScanString(requestContext.BoundaryDisclaimers, "authority request is not Human approval") {
 			t.Fatalf("request context missing Human boundary: %+v", requestContext.BoundaryDisclaimers)
 		}
+		baseSHA := "dddddddddddddddddddddddddddddddddddddddd"
+		if calls > 1 {
+			baseSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		}
 		return IssueScanDraftPRAuthorityRequestRunnerResult{
 			BaseRef: "main",
-			BaseSHA: "dddddddddddddddddddddddddddddddddddddddd",
+			BaseSHA: baseSHA,
 			Nonce:   "nonce-configured-draft-pr-request",
 		}, nil
 	}
@@ -3531,6 +3535,9 @@ func TestProgressIssueScanLifecycleRaisesConfiguredDraftPRAuthorityRequest(t *te
 	}
 	if len(again.DraftPRRequests) != 1 || !again.DraftPRRequests[0].AlreadyRaised || again.DraftPRRequests[0].Raised {
 		t.Fatalf("second draft PR authority requests = %+v, want already-raised without new request", again.DraftPRRequests)
+	}
+	if again.DraftPRRequests[0].DraftPRTarget.BaseSHA != "dddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("second draft PR authority target base SHA = %q, want originally recorded base SHA", again.DraftPRRequests[0].DraftPRTarget.BaseSHA)
 	}
 }
 
@@ -4415,12 +4422,15 @@ func TestRaiseIssueScanDraftPRAuthorityRequestHoldsAndIsIdempotent(t *testing.T)
 	if requests[0].ActionName != string(safety.ActionRepoPullRequestCreate) || !equalStringSlices(requests[0].Scope, result.DraftPRTarget.Scope()) {
 		t.Fatalf("authority request = %+v, target = %+v", requests[0], result.DraftPRTarget)
 	}
-	again, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr-retry")
+	again, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "nonce-issue-scan-pr-retry")
 	if err != nil {
 		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest again: %v", err)
 	}
 	if !again.AlreadyRaised || again.RequestID != result.RequestID {
 		t.Fatalf("second result = %+v, want same already-raised request %s", again, result.RequestID)
+	}
+	if again.DraftPRTarget.BaseSHA != "dddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("second result base SHA = %q, want originally recorded base SHA", again.DraftPRTarget.BaseSHA)
 	}
 	if again.DraftPRTarget.SingleUseNonce != "nonce-issue-scan-pr" {
 		t.Fatalf("second result nonce = %q, want originally recorded nonce", again.DraftPRTarget.SingleUseNonce)

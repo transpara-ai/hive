@@ -314,9 +314,12 @@ func truncateIssueScanDraftPRTitle(title string) string {
 }
 
 func sameIssueScanDraftPRAuthorityTarget(a, b DraftPRTarget) bool {
+	// BaseSHA and nonce are intentionally excluded. A zero-blocker issue-scan
+	// run gets one draft-PR authority request for its implementation head; if
+	// the base branch advances while Human approval is pending, the first
+	// recorded target remains the authoritative request.
 	return strings.EqualFold(strings.TrimSpace(a.Repository), strings.TrimSpace(b.Repository)) &&
 		strings.TrimSpace(a.BaseRef) == strings.TrimSpace(b.BaseRef) &&
-		strings.TrimSpace(a.BaseSHA) == strings.TrimSpace(b.BaseSHA) &&
 		strings.TrimSpace(a.HeadRef) == strings.TrimSpace(b.HeadRef) &&
 		strings.TrimSpace(a.HeadSHA) == strings.TrimSpace(b.HeadSHA) &&
 		strings.TrimSpace(a.TitleHash) == strings.TrimSpace(b.TitleHash) &&

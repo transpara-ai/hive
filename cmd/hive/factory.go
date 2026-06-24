@@ -218,6 +218,15 @@ func cmdFactoryDaemon(args []string) error {
 	if *issueScanDraftPRRequest && *approveRoles {
 		return fmt.Errorf("--issue-scan-draft-pr-request cannot be combined with --approve-roles")
 	}
+	issueScanDraftPRRequestBaseSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "issue-scan-draft-pr-request-base" {
+			issueScanDraftPRRequestBaseSet = true
+		}
+	})
+	if issueScanDraftPRRequestBaseSet && !*issueScanDraftPRRequest {
+		return fmt.Errorf("--issue-scan-draft-pr-request is required when --issue-scan-draft-pr-request-base is set")
+	}
 	if *readyPRMarkReady && *approveRequests {
 		return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --approve-requests")
 	}
