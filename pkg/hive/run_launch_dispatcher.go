@@ -953,6 +953,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if len(progress.Completions) > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
 			}
+			if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan research evidence bridge: recorded %d role output(s)\n", recorded)
+			}
 			if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan implementation task seeder: created %d implementation task(s)\n", created)
 			}
@@ -976,6 +979,7 @@ type issueScanLifecycleProgress struct {
 	Dispatch                  RunLaunchDispatchResult
 	Advances                  []IssueScanStageAdvanceResult
 	Completions               []IssueScanStageCompletionResult
+	ResearchRoleOutputs       []IssueScanStageRoleOutputResult
 	ImplementationTasks       []IssueScanImplementationTaskResult
 	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
@@ -1001,6 +1005,11 @@ func (r *Runtime) progressIssueScanLifecycle() (issueScanLifecycleProgress, erro
 	progress.Advances = advances
 	if err != nil {
 		errs = append(errs, fmt.Errorf("issue-scan lifecycle start: %w", err))
+	}
+	researchRoleOutputs, err := r.RecordQueuedIssueScanResearchRoleOutputs(dispatch)
+	progress.ResearchRoleOutputs = researchRoleOutputs
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan research role-output recording: %w", err))
 	}
 	completions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
 	progress.Completions = completions
@@ -1085,6 +1094,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	if len(progress.Completions) > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
 	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d research role output(s)\n", recorded)
+	}
 	if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: created %d implementation task(s)\n", created)
 	}
@@ -1113,6 +1125,9 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-completion issue-scan lifecycle progress failed closed for task %s: %v\n", task.ID.Value(), err)
 	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d research role output(s)\n", recorded)
+	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d implementation role output(s)\n", recorded)
 	}
@@ -1136,6 +1151,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	progress, err := r.progressIssueScanLifecycle()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-review issue-scan lifecycle progress failed closed for task %s verdict %s: %v\n", taskID, verdict, err)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d research role output(s)\n", recorded)
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d review role output(s)\n", recorded)

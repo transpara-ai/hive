@@ -741,6 +741,91 @@ func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testin
 	}
 }
 
+func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 321,
+				Title:  "Teach the Civilization to scan Transpara-AI repos",
+				URL:    "https://github.com/transpara-ai/hive/issues/321",
+				Body:   "The Civilization should scan Transpara-AI repos, create a FactoryOrder, debate, implement, review, and surface a ready-for-Human PR.",
+				Labels: []string{"civilization", "autonomy"},
+			},
+		},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle: %v", err)
+	}
+	if progress.Dispatch.Dispatched != 1 {
+		t.Fatalf("dispatch = %+v, want one dispatched issue-scan run", progress.Dispatch)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 2 {
+		t.Fatalf("research role outputs = %+v, want strategist and planner recorded", progress.ResearchRoleOutputs)
+	}
+	if len(progress.Completions) != 1 || progress.Completions[0].StageID != "research_issue_and_repo_context" || !progress.Completions[0].Completed {
+		t.Fatalf("completions = %+v, want completed research stage", progress.Completions)
+	}
+	if progress.Completions[0].NextAdvance == nil || progress.Completions[0].NextAdvance.StageID != "debate_with_correct_civic_roles" || !progress.Completions[0].NextAdvance.Released {
+		t.Fatalf("next advance = %+v, want debate stage released", progress.Completions[0].NextAdvance)
+	}
+
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	researchTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context"))
+	if !ok {
+		t.Fatalf("missing research stage task in %+v", tasks)
+	}
+	researchCompleted, err := rt.issueScanStageTaskCompleted(researchTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted research: %v", err)
+	}
+	if !researchCompleted {
+		t.Fatalf("research stage task was not completed")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(researchTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts research: %v", err)
+	}
+	roleOutputs := issueScanRoleOutputArtifactsForTest(t, artifacts)
+	strategist := roleOutputs["strategist"]
+	planner := roleOutputs["planner"]
+	if strategist == nil || planner == nil {
+		t.Fatalf("research role outputs = %+v, want strategist and planner", roleOutputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(strategist.Outputs, "issue_snapshot") == nil || issueScanStageRuntimeEvidenceItemByKey(strategist.Outputs, "risk_and_scope_notes") == nil {
+		t.Fatalf("strategist outputs = %+v, want issue snapshot and risk/scope", strategist.Outputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(planner.Outputs, "repo_context") == nil || issueScanStageRuntimeEvidenceItemByKey(planner.Outputs, "repo_context_packet") == nil {
+		t.Fatalf("planner outputs = %+v, want repo context", planner.Outputs)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
+		t.Fatalf("missing research runtime evidence artifact: %+v", artifacts)
+	}
+
+	progress, err = rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle second pass: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 0 {
+		t.Fatalf("research role outputs second pass = %+v, want no duplicates", progress.ResearchRoleOutputs)
+	}
+}
+
 func TestIssueScanAgentExecutionPlanCoversEveryRequiredStageRole(t *testing.T) {
 	lifecycle := issueScanDevelopmentLifecycle()
 	plan, err := issueScanAgentExecutionPlan(lifecycle)

@@ -128,6 +128,13 @@ func cmdFactoryScanIssues(args []string) error {
 				fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
 			}
 		}
+		researchOutputs, err := rt.RecordQueuedIssueScanResearchRoleOutputs(result)
+		if err != nil {
+			return fmt.Errorf("record issue-scan research role outputs: %w", err)
+		}
+		if len(researchOutputs) > 0 {
+			fmt.Printf("issue-scan research role outputs recorded: %d\n", len(researchOutputs))
+		}
 		completions, err := rt.CompleteReadyIssueScanLifecycleStages(result)
 		if err != nil {
 			return fmt.Errorf("auto-complete ready issue-scan lifecycle stages: %w", err)
