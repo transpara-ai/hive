@@ -502,21 +502,36 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		}
 	}
 	firstStageTaskID := stageTaskIDsByStage[expectedStageIDs[0]]
-	if err := rt.tasks.Complete(writer.human, firstStageTaskID, "stage draft bookkeeping completed with seeded readiness gate artifacts; runtime evidence remains pending", []types.EventID{firstStageTaskID}, writer.conv); err != nil {
-		t.Fatalf("Complete first stage draft: %v", err)
+	stageCompletion, err := rt.CompleteIssueScanLifecycleStage(content.RunID, expectedStageIDs[0], issueScanStageRuntimeEvidenceForTest(t, expectedStageIDs[0]), false)
+	if err != nil {
+		t.Fatalf("CompleteIssueScanLifecycleStage first stage: %v", err)
+	}
+	if !stageCompletion.Completed || stageCompletion.StageTaskID != firstStageTaskID || stageCompletion.EvidenceArtifactID == (types.EventID{}) {
+		t.Fatalf("stage completion = %+v, want completed first stage with runtime evidence artifact", stageCompletion)
 	}
 	completedProjection := BuildCivilizationAssemblyProjection(rt.store, 100)
 	firstStageEvidence := civilizationProjectionTaskEvidenceByID(completedProjection.WorkEvidenceSummary.Tasks, firstStageTaskID.Value())
 	if firstStageEvidence == nil || firstStageEvidence.Status != "work_task_completed" || firstStageEvidence.Ready || firstStageEvidence.Blocked {
 		t.Fatalf("projected completed first stage evidence = %+v, want completed Work task without ready/blocked flags", firstStageEvidence)
 	}
+	if firstStageEvidence.RuntimeEvidenceStatus != civilizationAssemblyQueuedStageCompletedStatus || !containsIssueScanValue(firstStageEvidence.RuntimeEvidenceRefs, stageCompletion.EvidenceArtifactID.Value()) {
+		t.Fatalf("projected completed first stage runtime evidence = %+v, want %q ref %s", firstStageEvidence, civilizationAssemblyQueuedStageCompletedStatus, stageCompletion.EvidenceArtifactID)
+	}
 	completedQueued := completedProjection.QueuedRunRequest
 	if completedQueued == nil {
 		t.Fatalf("completed projection queued run request = nil")
 	}
 	completedResearchStage := queuedRunLifecycleStageByID(completedQueued.DevelopmentLifecycle, expectedStageIDs[0])
-	if completedResearchStage == nil || completedResearchStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
-		t.Fatalf("completed research stage evidence = %+v, want task draft status still pending runtime evidence", completedResearchStage)
+	if completedResearchStage == nil || completedResearchStage.EvidenceStatus != civilizationAssemblyQueuedStageCompletedStatus {
+		t.Fatalf("completed research stage evidence = %+v, want completed runtime evidence status", completedResearchStage)
+	}
+	completedResearchStep := queuedRunAgentPlanStepByRole(completedQueued.AgentExecutionPlan, expectedStageIDs[0], "strategist")
+	if completedResearchStep == nil || completedResearchStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepCompletedStatus {
+		t.Fatalf("completed research strategist step = %+v, want completed runtime evidence status", completedResearchStep)
+	}
+	completedStrategistOutput := issueScanRoleOutputContractByRole(firstStageEvidence.RoleOutputContracts, "strategist")
+	if completedStrategistOutput == nil || completedStrategistOutput.EvidenceStatus != civilizationAssemblyQueuedPlanStepCompletedStatus {
+		t.Fatalf("completed strategist output contract = %+v, want completed runtime evidence status", completedStrategistOutput)
 	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
@@ -784,13 +799,17 @@ func TestAdvanceIssueScanLifecycleStageReleasesNextRunnableStage(t *testing.T) {
 		t.Fatalf("explicit second stage before first completion error = %v, want previous stage blocker", err)
 	}
 
-	if err := rt.tasks.Complete(writer.human, firstStageTask.ID, "research stage evidence recorded", []types.EventID{firstStageTask.ID}, writer.conv); err != nil {
-		t.Fatalf("Complete first stage: %v", err)
-	}
-	next, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, "")
+	completed, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, firstStageID, issueScanStageRuntimeEvidenceForTest(t, firstStageID), true)
 	if err != nil {
-		t.Fatalf("AdvanceIssueScanLifecycleStage second: %v", err)
+		t.Fatalf("CompleteIssueScanLifecycleStage first: %v", err)
 	}
+	if !completed.Completed || completed.StageID != firstStageID || completed.StageTaskID != firstStageTask.ID || completed.EvidenceArtifactID == (types.EventID{}) {
+		t.Fatalf("completed first stage = %+v, want governed runtime evidence completion", completed)
+	}
+	if completed.NextAdvance == nil {
+		t.Fatalf("completed first stage next advance = nil, want second stage release")
+	}
+	next := *completed.NextAdvance
 	if !next.Released || next.StageID != secondStageID || next.PreviousStageID != firstStageID || next.PreviousStageTaskID != firstStageTask.ID {
 		t.Fatalf("second advance = %+v, want released second stage after first completion", next)
 	}
@@ -800,6 +819,549 @@ func TestAdvanceIssueScanLifecycleStageReleasesNextRunnableStage(t *testing.T) {
 	}
 	if secondBlocked {
 		t.Fatalf("second stage remains blocked after advance")
+	}
+	completedProjection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	completedResearchStage := queuedRunLifecycleStageByID(completedProjection.QueuedRunRequest.DevelopmentLifecycle, firstStageID)
+	if completedResearchStage == nil || completedResearchStage.EvidenceStatus != civilizationAssemblyQueuedStageCompletedStatus {
+		t.Fatalf("completed projection research stage = %+v, want completed runtime evidence", completedResearchStage)
+	}
+	debateStage := queuedRunLifecycleStageByID(completedProjection.QueuedRunRequest.DevelopmentLifecycle, secondStageID)
+	if debateStage == nil || debateStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("completed projection debate stage = %+v, want next stage task draft pending runtime evidence", debateStage)
+	}
+}
+
+func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	evidence := issueScanStageRuntimeEvidenceForTest(t, stageID)
+	evidence.EvidenceItems = evidence.EvidenceItems[:len(evidence.EvidenceItems)-1]
+	if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, evidence, false); err == nil || !strings.Contains(err.Error(), "missing required evidence") {
+		t.Fatalf("CompleteIssueScanLifecycleStage missing evidence error = %v, want required evidence refusal", err)
+	}
+	blocked, err := rt.tasks.IsBlocked(stageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked stage: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("stage task barrier released despite missing required evidence")
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(stageTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus stage: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("stage task completed despite missing required evidence")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts stage: %v", err)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("runtime evidence artifact recorded despite missing required evidence: %+v", artifacts)
+	}
+}
+
+func TestCompleteIssueScanLifecycleStageRejectsMissingRoleOutput(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	evidence := issueScanStageRuntimeEvidenceForTest(t, stageID)
+	evidence.RoleOutputs = evidence.RoleOutputs[:len(evidence.RoleOutputs)-1]
+	if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, evidence, false); err == nil || !strings.Contains(err.Error(), "missing role output") {
+		t.Fatalf("CompleteIssueScanLifecycleStage missing role output error = %v, want role output refusal", err)
+	}
+	blocked, err := rt.tasks.IsBlocked(stageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked stage: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("stage task barrier released despite missing role output")
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(stageTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus stage: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("stage task completed despite missing role output")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts stage: %v", err)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("runtime evidence artifact recorded despite missing role output: %+v", artifacts)
+	}
+}
+
+func TestCompleteIssueScanLifecycleStageRejectsIdentitySpoofing(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*IssueScanStageRuntimeEvidence)
+		wantErr string
+	}{
+		{
+			name:    "kind mismatch",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.Kind = "wrong_kind" },
+			wantErr: "kind",
+		},
+		{
+			name:    "lifecycle version mismatch",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.LifecycleVersion = "wrong_version" },
+			wantErr: "lifecycle_version",
+		},
+		{
+			name:    "run mismatch",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.RunID = "run_other" },
+			wantErr: "run_id",
+		},
+		{
+			name:    "factory order mismatch",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.FactoryOrderID = "fo_other" },
+			wantErr: "factory_order_id",
+		},
+		{
+			name:    "stage mismatch",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.StageID = "debate_with_correct_civic_roles" },
+			wantErr: "stage_id",
+		},
+		{
+			name:    "bad status",
+			mutate:  func(e *IssueScanStageRuntimeEvidence) { e.Status = "failed" },
+			wantErr: "not completable",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, writer := newRunLaunchDispatchRuntime(t)
+			queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+				OperatorID: IssueScanOperatorID("Michael Saucier"),
+				Issues: []GitHubIssueCandidate{{
+					Repo:   "transpara-ai/hive",
+					Number: 321,
+					Title:  "Teach the Civilization to scan issues",
+					URL:    "https://github.com/transpara-ai/hive/issues/321",
+					Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+				}},
+				Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+			}, nil)
+			if err != nil {
+				t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+			}
+			if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+				t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+			}
+			orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+			if err != nil {
+				t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+			}
+			tasks, err := rt.tasks.List(20)
+			if err != nil {
+				t.Fatalf("List tasks: %v", err)
+			}
+			stageID := "research_issue_and_repo_context"
+			stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+			if !ok {
+				t.Fatalf("missing stage task in %+v", tasks)
+			}
+
+			evidence := issueScanStageRuntimeEvidenceForTest(t, stageID)
+			tc.mutate(&evidence)
+			if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, evidence, false); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("CompleteIssueScanLifecycleStage %s error = %v, want %q", tc.name, err, tc.wantErr)
+			}
+			blocked, err := rt.tasks.IsBlocked(stageTask.ID)
+			if err != nil {
+				t.Fatalf("IsBlocked stage: %v", err)
+			}
+			if !blocked {
+				t.Fatalf("stage task barrier released despite %s", tc.name)
+			}
+			status, err := rt.tasks.GetCompatibilityStatus(stageTask.ID)
+			if err != nil {
+				t.Fatalf("GetCompatibilityStatus stage: %v", err)
+			}
+			if status == work.LegacyStatusCompleted {
+				t.Fatalf("stage task completed despite %s", tc.name)
+			}
+			artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+			if err != nil {
+				t.Fatalf("ListArtifacts stage: %v", err)
+			}
+			if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+				t.Fatalf("runtime evidence artifact recorded despite %s: %+v", tc.name, artifacts)
+			}
+		})
+	}
+}
+
+func TestCivilizationAssemblyProjectionDoesNotCompleteStageWithoutRuntimeEvidence(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, stageID); err != nil {
+		t.Fatalf("AdvanceIssueScanLifecycleStage: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, stageTask.ID, "direct completion without governed runtime evidence", []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("direct Complete stage: %v", err)
+	}
+
+	projection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, stageTask.ID.Value())
+	if taskEvidence == nil || taskEvidence.Status != "work_task_completed" || len(taskEvidence.RuntimeEvidenceRefs) != 0 || taskEvidence.RuntimeEvidenceStatus != "" {
+		t.Fatalf("direct-completed task evidence = %+v, want completed Work task without runtime evidence status", taskEvidence)
+	}
+	projectedStage := queuedRunLifecycleStageByID(projection.QueuedRunRequest.DevelopmentLifecycle, stageID)
+	if projectedStage == nil || projectedStage.EvidenceStatus != civilizationAssemblyQueuedStageTaskDraftStatus {
+		t.Fatalf("direct-completed queued stage = %+v, want task draft pending runtime evidence", projectedStage)
+	}
+}
+
+func TestCivilizationAssemblyProjectionDoesNotCompleteStageWithThinRuntimeEvidence(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, stageID); err != nil {
+		t.Fatalf("AdvanceIssueScanLifecycleStage: %v", err)
+	}
+	thinEvidence := IssueScanStageRuntimeEvidence{
+		Kind:             issueScanStageRuntimeEvidenceArtifactKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            queued.RunID,
+		FactoryOrderID:   orderID,
+		StageID:          stageID,
+		Status:           "completed",
+		Summary:          "thin forged runtime evidence",
+	}
+	body, err := json.MarshalIndent(thinEvidence, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal thin evidence: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, IssueScanStageRuntimeEvidenceArtifactLabel, issueScanStageRuntimeEvidenceMediaType, string(body), []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact thin runtime evidence: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, stageTask.ID, "direct completion with thin runtime evidence", []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("direct Complete stage: %v", err)
+	}
+
+	projection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, stageTask.ID.Value())
+	if taskEvidence == nil || taskEvidence.Status != "work_task_completed" || taskEvidence.RuntimeEvidenceStatus != civilizationAssemblyQueuedStageRuntimeStatus {
+		t.Fatalf("thin-runtime task evidence = %+v, want recorded runtime evidence without completed runtime status", taskEvidence)
+	}
+	projectedStage := queuedRunLifecycleStageByID(projection.QueuedRunRequest.DevelopmentLifecycle, stageID)
+	if projectedStage == nil || projectedStage.EvidenceStatus != civilizationAssemblyQueuedStageRuntimeStatus {
+		t.Fatalf("thin-runtime queued stage = %+v, want runtime evidence recorded", projectedStage)
+	}
+}
+
+func TestCompleteIssueScanLifecycleStageRejectsLaterStageBeforePredecessor(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "debate_with_correct_civic_roles"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, issueScanStageRuntimeEvidenceForTest(t, stageID), false); err == nil || !strings.Contains(err.Error(), "previous stage") {
+		t.Fatalf("CompleteIssueScanLifecycleStage later-stage error = %v, want previous stage blocker", err)
+	}
+	blocked, err := rt.tasks.IsBlocked(stageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked later stage: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("later stage barrier released before predecessor completion")
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(stageTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus later stage: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("later stage completed before predecessor completion")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts later stage: %v", err)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("runtime evidence artifact recorded for out-of-order completion: %+v", artifacts)
+	}
+}
+
+func TestCompleteIssueScanLifecycleStageCompletesLifecycleWithoutCompletingFactoryOrder(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	parentTask, ok := findTaskByCanonicalTaskIDForTest(tasks, "")
+	if !ok {
+		t.Fatalf("missing parent FactoryOrder task in %+v", tasks)
+	}
+
+	lifecycle := issueScanDevelopmentLifecycle()
+	var final IssueScanStageCompletionResult
+	for i, stage := range lifecycle {
+		advanceNext := i < len(lifecycle)-1
+		final, err = rt.CompleteIssueScanLifecycleStage(queued.RunID, stage.ID, issueScanStageRuntimeEvidenceForTest(t, stage.ID), advanceNext)
+		if err != nil {
+			t.Fatalf("CompleteIssueScanLifecycleStage %s: %v", stage.ID, err)
+		}
+		if !final.Completed || final.StageID != safeRunLaunchID(stage.ID) || final.EvidenceArtifactID == (types.EventID{}) {
+			t.Fatalf("completion %s = %+v, want completed stage with runtime evidence", stage.ID, final)
+		}
+		if advanceNext && final.NextAdvance == nil {
+			t.Fatalf("completion %s next advance = nil, want next stage release", stage.ID)
+		}
+		if !advanceNext && final.NextAdvance != nil {
+			t.Fatalf("completion %s next advance = %+v, want no next advance when advanceNext=false", stage.ID, final.NextAdvance)
+		}
+	}
+	if !final.LifecycleComplete {
+		t.Fatalf("final completion = %+v, want lifecycle complete marker after final stage", final)
+	}
+	parentStatus, err := rt.tasks.GetCompatibilityStatus(parentTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus parent: %v", err)
+	}
+	if parentStatus == work.LegacyStatusCompleted {
+		t.Fatalf("parent FactoryOrder task completed by issue-scan stage lifecycle")
+	}
+
+	projection := BuildCivilizationAssemblyProjection(rt.store, 200)
+	parentEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, parentTask.ID.Value())
+	if parentEvidence == nil || parentEvidence.Status == "work_task_completed" || len(parentEvidence.RuntimeEvidenceRefs) > 0 {
+		t.Fatalf("parent evidence = %+v, want incomplete parent without stage runtime refs", parentEvidence)
+	}
+	for _, stage := range lifecycle {
+		projectedStage := queuedRunLifecycleStageByID(projection.QueuedRunRequest.DevelopmentLifecycle, stage.ID)
+		if projectedStage == nil || projectedStage.EvidenceStatus != civilizationAssemblyQueuedStageCompletedStatus {
+			t.Fatalf("projected stage %s = %+v, want completed runtime evidence", stage.ID, projectedStage)
+		}
+	}
+	if len(projection.WorkEvidenceSummary.TestRunRefs) > 0 || len(projection.WorkEvidenceSummary.GateResultRefs) > 0 {
+		t.Fatalf("stage completion produced test/gate refs: tests=%+v gates=%+v", projection.WorkEvidenceSummary.TestRunRefs, projection.WorkEvidenceSummary.GateResultRefs)
+	}
+}
+
+func TestCivilizationAssemblyProjectionMarksRuntimeEvidenceRecordedBeforeTaskCompletion(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	evidence := issueScanStageRuntimeEvidenceForTest(t, stageID)
+	evidence.Kind = issueScanStageRuntimeEvidenceArtifactKind
+	evidence.LifecycleVersion = issueScanLifecycleVersion
+	evidence.RunID = queued.RunID
+	evidence.FactoryOrderID = orderID
+	evidence.StageID = stageID
+	evidence.Status = "unexpected_artifact_status"
+	body, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal runtime evidence: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, IssueScanStageRuntimeEvidenceArtifactLabel, issueScanExecutionPlanArtifactMediaType, string(body), []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact runtime evidence: %v", err)
+	}
+
+	projection := BuildCivilizationAssemblyProjection(rt.store, 100)
+	taskEvidence := civilizationProjectionTaskEvidenceByID(projection.WorkEvidenceSummary.Tasks, stageTask.ID.Value())
+	if taskEvidence == nil || taskEvidence.Status == "work_task_completed" || taskEvidence.RuntimeEvidenceStatus != civilizationAssemblyQueuedStageRuntimeStatus {
+		t.Fatalf("runtime-only task evidence = %+v, want recorded runtime evidence without task completion", taskEvidence)
+	}
+	projectedStage := queuedRunLifecycleStageByID(projection.QueuedRunRequest.DevelopmentLifecycle, stageID)
+	if projectedStage == nil || projectedStage.EvidenceStatus != civilizationAssemblyQueuedStageRuntimeStatus {
+		t.Fatalf("runtime-only queued stage = %+v, want runtime evidence recorded", projectedStage)
+	}
+	strategistOutput := issueScanRoleOutputContractByRole(taskEvidence.RoleOutputContracts, "strategist")
+	if strategistOutput == nil || strategistOutput.EvidenceStatus != civilizationAssemblyQueuedPlanStepRuntimeStatus {
+		t.Fatalf("runtime-only strategist output = %+v, want runtime evidence recorded", strategistOutput)
 	}
 }
 
@@ -1109,4 +1671,52 @@ func issueScanPlanStepByRole(steps []issueScanBriefPlanForTest, stageID, role st
 		}
 	}
 	return nil
+}
+
+func issueScanStageRuntimeEvidenceForTest(t *testing.T, stageID string) IssueScanStageRuntimeEvidence {
+	t.Helper()
+	lifecycle := issueScanDevelopmentLifecycle()
+	stage, ok := issueScanLifecycleStageByID(lifecycle, stageID)
+	if !ok {
+		t.Fatalf("missing lifecycle stage %q", stageID)
+	}
+	plan, err := issueScanAgentExecutionPlan(lifecycle)
+	if err != nil {
+		t.Fatalf("issueScanAgentExecutionPlan: %v", err)
+	}
+	refBase := "test://" + safeRunLaunchID(stageID)
+	items := make([]IssueScanStageRuntimeEvidenceItem, 0, len(stage.RequiredEvidence))
+	for _, key := range stage.RequiredEvidence {
+		items = append(items, IssueScanStageRuntimeEvidenceItem{
+			Key:          key,
+			Summary:      "test evidence for " + key,
+			EvidenceRefs: []string{refBase + "/evidence/" + safeRunLaunchID(key)},
+		})
+	}
+	roleOutputs := []IssueScanStageRuntimeRoleOutput{}
+	for _, step := range plan {
+		if step.StageID != stageID {
+			continue
+		}
+		outputs := make([]IssueScanStageRuntimeEvidenceItem, 0, len(step.RequiredOutputs))
+		for _, key := range step.RequiredOutputs {
+			outputs = append(outputs, IssueScanStageRuntimeEvidenceItem{
+				Key:          key,
+				Summary:      "test output for " + key,
+				EvidenceRefs: []string{refBase + "/roles/" + safeRunLaunchID(step.Role) + "/" + safeRunLaunchID(key)},
+			})
+		}
+		roleOutputs = append(roleOutputs, IssueScanStageRuntimeRoleOutput{
+			Role:         step.Role,
+			Summary:      "test role output for " + step.Role,
+			EvidenceRefs: []string{refBase + "/roles/" + safeRunLaunchID(step.Role)},
+			Outputs:      outputs,
+		})
+	}
+	return IssueScanStageRuntimeEvidence{
+		Summary:       "test governed runtime evidence for " + stage.ID,
+		EvidenceItems: items,
+		RoleOutputs:   roleOutputs,
+		SourceRefs:    []string{refBase + "/source"},
+	}
 }
