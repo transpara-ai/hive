@@ -139,6 +139,30 @@ func cmdFactoryScanIssues(args []string) error {
 		if err != nil {
 			return fmt.Errorf("auto-complete ready issue-scan lifecycle stages: %w", err)
 		}
+		debateOutputs, err := rt.RecordCompletedIssueScanDebateRoleOutputs(result)
+		if err != nil {
+			return fmt.Errorf("record issue-scan debate role outputs: %w", err)
+		}
+		if len(debateOutputs) > 0 {
+			fmt.Printf("issue-scan debate role outputs recorded: %d\n", len(debateOutputs))
+		}
+		moreCompletions, err := rt.CompleteReadyIssueScanLifecycleStages(result)
+		if err != nil {
+			return fmt.Errorf("auto-complete debated issue-scan lifecycle stages: %w", err)
+		}
+		completions = append(completions, moreCompletions...)
+		designOutputs, err := rt.RecordCompletedIssueScanDesignRoleOutputs(result)
+		if err != nil {
+			return fmt.Errorf("record issue-scan design role outputs: %w", err)
+		}
+		if len(designOutputs) > 0 {
+			fmt.Printf("issue-scan design role outputs recorded: %d\n", len(designOutputs))
+		}
+		moreCompletions, err = rt.CompleteReadyIssueScanLifecycleStages(result)
+		if err != nil {
+			return fmt.Errorf("auto-complete designed issue-scan lifecycle stages: %w", err)
+		}
+		completions = append(completions, moreCompletions...)
 		for _, completion := range completions {
 			fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
 		}

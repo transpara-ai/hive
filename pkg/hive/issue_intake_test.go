@@ -771,11 +771,32 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 2 {
 		t.Fatalf("research role outputs = %+v, want strategist and planner recorded", progress.ResearchRoleOutputs)
 	}
-	if len(progress.Completions) != 1 || progress.Completions[0].StageID != "research_issue_and_repo_context" || !progress.Completions[0].Completed {
+	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 4 {
+		t.Fatalf("debate role outputs = %+v, want strategist/planner/reviewer/guardian recorded", progress.DebateRoleOutputs)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 3 {
+		t.Fatalf("design role outputs = %+v, want planner/reviewer/guardian recorded", progress.DesignRoleOutputs)
+	}
+	researchCompletion := issueScanCompletionByStageForTest(progress.Completions, "research_issue_and_repo_context")
+	if researchCompletion == nil || !researchCompletion.Completed {
 		t.Fatalf("completions = %+v, want completed research stage", progress.Completions)
 	}
-	if progress.Completions[0].NextAdvance == nil || progress.Completions[0].NextAdvance.StageID != "debate_with_correct_civic_roles" || !progress.Completions[0].NextAdvance.Released {
-		t.Fatalf("next advance = %+v, want debate stage released", progress.Completions[0].NextAdvance)
+	if researchCompletion.NextAdvance == nil || researchCompletion.NextAdvance.StageID != "debate_with_correct_civic_roles" || !researchCompletion.NextAdvance.Released {
+		t.Fatalf("research next advance = %+v, want debate stage released", researchCompletion.NextAdvance)
+	}
+	debateCompletion := issueScanCompletionByStageForTest(progress.Completions, "debate_with_correct_civic_roles")
+	if debateCompletion == nil || !debateCompletion.Completed {
+		t.Fatalf("completions = %+v, want completed debate stage", progress.Completions)
+	}
+	designCompletion := issueScanCompletionByStageForTest(progress.Completions, "select_and_design_approach")
+	if designCompletion == nil || !designCompletion.Completed {
+		t.Fatalf("completions = %+v, want completed design stage", progress.Completions)
+	}
+	if designCompletion.NextAdvance == nil || designCompletion.NextAdvance.StageID != "implement_on_branch" || !designCompletion.NextAdvance.Released {
+		t.Fatalf("design next advance = %+v, want implementation stage released", designCompletion.NextAdvance)
+	}
+	if len(progress.ImplementationTasks) != 1 || !progress.ImplementationTasks[0].Created {
+		t.Fatalf("implementation task progress = %+v, want one created task", progress.ImplementationTasks)
 	}
 
 	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
@@ -816,6 +837,46 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
 		t.Fatalf("missing research runtime evidence artifact: %+v", artifacts)
 	}
+	debateTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "debate_with_correct_civic_roles"))
+	if !ok {
+		t.Fatalf("missing debate stage task in %+v", tasks)
+	}
+	debateArtifacts, err := rt.tasks.ListArtifacts(debateTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts debate: %v", err)
+	}
+	debateOutputs := issueScanRoleOutputArtifactsForTest(t, debateArtifacts)
+	if debateOutputs["strategist"] == nil || debateOutputs["planner"] == nil || debateOutputs["reviewer"] == nil || debateOutputs["guardian"] == nil {
+		t.Fatalf("debate role outputs = %+v, want all debate roles", debateOutputs)
+	}
+	if issueScanArtifactByLabel(debateArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
+		t.Fatalf("missing debate runtime evidence artifact: %+v", debateArtifacts)
+	}
+	designTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "select_and_design_approach"))
+	if !ok {
+		t.Fatalf("missing design stage task in %+v", tasks)
+	}
+	designArtifacts, err := rt.tasks.ListArtifacts(designTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts design: %v", err)
+	}
+	designOutputs := issueScanRoleOutputArtifactsForTest(t, designArtifacts)
+	if designOutputs["planner"] == nil || designOutputs["reviewer"] == nil || designOutputs["guardian"] == nil {
+		t.Fatalf("design role outputs = %+v, want planner/reviewer/guardian", designOutputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(designOutputs["planner"].Outputs, "implementation_task_plan") == nil {
+		t.Fatalf("planner design outputs = %+v, want implementation_task_plan", designOutputs["planner"].Outputs)
+	}
+	if issueScanArtifactByLabel(designArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
+		t.Fatalf("missing design runtime evidence artifact: %+v", designArtifacts)
+	}
+	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
+	if !ok {
+		t.Fatalf("missing concrete implementation task in %+v", tasks)
+	}
+	if implementationTask.ID != progress.ImplementationTasks[0].ImplementationTaskID {
+		t.Fatalf("implementation task id = %s, progress id = %s", implementationTask.ID.Value(), progress.ImplementationTasks[0].ImplementationTaskID.Value())
+	}
 
 	progress, err = rt.progressIssueScanLifecycle()
 	if err != nil {
@@ -823,6 +884,12 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	}
 	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 0 {
 		t.Fatalf("research role outputs second pass = %+v, want no duplicates", progress.ResearchRoleOutputs)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 0 {
+		t.Fatalf("debate role outputs second pass = %+v, want no duplicates", progress.DebateRoleOutputs)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 0 {
+		t.Fatalf("design role outputs second pass = %+v, want no duplicates", progress.DesignRoleOutputs)
 	}
 }
 
@@ -2897,6 +2964,15 @@ func issueScanArtifactByLabel(artifacts []work.ArtifactEvent, label string) *wor
 	for i := range artifacts {
 		if artifacts[i].Label == label {
 			return &artifacts[i]
+		}
+	}
+	return nil
+}
+
+func issueScanCompletionByStageForTest(completions []IssueScanStageCompletionResult, stageID string) *IssueScanStageCompletionResult {
+	for i := range completions {
+		if completions[i].StageID == stageID {
+			return &completions[i]
 		}
 	}
 	return nil
