@@ -2378,8 +2378,13 @@ func TestProgressIssueScanLifecycleRunsConfiguredAdversarialReviewOnce(t *testin
 
 func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testing.T) {
 	rt, _, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	stageRoleCalls := 0
 	reviewCalls := 0
 	readyPRCalls := 0
+	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		stageRoleCalls++
+		return IssueScanStageRoleOutputRunnerResult{}, fmt.Errorf("post-event progress must not invoke configured stage role-output runner")
+	}
 	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
 		reviewCalls++
 		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("post-event progress must not invoke configured review runner")
@@ -2393,11 +2398,104 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	rt.handleTaskCompletion(context.Background(), implementationTask, "implementation finished")
 	rt.progressIssueScanLifecycleAfterReview(context.Background(), implementationTask.ID.Value(), "approve")
 
+	if stageRoleCalls != 0 {
+		t.Fatalf("stage role-output runner calls = %d, want none from post-event progress", stageRoleCalls)
+	}
 	if reviewCalls != 0 {
 		t.Fatalf("review runner calls = %d, want none from post-event progress", reviewCalls)
 	}
 	if readyPRCalls != 0 {
 		t.Fatalf("ready PR runner calls = %d, want none from post-event progress", readyPRCalls)
+	}
+}
+
+func TestProgressIssueScanLifecycleRunsConfiguredStageRoleOutputRunnerThroughPlanningStages(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos, research, debate, implement, review, and surface a ready PR.",
+			Labels: []string{"civilization", "autonomy"},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+
+	callsByStage := map[string]int{}
+	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		callsByStage[runnerContext.StageID]++
+		if runnerContext.RunID != queued.RunID || runnerContext.FactoryOrderID != orderID {
+			t.Fatalf("runner context run/order = %q/%q, want %q/%q", runnerContext.RunID, runnerContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if runnerContext.Repository != "transpara-ai/hive" {
+			t.Fatalf("runner context repo = %q", runnerContext.Repository)
+		}
+		if !issueScanStageRoleOutputRunnerEligibleStage(runnerContext.StageID) {
+			t.Fatalf("runner called for ineligible stage %q", runnerContext.StageID)
+		}
+		if len(runnerContext.RequestedRoleSteps) == 0 {
+			t.Fatalf("runner context has no requested role steps: %+v", runnerContext)
+		}
+		outputs := make([]IssueScanStageRoleOutputEvidence, 0, len(runnerContext.RequestedRoleSteps))
+		for _, step := range runnerContext.RequestedRoleSteps {
+			outputs = append(outputs, issueScanStageRoleOutputWithStageEvidenceForTest(t, runnerContext.StageID, step.Role))
+		}
+		return IssueScanStageRoleOutputRunnerResult{RoleOutputs: outputs}, nil
+	}
+
+	for i := 0; i < 3; i++ {
+		progress, err := rt.progressIssueScanLifecycle()
+		if err != nil {
+			t.Fatalf("progressIssueScanLifecycle pass %d: %v", i+1, err)
+		}
+		if len(progress.StageRoleOutputRuns) != 1 || !progress.StageRoleOutputRuns[0].Recorded {
+			t.Fatalf("pass %d stage role-output runs = %+v, want one recorded planning-stage run", i+1, progress.StageRoleOutputRuns)
+		}
+	}
+	for _, stageID := range []string{"research_issue_and_repo_context", "debate_with_correct_civic_roles", "select_and_design_approach"} {
+		if callsByStage[stageID] != 1 {
+			t.Fatalf("runner calls for %s = %d, want 1 (all calls %+v)", stageID, callsByStage[stageID], callsByStage)
+		}
+	}
+
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	for _, stageID := range []string{"research_issue_and_repo_context", "debate_with_correct_civic_roles", "select_and_design_approach"} {
+		stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+		if !ok {
+			t.Fatalf("missing stage task %s", stageID)
+		}
+		completed, err := rt.issueScanStageTaskCompleted(stageTask.ID)
+		if err != nil {
+			t.Fatalf("issueScanStageTaskCompleted %s: %v", stageID, err)
+		}
+		if !completed {
+			t.Fatalf("stage %s was not completed from configured role-output runner evidence", stageID)
+		}
+	}
+	if _, _, exists, err := workTaskByCanonicalTaskID(rt.store, issueScanImplementationTaskCanonicalID(orderID)); err != nil {
+		t.Fatalf("find implementation task: %v", err)
+	} else if !exists {
+		t.Fatalf("implementation task was not created after planning stages completed")
+	}
+
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after planning stages: %v", err)
+	}
+	if len(callsByStage) != 3 {
+		t.Fatalf("runner was called beyond planning stages: %+v", callsByStage)
 	}
 }
 
@@ -4769,6 +4867,27 @@ func issueScanStageRoleOutputForTest(t *testing.T, stageID, role string) IssueSc
 		Outputs:      outputs,
 		SourceRefs:   []string{refBase + "/source"},
 	}
+}
+
+func issueScanStageRoleOutputWithStageEvidenceForTest(t *testing.T, stageID, role string) IssueScanStageRoleOutputEvidence {
+	t.Helper()
+	output := issueScanStageRoleOutputForTest(t, stageID, role)
+	stage, ok := issueScanLifecycleStageByID(issueScanDevelopmentLifecycle(), stageID)
+	if !ok {
+		t.Fatalf("missing lifecycle stage %q", stageID)
+	}
+	seen := map[string]bool{}
+	for _, item := range output.Outputs {
+		seen[item.Key] = true
+	}
+	for _, key := range stage.RequiredEvidence {
+		if seen[key] {
+			continue
+		}
+		output.Outputs = append(output.Outputs, issueScanEvidenceItemForTest(stageID, role, key))
+		seen[key] = true
+	}
+	return output
 }
 
 func issueScanStageRoleOutputTaskArtifactCommandForTest(t *testing.T, taskID types.EventID, output IssueScanStageRoleOutputEvidence) string {

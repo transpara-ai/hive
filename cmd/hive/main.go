@@ -1201,7 +1201,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1298,6 +1298,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		CatalogPath:                      catalogPath,
 		CatalogReloadInterval:            catalogReloadInterval,
 		Loop:                             loop,
+		IssueScanStageRoleOutputRunner:   issueScanStageRoleRunner,
 		IssueScanAdversarialReviewRunner: issueScanReviewRunner,
 		IssueScanReadyPRRunner:           issueScanReadyPRRunner,
 		TelemetryWriter:                  tw,

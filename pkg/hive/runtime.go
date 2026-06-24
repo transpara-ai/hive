@@ -82,6 +82,7 @@ type Runtime struct {
 	issueScanLifecycleMu             sync.Mutex
 	runLaunchDispatchInterval        time.Duration
 	providerFactory                  func(intelligence.Config) (intelligence.Provider, error)
+	issueScanStageRoleOutputRunner   IssueScanStageRoleOutputRunner
 	issueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner
 	issueScanReadyPRRunner           IssueScanReadyPRRunner
 
@@ -119,6 +120,7 @@ type Config struct {
 	CatalogPath                      string                           // --catalog: custom YAML catalog file (merged with defaults)
 	CatalogReloadInterval            time.Duration                    // reload --catalog for future spawns; 0 disables
 	RunLaunchDispatchInterval        time.Duration                    // dispatch queued run-launch requests; <0 disables
+	IssueScanStageRoleOutputRunner   IssueScanStageRoleOutputRunner   // optional planning-stage issue-scan role-output runner
 	IssueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner // optional exact-head issue-scan review runner
 	IssueScanReadyPRRunner           IssueScanReadyPRRunner           // optional terminal ready-PR evidence runner
 
@@ -185,6 +187,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		catalogPath:                      cfg.CatalogPath,
 		catalogReloadInterval:            cfg.CatalogReloadInterval,
 		runLaunchDispatchInterval:        cfg.RunLaunchDispatchInterval,
+		issueScanStageRoleOutputRunner:   cfg.IssueScanStageRoleOutputRunner,
 		issueScanAdversarialReviewRunner: cfg.IssueScanAdversarialReviewRunner,
 		issueScanReadyPRRunner:           cfg.IssueScanReadyPRRunner,
 		telemetryWriter:                  cfg.TelemetryWriter,

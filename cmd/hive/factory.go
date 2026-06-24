@@ -44,6 +44,9 @@ import (
 //   record-issue-scan-role-output
 //               → record one civic role's durable output evidence for an
 //                  issue-scan lifecycle stage without completing the stage.
+//   run-issue-scan-stage-role-output
+//               → invoke a configured planning-stage role-output runner, then
+//                  record its returned role-output artifacts.
 //   record-issue-scan-review
 //               → record an exact-head adversarial review receipt and emit the
 //                  durable code.review.submitted event consumed by the
@@ -73,7 +76,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -88,6 +91,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryAdvanceIssueScan(rest)
 	case "record-issue-scan-role-output":
 		return cmdFactoryRecordIssueScanRoleOutput(rest)
+	case "run-issue-scan-stage-role-output":
+		return cmdFactoryRunIssueScanStageRoleOutput(rest)
 	case "record-issue-scan-review":
 		return cmdFactoryRecordIssueScanReview(rest)
 	case "run-issue-scan-review":
@@ -105,11 +110,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
@@ -137,6 +142,10 @@ func cmdFactoryDaemon(args []string) error {
 	issueScanLabels := repeatedStringFlag{}
 	fs.Var(&issueScanRepos, "issue-scan-repo", "Transpara-AI repo slug to scan from daemon, e.g. transpara-ai/hive (repeatable; required with --issue-scan-interval unless --issue-scan-registry is set)")
 	fs.Var(&issueScanLabels, "issue-scan-label", "GitHub issue label filter for daemon issue scanning (repeatable)")
+	stageRoleRunner := fs.String("issue-scan-stage-role-runner", "", "Executable planning-stage issue-scan role-output runner; receives JSON context on stdin and returns role outputs JSON")
+	stageRoleTimeout := fs.Duration("issue-scan-stage-role-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-stage-role-runner")
+	stageRoleRunnerArgs := repeatedStringFlag{}
+	fs.Var(&stageRoleRunnerArgs, "issue-scan-stage-role-runner-arg", "Argument passed to --issue-scan-stage-role-runner (repeatable)")
 	reviewRunner := fs.String("issue-scan-review-runner", "", "Executable exact-head issue-scan adversarial review runner; receives JSON context on stdin and returns receipt JSON")
 	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
 	reviewRunnerArgs := repeatedStringFlag{}
@@ -199,6 +208,17 @@ func cmdFactoryDaemon(args []string) error {
 			AuthorityScope: "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
 		}
 	}
+	var issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner
+	if strings.TrimSpace(*stageRoleRunner) == "" {
+		if len(stageRoleRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-stage-role-runner is required when --issue-scan-stage-role-runner-arg is set")
+		}
+	} else {
+		if *stageRoleTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-stage-role-timeout must be greater than zero")
+		}
+		issueScanStageRoleRunner = issueScanStageRoleOutputCommandRunner(*stageRoleRunner, stageRoleRunnerArgs, *stageRoleTimeout)
+	}
 	var issueScanReviewRunner hive.IssueScanAdversarialReviewRunner
 	if strings.TrimSpace(*reviewRunner) == "" {
 		if len(reviewRunnerArgs) > 0 {
@@ -227,7 +247,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanReviewRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

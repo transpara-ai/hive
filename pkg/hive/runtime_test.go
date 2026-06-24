@@ -43,6 +43,37 @@ func TestApplyPerCallBudgetFloor(t *testing.T) {
 	}
 }
 
+func TestNewWiresIssueScanStageRoleOutputRunner(t *testing.T) {
+	ctx := context.Background()
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	runner := func(context.Context, IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		return IssueScanStageRoleOutputRunnerResult{
+			RoleOutputs: []IssueScanStageRoleOutputEvidence{{Role: "strategist"}},
+		}, nil
+	}
+	rt, err := New(ctx, Config{
+		Store:                          store.NewInMemoryStore(),
+		Actors:                         actors,
+		HumanID:                        humanID,
+		IssueScanStageRoleOutputRunner: runner,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.issueScanStageRoleOutputRunner == nil {
+		t.Fatal("issueScanStageRoleOutputRunner was not wired from Config")
+	}
+	result, err := rt.issueScanStageRoleOutputRunner(ctx, IssueScanStageRoleOutputRunnerContext{})
+	if err != nil {
+		t.Fatalf("configured runner returned error: %v", err)
+	}
+	if len(result.RoleOutputs) != 1 || result.RoleOutputs[0].Role != "strategist" {
+		t.Fatalf("configured runner result = %+v", result)
+	}
+}
+
 func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 	tests := []struct {
 		name          string

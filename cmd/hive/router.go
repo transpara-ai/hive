@@ -61,6 +61,8 @@ func helpText() string {
 	b.WriteString("  factory daemon           Always-on governing loop (Keepalive; block on bus)\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
 	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
+	b.WriteString("  factory run-issue-scan-stage-role-output\n")
+	b.WriteString("                           Run configured planning-stage role-output command\n")
 	b.WriteString("  factory run-issue-scan-review\n")
 	b.WriteString("                           Run configured exact-head issue-scan review command\n")
 	b.WriteString("  factory record-issue-scan-draft-pr\n")
@@ -121,7 +123,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, *space, *apiBase)
 }
 
 func cmdCivilizationDaemon(args []string) error {
@@ -148,7 +150,7 @@ func cmdCivilizationDaemon(args []string) error {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, *space, *apiBase)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────
