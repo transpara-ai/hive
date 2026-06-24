@@ -3849,6 +3849,131 @@ func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 	}
 }
 
+func TestIssueScanDraftPRAuthorityRequestContextBuildsTargetAndBody(t *testing.T) {
+	rt, _, runID, orderID, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
+	requestContext, err := rt.IssueScanDraftPRAuthorityRequestContext(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("IssueScanDraftPRAuthorityRequestContext: %v", err)
+	}
+	if requestContext.Kind != issueScanDraftPRAuthorityRequestContextKind {
+		t.Fatalf("kind = %q, want %q", requestContext.Kind, issueScanDraftPRAuthorityRequestContextKind)
+	}
+	if requestContext.RunID != runID || requestContext.FactoryOrderID != orderID {
+		t.Fatalf("context run/order = %q/%q, want %q/%q", requestContext.RunID, requestContext.FactoryOrderID, runID, orderID)
+	}
+	if requestContext.ReadyStageTaskID != readyStage.ID.Value() || requestContext.ImplementationTaskID != implementationTask.ID.Value() {
+		t.Fatalf("context task refs = ready %q implementation %q, want %s/%s", requestContext.ReadyStageTaskID, requestContext.ImplementationTaskID, readyStage.ID, implementationTask.ID)
+	}
+	if requestContext.Repository != "transpara-ai/hive" || requestContext.SelectedIssue.Number != 321 {
+		t.Fatalf("selected issue = %+v repository=%q", requestContext.SelectedIssue, requestContext.Repository)
+	}
+	if requestContext.DraftPRTarget.Repository != "transpara-ai/hive" ||
+		requestContext.DraftPRTarget.BaseRef != "main" ||
+		requestContext.DraftPRTarget.BaseSHA != "dddddddddddddddddddddddddddddddddddddddd" ||
+		requestContext.DraftPRTarget.HeadRef != "codex/run-issue-001-repair" ||
+		requestContext.DraftPRTarget.HeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("draft PR target = %+v", requestContext.DraftPRTarget)
+	}
+	if requestContext.DraftPRTarget.TitleHash != sha256HexPrefixed([]byte(requestContext.DraftPRTitle)) {
+		t.Fatalf("title hash = %q does not match title %q", requestContext.DraftPRTarget.TitleHash, requestContext.DraftPRTitle)
+	}
+	if requestContext.DraftPRTarget.BodyHash != sha256HexPrefixed([]byte(requestContext.DraftPRBody)) {
+		t.Fatalf("body hash = %q does not match body", requestContext.DraftPRTarget.BodyHash)
+	}
+	if !strings.Contains(requestContext.DraftPRTitle, "transpara-ai/hive#321") {
+		t.Fatalf("title does not name source issue: %q", requestContext.DraftPRTitle)
+	}
+	for _, want := range []string{"FactoryOrder `" + orderID + "`", "Head SHA: `cccccccccccccccccccccccccccccccccccccccc`", "ready-for-review state"} {
+		if !strings.Contains(requestContext.DraftPRBody, want) {
+			t.Fatalf("draft PR body missing %q:\n%s", want, requestContext.DraftPRBody)
+		}
+	}
+	if !containsIssueScanString(requestContext.BoundaryDisclaimers, "authority request is not PR creation") {
+		t.Fatalf("missing authority boundary disclaimer: %+v", requestContext.BoundaryDisclaimers)
+	}
+}
+
+func TestIssueScanDraftPRAuthorityRequestContextRequiresZeroBlockerStage(t *testing.T) {
+	rt, _, queued, _, _ := issueScanCompletedImplementationFixtureForTest(t)
+	if _, err := rt.IssueScanDraftPRAuthorityRequestContext(queued.RunID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr"); err == nil || !strings.Contains(err.Error(), "drive_blockers_to_zero stage has not completed") {
+		t.Fatalf("IssueScanDraftPRAuthorityRequestContext error = %v, want blocker-stage gate", err)
+	}
+}
+
+func TestRaiseIssueScanDraftPRAuthorityRequestHoldsAndIsIdempotent(t *testing.T) {
+	rt, _, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	result, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	if !result.Raised || !result.HeldPendingApproval || result.RequestID == (types.EventID{}) {
+		t.Fatalf("result = %+v, want held authority request", result)
+	}
+	requests := authorityRequestsByType[AuthorityRequestRecordedContent](t, rt, EventTypeAuthorityRequestRecorded)
+	if len(requests) != 1 {
+		t.Fatalf("authority request count = %d, want 1", len(requests))
+	}
+	if requests[0].ActionName != string(safety.ActionRepoPullRequestCreate) || !equalStringSlices(requests[0].Scope, result.DraftPRTarget.Scope()) {
+		t.Fatalf("authority request = %+v, target = %+v", requests[0], result.DraftPRTarget)
+	}
+	again, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr-retry")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest again: %v", err)
+	}
+	if !again.AlreadyRaised || again.RequestID != result.RequestID {
+		t.Fatalf("second result = %+v, want same already-raised request %s", again, result.RequestID)
+	}
+	if again.DraftPRTarget.SingleUseNonce != "nonce-issue-scan-pr" {
+		t.Fatalf("second result nonce = %q, want originally recorded nonce", again.DraftPRTarget.SingleUseNonce)
+	}
+	requests = authorityRequestsByType[AuthorityRequestRecordedContent](t, rt, EventTypeAuthorityRequestRecorded)
+	if len(requests) != 1 {
+		t.Fatalf("authority request count after duplicate = %d, want 1", len(requests))
+	}
+}
+
+func attachIssueScanAuthorityGraphForTest(t *testing.T, rt *Runtime) {
+	t.Helper()
+	agentGraph := graph.New(rt.store, actor.NewInMemoryActorStore())
+	RegisterWithRegistry(agentGraph.Registry())
+	work.RegisterWithRegistry(agentGraph.Registry())
+	if err := agentGraph.Start(); err != nil {
+		t.Fatalf("start authority graph: %v", err)
+	}
+	rt.graph = agentGraph
+	t.Cleanup(func() { agentGraph.Close() })
+}
+
+func TestIssueScanDraftPRAuthorityRequestRefusesAfterDraftReceipt(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+	}
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	if _, err := rt.IssueScanDraftPRAuthorityRequestContext(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr"); err == nil || !strings.Contains(err.Error(), "not ready") {
+		t.Fatalf("IssueScanDraftPRAuthorityRequestContext error = %v, want not ready after draft receipt", err)
+	}
+}
+
 func issueScanReadyImplementationTaskFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
 	t.Helper()
 	rt, writer := newRunLaunchDispatchRuntime(t)

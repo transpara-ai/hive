@@ -886,6 +886,13 @@ func TestFactoryRequestPRRequiresFlags(t *testing.T) {
 	}
 }
 
+func TestFactoryRequestIssueScanPRRequiresHuman(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "request-issue-scan-pr"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing-flag error mentioning human, got %v", err)
+	}
+}
+
 // TestFactoryCreatePRRequiresRequest asserts create-pr validates --request
 // before opening a store or calling GitHub.
 func TestFactoryCreatePRRequiresRequest(t *testing.T) {
