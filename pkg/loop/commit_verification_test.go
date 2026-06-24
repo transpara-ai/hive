@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -838,6 +839,77 @@ func TestRun_TaskOperateProviderUsesSelectedProvider(t *testing.T) {
 	}
 }
 
+func TestRun_TaskWorkspaceProviderUsesSelectedWorkspace(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	defaultRepo := newTempGitRepoAt(t, filepath.Join(workspaceRoot, "hive"))
+	targetRepo := newTempGitRepoAt(t, filepath.Join(workspaceRoot, "site"))
+	defaultHead := gitCommand(defaultRepo, "rev-parse", "HEAD")
+	targetHead := gitCommand(targetRepo, "rev-parse", "HEAD")
+	operator := &committingOperator{t: t, filename: "site.txt"}
+	agent, g := agentWithGraph(t, operator)
+	factory := event.NewEventFactory(g.Registry())
+	ts := work.NewTaskStore(g.Store(), factory, &testSigner{})
+	convID := types.MustConversationID("conv_task_workspace_provider")
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+	task, err := ts.Create(agent.ID(), "Write in selected repo", "desc", causes, convID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ts.Assign(agent.ID(), task.ID, agent.ID(), causes, convID); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	l, err := New(Config{
+		Agent:                 agent,
+		HumanID:               humanID(),
+		RepoPath:              defaultRepo,
+		ContainmentWatchRoots: []string{workspaceRoot},
+		TaskStore:             ts,
+		CanOperate:            true,
+		ConvID:                convID,
+		Budget:                resources.BudgetConfig{MaxIterations: 1},
+		TaskWorkspaceProvider: func(_ context.Context, got work.Task, role string) (TaskWorkspaceProviderResult, error) {
+			if got.ID != task.ID {
+				t.Fatalf("TaskWorkspaceProvider task = %s, want %s", got.ID.Value(), task.ID.Value())
+			}
+			if role != string(agent.Role()) {
+				t.Fatalf("TaskWorkspaceProvider role = %q, want %q", role, agent.Role())
+			}
+			return TaskWorkspaceProviderResult{Applied: true, RepoPath: targetRepo, ContainmentWatchRoots: []string{workspaceRoot}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := l.Run(context.Background())
+	if res.Reason != StopBudget {
+		t.Fatalf("reason = %s, want StopBudget after selected-workspace Operate (detail=%q)", res.Reason, res.Detail)
+	}
+	if operator.calls != 1 {
+		t.Fatalf("operator calls = %d, want 1", operator.calls)
+	}
+	if got := gitCommand(defaultRepo, "rev-parse", "HEAD"); got != defaultHead {
+		t.Fatalf("default repo HEAD = %s, want unchanged %s", got, defaultHead)
+	}
+	if got := gitCommand(targetRepo, "rev-parse", "HEAD"); got == targetHead {
+		t.Fatalf("target repo HEAD did not advance from %s", targetHead)
+	}
+	artifacts, err := ts.ListArtifacts(task.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(artifacts) != 1 || !strings.Contains(artifacts[0].Body, "site.txt") {
+		t.Fatalf("Operate artifact = %+v, want selected repo diff stat", artifacts)
+	}
+	if !taskHasCompletedEvent(t, g, task.ID) {
+		t.Fatal("selected-workspace Operate did not complete the assigned task")
+	}
+}
+
 func TestRun_TaskOperateProviderErrorEscalatesWithoutFallback(t *testing.T) {
 	repo := newTempGitRepo(t)
 	base := &countingOperator{reasonResp: `/signal {"signal":"IDLE"}`, operateSummary: "base should not run"}
@@ -941,7 +1013,14 @@ var (
 // newTempGitRepo creates an isolated, clean git repo with one commit.
 func newTempGitRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	return newTempGitRepoAt(t, t.TempDir())
+}
+
+func newTempGitRepoAt(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
 	for _, args := range [][]string{
 		{"init", "-q"},
 		{"config", "user.email", "test@example.com"},

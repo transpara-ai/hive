@@ -121,6 +121,71 @@ func TestFirstAssignableOpenTask(t *testing.T) {
 	}
 }
 
+func TestFirstAssignableOpenTaskSkipsIssueScanStageAggregator(t *testing.T) {
+	l, ts, agent, convID := newRecheckLoop(t, true, 10*time.Millisecond)
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+
+	stageTask, err := ts.CreateV39(agent.ID(), work.TaskCreateOptions{
+		Title:                  "Issue-scan stage: Research issue and repo context",
+		Description:            "Governed stage aggregator. Role artifacts complete this task.",
+		FactoryOrderID:         "fo_issue_001",
+		RequirementIDs:         []string{"req_issue_001"},
+		AcceptanceCriterionIDs: []string{"ac_issue_001"},
+		CanonicalTaskID:        "tsk_issue_001_research_issue_and_repo_context",
+		Cell:                   "planning",
+		RiskClass:              "medium",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence"},
+	}, causes, convID)
+	if err != nil {
+		t.Fatalf("CreateV39 stage: %v", err)
+	}
+	for _, label := range work.RequiredReadinessGateLabels() {
+		if err := ts.AddArtifact(agent.ID(), stageTask.ID, label, "text/markdown", "gate body", causes, convID); err != nil {
+			t.Fatalf("AddArtifact stage gate %s: %v", label, err)
+		}
+	}
+	outputContract := `{
+  "kind": "issue_scan_stage_output_contract",
+  "run_id": "run_issue_001",
+  "factory_order_id": "fo_issue_001",
+  "stage_id": "research_issue_and_repo_context",
+  "role_output_contracts": [
+    {
+      "role": "strategist",
+      "required_outputs": ["issue_priority_rationale"]
+    }
+  ]
+}`
+	if err := ts.AddArtifact(agent.ID(), stageTask.ID, "issue_scan_stage_output_contract", "application/json", outputContract, causes, convID); err != nil {
+		t.Fatalf("AddArtifact stage contract: %v", err)
+	}
+
+	if got, ok := l.firstAssignableOpenTask(); ok {
+		t.Fatalf("firstAssignableOpenTask returned issue-scan stage aggregator %s (%s); want none", got.ID.Value(), got.Title)
+	}
+
+	normalTask, err := ts.Create(agent.ID(), "Implement selected issue-scan patch", "Concrete implementation work", causes, convID)
+	if err != nil {
+		t.Fatalf("Create normal task: %v", err)
+	}
+	for _, label := range work.RequiredReadinessGateLabels() {
+		if err := ts.AddArtifact(agent.ID(), normalTask.ID, label, "text/markdown", "gate body", causes, convID); err != nil {
+			t.Fatalf("AddArtifact normal gate %s: %v", label, err)
+		}
+	}
+
+	got, ok := l.firstAssignableOpenTask()
+	if !ok {
+		t.Fatal("firstAssignableOpenTask = false with ready normal task present; want true")
+	}
+	if got.ID != normalTask.ID {
+		t.Fatalf("firstAssignableOpenTask returned %s; want normal task %s", got.ID.Value(), normalTask.ID.Value())
+	}
+}
+
 // TestWaitForEvents_RechecksAssignableWorkWithoutWakeSignal is the keystone: a
 // CanOperate keepalive agent with assignable work but NO wake signal (the
 // dropped-edge race) must still return via the periodic re-check, instead of
@@ -1052,5 +1117,71 @@ func TestBuildTaskContextRendersDemand(t *testing.T) {
 	ctx = l.buildTaskContext()
 	if !strings.Contains(ctx, "expected outputs: dark-factory/fo_roles_catalog.md") {
 		t.Fatal("task context does not render ExpectedOutputs; the structured demand stays invisible")
+	}
+}
+
+func TestBuildTaskContextRendersIssueScanRoleOutputContract(t *testing.T) {
+	l, ts, agent, convID := newRecheckLoop(t, false, time.Hour)
+	var causes []types.EventID
+	if !agent.LastEvent().IsZero() {
+		causes = []types.EventID{agent.LastEvent()}
+	}
+
+	longDesc := strings.Repeat("generic lifecycle stage context ", 40)
+	task, err := ts.CreateV39(agent.ID(), work.TaskCreateOptions{
+		Title:           "Issue-scan stage: Research issue and repo context",
+		Description:     longDesc,
+		ExpectedOutputs: []string{"stage declaration artifact remains pending runtime evidence"},
+	}, causes, convID)
+	if err != nil {
+		t.Fatalf("CreateV39: %v", err)
+	}
+	outputContract := `{
+  "kind": "issue_scan_stage_output_contract",
+  "run_id": "run_issue_001",
+  "factory_order_id": "fo_issue_001",
+  "stage_id": "research_issue_and_repo_context",
+  "stage_index": 1,
+  "stage_count": 5,
+  "stage": {
+    "id": "research_issue_and_repo_context",
+    "required_roles": ["strategist", "planner"],
+    "required_evidence": ["repo_context_packet", "issue_intake_packet"],
+    "authority_boundary": "research only; no implementation, merge, or deploy",
+    "completion_gate": "all declared role outputs and evidence refs are recorded"
+  },
+  "required_evidence": ["repo_context_packet", "issue_intake_packet"],
+  "role_output_contracts": [
+    {
+      "role": "strategist",
+      "required_outputs": ["strategy_brief", "repo_context_packet"],
+      "authority_boundary": "strategy only",
+      "completion_gate": "artifact evidence refs"
+    },
+    {
+      "role": "planner",
+      "required_outputs": ["plan_packet"]
+    }
+  ]
+}`
+	if err := ts.AddArtifact(agent.ID(), task.ID, "issue_scan_stage_output_contract", "application/json", outputContract, causes, convID); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+
+	ctx := l.buildTaskContext()
+	want := []string{
+		"issue-scan contract: run run_issue_001, FactoryOrder fo_issue_001, stage research_issue_and_repo_context (1/5)",
+		"issue-scan required evidence: repo_context_packet, issue_intake_packet",
+		"issue-scan boundary: authority research only; no implementation, merge, or deploy; gate all declared role outputs and evidence refs are recorded",
+		"issue-scan your role (strategist) outputs: strategy_brief, repo_context_packet",
+		"issue-scan role artifact: attach label issue_scan_stage_role_output with role=strategist",
+	}
+	for _, fragment := range want {
+		if !strings.Contains(ctx, fragment) {
+			t.Fatalf("task context missing %q\ncontext:\n%s", fragment, ctx)
+		}
+	}
+	if strings.Contains(ctx, "plan_packet") {
+		t.Fatalf("task context leaked another role's output contract to strategist:\n%s", ctx)
 	}
 }

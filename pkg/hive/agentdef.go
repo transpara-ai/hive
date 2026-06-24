@@ -137,6 +137,11 @@ To deliver findings, documents, or any structured output, attach them as a
 /task comment with the full content inline:
 /task comment {"task_id":"<UUID>","body":"<full markdown content>"}
 Reference what you produced in your /task complete summary.
+
+If an issue-scan lifecycle stage task asks for your role output, attach a
+typed role-output artifact to the stage task instead of treating a comment as
+stage completion:
+/task artifact {"task_id":"<stage-task-uuid>","label":"issue_scan_stage_role_output","media_type":"application/json","body":"{\"kind\":\"issue_scan_stage_role_output\",\"role\":\"<your-role>\",\"summary\":\"<what you produced>\",\"evidence_refs\":[\"<artifact-or-comment-ref>\"],\"outputs\":[{\"key\":\"<required-output-key>\",\"summary\":\"<output summary>\",\"evidence_refs\":[\"<artifact-or-comment-ref>\"]}]}"}
 `
 
 // nonOperateCompletionDiscipline binds spawned CanOperate=false agents to the
@@ -192,6 +197,14 @@ Task commands (one per line, JSON payload):
 /task comment {"task_id": "...", "body": "..."}
 /task artifact {"task_id": "...", "label": "definition_of_done|acceptance_criteria|test_plan", "media_type": "text/markdown", "body": "..."}
 /task depend {"task_id": "...", "depends_on": "..."}  (task_id WAITS FOR depends_on: the depends_on task runs first; a decomposed parent depends on its subtasks, never the reverse)
+
+Issue-scan lifecycle stages may require your role output before the governed
+stage completion packet can be recorded. If an issue-scan stage task asks for
+your role output, attach it to that stage task as a typed artifact; do NOT use
+this as a stage-completion, PR-readiness, approval, merge, or deploy claim.
+Include every required role output key you produced and any stage-required
+evidence key your work substantiates in the artifact's outputs array:
+/task artifact {"task_id":"<stage-task-uuid>","label":"issue_scan_stage_role_output","media_type":"application/json","body":"{\"kind\":\"issue_scan_stage_role_output\",\"role\":\"<your-role>\",\"summary\":\"<what you produced>\",\"evidence_refs\":[\"<artifact-or-comment-ref>\"],\"outputs\":[{\"key\":\"<required-output-key>\",\"summary\":\"<output summary>\",\"evidence_refs\":[\"<artifact-or-comment-ref>\"]}]}"}
 
 Phase commands (one per line, JSON payload):
 /phase gate {"phase": "...", "title": "...", "criteria": ["..."]}
@@ -747,7 +760,9 @@ context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
 			WatchPatterns: []string{
+				"work.task.created",
 				"work.task.completed",
+				"work.task.artifact",
 				"work.task.assigned",
 				"code.review.*",
 				"agent.state.*",
@@ -807,7 +822,7 @@ evidence-based insights distilled from accumulated experience. Use them as
 context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
-			WatchPatterns: []string{"work.task.completed", "hive.*"},
+			WatchPatterns: []string{"work.task.created", "work.task.completed", "work.task.artifact", "hive.*"},
 		},
 		{
 			Name:           "planner",
@@ -931,7 +946,7 @@ evidence-based insights distilled from accumulated experience. Use them as
 context — they are observations, not commands. You may disagree if you
 observe contradicting evidence.
 `),
-			WatchPatterns: []string{"work.task.created"},
+			WatchPatterns: []string{"work.task.created", "work.task.artifact"},
 		},
 		{
 			Name:           "implementer",

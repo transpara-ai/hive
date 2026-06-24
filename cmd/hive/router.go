@@ -61,6 +61,14 @@ func helpText() string {
 	b.WriteString("  factory daemon           Always-on governing loop (Keepalive; block on bus)\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
 	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
+	b.WriteString("  factory run-issue-scan-review\n")
+	b.WriteString("                           Run configured exact-head issue-scan review command\n")
+	b.WriteString("  factory record-issue-scan-draft-pr\n")
+	b.WriteString("                           Link governed draft PR receipt to issue-scan ready stage\n")
+	b.WriteString("  factory record-issue-scan-ready-pr\n")
+	b.WriteString("                           Record ready-for-Human PR evidence for issue-scan run\n")
+	b.WriteString("  factory run-issue-scan-ready-pr\n")
+	b.WriteString("                           Run configured terminal ready-PR evidence command\n")
 	b.WriteString("  factory request-pr       Raise a draft-PR authority request (gate holds)\n")
 	b.WriteString("  factory create-pr        Create the approved draft PR (gated GitHub step)\n")
 	b.WriteString("\nRun 'hive <verb> --help' for verb-specific flags.\n")
@@ -96,6 +104,7 @@ func cmdCivilizationRun(args []string) error {
 	spec := fs.String("spec", "", "Path to markdown spec file (POSTed via hive ingest channel)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
@@ -112,7 +121,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, 0, false, *space, *apiBase)
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, *space, *apiBase)
 }
 
 func cmdCivilizationDaemon(args []string) error {
@@ -121,6 +130,7 @@ func cmdCivilizationDaemon(args []string) error {
 	seedSpec := fs.String("seed-spec", "", "Optional initial spec to ingest before daemon starts")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
@@ -138,7 +148,7 @@ func cmdCivilizationDaemon(args []string) error {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, *catalogReloadInterval, true, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, *space, *apiBase)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────

@@ -320,15 +320,17 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		Bus:            r.graph.Bus(),
 		Task:           "", // dynamic agents have no seed task
 
-		TaskStore:       r.tasks,
-		PhaseGateStore:  r.phaseGates,
-		ConvID:          r.convID,
-		OnTaskCompleted: r.mirrorTaskCompletion,
-		CanOperate:      false,
-		RepoPath:        r.repoPath,
-		Keepalive:       r.loop,
-		KnowledgeStore:  r.knowledgeStore,
-		Catalog:         resolver.Catalog(),
+		TaskStore:              r.tasks,
+		PhaseGateStore:         r.phaseGates,
+		ConvID:                 r.convID,
+		OnTaskCompleted:        r.handleTaskCompletion,
+		OnTaskCommandsExecuted: r.progressIssueScanLifecycleAfterTaskCommands,
+		OnReviewCompleted:      r.progressIssueScanLifecycleAfterReview,
+		CanOperate:             false,
+		RepoPath:               r.repoPath,
+		Keepalive:              r.loop,
+		KnowledgeStore:         r.knowledgeStore,
+		Catalog:                resolver.Catalog(),
 		ActorResolver: func(id types.ActorID) string {
 			a, err := r.actors.Get(id)
 			if err != nil {

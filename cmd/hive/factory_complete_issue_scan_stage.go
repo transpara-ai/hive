@@ -20,6 +20,7 @@ func cmdFactoryCompleteIssueScanStage(args []string) error {
 	evidenceFile := fs.String("evidence-file", "", "JSON file containing issue-scan stage runtime evidence (required)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repoPath := fs.String("repo-path", "", "Path to repo for dispatch Operate context (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for implementation targets")
 	advanceNext := fs.Bool("advance-next", false, "Release the next issue-scan stage after completion")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -40,7 +41,7 @@ func cmdFactoryCompleteIssueScanStage(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, *repoPath)
+	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
 	if err != nil {
 		return err
 	}

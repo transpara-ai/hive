@@ -152,15 +152,18 @@ func VerifyDraftPRContent(target DraftPRTarget, title, body string) error {
 }
 
 // RaiseDraftPRAuthorityRequest raises the required authority request for a
-// guardian-initiated draft PR against transpara-ai/docs. With --approve-requests
-// OFF (the default), authorizeProtectedAction records the request and returns
-// safety.AuthorityError — the gate HOLDS and the returned requestID is non-zero.
-// The pending request surfaces via BuildOperatorProjection(...).PendingApprovals
-// with the DraftPRTarget encoded in Scope for Site to read.
+// guardian-initiated draft PR against a registered Transpara-AI repository.
+// With --approve-requests OFF (the default), authorizeProtectedAction records
+// the request and returns safety.AuthorityError — the gate HOLDS and the
+// returned requestID is non-zero. The pending request surfaces via
+// BuildOperatorProjection(...).PendingApprovals with the DraftPRTarget encoded
+// in Scope for Site to read.
 func (r *Runtime) RaiseDraftPRAuthorityRequest(target DraftPRTarget, guardian types.ActorID, justification string) (types.EventID, error) {
-	if !strings.EqualFold(target.Repository, "transpara-ai/docs") {
-		return types.EventID{}, fmt.Errorf("draft-pr target repo must be transpara-ai/docs, got %q", target.Repository)
+	repo := strings.ToLower(strings.TrimSpace(target.Repository))
+	if !ValidTransparaAIRepo(repo) {
+		return types.EventID{}, fmt.Errorf("draft-pr target repo must be a registered Transpara-AI repo, got %q", target.Repository)
 	}
+	target.Repository = repo
 	return r.authorizeProtectedAction(protectedActionRequest{
 		Action:            safety.ActionRepoPullRequestCreate,
 		RequestingActor:   guardian,

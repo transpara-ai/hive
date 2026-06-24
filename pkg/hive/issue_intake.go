@@ -3,6 +3,7 @@ package hive
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -214,7 +215,66 @@ func normalizeIssueScanCandidates(candidates []GitHubIssueCandidate) ([]GitHubIs
 		}
 		out = append(out, normalized)
 	}
+	rankIssueScanCandidates(out)
 	return out, nil
+}
+
+func rankIssueScanCandidates(candidates []GitHubIssueCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return issueScanCandidateActionabilityScore(candidates[i]) > issueScanCandidateActionabilityScore(candidates[j])
+	})
+}
+
+func issueScanCandidateActionabilityScore(issue GitHubIssueCandidate) int {
+	labels := make([]string, 0, len(issue.Labels))
+	for _, label := range issue.Labels {
+		labels = append(labels, strings.ToLower(strings.TrimSpace(label)))
+	}
+	text := strings.ToLower(strings.Join(append([]string{issue.Title, issue.Body}, labels...), "\n"))
+	score := 0
+	for _, signal := range []struct {
+		Needle string
+		Weight int
+	}{
+		{"civilization", 90},
+		{"issue-scan", 85},
+		{"issue scan", 85},
+		{"factoryorder", 80},
+		{"factory order", 80},
+		{"ready-for-human", 80},
+		{"ready for human", 80},
+		{"runtime visualization", 75},
+		{"runtime evidence", 70},
+		{"adversarial review", 70},
+		{"zero blockers", 65},
+		{"transpara-ai repos", 65},
+		{"blocker", 60},
+		{"regression", 55},
+		{"failing", 50},
+		{"failure", 50},
+		{"bug", 45},
+		{"security", 45},
+		{"test", 25},
+		{"implementation", 20},
+	} {
+		if strings.Contains(text, signal.Needle) {
+			score += signal.Weight
+		}
+	}
+	for _, label := range labels {
+		switch label {
+		case "duplicate", "wontfix", "invalid", "question", "discussion", "needs-info", "needs info", "blocked":
+			score -= 100
+		case "bug", "regression", "blocker", "security", "incident":
+			score += 50
+		case "civilization", "factory", "autonomy", "adversarial-review", "runtime-evidence":
+			score += 45
+		}
+	}
+	if strings.TrimSpace(issue.Body) != "" {
+		score += 5
+	}
+	return score
 }
 
 // ValidTransparaAIRepo reports whether repo is a safe transpara-ai/owner repo
@@ -536,16 +596,18 @@ func issueScanDevelopmentLifecycleV02() ([]issueScanLifecycleStage, error) {
 
 func issueScanSelectionPolicy(candidates []GitHubIssueCandidate) issueScanSelectionPolicyPayload {
 	return issueScanSelectionPolicyPayload{
-		PolicyID:       "scanner_order_first_candidate_v0.1",
+		PolicyID:       "deterministic_actionability_rank_v0.2",
 		SelectedRank:   1,
 		CandidateCount: len(candidates),
 		RankingInputs: []string{
 			"validated_transpara_ai_repo_scope",
-			"scanner_return_order",
+			"actionability_keyword_score",
+			"actionability_label_score",
+			"scanner_return_order_tie_breaker",
 			"label_filters",
 			"repo_scan_order",
 		},
-		Rationale: "Select the first validated candidate after the scanner has applied repo, label, state, and limit filters; preserve all candidates and ranks for later civic debate.",
+		Rationale: "Rank validated open Transpara-AI issues by explicit actionability signals before selecting rank 1; preserve all candidates and ranks for later civic debate.",
 	}
 }
 

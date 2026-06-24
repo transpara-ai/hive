@@ -41,6 +41,25 @@ import (
 //   advance-issue-scan
 //               → release the next issue-scan stage dependency barrier after
 //                  its lifecycle contracts are present.
+//   record-issue-scan-role-output
+//               → record one civic role's durable output evidence for an
+//                  issue-scan lifecycle stage without completing the stage.
+//   record-issue-scan-review
+//               → record an exact-head adversarial review receipt and emit the
+//                  durable code.review.submitted event consumed by the
+//                  issue-scan review stage.
+//   run-issue-scan-review
+//               → invoke a configured adversarial review runner with exact-head
+//                  context, then record the returned receipt.
+//   record-issue-scan-draft-pr
+//               → link the governed draft-PR creation receipt to the terminal
+//                  issue-scan ready stage.
+//   record-issue-scan-ready-pr
+//               → record terminal ready-for-Human PR evidence and progress the
+//                  final issue-scan stage.
+//   run-issue-scan-ready-pr
+//               → invoke a configured terminal ready-PR evidence runner, then
+//                  record its draft receipt and ready-for-Human evidence.
 //   complete-issue-scan-stage
 //               → record governed runtime evidence for one issue-scan stage,
 //                  complete that stage task, and optionally release the next
@@ -54,7 +73,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -67,6 +86,18 @@ func cmdFactory(args []string) error {
 		return cmdFactoryScanIssues(rest)
 	case "advance-issue-scan":
 		return cmdFactoryAdvanceIssueScan(rest)
+	case "record-issue-scan-role-output":
+		return cmdFactoryRecordIssueScanRoleOutput(rest)
+	case "record-issue-scan-review":
+		return cmdFactoryRecordIssueScanReview(rest)
+	case "run-issue-scan-review":
+		return cmdFactoryRunIssueScanReview(rest)
+	case "record-issue-scan-draft-pr":
+		return cmdFactoryRecordIssueScanDraftPR(rest)
+	case "record-issue-scan-ready-pr":
+		return cmdFactoryRecordIssueScanReadyPR(rest)
+	case "run-issue-scan-ready-pr":
+		return cmdFactoryRunIssueScanReadyPR(rest)
 	case "complete-issue-scan-stage":
 		return cmdFactoryCompleteIssueScanStage(rest)
 	case "request-pr":
@@ -74,11 +105,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
@@ -93,8 +124,17 @@ func cmdFactoryDaemon(args []string) error {
 	seedSpec := fs.String("seed-spec", "", "Optional initial spec to seed the loop before it starts")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
+	reviewRunner := fs.String("issue-scan-review-runner", "", "Executable exact-head issue-scan adversarial review runner; receives JSON context on stdin and returns receipt JSON")
+	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
+	reviewRunnerArgs := repeatedStringFlag{}
+	fs.Var(&reviewRunnerArgs, "issue-scan-review-runner-arg", "Argument passed to --issue-scan-review-runner (repeatable)")
+	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
+	readyPRTimeout := fs.Duration("issue-scan-ready-pr-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-ready-pr-runner")
+	readyPRRunnerArgs := repeatedStringFlag{}
+	fs.Var(&readyPRRunnerArgs, "issue-scan-ready-pr-runner-arg", "Argument passed to --issue-scan-ready-pr-runner (repeatable)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -105,13 +145,35 @@ func cmdFactoryDaemon(args []string) error {
 	if *human == "" {
 		return fmt.Errorf("--human is required")
 	}
+	var issueScanReviewRunner hive.IssueScanAdversarialReviewRunner
+	if strings.TrimSpace(*reviewRunner) == "" {
+		if len(reviewRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-review-runner is required when --issue-scan-review-runner-arg is set")
+		}
+	} else {
+		if *reviewTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-review-timeout must be greater than zero")
+		}
+		issueScanReviewRunner = issueScanReviewCommandRunner(*reviewRunner, reviewRunnerArgs, *reviewTimeout)
+	}
+	var issueScanReadyPRRunner hive.IssueScanReadyPRRunner
+	if strings.TrimSpace(*readyPRRunner) == "" {
+		if len(readyPRRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-runner is required when --issue-scan-ready-pr-runner-arg is set")
+		}
+	} else {
+		if *readyPRTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-timeout must be greater than zero")
+		}
+		issueScanReadyPRRunner = issueScanReadyPRCommandRunner(*readyPRRunner, readyPRRunnerArgs, *readyPRTimeout)
+	}
 	if *seedSpec != "" {
 		if err := runIngest(*seedSpec, *space, *apiBase, "high"); err != nil {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, *catalogReloadInterval, true, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, issueScanReadyPRRunner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by
@@ -392,7 +454,7 @@ func cloneFloat64Ptr(value *float64) *float64 {
 func cmdFactoryRequestPR(args []string) error {
 	fs := flag.NewFlagSet("factory request-pr", flag.ContinueOnError)
 	human := fs.String("human", "", "Guardian/operator name (required)")
-	repo := fs.String("repo", "", "GitHub target repo slug, e.g. transpara-ai/docs (required)")
+	repo := fs.String("repo", "", "GitHub target Transpara-AI repo slug, e.g. transpara-ai/site (required)")
 	baseRef := fs.String("base", "main", "Base branch ref")
 	baseSHA := fs.String("base-sha", "", "Base commit SHA (required)")
 	headRef := fs.String("head", "", "Head branch ref, e.g. codex/... (required)")
@@ -420,23 +482,31 @@ func cmdFactoryRequestPR(args []string) error {
 	// BuildEpic11DocsDraftPROptions during `create-pr`; an exact-match here is
 	// not required (work's epic7Hash helper is unexported, so we reproduce its
 	// "sha256:"+hex(sha256(value)) format locally).
+	repoSlug := strings.ToLower(strings.TrimSpace(*repo))
+	policyBundleID := work.Epic11PolicyBundleID
+	policyBundleHash := work.Epic11DocsDraftPRPolicyBundleHash()
+	if repoSlug != "transpara-ai/docs" {
+		policyBundleID = hive.TransparaAIDraftPRPolicyBundleID
+		policyBundleHash = hive.TransparaAIDraftPRPolicyBundleHash()
+	}
+
 	target := hive.DraftPRTarget{
-		Repository:       *repo,
+		Repository:       repoSlug,
 		BaseRef:          *baseRef,
 		BaseSHA:          *baseSHA,
 		HeadRef:          *headRef,
 		HeadSHA:          *headSHA,
 		TitleHash:        sha256Hash(*title),
 		BodyHash:         sha256Hash(string(body)),
-		PolicyBundleID:   work.Epic11PolicyBundleID,
-		PolicyBundleHash: work.Epic11DocsDraftPRPolicyBundleHash(),
+		PolicyBundleID:   policyBundleID,
+		PolicyBundleHash: policyBundleHash,
 		SingleUseNonce:   *nonce,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, ".")
+	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, ".", "")
 	if err != nil {
 		return err
 	}
@@ -526,9 +596,17 @@ func cmdFactoryCreatePR(args []string) error {
 	// fallback; an empty token will fail at the GitHub call, not here.
 	client := work.NewEpic11GitHubPullRequestCreator(os.Getenv("GITHUB_TOKEN"))
 
-	run, err := hive.CreateDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
+	if strings.EqualFold(strings.TrimSpace(target.Repository), "transpara-ai/docs") && strings.TrimSpace(target.PolicyBundleID) == work.Epic11PolicyBundleID {
+		run, err := hive.CreateDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
+		if err != nil {
+			return fmt.Errorf("create draft PR from approved decision %s: %w", *request, err)
+		}
+		fmt.Printf("created draft PR #%d for %s: %s\n", run.MutationResult.Number, run.MutationResult.Repository, run.MutationResult.URL)
+		return nil
+	}
+	run, err := hive.CreateTransparaAIDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
 	if err != nil {
-		return fmt.Errorf("create draft PR from approved decision %s: %w", *request, err)
+		return fmt.Errorf("create Transpara-AI draft PR from approved decision %s: %w", *request, err)
 	}
 	fmt.Printf("created draft PR #%d for %s: %s\n", run.MutationResult.Number, run.MutationResult.Repository, run.MutationResult.URL)
 	return nil
@@ -644,7 +722,7 @@ func (fc *factoryContext) headCauses() []types.EventID {
 
 // openFactoryRuntime builds a full hive.Runtime over the factory store context,
 // for the request-pr authority seam. repoPath defaults to current dir.
-func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath string) (*hive.Runtime, *factoryContext, error) {
+func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorkspaceRoot string) (*hive.Runtime, *factoryContext, error) {
 	fc, err := openFactoryContext(ctx, dsn, humanName)
 	if err != nil {
 		return nil, nil, err
@@ -653,10 +731,11 @@ func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath string) (*
 		repoPath = "."
 	}
 	rt, err := hive.New(ctx, hive.Config{
-		Store:    fc.store,
-		Actors:   fc.actors, // hive.New verifies the human and registers the system actor.
-		HumanID:  fc.humanID,
-		RepoPath: repoPath,
+		Store:             fc.store,
+		Actors:            fc.actors, // hive.New verifies the human and registers the system actor.
+		HumanID:           fc.humanID,
+		RepoPath:          repoPath,
+		RepoWorkspaceRoot: repoWorkspaceRoot,
 	})
 	if err != nil {
 		fc.close()

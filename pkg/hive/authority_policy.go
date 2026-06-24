@@ -298,11 +298,11 @@ func (r *Runtime) authorityCauses(causalEventIDs []types.EventID) ([]types.Event
 }
 
 func (r *Runtime) hasAuthorityRequest(action safety.ProtectedAction, target string) bool {
-	page, err := r.store.ByType(EventTypeAuthorityRequestRecorded, 1000, types.None[types.Cursor]())
+	events, err := eventsByTypePaginated(r.store, EventTypeAuthorityRequestRecorded, defaultOperatorProjectionLimit)
 	if err != nil {
 		return false
 	}
-	for _, ev := range page.Items() {
+	for _, ev := range events {
 		content, ok := ev.Content().(AuthorityRequestRecordedContent)
 		if ok && content.ActionName == string(action) && content.Target == target {
 			return true

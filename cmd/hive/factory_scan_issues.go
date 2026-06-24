@@ -23,6 +23,7 @@ func cmdFactoryScanIssues(args []string) error {
 	operatorID := fs.String("operator-id", "", "Operator id for queued run metadata (default: derived from --human)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repoPath := fs.String("repo-path", "", "Path to repo for dispatch Operate context (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for implementation targets")
 	limit := fs.Int("limit", 10, "Maximum open issues to read per repo")
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
@@ -82,7 +83,7 @@ func cmdFactoryScanIssues(args []string) error {
 		fc *factoryContext
 	)
 	if *dispatch {
-		rt, fc, err = openFactoryRuntime(ctx, *storeDSN, *human, *repoPath)
+		rt, fc, err = openFactoryRuntime(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
 	} else {
 		fc, err = openFactoryContext(ctx, *storeDSN, *human)
 	}
@@ -109,16 +110,102 @@ func cmdFactoryScanIssues(args []string) error {
 
 	fmt.Printf("queued issue-scan run %s for %s#%d (first event %s)\n", queued.RunID, queued.Selected.Repo, queued.Selected.Number, queued.FirstEventID)
 	if *dispatch {
-		result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+		progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, queued.RunID)
 		if err != nil {
-			return fmt.Errorf("dispatch queued run launches: %w", err)
+			return fmt.Errorf("progress issue-scan lifecycle: %w", err)
 		}
-		fmt.Printf("dispatch scanned=%d dispatched=%d already_dispatched=%d failed=%d\n", result.Scanned, result.Dispatched, result.AlreadyDispatched, result.Failed)
-		if len(result.DispatchedOrderIDs) > 0 {
-			fmt.Printf("factory order(s): %s\n", strings.Join(result.DispatchedOrderIDs, ", "))
-		}
+		printIssueScanLifecycleProgress(progress)
 	}
 	return nil
+}
+
+func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
+	dispatch := progress.Dispatch
+	fmt.Printf("dispatch scanned=%d dispatched=%d already_dispatched=%d failed=%d\n", dispatch.Scanned, dispatch.Dispatched, dispatch.AlreadyDispatched, dispatch.Failed)
+	if len(dispatch.DispatchedOrderIDs) > 0 {
+		fmt.Printf("factory order(s): %s\n", strings.Join(dispatch.DispatchedOrderIDs, ", "))
+	}
+	if len(dispatch.AlreadyDispatchedIDs) > 0 {
+		fmt.Printf("already-dispatched task(s): %s\n", strings.Join(dispatch.AlreadyDispatchedIDs, ", "))
+	}
+	for _, advance := range progress.Advances {
+		if advance.Released {
+			fmt.Printf("issue-scan stage started: %s task %s\n", advance.StageID, advance.StageTaskID)
+		} else if advance.AlreadyReady {
+			fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
+		}
+	}
+	if created := countCreatedIssueScanImplementationTasksForCLI(progress.ImplementationTasks); created > 0 {
+		fmt.Printf("issue-scan implementation task created: %d\n", created)
+	}
+	if existing := countExistingIssueScanImplementationTasksForCLI(progress.ImplementationTasks); existing > 0 {
+		fmt.Printf("issue-scan implementation task already exists: %d\n", existing)
+	}
+	printIssueScanRoleOutputCount("implementation", progress.ImplementationRoleOutputs)
+	if recorded := countRecordedIssueScanAdversarialReviewRunsForCLI(progress.ReviewRuns); recorded > 0 {
+		fmt.Printf("issue-scan adversarial reviews recorded: %d\n", recorded)
+	}
+	printIssueScanRoleOutputCount("review", progress.ReviewRoleOutputs)
+	printIssueScanRoleOutputCount("blocker", progress.BlockerRoleOutputs)
+	if recorded := countRecordedIssueScanReadyPRRunsForCLI(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Printf("issue-scan ready PR evidence recorded: %d\n", recorded)
+	}
+	printIssueScanRoleOutputCount("ready-PR", progress.ReadyRoleOutputs)
+	for _, completion := range progress.Completions {
+		fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
+	}
+}
+
+func printIssueScanRoleOutputCount(stage string, outputs []hive.IssueScanStageRoleOutputResult) {
+	recorded := 0
+	for _, output := range outputs {
+		if output.Recorded {
+			recorded++
+		}
+	}
+	if recorded > 0 {
+		fmt.Printf("issue-scan %s role outputs recorded: %d\n", stage, recorded)
+	}
+}
+
+func countCreatedIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImplementationTaskResult) int {
+	count := 0
+	for _, task := range tasks {
+		if task.Created {
+			count++
+		}
+	}
+	return count
+}
+
+func countExistingIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImplementationTaskResult) int {
+	count := 0
+	for _, task := range tasks {
+		if task.AlreadyExists {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanAdversarialReviewRunsForCLI(runs []hive.IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanReadyPRRunsForCLI(runs []hive.IssueScanReadyPRRunnerRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Recorded {
+			count++
+		}
+	}
+	return count
 }
 
 func resolveIssueScanRepos(values []string, useRegistry bool, registryPath string) ([]string, error) {

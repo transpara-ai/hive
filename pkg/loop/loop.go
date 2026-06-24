@@ -74,6 +74,18 @@ type TaskOperateProviderResult struct {
 // of falling back to the agent's default provider.
 type TaskOperateProviderFunc func(ctx context.Context, task work.Task, role string) (TaskOperateProviderResult, error)
 
+// TaskWorkspaceProviderResult is the optional per-task workspace selected for
+// one Operate call. Applied=false means the loop should use Config.RepoPath.
+type TaskWorkspaceProviderResult struct {
+	Applied               bool
+	RepoPath              string
+	ContainmentWatchRoots []string
+}
+
+// TaskWorkspaceProviderFunc resolves a task-scoped checkout for one Operate
+// call. Errors fail closed before any filesystem-capable subprocess launches.
+type TaskWorkspaceProviderFunc func(ctx context.Context, task work.Task, role string) (TaskWorkspaceProviderResult, error)
+
 // Config configures an agentic loop.
 type Config struct {
 	// Agent is the unified hive agent to run. Required.
@@ -121,6 +133,16 @@ type Config struct {
 	// OnTaskCompleted is called after TaskStore.Complete succeeds. Optional.
 	OnTaskCompleted func(ctx context.Context, task work.Task, summary string)
 
+	// OnTaskCommandsExecuted is called after an agent successfully executes one
+	// or more /task commands. It is a post-commit hook: the durable Work events
+	// already exist when this runs, so runtime coordinators can derive follow-up
+	// state from the store without trusting the agent response text.
+	OnTaskCommandsExecuted func(ctx context.Context, executed, total int)
+
+	// OnReviewCompleted is called after a /review command is durably emitted and
+	// any request_changes return edge has been routed. Optional.
+	OnReviewCompleted func(ctx context.Context, taskID, verdict string)
+
 	// CanOperate indicates this agent has filesystem access.
 	// When true and the agent has assigned tasks, the loop calls
 	// Operate() instead of Reason() for implementation work.
@@ -140,6 +162,11 @@ type Config struct {
 	// TaskOperateProvider optionally selects a provider for this exact Work task.
 	// Used for structured FactoryOrder model overrides. Errors fail closed.
 	TaskOperateProvider TaskOperateProviderFunc
+
+	// TaskWorkspaceProvider optionally selects a checkout for this exact Work
+	// task. Operate, containment, commit verification, and Operate artifacts all
+	// use the selected checkout together. Errors fail closed.
+	TaskWorkspaceProvider TaskWorkspaceProviderFunc
 
 	// Keepalive prevents agents from exiting on quiescence. When true,
 	// waitForEvents blocks indefinitely on the bus wake channel instead
@@ -573,24 +600,33 @@ func (l *Loop) Run(ctx context.Context) Result {
 				return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", instrErr))
 			}
 
+			workspace, workspaceErr := l.taskWorkspace(ctx, task)
+			if workspaceErr != nil {
+				return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", workspaceErr))
+			}
+			if strings.TrimSpace(workspace.RepoPath) == "" {
+				return l.result(StopEscalation, iteration, "operate: no repo path configured for filesystem-capable task")
+			}
+			containmentRoots := l.containmentRootsFor(workspace.RepoPath, workspace.ContainmentWatchRoots)
+
 			// Record HEAD before Operate so we can detect new commits. gitTry
 			// reports whether the read succeeded: an unreadable pre-Operate HEAD
 			// makes the post-Operate result unverifiable (it must not be mistaken
 			// for a clean "first commit").
-			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
+			preOperateHead, preHeadReadable := gitTry(workspace.RepoPath, "rev-parse", "HEAD")
 
 			// Workspace-containment baseline (v10-F2 / Finding 18): snapshot the
 			// watched sibling checkouts BEFORE the subprocess exists. Post-hoc
 			// detection cannot undo sibling damage, so an unreadable baseline
 			// refuses the launch outright (fail closed) instead of running
 			// unwatched and apologizing later.
-			preContainment, preContainOK := snapshotContainment(l.containmentRoots(), l.config.RepoPath)
+			preContainment, preContainOK := snapshotContainment(containmentRoots, workspace.RepoPath)
 			if !preContainOK {
 				return l.result(StopEscalation, iteration,
 					"operate: containment baseline unreadable — refusing to launch a filesystem-capable Operate without a verifiable sibling-checkout watch")
 			}
 
-			result, opErr := l.operateTask(ctx, task, instruction)
+			result, opErr := l.operateTask(ctx, task, instruction, workspace.RepoPath)
 			if opErr != nil {
 				if errors.Is(opErr, errTaskOperateProvider) {
 					return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", opErr))
@@ -610,7 +646,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// auto-complete, however clean its workspace commit looks (the v10
 			// round-3 escape shape was exactly that). failOperateTask already
 			// escalated; the summary is untrusted and drives nothing further.
-			if !l.verifyOperateContainment(ctx, task, preContainment) {
+			if !l.verifyOperateContainmentInWorkspace(ctx, task, preContainment, workspace.RepoPath, containmentRoots) {
 				return l.result(StopEscalation, iteration,
 					"workspace containment violated; halting implementer for human review")
 			}
@@ -619,7 +655,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// handleOperateResult compares HEAD before/after Operate and
 			// cross-checks the summary — a confabulated (or wrong-repo) commit
 			// fails the task instead of silently completing it.
-			if l.handleOperateResult(ctx, task, preOperateHead, preHeadReadable, result.Summary) {
+			if l.handleOperateResultInWorkspace(ctx, task, workspace.RepoPath, preOperateHead, preHeadReadable, result.Summary) {
 				if l.sink != nil {
 					l.captureBoundary(checkpoint.TaskCompleted, response)
 					l.lastCheckpointIter = l.iteration
@@ -707,7 +743,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 		}
 
 		// 2.5. PROCESS work graph commands from the response.
-		l.processTaskCommands(response)
+		l.processTaskCommands(ctx, response)
 		l.processPhaseCommands(response)
 
 		// 2.6. PROCESS /health command from the response.
@@ -799,6 +835,9 @@ func (l *Loop) Run(ctx context.Context) Result {
 						// request_changes reopens the task for its producer,
 						// or escalates when this verdict consumed the cap.
 						l.routeReviewVerdict(cmd)
+						if l.config.OnReviewCompleted != nil {
+							l.config.OnReviewCompleted(ctx, cmd.TaskID, cmd.Verdict)
+						}
 						if l.sink != nil {
 							l.captureBoundary(checkpoint.ReviewCompleted, response)
 							l.lastCheckpointIter = l.iteration
@@ -1004,8 +1043,38 @@ Every response MUST end with exactly one /signal line.
 }
 
 var errTaskOperateProvider = errors.New("task operate provider")
+var errTaskWorkspaceProvider = errors.New("task workspace provider")
 
-func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction string) (decision.OperateResult, error) {
+type taskOperateWorkspace struct {
+	RepoPath              string
+	ContainmentWatchRoots []string
+}
+
+func (l *Loop) taskWorkspace(ctx context.Context, task work.Task) (taskOperateWorkspace, error) {
+	workspace := taskOperateWorkspace{
+		RepoPath:              l.config.RepoPath,
+		ContainmentWatchRoots: append([]string(nil), l.config.ContainmentWatchRoots...),
+	}
+	if l.config.TaskWorkspaceProvider == nil {
+		return workspace, nil
+	}
+	selected, err := l.config.TaskWorkspaceProvider(ctx, task, string(l.agent.Role()))
+	if err != nil {
+		return taskOperateWorkspace{}, fmt.Errorf("%w: %v", errTaskWorkspaceProvider, err)
+	}
+	if !selected.Applied {
+		return workspace, nil
+	}
+	if strings.TrimSpace(selected.RepoPath) == "" {
+		return taskOperateWorkspace{}, fmt.Errorf("%w: selected repo path is empty", errTaskWorkspaceProvider)
+	}
+	return taskOperateWorkspace{
+		RepoPath:              strings.TrimSpace(selected.RepoPath),
+		ContainmentWatchRoots: append([]string(nil), selected.ContainmentWatchRoots...),
+	}, nil
+}
+
+func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction, repoPath string) (decision.OperateResult, error) {
 	if l.config.TaskOperateProvider != nil {
 		selected, err := l.config.TaskOperateProvider(ctx, task, string(l.agent.Role()))
 		if err != nil {
@@ -1015,10 +1084,10 @@ func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction stri
 			if selected.Provider == nil {
 				return decision.OperateResult{}, fmt.Errorf("%w: selected provider is nil", errTaskOperateProvider)
 			}
-			return l.agent.OperateWithProvider(ctx, selected.Provider, l.config.RepoPath, instruction)
+			return l.agent.OperateWithProvider(ctx, selected.Provider, repoPath, instruction)
 		}
 	}
-	return l.agent.Operate(ctx, l.config.RepoPath, instruction)
+	return l.agent.Operate(ctx, repoPath, instruction)
 }
 
 // reason calls the agent's LLM and returns the response text and token usage.
@@ -1523,9 +1592,329 @@ func (l *Loop) buildTaskContext() string {
 		if demand != "" || readiness != "" {
 			sb.WriteString(fmt.Sprintf("  demand: %s%s\n", demand, readiness))
 		}
+		if contract := l.issueScanTaskContractContext(t); contract != "" {
+			sb.WriteString(contract)
+		}
 	}
 
 	return sb.String()
+}
+
+const (
+	issueScanStageRoleContractTaskContextLabel   = "issue_scan_stage_role_contract"
+	issueScanStageOutputContractTaskContextLabel = "issue_scan_stage_output_contract"
+	issueScanStageRoleOutputTaskContextLabel     = "issue_scan_stage_role_output"
+)
+
+type issueScanTaskContextContract struct {
+	RunID               string
+	FactoryOrderID      string
+	StageID             string
+	StageIndex          int
+	StageCount          int
+	RequiredRoles       []string
+	RequiredEvidence    []string
+	AuthorityBoundary   string
+	CompletionGate      string
+	RoleOutputContracts []issueScanTaskContextRoleOutputContract
+}
+
+type issueScanTaskContextStage struct {
+	ID                string   `json:"id"`
+	RequiredRoles     []string `json:"required_roles"`
+	RequiredEvidence  []string `json:"required_evidence"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+type issueScanTaskContextRoleOutputContract struct {
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	RequiredOutputs   []string `json:"required_outputs"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+type issueScanTaskContextAgentPlanStep struct {
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	RequiredOutputs   []string `json:"required_outputs"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+// issueScanTaskContractContext exposes issue-scan lifecycle contracts that are
+// otherwise buried in Work artifacts. Civic agents reason from buildTaskContext,
+// and stage descriptions are intentionally truncated; without this compact view
+// they cannot reliably know the exact role-output keys a valid
+// issue_scan_stage_role_output artifact must carry.
+func (l *Loop) issueScanTaskContractContext(t work.TaskSummary) string {
+	if l == nil || l.config.TaskStore == nil || t.ArtifactCount == 0 {
+		return ""
+	}
+	artifacts, err := l.config.TaskStore.ListArtifacts(t.ID)
+	if err != nil {
+		return fmt.Sprintf("  issue-scan contract: unavailable (%s); do not emit %s from a hidden contract\n",
+			taskDemandExcerpt(err.Error(), 160), issueScanStageRoleOutputTaskContextLabel)
+	}
+	contract, ok, err := issueScanTaskContractFromArtifacts(artifacts)
+	if !ok {
+		return ""
+	}
+	if err != nil {
+		return fmt.Sprintf("  issue-scan contract: invalid (%s); do not emit %s until the contract is visible\n",
+			taskDemandExcerpt(err.Error(), 160), issueScanStageRoleOutputTaskContextLabel)
+	}
+	return renderIssueScanTaskContractContext(contract, string(l.agent.Role()))
+}
+
+func issueScanTaskContractFromArtifacts(artifacts []work.ArtifactEvent) (issueScanTaskContextContract, bool, error) {
+	var outputBody string
+	var roleBody string
+	for _, artifact := range artifacts {
+		switch normalizeGateLabel(artifact.Label) {
+		case issueScanStageOutputContractTaskContextLabel:
+			outputBody = artifact.Body
+		case issueScanStageRoleContractTaskContextLabel:
+			roleBody = artifact.Body
+		}
+	}
+	if strings.TrimSpace(outputBody) != "" {
+		contract, err := parseIssueScanOutputContract(outputBody)
+		return contract, true, err
+	}
+	if strings.TrimSpace(roleBody) != "" {
+		contract, err := parseIssueScanRoleContract(roleBody)
+		return contract, true, err
+	}
+	return issueScanTaskContextContract{}, false, nil
+}
+
+func parseIssueScanOutputContract(body string) (issueScanTaskContextContract, error) {
+	var payload struct {
+		Kind                string                                   `json:"kind"`
+		RunID               string                                   `json:"run_id"`
+		FactoryOrderID      string                                   `json:"factory_order_id"`
+		StageID             string                                   `json:"stage_id"`
+		StageIndex          int                                      `json:"stage_index"`
+		StageCount          int                                      `json:"stage_count"`
+		Stage               issueScanTaskContextStage                `json:"stage"`
+		RequiredEvidence    []string                                 `json:"required_evidence"`
+		RoleOutputContracts []issueScanTaskContextRoleOutputContract `json:"role_output_contracts"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return issueScanTaskContextContract{}, err
+	}
+	if kind := strings.TrimSpace(payload.Kind); kind != "" && kind != issueScanStageOutputContractTaskContextLabel {
+		return issueScanTaskContextContract{}, fmt.Errorf("kind %q is not %q", kind, issueScanStageOutputContractTaskContextLabel)
+	}
+	contract := issueScanTaskContextContract{
+		RunID:               strings.TrimSpace(payload.RunID),
+		FactoryOrderID:      strings.TrimSpace(payload.FactoryOrderID),
+		StageID:             firstNonEmptyString(payload.StageID, payload.Stage.ID),
+		StageIndex:          payload.StageIndex,
+		StageCount:          payload.StageCount,
+		RequiredRoles:       compactTaskContextStrings(payload.Stage.RequiredRoles),
+		RequiredEvidence:    compactTaskContextStrings(payload.RequiredEvidence),
+		AuthorityBoundary:   strings.TrimSpace(payload.Stage.AuthorityBoundary),
+		CompletionGate:      strings.TrimSpace(payload.Stage.CompletionGate),
+		RoleOutputContracts: compactIssueScanTaskRoleOutputContracts(payload.RoleOutputContracts),
+	}
+	if len(contract.RequiredEvidence) == 0 {
+		contract.RequiredEvidence = compactTaskContextStrings(payload.Stage.RequiredEvidence)
+	}
+	if len(contract.RequiredRoles) == 0 {
+		contract.RequiredRoles = issueScanTaskRoleNames(contract.RoleOutputContracts)
+	}
+	return contract, nil
+}
+
+func parseIssueScanRoleContract(body string) (issueScanTaskContextContract, error) {
+	var payload struct {
+		Kind               string                              `json:"kind"`
+		RunID              string                              `json:"run_id"`
+		FactoryOrderID     string                              `json:"factory_order_id"`
+		StageID            string                              `json:"stage_id"`
+		StageIndex         int                                 `json:"stage_index"`
+		StageCount         int                                 `json:"stage_count"`
+		Stage              issueScanTaskContextStage           `json:"stage"`
+		AgentExecutionPlan []issueScanTaskContextAgentPlanStep `json:"agent_execution_plan"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return issueScanTaskContextContract{}, err
+	}
+	if kind := strings.TrimSpace(payload.Kind); kind != "" && kind != issueScanStageRoleContractTaskContextLabel {
+		return issueScanTaskContextContract{}, fmt.Errorf("kind %q is not %q", kind, issueScanStageRoleContractTaskContextLabel)
+	}
+	roleOutputContracts := make([]issueScanTaskContextRoleOutputContract, 0, len(payload.AgentExecutionPlan))
+	for _, step := range payload.AgentExecutionPlan {
+		roleOutputContracts = append(roleOutputContracts, issueScanTaskContextRoleOutputContract{
+			Role:              step.Role,
+			CanOperate:        step.CanOperate,
+			RequiredOutputs:   step.RequiredOutputs,
+			AuthorityBoundary: step.AuthorityBoundary,
+			CompletionGate:    step.CompletionGate,
+		})
+	}
+	contract := issueScanTaskContextContract{
+		RunID:               strings.TrimSpace(payload.RunID),
+		FactoryOrderID:      strings.TrimSpace(payload.FactoryOrderID),
+		StageID:             firstNonEmptyString(payload.StageID, payload.Stage.ID),
+		StageIndex:          payload.StageIndex,
+		StageCount:          payload.StageCount,
+		RequiredRoles:       compactTaskContextStrings(payload.Stage.RequiredRoles),
+		RequiredEvidence:    compactTaskContextStrings(payload.Stage.RequiredEvidence),
+		AuthorityBoundary:   strings.TrimSpace(payload.Stage.AuthorityBoundary),
+		CompletionGate:      strings.TrimSpace(payload.Stage.CompletionGate),
+		RoleOutputContracts: compactIssueScanTaskRoleOutputContracts(roleOutputContracts),
+	}
+	if len(contract.RequiredRoles) == 0 {
+		contract.RequiredRoles = issueScanTaskRoleNames(contract.RoleOutputContracts)
+	}
+	return contract, nil
+}
+
+func renderIssueScanTaskContractContext(contract issueScanTaskContextContract, agentRole string) string {
+	var b strings.Builder
+	parts := []string{}
+	if contract.RunID != "" {
+		parts = append(parts, "run "+contract.RunID)
+	}
+	if contract.FactoryOrderID != "" {
+		parts = append(parts, "FactoryOrder "+contract.FactoryOrderID)
+	}
+	stage := contract.StageID
+	if stage == "" {
+		stage = "unknown-stage"
+	}
+	stagePart := "stage " + stage
+	if contract.StageIndex > 0 && contract.StageCount > 0 {
+		stagePart += fmt.Sprintf(" (%d/%d)", contract.StageIndex, contract.StageCount)
+	}
+	parts = append(parts, stagePart)
+	fmt.Fprintf(&b, "  issue-scan contract: %s\n", strings.Join(parts, ", "))
+	if evidence := formatTaskContextList(contract.RequiredEvidence, 12); evidence != "" {
+		fmt.Fprintf(&b, "  issue-scan required evidence: %s\n", evidence)
+	}
+	boundaries := []string{}
+	if contract.AuthorityBoundary != "" {
+		boundaries = append(boundaries, "authority "+contract.AuthorityBoundary)
+	}
+	if contract.CompletionGate != "" {
+		boundaries = append(boundaries, "gate "+contract.CompletionGate)
+	}
+	if len(boundaries) > 0 {
+		fmt.Fprintf(&b, "  issue-scan boundary: %s\n", strings.Join(boundaries, "; "))
+	}
+
+	agentRole = strings.TrimSpace(agentRole)
+	roleContract, roleMatched := issueScanTaskRoleOutputContractForAgent(contract.RoleOutputContracts, agentRole)
+	if roleMatched {
+		outputs := formatTaskContextList(roleContract.RequiredOutputs, 12)
+		if outputs == "" {
+			outputs = "none declared; include any stage-required evidence keys you substantiate"
+		}
+		fmt.Fprintf(&b, "  issue-scan your role (%s) outputs: %s\n", roleContract.Role, outputs)
+		fmt.Fprintf(&b, "  issue-scan role artifact: attach label %s with role=%s, summary, evidence_refs, and outputs covering your role keys plus any stage-required evidence keys you substantiate; this is not stage completion, PR readiness, Human approval, merge, or deploy\n",
+			issueScanStageRoleOutputTaskContextLabel, roleContract.Role)
+		return b.String()
+	}
+
+	roles := formatTaskContextList(contract.RequiredRoles, 12)
+	if roles == "" {
+		roles = formatTaskContextList(issueScanTaskRoleNames(contract.RoleOutputContracts), 12)
+	}
+	if roles != "" {
+		if agentRole != "" {
+			fmt.Fprintf(&b, "  issue-scan roles: %s; your role (%s) has no declared role-output contract for this stage\n", roles, agentRole)
+		} else {
+			fmt.Fprintf(&b, "  issue-scan roles: %s\n", roles)
+		}
+	}
+	fmt.Fprintf(&b, "  issue-scan role artifact: emit %s only when your role is declared for this stage; this is not stage completion, PR readiness, Human approval, merge, or deploy\n",
+		issueScanStageRoleOutputTaskContextLabel)
+	return b.String()
+}
+
+func issueScanTaskRoleOutputContractForAgent(contracts []issueScanTaskContextRoleOutputContract, agentRole string) (issueScanTaskContextRoleOutputContract, bool) {
+	agentRole = strings.TrimSpace(agentRole)
+	if agentRole == "" {
+		return issueScanTaskContextRoleOutputContract{}, false
+	}
+	for _, contract := range contracts {
+		if strings.EqualFold(strings.TrimSpace(contract.Role), agentRole) {
+			return contract, true
+		}
+	}
+	return issueScanTaskContextRoleOutputContract{}, false
+}
+
+func compactIssueScanTaskRoleOutputContracts(values []issueScanTaskContextRoleOutputContract) []issueScanTaskContextRoleOutputContract {
+	seen := map[string]bool{}
+	out := make([]issueScanTaskContextRoleOutputContract, 0, len(values))
+	for _, value := range values {
+		role := strings.TrimSpace(value.Role)
+		if role == "" {
+			continue
+		}
+		key := strings.ToLower(role)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		value.Role = role
+		value.RequiredOutputs = compactTaskContextStrings(value.RequiredOutputs)
+		value.AuthorityBoundary = strings.TrimSpace(value.AuthorityBoundary)
+		value.CompletionGate = strings.TrimSpace(value.CompletionGate)
+		out = append(out, value)
+	}
+	return out
+}
+
+func issueScanTaskRoleNames(contracts []issueScanTaskContextRoleOutputContract) []string {
+	names := make([]string, 0, len(contracts))
+	for _, contract := range contracts {
+		names = append(names, contract.Role)
+	}
+	return compactTaskContextStrings(names)
+}
+
+func compactTaskContextStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func formatTaskContextList(values []string, max int) string {
+	values = compactTaskContextStrings(values)
+	if len(values) == 0 {
+		return ""
+	}
+	if max <= 0 || len(values) <= max {
+		return strings.Join(values, ", ")
+	}
+	return strings.Join(values[:max], ", ") + fmt.Sprintf(" (+%d more)", len(values)-max)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // taskDemandExcerpt renders a one-line, rune-safe excerpt of a task
@@ -1545,7 +1934,7 @@ func taskDemandExcerpt(desc string, maxRunes int) string {
 }
 
 // processTaskCommands extracts and executes /task commands from the response.
-func (l *Loop) processTaskCommands(response string) {
+func (l *Loop) processTaskCommands(ctx context.Context, response string) {
 	if l.config.TaskStore == nil {
 		return
 	}
@@ -1564,6 +1953,9 @@ func (l *Loop) processTaskCommands(response string) {
 	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID, l.config.CanOperate)
 	if executed > 0 {
 		fmt.Printf("[%s] executed %d/%d task commands\n", l.agent.Name(), executed, len(commands))
+		if l.config.OnTaskCommandsExecuted != nil {
+			l.config.OnTaskCommandsExecuted(ctx, executed, len(commands))
+		}
 	}
 }
 
@@ -1685,9 +2077,12 @@ func (l *Loop) hasAssignableWork() bool {
 // childless-leaf rule) deadlocked against ListOpen's prerequisite semantics:
 // a subtask depending on its parent was hidden as blocked while the parent was
 // skipped for having a dependent — zero assignable tasks in either edge
-// direction (run findings v11-F1). ok is false when none exists. Pure (no
-// writes): shared by autoAssignOpenTask (which assigns the result) and
-// hasAssignableWork (the re-check gate).
+// direction (run findings v11-F1). Issue-scan lifecycle stages are also
+// skipped even when they have no Work dependencies: their contract artifacts
+// make them governed aggregators that close only through recorded role-output
+// evidence, not through the implementer's verified-Operate path. ok is false
+// when none exists. Pure (no writes): shared by autoAssignOpenTask (which
+// assigns the result) and hasAssignableWork (the re-check gate).
 func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
 	if l.config.TaskStore == nil {
 		return work.Task{}, false
@@ -1720,9 +2115,33 @@ func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
 		if readyErr != nil || !readiness.Ready {
 			continue
 		}
+		if hasIssueScanContract, contractErr := l.taskHasIssueScanStageContract(t.ID); contractErr != nil || hasIssueScanContract {
+			continue
+		}
 		return t, true
 	}
 	return work.Task{}, false
+}
+
+func (l *Loop) taskHasIssueScanStageContract(taskID types.EventID) (bool, error) {
+	if l == nil || l.config.TaskStore == nil {
+		return false, nil
+	}
+	artifacts, err := l.config.TaskStore.ListArtifacts(taskID)
+	if err != nil {
+		return false, err
+	}
+	return artifactsContainIssueScanStageContract(artifacts), nil
+}
+
+func artifactsContainIssueScanStageContract(artifacts []work.ArtifactEvent) bool {
+	for _, artifact := range artifacts {
+		switch normalizeGateLabel(artifact.Label) {
+		case issueScanStageRoleContractTaskContextLabel, issueScanStageOutputContractTaskContextLabel:
+			return true
+		}
+	}
+	return false
 }
 
 // hasAssignedTask returns true if the agent has any assigned, operable task.
@@ -1759,6 +2178,10 @@ func (l *Loop) nextAssignedTask() work.Task {
 // Note: causes may be empty on the agent's very first event (bootstrap case).
 // The factory handles this by using the graph head as a fallback cause.
 func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) bool {
+	return l.attachOperateArtifactInWorkspace(task, l.config.RepoPath, baseHead, postHead)
+}
+
+func (l *Loop) attachOperateArtifactInWorkspace(task work.Task, repoPath, baseHead, postHead string) bool {
 	if l.config.TaskStore == nil {
 		return true
 	}
@@ -1767,7 +2190,7 @@ func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) 
 		causes = []types.EventID{lastEv}
 	}
 
-	body := buildOperateArtifactBody(l.config.RepoPath, baseHead, postHead)
+	body := buildOperateArtifactBody(repoPath, baseHead, postHead)
 	err := l.config.TaskStore.AddArtifact(
 		l.agent.ID(), task.ID,
 		"Operate result",
@@ -1798,13 +2221,18 @@ func buildOperateArtifactBody(repoPath, baseHead, postHead string) string {
 	if postHead == "" {
 		return "(no commits)"
 	}
+	branch := gitCommand(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	branchLine := ""
+	if branch != "" {
+		branchLine = "\nbranch: " + branch
+	}
 	if baseHead == "" {
 		stat := gitCommand(repoPath, "diff", postHead+"^.."+postHead, "--stat")
-		return fmt.Sprintf("commit: %s\n\n%s", postHead, stat)
+		return fmt.Sprintf("commit: %s%s\n\n%s", postHead, branchLine, stat)
 	}
 	diffRef := baseHead + ".." + postHead
 	stat := gitCommand(repoPath, "diff", diffRef, "--stat")
-	return fmt.Sprintf("commit: %s\nbase: %s\nhead: %s\nrange: %s\n\n%s", postHead, baseHead, postHead, diffRef, stat)
+	return fmt.Sprintf("commit: %s\nbase: %s\nhead: %s\nrange: %s%s\n\n%s", postHead, baseHead, postHead, diffRef, branchLine, stat)
 }
 
 // completeTask marks a task as completed in the task store.

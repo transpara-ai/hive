@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/hive/pkg/hive"
 	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
@@ -40,6 +43,136 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael"})
 	if err == nil || !strings.Contains(err.Error(), "repo") {
 		t.Fatalf("expected missing --repo error, got %v", err)
+	}
+}
+
+func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-review", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRecordIssueScanDraftPRRequiresHumanBeforeFileRead(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "record-issue-scan-draft-pr", "--run", "run_issue_001", "--receipt-file", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRecordIssueScanReadyPRRequiresHumanBeforeFileRead(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "record-issue-scan-ready-pr", "--run", "run_issue_001", "--evidence-file", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRunIssueScanReadyPRRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-ready-pr", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequiresReviewRunnerBeforeRunnerArg(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-review-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-runner") {
+		t.Fatalf("expected missing review runner error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-runner") {
+		t.Fatalf("expected missing ready PR runner error, got %v", err)
+	}
+}
+
+func TestRunIssueScanReviewRunnerPassesContextAndParsesReceipt(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+printf '%s\n' '{"repository":"transpara-ai/hive","review_ref":"artifact://review/result.md","reviewed_head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"approve","summary":"no blockers","issues":[],"confidence":0.91}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	reviewContext := hive.IssueScanAdversarialReviewContext{
+		Kind:                 "issue_scan_adversarial_review_context",
+		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:                "run_issue_001",
+		FactoryOrderID:       "fo_run_issue_001",
+		Repository:           "transpara-ai/hive",
+		ImplementationTaskID: "evt_task",
+		OperateCommit:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+
+	receipt, err := runIssueScanReviewRunner(context.Background(), runner, []string{contextPath}, reviewContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanReviewRunner: %v", err)
+	}
+	if receipt.ReviewRef != "artifact://review/result.md" || receipt.Verdict != "approve" || receipt.ReviewedHeadSHA != reviewContext.OperateCommit {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanAdversarialReviewContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != reviewContext.RunID || sent.OperateCommit != reviewContext.OperateCommit {
+		t.Fatalf("sent context = %+v, want run/head from %+v", sent, reviewContext)
+	}
+}
+
+func TestRunIssueScanReadyPRRunnerPassesContextAndParsesResult(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+printf '%s\n' '{"draft_pr_receipt":{"kind":"transpara_ai_draft_pr_receipt","repository":"transpara-ai/hive","pr_number":321,"pr_url":"https://github.com/transpara-ai/hive/pull/321","base_ref":"main","base_sha":"dddddddddddddddddddddddddddddddddddddddd","head_ref":"codex/run-issue-001","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","remote_head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changed_files":["README.md"],"draft":true,"state":"open","policy_bundle_id":"transpara-ai-issue-scan-draft-pr-create-only-v0.1","policy_bundle_hash":"test","authority_nonce":"nonce","human_approval_required":true,"no_merge_or_deploy_claim":true,"ready_for_review_required":true},"ready_pr_evidence":{"repository":"transpara-ai/hive","pr_number":321,"pr_url":"https://github.com/transpara-ai/hive/pull/321","head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","state":"open","draft":false,"ready_for_review":true,"merge_state_status":"clean","ci_status":"success","ready_state_review_ref":"https://github.com/transpara-ai/hive/pull/321#issuecomment-ready","ready_state_review_status":"passed","human_approval_required":true}}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	readyContext := hive.IssueScanReadyPRRunnerContext{
+		Kind:             "issue_scan_ready_pr_runner_context",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:            "run_issue_001",
+		FactoryOrderID:   "fo_run_issue_001",
+		Repository:       "transpara-ai/hive",
+		OperateCommit:    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+
+	result, err := runIssueScanReadyPRRunner(context.Background(), runner, []string{contextPath}, readyContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanReadyPRRunner: %v", err)
+	}
+	if result.DraftPRReceipt.PRNumber != 321 || result.ReadyPREvidence.PRNumber != 321 || result.ReadyPREvidence.HeadSHA != readyContext.OperateCommit {
+		t.Fatalf("result = %+v", result)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanReadyPRRunnerContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != readyContext.RunID || sent.OperateCommit != readyContext.OperateCommit {
+		t.Fatalf("sent context = %+v, want run/head from %+v", sent, readyContext)
 	}
 }
 
