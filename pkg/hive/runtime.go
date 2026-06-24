@@ -85,6 +85,7 @@ type Runtime struct {
 	issueScanStageRoleOutputRunner   IssueScanStageRoleOutputRunner
 	issueScanImplementationRunner    IssueScanImplementationRunner
 	issueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner
+	issueScanBlockerRepairRunner     IssueScanBlockerRepairRunner
 	issueScanReadyPRRunner           IssueScanReadyPRRunner
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
@@ -124,6 +125,7 @@ type Config struct {
 	IssueScanStageRoleOutputRunner   IssueScanStageRoleOutputRunner   // optional planning-stage issue-scan role-output runner
 	IssueScanImplementationRunner    IssueScanImplementationRunner    // optional concrete issue-scan implementation runner
 	IssueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner // optional exact-head issue-scan review runner
+	IssueScanBlockerRepairRunner     IssueScanBlockerRepairRunner     // optional request_changes blocker repair runner
 	IssueScanReadyPRRunner           IssueScanReadyPRRunner           // optional terminal ready-PR evidence runner
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
@@ -192,6 +194,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		issueScanStageRoleOutputRunner:   cfg.IssueScanStageRoleOutputRunner,
 		issueScanImplementationRunner:    cfg.IssueScanImplementationRunner,
 		issueScanAdversarialReviewRunner: cfg.IssueScanAdversarialReviewRunner,
+		issueScanBlockerRepairRunner:     cfg.IssueScanBlockerRepairRunner,
 		issueScanReadyPRRunner:           cfg.IssueScanReadyPRRunner,
 		telemetryWriter:                  cfg.TelemetryWriter,
 		apiClient:                        cfg.APIClient,

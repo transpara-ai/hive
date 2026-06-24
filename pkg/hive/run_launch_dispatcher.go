@@ -974,6 +974,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan blocker evidence bridge: recorded %d role output(s)\n", recorded)
 			}
+			if recorded := countRecordedIssueScanBlockerRepairRuns(progress.BlockerRepairRuns); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan blocker repair runner: recorded %d repair result(s)\n", recorded)
+			}
 			if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan ready PR evidence runner: recorded %d ready PR evidence packet(s)\n", recorded)
 			}
@@ -998,6 +1001,7 @@ type IssueScanLifecycleProgress struct {
 	ReviewRuns                []IssueScanAdversarialReviewRecordResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
+	BlockerRepairRuns         []IssueScanBlockerRepairRunnerRecordResult
 	ReadyPRRuns               []IssueScanReadyPRRunnerRecordResult
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
 }
@@ -1116,6 +1120,41 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 		mergeIssueScanLifecycleProgress(&progress, after)
 		if err != nil {
 			errs = append(errs, err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
+	blockerRepairRuns, err := r.RunConfiguredIssueScanBlockerRepairRunners(ctx, dispatch)
+	progress.BlockerRepairRuns = blockerRepairRuns
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan blocker repair runner: %w", err))
+	}
+	if len(blockerRepairRuns) > 0 {
+		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+		mergeIssueScanLifecycleProgress(&progress, after)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		select {
+		case <-ctx.Done():
+			return progress, errors.Join(append(errs, ctx.Err())...)
+		default:
+		}
+		rerunReviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
+		progress.ReviewRuns = append(progress.ReviewRuns, rerunReviewRuns...)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("issue-scan adversarial review runner after blocker repair: %w", err))
+		}
+		if len(rerunReviewRuns) > 0 {
+			after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+			mergeIssueScanLifecycleProgress(&progress, after)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 
@@ -1248,6 +1287,7 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 	dst.ReviewRuns = append(dst.ReviewRuns, src.ReviewRuns...)
 	dst.ReviewRoleOutputs = append(dst.ReviewRoleOutputs, src.ReviewRoleOutputs...)
 	dst.BlockerRoleOutputs = append(dst.BlockerRoleOutputs, src.BlockerRoleOutputs...)
+	dst.BlockerRepairRuns = append(dst.BlockerRepairRuns, src.BlockerRepairRuns...)
 	dst.ReadyPRRuns = append(dst.ReadyPRRuns, src.ReadyPRRuns...)
 	dst.ReadyRoleOutputs = append(dst.ReadyRoleOutputs, src.ReadyRoleOutputs...)
 }
@@ -1436,6 +1476,16 @@ func countRecordedIssueScanImplementationRuns(values []IssueScanImplementationRu
 }
 
 func countRecordedIssueScanAdversarialReviewRuns(values []IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanBlockerRepairRuns(values []IssueScanBlockerRepairRunnerRecordResult) int {
 	count := 0
 	for _, value := range values {
 		if value.Recorded {

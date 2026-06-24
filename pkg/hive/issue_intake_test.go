@@ -2525,6 +2525,7 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	stageRoleCalls := 0
 	implementationCalls := 0
 	reviewCalls := 0
+	blockerRepairCalls := 0
 	readyPRCalls := 0
 	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
 		stageRoleCalls++
@@ -2537,6 +2538,10 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
 		reviewCalls++
 		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("post-event progress must not invoke configured review runner")
+	}
+	rt.issueScanBlockerRepairRunner = func(ctx context.Context, runnerContext IssueScanBlockerRepairRunnerContext) (IssueScanBlockerRepairRunnerResult, error) {
+		blockerRepairCalls++
+		return IssueScanBlockerRepairRunnerResult{}, fmt.Errorf("post-event progress must not invoke configured blocker repair runner")
 	}
 	rt.issueScanReadyPRRunner = func(ctx context.Context, readyContext IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error) {
 		readyPRCalls++
@@ -2555,6 +2560,9 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	}
 	if reviewCalls != 0 {
 		t.Fatalf("review runner calls = %d, want none from post-event progress", reviewCalls)
+	}
+	if blockerRepairCalls != 0 {
+		t.Fatalf("blocker repair runner calls = %d, want none from post-event progress", blockerRepairCalls)
 	}
 	if readyPRCalls != 0 {
 		t.Fatalf("ready PR runner calls = %d, want none from post-event progress", readyPRCalls)
@@ -2771,6 +2779,151 @@ func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.
 	}
 	if countRecordedIssueScanRoleOutputs(second.BlockerRoleOutputs) != 3 {
 		t.Fatalf("blocker role outputs = %+v, want implementer/reviewer/guardian zero-blocker evidence", second.BlockerRoleOutputs)
+	}
+}
+
+func TestProgressIssueScanLifecycleRunsConfiguredBlockerRepairAndRerunsReview(t *testing.T) {
+	rt, _, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	reviewCalls := 0
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		reviewCalls++
+		if reviewContext.RunID != queued.RunID {
+			t.Fatalf("review runner run id = %q, want %q", reviewContext.RunID, queued.RunID)
+		}
+		if reviewContext.ImplementationTaskID != implementationTask.ID.Value() {
+			t.Fatalf("review runner task id = %q, want %s", reviewContext.ImplementationTaskID, implementationTask.ID)
+		}
+		receipt := reviewContext.ExpectedReceipt
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		switch reviewCalls {
+		case 1:
+			if reviewContext.OperateCommit != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+				t.Fatalf("first review operate commit = %q, want initial implementation head", reviewContext.OperateCommit)
+			}
+			receipt.ReviewRef = "artifact://adversarial-review/configured-runner/blocker.md"
+			receipt.Verdict = "request_changes"
+			receipt.Summary = "configured runner found a blocker"
+			receipt.Issues = []string{"missing regression test"}
+		case 2:
+			if reviewContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+				t.Fatalf("second review operate commit = %q, want repaired implementation head", reviewContext.OperateCommit)
+			}
+			receipt.ReviewRef = "artifact://adversarial-review/configured-runner/approved.md"
+			receipt.Verdict = "approve"
+			receipt.Summary = "configured runner approved repaired head"
+			receipt.Issues = []string{}
+		default:
+			t.Fatalf("unexpected review runner call %d with context %+v", reviewCalls, reviewContext)
+		}
+		return receipt, nil
+	}
+
+	repairCalls := 0
+	rt.issueScanBlockerRepairRunner = func(ctx context.Context, runnerContext IssueScanBlockerRepairRunnerContext) (IssueScanBlockerRepairRunnerResult, error) {
+		repairCalls++
+		if runnerContext.RunID != queued.RunID {
+			t.Fatalf("repair runner run id = %q, want %q", runnerContext.RunID, queued.RunID)
+		}
+		if runnerContext.ImplementationTaskID != implementationTask.ID.Value() {
+			t.Fatalf("repair runner task id = %q, want %s", runnerContext.ImplementationTaskID, implementationTask.ID)
+		}
+		if runnerContext.RequestChangesReviewEventID == "" || !containsIssueScanValue(runnerContext.RequestChangesReviewIssues, "missing regression test") {
+			t.Fatalf("repair runner request_changes context = %+v", runnerContext)
+		}
+		if runnerContext.PreviousOperateCommit != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+			t.Fatalf("repair runner previous commit = %q, want reviewed blocker head", runnerContext.PreviousOperateCommit)
+		}
+		if runnerContext.ReopenEventID == "" || !strings.Contains(runnerContext.ReopenReason, "request_changes") {
+			t.Fatalf("repair runner reopen context = %+v", runnerContext)
+		}
+		if len(runnerContext.ImplementationTaskContext) == 0 || len(runnerContext.ImplementationReadinessGates) == 0 {
+			t.Fatalf("repair runner missing implementation task context/gates: %+v", runnerContext)
+		}
+		if !containsIssueScanValue(runnerContext.BoundaryDisclaimers, "repair runner output is not adversarial review evidence") || !containsIssueScanValue(runnerContext.BoundaryDisclaimers, "repair runner output is not PR creation or PR readiness") {
+			t.Fatalf("repair runner boundary disclaimers = %+v", runnerContext.BoundaryDisclaimers)
+		}
+		repairedBody := issueScanOperateResultBodyForTestWith(
+			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"cccccccccccccccccccccccccccccccccccccccc",
+			"codex/run-issue-001-repair",
+			"pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++\n2 files changed, 30 insertions(+), 2 deletions(-)",
+		)
+		return IssueScanBlockerRepairRunnerResult{
+			OperateResultBody: repairedBody,
+			CompletionSummary: "validation output: go test ./pkg/hive passed after blocker repair runner",
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with blocker repair runner: %v", err)
+	}
+	if reviewCalls != 2 {
+		t.Fatalf("review runner calls = %d, want request_changes then approve", reviewCalls)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repair runner calls = %d, want one repair run", repairCalls)
+	}
+	if len(progress.BlockerRepairRuns) != 1 || !progress.BlockerRepairRuns[0].Recorded {
+		t.Fatalf("blocker repair runs = %+v, want one recorded repair", progress.BlockerRepairRuns)
+	}
+	if progress.BlockerRepairRuns[0].OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("blocker repair commit = %q, want repaired head", progress.BlockerRepairRuns[0].OperateCommit)
+	}
+	if len(progress.ReviewRuns) != 2 {
+		t.Fatalf("review runs = %+v, want initial blocker review and repaired approval", progress.ReviewRuns)
+	}
+	if progress.ReviewRuns[0].Verdict != "request_changes" || !progress.ReviewRuns[0].ReopenedImplementationTask {
+		t.Fatalf("first review run = %+v, want request_changes with reopen", progress.ReviewRuns[0])
+	}
+	if progress.ReviewRuns[1].Verdict != "approve" || progress.ReviewRuns[1].ReviewedHeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("second review run = %+v, want approval for repaired head", progress.ReviewRuns[1])
+	}
+	if countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs) != 3 {
+		t.Fatalf("blocker role outputs = %+v, want implementer/reviewer/guardian zero-blocker evidence", progress.BlockerRoleOutputs)
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus implementation task: %v", err)
+	}
+	if status != work.LegacyStatusCompleted {
+		t.Fatalf("implementation task status = %s, want completed after repair runner", status)
+	}
+}
+
+func TestConfiguredBlockerRepairRunnerRejectsPreviousReviewedCommit(t *testing.T) {
+	rt, _, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		receipt := reviewContext.ExpectedReceipt
+		receipt.ReviewRef = "artifact://adversarial-review/configured-runner/blocker.md"
+		receipt.Verdict = "request_changes"
+		receipt.Summary = "configured runner found a blocker"
+		receipt.Issues = []string{"missing regression test"}
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		return receipt, nil
+	}
+	rt.issueScanBlockerRepairRunner = func(ctx context.Context, runnerContext IssueScanBlockerRepairRunnerContext) (IssueScanBlockerRepairRunnerResult, error) {
+		return IssueScanBlockerRepairRunnerResult{
+			OperateResultBody: issueScanOperateResultBodyForTest(),
+			CompletionSummary: "validation output: go test ./pkg/hive reported no changed repair head",
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "must differ from previous reviewed commit") {
+		t.Fatalf("expected previous reviewed commit guard error, got progress=%+v err=%v", progress, err)
+	}
+	if len(progress.BlockerRepairRuns) != 0 {
+		t.Fatalf("blocker repair runs = %+v, want no recorded repair after guard failure", progress.BlockerRepairRuns)
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus implementation task: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("implementation task status = %s, want reopened after rejected repair output", status)
 	}
 }
 

@@ -67,6 +67,8 @@ func helpText() string {
 	b.WriteString("                           Run configured implementation command\n")
 	b.WriteString("  factory run-issue-scan-review\n")
 	b.WriteString("                           Run configured exact-head issue-scan review command\n")
+	b.WriteString("  factory run-issue-scan-blocker-repair\n")
+	b.WriteString("                           Run configured request_changes blocker repair command\n")
 	b.WriteString("  factory record-issue-scan-draft-pr\n")
 	b.WriteString("                           Link governed draft PR receipt to issue-scan ready stage\n")
 	b.WriteString("  factory record-issue-scan-ready-pr\n")
@@ -125,7 +127,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, *space, *apiBase)
 }
 
 func cmdCivilizationDaemon(args []string) error {
@@ -152,7 +154,7 @@ func cmdCivilizationDaemon(args []string) error {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, nil, nil, *space, *apiBase)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────
