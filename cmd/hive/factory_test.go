@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,6 +93,34 @@ func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-runner-arg=--json"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-runner") {
 		t.Fatalf("expected missing ready PR runner error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonIssueScanIntervalRequiresRepoBeforeStart(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m"})
+	if err == nil || !strings.Contains(err.Error(), "--registry") {
+		t.Fatalf("expected missing issue-scan repo or registry error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonIssueScanIntervalRejectsAutoApproveRequests(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected auto-approval guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonIssueScanIntervalRejectsAutoApproveRoles(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--approve-roles"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("expected auto-role guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonIssueScanIntervalRequiresPositiveMaxNewRuns(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-max-new-runs", "0"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-max-new-runs") {
+		t.Fatalf("expected max-new-runs guard error, got %v", err)
 	}
 }
 
@@ -216,6 +245,222 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 	_, err := resolveIssueScanRepos(nil, false, "")
 	if err == nil || !strings.Contains(err.Error(), "--registry") {
 		t.Fatalf("expected repo or registry error, got %v", err)
+	}
+}
+
+func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) {
+	ctx := context.Background()
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 192,
+				Title:  "Teach Civilization to scan Transpara-AI repos",
+				URL:    "https://github.com/transpara-ai/hive/issues/192",
+				Labels: []string{"civilization"},
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	first, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("first runIssueScanScannerCycle: %v", err)
+	}
+	if !first.Queued || first.QueuedRunID == "" || first.QueuedIssue.Number != 192 {
+		t.Fatalf("first cycle = %+v, want queued issue 192", first)
+	}
+	progress, err := rt.ProgressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("ProgressIssueScanLifecycle: %v", err)
+	}
+	if progress.Dispatch.Dispatched != 1 {
+		t.Fatalf("dispatch = %+v, want one dispatched FactoryOrder", progress.Dispatch)
+	}
+
+	second, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("second runIssueScanScannerCycle: %v", err)
+	}
+	if second.Queued {
+		t.Fatalf("second cycle queued duplicate: %+v", second)
+	}
+	if second.SkippedExisting != 1 {
+		t.Fatalf("second skipped existing = %d, want 1", second.SkippedExisting)
+	}
+}
+
+func TestRunIssueScanScannerCycleQueuedRunCanBeRedrivenByRuntimeProgress(t *testing.T) {
+	ctx := context.Background()
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 193,
+				Title:  "Redrive queued issue-scan run",
+				URL:    "https://github.com/transpara-ai/hive/issues/193",
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	queuedOnly, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("queued-only runIssueScanScannerCycle: %v", err)
+	}
+	if !queuedOnly.Queued {
+		t.Fatalf("queued-only cycle = %+v, want queued without inline dispatch", queuedOnly)
+	}
+
+	progress, err := rt.ProgressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("ProgressIssueScanLifecycle: %v", err)
+	}
+	if progress.Dispatch.Dispatched != 1 {
+		t.Fatalf("redrive dispatch = %+v, want one dispatched FactoryOrder", progress.Dispatch)
+	}
+
+	second, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("second runIssueScanScannerCycle: %v", err)
+	}
+	if second.Queued || second.SkippedExisting != 1 {
+		t.Fatalf("second cycle = %+v, want skipped existing queued run", second)
+	}
+}
+
+func TestRunIssueScanScannerCycleSkipsExistingSourceWhenIntakeMissing(t *testing.T) {
+	ctx := context.Background()
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	content := hive.FactoryRunRequestedContent{
+		RunID:    "run_existing_source_only",
+		IntakeID: "",
+		Status:   "queued",
+		Sources: []hive.RunLaunchSource{{
+			ID:    "github_issue_transpara_ai_docs_172",
+			Type:  "github.issue",
+			Ref:   "https://github.com/transpara-ai/docs/issues/172",
+			Title: "transpara-ai/docs#172",
+		}},
+		Brief: json.RawMessage(`{"kind":"transpara_ai_github_issue_scan"}`),
+	}
+	ev, err := fc.factory.Create(hive.EventTypeFactoryRunRequested, fc.humanID, content, fc.headCauses(), factoryOrderConversation("existing_source_only"), fc.store, fc.signer)
+	if err != nil {
+		t.Fatalf("create factory.run.requested: %v", err)
+	}
+	if _, err := fc.store.Append(ev); err != nil {
+		t.Fatalf("append factory.run.requested: %v", err)
+	}
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/docs": {{
+				Repo:   "transpara-ai/docs",
+				Number: 172,
+				Title:  "Gate S closeout PR #171 approval artifact residual",
+				URL:    "https://github.com/transpara-ai/docs/issues/172",
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/docs"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("runIssueScanScannerCycle: %v", err)
+	}
+	if result.Queued || result.SkippedExisting != 1 {
+		t.Fatalf("cycle = %+v, want source-ref dedupe skip", result)
+	}
+}
+
+func TestRunIssueScanScannerLoopStopsOnCancelAndHonorsMaxNewRunCap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		cancel()
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+	lister := &countingIssueScanLister{
+		first: make(chan struct{}),
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 194,
+				Title:  "Loop scanner cap",
+				URL:    "https://github.com/transpara-ai/hive/issues/194",
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+		MaxNewRuns:    1,
+		Interval:      time.Millisecond,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runIssueScanScannerLoop(ctx, scannerContext, config, lister)
+	}()
+	select {
+	case <-lister.first:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("scanner did not perform initial scan")
+	}
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("scanner did not stop after cancellation")
+	}
+	if calls := lister.Calls(); calls != 1 {
+		t.Fatalf("scan calls = %d, want 1 because max_new_runs caps later ticks", calls)
 	}
 }
 
@@ -471,4 +716,34 @@ func TestFactoryCreatePRRequiresRequest(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "request") {
 		t.Fatalf("expected missing --request error, got %v", err)
 	}
+}
+
+type fakeIssueScanLister struct {
+	issues map[string][]hive.GitHubIssueCandidate
+}
+
+func (l fakeIssueScanLister) ListIssues(_ context.Context, repo string, _ int, _ []string) ([]hive.GitHubIssueCandidate, error) {
+	return append([]hive.GitHubIssueCandidate(nil), l.issues[repo]...), nil
+}
+
+type countingIssueScanLister struct {
+	mu     sync.Mutex
+	once   sync.Once
+	first  chan struct{}
+	calls  int
+	issues map[string][]hive.GitHubIssueCandidate
+}
+
+func (l *countingIssueScanLister) ListIssues(_ context.Context, repo string, _ int, _ []string) ([]hive.GitHubIssueCandidate, error) {
+	l.mu.Lock()
+	l.calls++
+	l.once.Do(func() { close(l.first) })
+	l.mu.Unlock()
+	return append([]hive.GitHubIssueCandidate(nil), l.issues[repo]...), nil
+}
+
+func (l *countingIssueScanLister) Calls() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.calls
 }

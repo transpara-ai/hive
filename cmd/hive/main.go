@@ -35,6 +35,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1200,7 +1201,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1342,8 +1343,27 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		fmt.Fprintln(os.Stderr, "Reconciliation: skipped (need --store, LOVYOU_API_KEY, and --space)")
 	}
 
-	if err := rt.Run(ctx, idea); err != nil {
-		return fmt.Errorf("run: %w", err)
+	var scannerWG sync.WaitGroup
+	var stopScanner context.CancelFunc
+	if issueScanScanner != nil && issueScanScanner.Interval > 0 {
+		scannerCtx, cancelScanner := context.WithCancel(ctx)
+		stopScanner = cancelScanner
+		scannerContext := newIssueScanScannerContext(s, actors, humanID)
+		scannerWG.Add(1)
+		go func() {
+			defer scannerWG.Done()
+			runIssueScanScannerLoop(scannerCtx, scannerContext, *issueScanScanner, ghIssueLister{})
+		}()
+		fmt.Fprintf(os.Stderr, "Issue-scan scanner: enabled interval=%s repos=%s limit=%d max_new_runs=%d\n", issueScanScanner.Interval, strings.Join(issueScanScanner.Repos, ","), issueScanScanner.Limit, issueScanScanner.MaxNewRuns)
+	}
+
+	runErr := rt.Run(ctx, idea)
+	if stopScanner != nil {
+		stopScanner()
+		scannerWG.Wait()
+	}
+	if runErr != nil {
+		return fmt.Errorf("run: %w", runErr)
 	}
 
 	count, _ := s.Count()

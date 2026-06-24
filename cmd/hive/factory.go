@@ -127,6 +127,16 @@ func cmdFactoryDaemon(args []string) error {
 	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
+	issueScanInterval := fs.Duration("issue-scan-interval", 0, "Autonomously scan Transpara-AI GitHub issues on this interval; 0 disables")
+	issueScanLimit := fs.Int("issue-scan-limit", 10, "Maximum open issues to read per repo for daemon issue scanning")
+	issueScanMaxIterations := fs.Int("issue-scan-max-iterations", 30, "Queued issue-scan run iteration budget")
+	issueScanMaxCostUSD := fs.Float64("issue-scan-max-cost-usd", 25, "Queued issue-scan run cost budget in USD")
+	issueScanMaxNewRuns := fs.Int("issue-scan-max-new-runs", 1, "Maximum new issue-scan runs this daemon instance may queue; bounds unattended scan cost")
+	issueScanRegistry := fs.Bool("issue-scan-registry", false, "Scan every Transpara-AI GitHub repo in repos.json when no --issue-scan-repo is supplied")
+	issueScanRepos := repeatedStringFlag{}
+	issueScanLabels := repeatedStringFlag{}
+	fs.Var(&issueScanRepos, "issue-scan-repo", "Transpara-AI repo slug to scan from daemon, e.g. transpara-ai/hive (repeatable; required with --issue-scan-interval unless --issue-scan-registry is set)")
+	fs.Var(&issueScanLabels, "issue-scan-label", "GitHub issue label filter for daemon issue scanning (repeatable)")
 	reviewRunner := fs.String("issue-scan-review-runner", "", "Executable exact-head issue-scan adversarial review runner; receives JSON context on stdin and returns receipt JSON")
 	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
 	reviewRunnerArgs := repeatedStringFlag{}
@@ -144,6 +154,50 @@ func cmdFactoryDaemon(args []string) error {
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required")
+	}
+	if *issueScanInterval > 0 && *approveRequests {
+		return fmt.Errorf("--issue-scan-interval cannot be combined with --approve-requests")
+	}
+	if *issueScanInterval > 0 && *approveRoles {
+		return fmt.Errorf("--issue-scan-interval cannot be combined with --approve-roles")
+	}
+	var issueScanScanner *issueScanScannerConfig
+	if *issueScanInterval > 0 {
+		if *issueScanLimit <= 0 {
+			return fmt.Errorf("--issue-scan-limit must be greater than zero")
+		}
+		if *issueScanMaxIterations <= 0 {
+			return fmt.Errorf("--issue-scan-max-iterations must be greater than zero")
+		}
+		if *issueScanMaxCostUSD < 0 {
+			return fmt.Errorf("--issue-scan-max-cost-usd must be zero or greater")
+		}
+		if *issueScanMaxNewRuns <= 0 {
+			return fmt.Errorf("--issue-scan-max-new-runs must be greater than zero")
+		}
+		registryPath := ""
+		if len(issueScanRepos) == 0 && *issueScanRegistry {
+			var err error
+			registryPath, err = issueScanRegistryPath()
+			if err != nil {
+				return err
+			}
+		}
+		normalizedRepos, err := resolveIssueScanRepos(issueScanRepos, *issueScanRegistry, registryPath)
+		if err != nil {
+			return err
+		}
+		issueScanScanner = &issueScanScannerConfig{
+			OperatorID:     hive.IssueScanOperatorID(*human),
+			Repos:          normalizedRepos,
+			Labels:         append([]string(nil), issueScanLabels...),
+			Limit:          *issueScanLimit,
+			MaxIterations:  *issueScanMaxIterations,
+			MaxCostUSD:     *issueScanMaxCostUSD,
+			MaxNewRuns:     *issueScanMaxNewRuns,
+			Interval:       *issueScanInterval,
+			AuthorityScope: "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+		}
 	}
 	var issueScanReviewRunner hive.IssueScanAdversarialReviewRunner
 	if strings.TrimSpace(*reviewRunner) == "" {
@@ -173,7 +227,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, issueScanReadyPRRunner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by
@@ -683,18 +737,31 @@ func openFactoryContext(ctx context.Context, dsn, humanName string) (*factoryCon
 		return nil, fmt.Errorf("bootstrap graph: %w", err)
 	}
 
-	registry := event.DefaultRegistry()
-	hive.RegisterWithRegistry(registry)
-	work.RegisterWithRegistry(registry)
-
 	return &factoryContext{
 		pool:    pool,
 		store:   s,
 		actors:  actors,
-		factory: event.NewEventFactory(registry),
+		factory: newFactoryEventFactory(),
 		signer:  &bootstrapSigner{humanID: humanID},
 		humanID: humanID,
 	}, nil
+}
+
+func newFactoryEventFactory() *event.EventFactory {
+	registry := event.DefaultRegistry()
+	hive.RegisterWithRegistry(registry)
+	work.RegisterWithRegistry(registry)
+	return event.NewEventFactory(registry)
+}
+
+func newIssueScanScannerContext(s store.Store, actors actor.IActorStore, humanID types.ActorID) *factoryContext {
+	return &factoryContext{
+		store:   s,
+		actors:  actors,
+		factory: newFactoryEventFactory(),
+		signer:  &bootstrapSigner{humanID: humanID},
+		humanID: humanID,
+	}
 }
 
 func (fc *factoryContext) close() {

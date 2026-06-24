@@ -319,15 +319,7 @@ func safeIssueScanOperatorID(value string) bool {
 }
 
 func scanGitHubIssues(ctx context.Context, repos []string, limit int, labels []string) ([]hive.GitHubIssueCandidate, error) {
-	var out []hive.GitHubIssueCandidate
-	for _, repo := range repos {
-		issues, err := scanGitHubRepoIssues(ctx, repo, limit, labels)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, issues...)
-	}
-	return out, nil
+	return scanGitHubIssuesWith(ctx, repos, limit, labels, ghIssueLister{})
 }
 
 func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []string) ([]hive.GitHubIssueCandidate, error) {
