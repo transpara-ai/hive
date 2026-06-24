@@ -387,6 +387,9 @@ func (r *Runtime) ensureIssueScanLifecycleStageTaskDrafts(content FactoryRunRequ
 		if err := r.ensureIssueScanStageTaskDependency(stageTaskID, parentTaskID, requestID, parentTaskID, convID); err != nil {
 			return out, fmt.Errorf("link stage task %q to parent task: %w", draft.StageID, err)
 		}
+		if err := r.attachIssueScanLifecycleStageTaskReadinessGates(content, order, draft, requestID, parentTaskID, stageTaskID, convID); err != nil {
+			return out, fmt.Errorf("attach stage task %q readiness gates: %w", draft.StageID, err)
+		}
 		if previous != (types.EventID{}) {
 			if err := r.ensureIssueScanStageTaskDependency(stageTaskID, previous, requestID, parentTaskID, convID); err != nil {
 				return out, fmt.Errorf("link stage task %q after previous stage: %w", draft.StageID, err)
@@ -467,8 +470,12 @@ func workTaskByCanonicalTaskID(s store.Store, canonicalTaskID string) (types.Eve
 }
 
 type issueScanLifecycleStageTaskDraft struct {
-	StageID string
-	Options work.TaskCreateOptions
+	StageID            string
+	Stage              OperatorQueuedRunLifecycleStage
+	AgentExecutionPlan []OperatorQueuedRunAgentPlanStep
+	StageIndex         int
+	StageCount         int
+	Options            work.TaskCreateOptions
 }
 
 func issueScanLifecycleStageTaskDrafts(content FactoryRunRequestedContent, order work.FactoryOrder) ([]issueScanLifecycleStageTaskDraft, error) {
@@ -530,7 +537,11 @@ func issueScanLifecycleStageTaskDraftsFromLifecycle(content FactoryRunRequestedC
 		steps := append([]OperatorQueuedRunAgentPlanStep(nil), planByStage[stage.ID]...)
 		riskClass := valueOr(order.RiskClass, "high")
 		out = append(out, issueScanLifecycleStageTaskDraft{
-			StageID: stageID,
+			StageID:            stageID,
+			Stage:              stage,
+			AgentExecutionPlan: steps,
+			StageIndex:         i + 1,
+			StageCount:         len(lifecycle),
 			Options: work.TaskCreateOptions{
 				Title:                  issueScanLifecycleStageTaskTitle(stage),
 				Description:            issueScanLifecycleStageTaskDescription(content, stage, steps, i+1, len(lifecycle)),
@@ -546,6 +557,39 @@ func issueScanLifecycleStageTaskDraftsFromLifecycle(content FactoryRunRequestedC
 		})
 	}
 	return out, nil
+}
+
+func (r *Runtime) attachIssueScanLifecycleStageTaskReadinessGates(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft, requestID, parentTaskID, stageTaskID types.EventID, convID types.ConversationID) error {
+	if r == nil || r.tasks == nil {
+		return nil
+	}
+	causes := []types.EventID{requestID, parentTaskID, stageTaskID}
+	existingArtifacts, err := r.tasks.ListArtifacts(stageTaskID)
+	if err != nil {
+		return fmt.Errorf("list stage task %q artifacts: %w", draft.StageID, err)
+	}
+	existingLabels := map[string]bool{}
+	for _, artifact := range existingArtifacts {
+		existingLabels[strings.TrimSpace(artifact.Label)] = true
+	}
+	gates := []struct{ label, body string }{
+		{work.GateDefinitionOfDone, issueScanLifecycleStageTaskDefinitionOfDone(content, order, draft)},
+		{work.GateAcceptanceCriteria, issueScanLifecycleStageTaskAcceptanceCriteria(content, order, draft)},
+		{work.GateTestPlan, issueScanLifecycleStageTaskTestPlan(content, order, draft)},
+	}
+	for _, gate := range gates {
+		if strings.TrimSpace(gate.body) == "" {
+			return fmt.Errorf("stage task %q readiness gate %q body is empty", draft.StageID, gate.label)
+		}
+		if existingLabels[strings.TrimSpace(gate.label)] {
+			continue
+		}
+		if err := r.tasks.AddArtifact(r.humanID, stageTaskID, gate.label, "text/markdown", gate.body, causes, convID); err != nil {
+			return err
+		}
+		existingLabels[strings.TrimSpace(gate.label)] = true
+	}
+	return nil
 }
 
 func issueScanLifecycleStageTaskTitle(stage OperatorQueuedRunLifecycleStage) string {
@@ -580,6 +624,68 @@ func issueScanLifecycleStageTaskDescription(content FactoryRunRequestedContent, 
 		b.WriteString("\n")
 	}
 	b.WriteString("Status boundary: this task draft declares expected governed work for the stage. It is not runtime progress, blocker resolution, PR readiness, approval, merge, or deploy evidence.")
+	return strings.TrimSpace(b.String())
+}
+
+func issueScanLifecycleStageTaskDefinitionOfDone(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft) string {
+	stage := draft.Stage
+	var b strings.Builder
+	fmt.Fprintf(&b, "Stage %d/%d `%s` for queued run `%s` completes only when its required evidence is recorded for FactoryOrder `%s`.\n\n", draft.StageIndex, draft.StageCount, strings.TrimSpace(stage.ID), strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID))
+	fmt.Fprintf(&b, "Completion gate: %s\n", valueOr(stage.CompletionGate, "not projected"))
+	fmt.Fprintf(&b, "Authority boundary: %s\n", valueOr(stage.AuthorityBoundary, "not projected"))
+	if len(stage.RequiredRoles) > 0 {
+		fmt.Fprintf(&b, "Required roles: %s\n", strings.Join(compactStrings(stage.RequiredRoles), ", "))
+	}
+	if len(stage.RequiredEvidence) > 0 {
+		b.WriteString("\nRequired evidence:\n")
+		for _, item := range compactStrings(stage.RequiredEvidence) {
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	b.WriteString("\nCompletion of this task is not merge, deploy, Human approval, or proof that later lifecycle stages completed.")
+	return strings.TrimSpace(b.String())
+}
+
+func issueScanLifecycleStageTaskAcceptanceCriteria(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft) string {
+	stage := draft.Stage
+	var b strings.Builder
+	fmt.Fprintf(&b, "- Evidence is tied to queued run `%s`, FactoryOrder `%s`, and lifecycle stage `%s`.\n", strings.TrimSpace(content.RunID), strings.TrimSpace(order.ID), strings.TrimSpace(stage.ID))
+	fmt.Fprintf(&b, "- The stage authority boundary `%s` is obeyed.\n", valueOr(stage.AuthorityBoundary, "not projected"))
+	fmt.Fprintf(&b, "- The completion gate `%s` is satisfied by durable evidence refs, not prose-only assertion.\n", valueOr(stage.CompletionGate, "not projected"))
+	if len(stage.RequiredEvidence) > 0 {
+		fmt.Fprintf(&b, "- Required evidence is present: %s.\n", strings.Join(compactStrings(stage.RequiredEvidence), ", "))
+	}
+	if len(draft.AgentExecutionPlan) > 0 {
+		b.WriteString("- Required role outputs are accounted for:")
+		for _, step := range draft.AgentExecutionPlan {
+			outputs := compactStrings(step.RequiredOutputs)
+			if len(outputs) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "\n  - %s: %s", strings.TrimSpace(step.Role), strings.Join(outputs, ", "))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("- Any blocker is recorded as blocked evidence instead of silently completing the task.")
+	return strings.TrimSpace(b.String())
+}
+
+func issueScanLifecycleStageTaskTestPlan(content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft) string {
+	stage := draft.Stage
+	var b strings.Builder
+	fmt.Fprintf(&b, "1. Inspect Work artifacts/source refs for FactoryOrder `%s` and stage `%s`.\n", strings.TrimSpace(order.ID), strings.TrimSpace(stage.ID))
+	fmt.Fprintf(&b, "2. Confirm the queued run `%s` remains bounded by `%s`.\n", strings.TrimSpace(content.RunID), valueOr(stage.AuthorityBoundary, "not projected"))
+	fmt.Fprintf(&b, "3. Verify required evidence refs cover: %s.\n", strings.Join(compactStrings(stage.RequiredEvidence), ", "))
+	if len(draft.AgentExecutionPlan) > 0 {
+		b.WriteString("4. Confirm each declared role output is present before marking the stage task complete:")
+		for _, step := range draft.AgentExecutionPlan {
+			fmt.Fprintf(&b, "\n   - %s: %s", strings.TrimSpace(step.Role), strings.Join(compactStrings(step.RequiredOutputs), ", "))
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("4. Confirm the stage has no required role outputs before marking it complete.\n")
+	}
+	b.WriteString("5. Confirm no merge, deploy, or Human-approval claim is made unless this stage explicitly requires and records that evidence.")
 	return strings.TrimSpace(b.String())
 }
 
