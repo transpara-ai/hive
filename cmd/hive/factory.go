@@ -398,7 +398,7 @@ func cloneFloat64Ptr(value *float64) *float64 {
 func cmdFactoryRequestPR(args []string) error {
 	fs := flag.NewFlagSet("factory request-pr", flag.ContinueOnError)
 	human := fs.String("human", "", "Guardian/operator name (required)")
-	repo := fs.String("repo", "", "GitHub target repo slug, e.g. transpara-ai/docs (required)")
+	repo := fs.String("repo", "", "GitHub target Transpara-AI repo slug, e.g. transpara-ai/site (required)")
 	baseRef := fs.String("base", "main", "Base branch ref")
 	baseSHA := fs.String("base-sha", "", "Base commit SHA (required)")
 	headRef := fs.String("head", "", "Head branch ref, e.g. codex/... (required)")

@@ -2,6 +2,7 @@ package hive
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/transpara-ai/hive/pkg/safety"
@@ -37,6 +38,59 @@ func TestRaiseDraftPRAuthorityRequestHoldsAndRecords(t *testing.T) {
 	got, perr := ParseDraftPRScope(proj.PendingApprovals[0].Scope)
 	if perr != nil || got != target {
 		t.Fatalf("scope round-trip failed: %v / %+v", perr, got)
+	}
+}
+
+func TestRaiseDraftPRAuthorityRequestAcceptsAnyTransparaAIRepo(t *testing.T) {
+	r := newIdentityTestRuntime(t)
+	target := DraftPRTarget{
+		Repository: "transpara-ai/site", BaseRef: "main", BaseSHA: "basesha",
+		HeadRef: "codex/site-civilization-runtime", HeadSHA: "headsha",
+		TitleHash: "sha256:aaa", BodyHash: "sha256:bbb",
+		PolicyBundleID: "transpara-ai-draft-pr-create-only", PolicyBundleHash: "sha256:ccc",
+		SingleUseNonce: "nonce-site-1",
+	}
+
+	requestID, err := r.RaiseDraftPRAuthorityRequest(target, r.humanID, "Draft PR for selected Site issue")
+	var authErr safety.AuthorityError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected AuthorityError (gate holds), got %v", err)
+	}
+	if requestID.IsZero() {
+		t.Fatal("expected a recorded request id")
+	}
+	proj := BuildOperatorProjection(r.store, 50)
+	if len(proj.PendingApprovals) != 1 {
+		t.Fatalf("pending approvals = %+v, want one", proj.PendingApprovals)
+	}
+	got, err := ParseDraftPRScope(proj.PendingApprovals[0].Scope)
+	if err != nil {
+		t.Fatalf("ParseDraftPRScope: %v", err)
+	}
+	if got != target {
+		t.Fatalf("scope target = %+v, want %+v", got, target)
+	}
+}
+
+func TestRaiseDraftPRAuthorityRequestRejectsNonTransparaAIRepo(t *testing.T) {
+	r := newIdentityTestRuntime(t)
+	target := DraftPRTarget{
+		Repository: "example/site", BaseRef: "main", BaseSHA: "basesha",
+		HeadRef: "codex/site-civilization-runtime", HeadSHA: "headsha",
+		TitleHash: "sha256:aaa", BodyHash: "sha256:bbb",
+		PolicyBundleID: "transpara-ai-draft-pr-create-only", PolicyBundleHash: "sha256:ccc",
+		SingleUseNonce: "nonce-site-1",
+	}
+
+	requestID, err := r.RaiseDraftPRAuthorityRequest(target, r.humanID, "Draft PR for selected Site issue")
+	if err == nil || !strings.Contains(err.Error(), "Transpara-AI repo") {
+		t.Fatalf("error = %v, want Transpara-AI repo refusal", err)
+	}
+	if !requestID.IsZero() {
+		t.Fatalf("request id = %s, want zero for refused repo", requestID.Value())
+	}
+	if proj := BuildOperatorProjection(r.store, 50); len(proj.PendingApprovals) != 0 {
+		t.Fatalf("pending approvals = %+v, want none", proj.PendingApprovals)
 	}
 }
 
