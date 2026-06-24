@@ -2320,6 +2320,84 @@ func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *t
 	}
 }
 
+func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
+	rt, _, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+		Summary:                "Ready-for-Human result PR is surfaced with exact-head ready-state review evidence and awaits Human approval.",
+		SourceRefs:             []string{"test://ready-pr"},
+	}
+	receipt := TransparaAIDraftPRReceipt{
+		Kind:                   transparaAIDraftPRReceiptKind,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               readyEvidence.PRNumber,
+		PRURL:                  readyEvidence.PRURL,
+		BaseRef:                readyEvidence.BaseRef,
+		BaseSHA:                readyEvidence.BaseSHA,
+		HeadRef:                readyEvidence.HeadRef,
+		HeadSHA:                readyEvidence.HeadSHA,
+		RemoteHeadSHA:          readyEvidence.HeadSHA,
+		ChangedFiles:           []string{"README.md"},
+		Draft:                  true,
+		State:                  "open",
+		PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+		AuthorityNonce:         "nonce-ready-pr-test",
+		HumanApprovalRequired:  true,
+		NoMergeOrDeployClaim:   true,
+		ReadyForReviewRequired: true,
+	}
+
+	draftResult, err := rt.RecordIssueScanDraftPRReceipt(runID, receipt)
+	if err != nil {
+		t.Fatalf("RecordIssueScanDraftPRReceipt: %v", err)
+	}
+	if !draftResult.Recorded || draftResult.DraftPRReceiptArtifactID == (types.EventID{}) {
+		t.Fatalf("draft result = %+v, want recorded receipt artifact", draftResult)
+	}
+	readyResult, err := rt.RecordIssueScanReadyPREvidence(runID, readyEvidence)
+	if err != nil {
+		t.Fatalf("RecordIssueScanReadyPREvidence: %v", err)
+	}
+	if !readyResult.Recorded || readyResult.ReadyPREvidenceArtifactID == (types.EventID{}) {
+		t.Fatalf("ready result = %+v, want recorded ready PR evidence artifact", readyResult)
+	}
+	if readyResult.DraftPRReceiptRef != draftResult.DraftPRReceiptArtifactID.Value() {
+		t.Fatalf("draft receipt ref = %q, want %s", readyResult.DraftPRReceiptRef, draftResult.DraftPRReceiptArtifactID)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after ready PR recorder: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 3 {
+		t.Fatalf("ready role outputs = %+v, want strategist/reviewer/guardian", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if !readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR stage was not completed")
+	}
+}
+
 func TestProgressIssueScanLifecycleRejectsReadyPREvidenceWithoutDraftReceipt(t *testing.T) {
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{
