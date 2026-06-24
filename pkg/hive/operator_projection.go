@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 )
@@ -143,21 +144,49 @@ type OperatorRuntimeAgentEvidence struct {
 }
 
 type OperatorQueuedRunRequestEvidence struct {
-	EventID               string    `json:"event_id"`
-	ConversationID        string    `json:"conversation_id"`
-	RunID                 string    `json:"run_id"`
-	Title                 string    `json:"title"`
-	OperatorID            string    `json:"operator_id,omitempty"`
-	Status                string    `json:"status"`
-	TargetRepos           []string  `json:"target_repos,omitempty"`
-	AuthorityInitialLevel string    `json:"authority_initial_level,omitempty"`
-	AuthorityScope        string    `json:"authority_scope,omitempty"`
-	BudgetMaxIterations   *int      `json:"budget_max_iterations,omitempty"`
-	BudgetMaxCostUSD      *float64  `json:"budget_max_cost_usd,omitempty"`
-	SourceEventID         string    `json:"source_event_id,omitempty"`
-	BriefEventID          string    `json:"brief_event_id,omitempty"`
-	EvidenceKind          string    `json:"evidence_kind"`
-	CreatedAt             time.Time `json:"created_at"`
+	EventID               string                            `json:"event_id"`
+	ConversationID        string                            `json:"conversation_id"`
+	RunID                 string                            `json:"run_id"`
+	Title                 string                            `json:"title"`
+	OperatorID            string                            `json:"operator_id,omitempty"`
+	Status                string                            `json:"status"`
+	TargetRepos           []string                          `json:"target_repos,omitempty"`
+	AuthorityInitialLevel string                            `json:"authority_initial_level,omitempty"`
+	AuthorityScope        string                            `json:"authority_scope,omitempty"`
+	BudgetMaxIterations   *int                              `json:"budget_max_iterations,omitempty"`
+	BudgetMaxCostUSD      *float64                          `json:"budget_max_cost_usd,omitempty"`
+	SourceEventID         string                            `json:"source_event_id,omitempty"`
+	BriefEventID          string                            `json:"brief_event_id,omitempty"`
+	BriefKind             string                            `json:"brief_kind,omitempty"`
+	LifecycleVersion      string                            `json:"lifecycle_version,omitempty"`
+	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage `json:"development_lifecycle,omitempty"`
+	AgentExecutionPlan    []OperatorQueuedRunAgentPlanStep  `json:"agent_execution_plan,omitempty"`
+	LifecycleEvidenceKind string                            `json:"lifecycle_evidence_kind,omitempty"`
+	EvidenceKind          string                            `json:"evidence_kind"`
+	CreatedAt             time.Time                         `json:"created_at"`
+}
+
+type OperatorQueuedRunLifecycleStage struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name,omitempty"`
+	RequiredRoles     []string `json:"required_roles,omitempty"`
+	RequiredEvidence  []string `json:"required_evidence,omitempty"`
+	AuthorityBoundary string   `json:"authority_boundary,omitempty"`
+	CompletionGate    string   `json:"completion_gate,omitempty"`
+	EvidenceStatus    string   `json:"evidence_status"`
+}
+
+type OperatorQueuedRunAgentPlanStep struct {
+	ID                string   `json:"id"`
+	StageID           string   `json:"stage_id"`
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	Objective         string   `json:"objective"`
+	RequiredInputs    []string `json:"required_inputs,omitempty"`
+	RequiredOutputs   []string `json:"required_outputs,omitempty"`
+	AuthorityBoundary string   `json:"authority_boundary,omitempty"`
+	CompletionGate    string   `json:"completion_gate,omitempty"`
+	EvidenceStatus    string   `json:"evidence_status"`
 }
 
 type OperatorRuntimeArtifactEvidence struct {
@@ -565,6 +594,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			"runtime start, agent, and completion events are correlated by EventGraph conversation ID",
 			"runtime event order follows EventGraph store order, not wall-clock timestamp order",
 			"artifact and causal graph projections are bounded by the operator projection limit",
+			"queued run development_lifecycle stages are expected evidence, not completed stage proof",
 		},
 	}
 
@@ -580,6 +610,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 		} else {
 			budgetMaxIterations := content.Budget.MaxIterations
 			budgetMaxCostUSD := content.Budget.MaxCostUSD
+			briefKind, lifecycleVersion, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s brief lifecycle projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -594,8 +628,15 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				BudgetMaxCostUSD:      &budgetMaxCostUSD,
 				SourceEventID:         content.SourceEventID.Value(),
 				BriefEventID:          content.BriefEventID.Value(),
+				BriefKind:             briefKind,
+				LifecycleVersion:      lifecycleVersion,
+				DevelopmentLifecycle:  lifecycle,
+				AgentExecutionPlan:    agentPlan,
 				EvidenceKind:          "queued_request_not_runtime_start",
 				CreatedAt:             timestamp,
+			}
+			if len(lifecycle) > 0 || len(agentPlan) > 0 {
+				evidence.LastQueuedRunRequest.LifecycleEvidenceKind = "expected_lifecycle_not_runtime_progress"
 			}
 		}
 	}
@@ -694,6 +735,175 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	evidence.AgentEvents.ObservedAgents = sortedRuntimeActiveAgents(observedAgents)
 	evidence.AgentEvents.ObservedActive = len(evidence.AgentEvents.ActiveAgents)
 	return evidence
+}
+
+func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []OperatorQueuedRunLifecycleStage, []OperatorQueuedRunAgentPlanStep, error) {
+	if len(raw) == 0 {
+		return "", "", nil, nil, nil
+	}
+	var brief struct {
+		Kind                 string `json:"kind"`
+		LifecycleVersion     string `json:"lifecycle_version"`
+		DevelopmentLifecycle []struct {
+			ID                string   `json:"id"`
+			Name              string   `json:"name"`
+			RequiredRoles     []string `json:"required_roles"`
+			RequiredEvidence  []string `json:"required_evidence"`
+			AuthorityBoundary string   `json:"authority_boundary"`
+			CompletionGate    string   `json:"completion_gate"`
+		} `json:"development_lifecycle"`
+		AgentExecutionPlan []struct {
+			ID                string   `json:"id"`
+			StageID           string   `json:"stage_id"`
+			Role              string   `json:"role"`
+			CanOperate        bool     `json:"can_operate"`
+			Objective         string   `json:"objective"`
+			RequiredInputs    []string `json:"required_inputs"`
+			RequiredOutputs   []string `json:"required_outputs"`
+			AuthorityBoundary string   `json:"authority_boundary"`
+			CompletionGate    string   `json:"completion_gate"`
+		} `json:"agent_execution_plan"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return "", "", nil, nil, fmt.Errorf("decode brief metadata: %w", err)
+	}
+	if len(brief.DevelopmentLifecycle) == 0 {
+		if brief.LifecycleVersion != "" {
+			return "", "", nil, nil, fmt.Errorf("issue scan brief missing development lifecycle")
+		}
+		return "", "", nil, nil, nil
+	}
+	if brief.Kind != issueScanBriefKind {
+		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
+	}
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
+		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
+	}
+	expected := issueScanDevelopmentLifecycle()
+	if brief.LifecycleVersion == issueScanLifecycleVersionV02 {
+		var err error
+		expected, err = issueScanDevelopmentLifecycleV02()
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+	}
+	if len(brief.DevelopmentLifecycle) != len(expected) {
+		return "", "", nil, nil, fmt.Errorf("lifecycle stage count %d does not match expected %d", len(brief.DevelopmentLifecycle), len(expected))
+	}
+	roles := StarterRoleDefinitions()
+	lifecycle := make([]OperatorQueuedRunLifecycleStage, 0, len(brief.DevelopmentLifecycle))
+	for i, stage := range brief.DevelopmentLifecycle {
+		if err := validateQueuedRunLifecycleStage(stage.ID, stage.Name, stage.RequiredRoles, stage.RequiredEvidence, stage.AuthorityBoundary, stage.CompletionGate, expected[i], roles); err != nil {
+			return "", "", nil, nil, fmt.Errorf("stage[%d]: %w", i, err)
+		}
+		lifecycle = append(lifecycle, OperatorQueuedRunLifecycleStage{
+			ID:                stage.ID,
+			Name:              stage.Name,
+			RequiredRoles:     append([]string(nil), stage.RequiredRoles...),
+			RequiredEvidence:  append([]string(nil), stage.RequiredEvidence...),
+			AuthorityBoundary: stage.AuthorityBoundary,
+			CompletionGate:    stage.CompletionGate,
+			EvidenceStatus:    "expected_not_observed",
+		})
+	}
+	if brief.LifecycleVersion == issueScanLifecycleVersionV02 {
+		if len(brief.AgentExecutionPlan) != 0 {
+			return "", "", nil, nil, fmt.Errorf("agent execution plan is not supported by lifecycle version %q", brief.LifecycleVersion)
+		}
+		return brief.Kind, brief.LifecycleVersion, lifecycle, nil, nil
+	}
+	expectedPlan, err := issueScanAgentExecutionPlan(expected)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if len(brief.AgentExecutionPlan) != len(expectedPlan) {
+		return "", "", nil, nil, fmt.Errorf("agent execution plan step count %d does not match expected %d", len(brief.AgentExecutionPlan), len(expectedPlan))
+	}
+	agentPlan := make([]OperatorQueuedRunAgentPlanStep, 0, len(brief.AgentExecutionPlan))
+	for i, step := range brief.AgentExecutionPlan {
+		if err := validateQueuedRunAgentPlanStep(step.ID, step.StageID, step.Role, step.CanOperate, step.Objective, step.RequiredInputs, step.RequiredOutputs, step.AuthorityBoundary, step.CompletionGate, expectedPlan[i], roles); err != nil {
+			return "", "", nil, nil, fmt.Errorf("agent_execution_plan[%d]: %w", i, err)
+		}
+		agentPlan = append(agentPlan, OperatorQueuedRunAgentPlanStep{
+			ID:                step.ID,
+			StageID:           step.StageID,
+			Role:              step.Role,
+			CanOperate:        step.CanOperate,
+			Objective:         step.Objective,
+			RequiredInputs:    append([]string(nil), step.RequiredInputs...),
+			RequiredOutputs:   append([]string(nil), step.RequiredOutputs...),
+			AuthorityBoundary: step.AuthorityBoundary,
+			CompletionGate:    step.CompletionGate,
+			EvidenceStatus:    "expected_not_observed",
+		})
+	}
+	return brief.Kind, brief.LifecycleVersion, lifecycle, agentPlan, nil
+}
+
+func validateQueuedRunLifecycleStage(id, name string, roles, evidence []string, authorityBoundary, completionGate string, expected issueScanLifecycleStage, starterRoles map[string]*modelconfig.RoleDefinition) error {
+	switch {
+	case id != expected.ID:
+		return fmt.Errorf("id %q does not match expected %q", id, expected.ID)
+	case name != expected.Name:
+		return fmt.Errorf("name %q does not match expected %q", name, expected.Name)
+	case !sameOperatorProjectionStrings(roles, expected.RequiredRoles):
+		return fmt.Errorf("roles %v do not match expected %v", roles, expected.RequiredRoles)
+	case !sameOperatorProjectionStrings(evidence, expected.RequiredEvidence):
+		return fmt.Errorf("required evidence %v does not match expected %v", evidence, expected.RequiredEvidence)
+	case authorityBoundary != expected.AuthorityBoundary:
+		return fmt.Errorf("authority boundary %q does not match expected %q", authorityBoundary, expected.AuthorityBoundary)
+	case completionGate != expected.CompletionGate:
+		return fmt.Errorf("completion gate %q does not match expected %q", completionGate, expected.CompletionGate)
+	}
+	for _, role := range roles {
+		if starterRoles[role] == nil {
+			return fmt.Errorf("unknown role %q", role)
+		}
+	}
+	return nil
+}
+
+func validateQueuedRunAgentPlanStep(id, stageID, role string, canOperate bool, objective string, inputs, outputs []string, authorityBoundary, completionGate string, expected issueScanAgentPlanStep, starterRoles map[string]*modelconfig.RoleDefinition) error {
+	switch {
+	case id != expected.ID:
+		return fmt.Errorf("id %q does not match expected %q", id, expected.ID)
+	case stageID != expected.StageID:
+		return fmt.Errorf("stage_id %q does not match expected %q", stageID, expected.StageID)
+	case role != expected.Role:
+		return fmt.Errorf("role %q does not match expected %q", role, expected.Role)
+	case canOperate != expected.CanOperate:
+		return fmt.Errorf("can_operate %v does not match expected %v", canOperate, expected.CanOperate)
+	case objective != expected.Objective:
+		return fmt.Errorf("objective %q does not match expected %q", objective, expected.Objective)
+	case !sameOperatorProjectionStrings(inputs, expected.RequiredInputs):
+		return fmt.Errorf("required inputs %v do not match expected %v", inputs, expected.RequiredInputs)
+	case !sameOperatorProjectionStrings(outputs, expected.RequiredOutputs):
+		return fmt.Errorf("required outputs %v do not match expected %v", outputs, expected.RequiredOutputs)
+	case authorityBoundary != expected.AuthorityBoundary:
+		return fmt.Errorf("authority boundary %q does not match expected %q", authorityBoundary, expected.AuthorityBoundary)
+	case completionGate != expected.CompletionGate:
+		return fmt.Errorf("completion gate %q does not match expected %q", completionGate, expected.CompletionGate)
+	}
+	roleDef := starterRoles[role]
+	if roleDef == nil {
+		return fmt.Errorf("unknown role %q", role)
+	}
+	if roleDef.CanOperate != canOperate {
+		return fmt.Errorf("role %q can_operate %v does not match starter role %v", role, canOperate, roleDef.CanOperate)
+	}
+	return nil
+}
+
+func sameOperatorProjectionStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, conversationID types.ConversationID, limit int) ([]projectionEvent, bool) {

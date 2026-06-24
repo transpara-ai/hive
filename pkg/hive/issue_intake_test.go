@@ -53,10 +53,13 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 
 	var brief struct {
-		Kind                string   `json:"kind"`
-		RequiredAgentFlow   []string `json:"required_agent_flow"`
-		AuthorityBoundaries []string `json:"authority_boundaries"`
-		SelectedIssue       struct {
+		Kind                 string                       `json:"kind"`
+		LifecycleVersion     string                       `json:"lifecycle_version"`
+		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
+		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
+		SelectedIssue        struct {
 			Repo   string `json:"repo"`
 			Number int    `json:"number"`
 			Title  string `json:"title"`
@@ -68,8 +71,100 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.Kind != "transpara_ai_github_issue_scan" || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
 		t.Fatalf("brief = %+v", brief)
 	}
+	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
+		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
+	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
+	}
+	expectedStageIDs := []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+		"implement_on_branch",
+		"run_adversarial_review",
+		"drive_blockers_to_zero",
+		"surface_ready_for_Human_result_PR",
+	}
+	if got := strings.Join(brief.RequiredAgentFlow, ","); got != strings.Join(expectedStageIDs, ",") {
+		t.Fatalf("required agent flow = %+v, want %+v", brief.RequiredAgentFlow, expectedStageIDs)
+	}
+	if len(brief.DevelopmentLifecycle) != len(expectedStageIDs) {
+		t.Fatalf("development lifecycle length = %d, want %d", len(brief.DevelopmentLifecycle), len(expectedStageIDs))
+	}
+	for i, stage := range brief.DevelopmentLifecycle {
+		if stage.ID != expectedStageIDs[i] {
+			t.Fatalf("stage[%d].id = %q, want %q", i, stage.ID, expectedStageIDs[i])
+		}
+	}
+	roles := StarterRoleDefinitions()
+	for _, stage := range brief.DevelopmentLifecycle {
+		for _, role := range stage.RequiredRoles {
+			if roles[role] == nil {
+				t.Fatalf("stage %q requires unknown role %q", stage.ID, role)
+			}
+		}
+	}
+	reviewStage := issueScanStageByID(brief.DevelopmentLifecycle, "run_adversarial_review")
+	if reviewStage == nil {
+		t.Fatalf("development lifecycle missing adversarial review stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if !containsIssueScanValue(reviewStage.RequiredRoles, "reviewer") || !containsIssueScanValue(reviewStage.RequiredRoles, "guardian") {
+		t.Fatalf("review stage roles = %+v", reviewStage.RequiredRoles)
+	}
+	if !containsIssueScanValue(reviewStage.RequiredEvidence, "exact_head_review_artifact") || !containsIssueScanValue(reviewStage.RequiredEvidence, "finding_disposition") {
+		t.Fatalf("review stage evidence = %+v", reviewStage.RequiredEvidence)
+	}
+	readyStage := issueScanStageByID(brief.DevelopmentLifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil {
+		t.Fatalf("development lifecycle missing ready-for-Human stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
+		t.Fatalf("ready stage authority boundary = %q", readyStage.AuthorityBoundary)
+	}
+	if !containsIssueScanValue(readyStage.RequiredRoles, "reviewer") {
+		t.Fatalf("ready stage roles = %+v, want reviewer for ready-state review evidence", readyStage.RequiredRoles)
+	}
+	if !containsIssueScanValue(readyStage.RequiredEvidence, "ready_pr_url") || containsIssueScanValue(readyStage.RequiredEvidence, "draft_pr_url") {
+		t.Fatalf("ready stage evidence = %+v, want ready_pr_url and no draft_pr_url", readyStage.RequiredEvidence)
+	}
+	implementStage := issueScanStageByID(brief.DevelopmentLifecycle, "implement_on_branch")
+	if implementStage == nil {
+		t.Fatalf("development lifecycle missing implementation stage: %+v", brief.DevelopmentLifecycle)
+	}
+	if !containsIssueScanValue(implementStage.RequiredRoles, "implementer") || !roles["implementer"].CanOperate {
+		t.Fatalf("implementation stage roles = %+v, implementer role = %+v", implementStage.RequiredRoles, roles["implementer"])
+	}
+	if len(brief.AgentExecutionPlan) != 18 {
+		t.Fatalf("agent execution plan length = %d, want 18: %+v", len(brief.AgentExecutionPlan), brief.AgentExecutionPlan)
+	}
+	firstPlan := brief.AgentExecutionPlan[0]
+	if firstPlan.StageID != "research_issue_and_repo_context" || firstPlan.Role != "strategist" || firstPlan.CanOperate {
+		t.Fatalf("first agent plan step = %+v, want non-operating strategist research step", firstPlan)
+	}
+	implementPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementPlan == nil || !implementPlan.CanOperate || !containsIssueScanValue(implementPlan.RequiredOutputs, "validation_output") {
+		t.Fatalf("implementer plan step = %+v", implementPlan)
+	}
+	reviewPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "run_adversarial_review", "reviewer")
+	if reviewPlan == nil || reviewPlan.CanOperate || !containsIssueScanValue(reviewPlan.RequiredOutputs, "exact_head_review_artifact") {
+		t.Fatalf("reviewer plan step = %+v", reviewPlan)
+	}
+	guardianReadyPlan := issueScanPlanStepByRole(brief.AgentExecutionPlan, "surface_ready_for_Human_result_PR", "guardian")
+	if guardianReadyPlan == nil || guardianReadyPlan.AuthorityBoundary != "human_approval_required_no_merge" || !containsIssueScanValue(guardianReadyPlan.RequiredOutputs, "human_approval_boundary_check") {
+		t.Fatalf("guardian ready plan step = %+v", guardianReadyPlan)
+	}
+	for _, step := range brief.AgentExecutionPlan {
+		role := roles[step.Role]
+		if role == nil {
+			t.Fatalf("agent plan step %q requires unknown role %q", step.ID, step.Role)
+		}
+		if role.CanOperate != step.CanOperate {
+			t.Fatalf("agent plan step %q can_operate=%v, role=%+v", step.ID, step.CanOperate, role)
+		}
+		if issueScanStageByID(brief.DevelopmentLifecycle, step.StageID) == nil {
+			t.Fatalf("agent plan step %q references missing stage %q", step.ID, step.StageID)
+		}
 	}
 	if !containsIssueScanValue(brief.AuthorityBoundaries, "no_merge") || !containsIssueScanValue(brief.AuthorityBoundaries, "ready_for_Human_result_PR_only") {
 		t.Fatalf("authority boundaries = %+v", brief.AuthorityBoundaries)
@@ -96,12 +191,44 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if !strings.Contains(task.Description, "https://github.com/transpara-ai/hive/issues/321") {
 		t.Fatalf("task description does not include issue URL: %s", task.Description)
 	}
+	if !strings.Contains(task.Description, "\"agent_execution_plan\"") || !strings.Contains(task.Description, "human_approval_boundary_check") {
+		t.Fatalf("task description does not include agent execution plan: %s", task.Description)
+	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
 		t.Fatalf("get task event: %v", err)
 	}
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != request.ID() {
 		t.Fatalf("task causes = %+v, want factory.run.requested %s", causes, request.ID())
+	}
+}
+
+func TestIssueScanAgentExecutionPlanCoversEveryRequiredStageRole(t *testing.T) {
+	lifecycle := issueScanDevelopmentLifecycle()
+	plan, err := issueScanAgentExecutionPlan(lifecycle)
+	if err != nil {
+		t.Fatalf("issueScanAgentExecutionPlan: %v", err)
+	}
+
+	byStage := map[string]map[string]bool{}
+	for _, step := range plan {
+		if byStage[step.StageID] == nil {
+			byStage[step.StageID] = map[string]bool{}
+		}
+		if byStage[step.StageID][step.Role] {
+			t.Fatalf("duplicate step for stage %q role %q", step.StageID, step.Role)
+		}
+		byStage[step.StageID][step.Role] = true
+	}
+	for _, stage := range lifecycle {
+		if len(byStage[stage.ID]) != len(stage.RequiredRoles) {
+			t.Fatalf("stage %q plan roles = %+v, want %+v", stage.ID, byStage[stage.ID], stage.RequiredRoles)
+		}
+		for _, role := range stage.RequiredRoles {
+			if !byStage[stage.ID][role] {
+				t.Fatalf("stage %q missing role %q in plan %+v", stage.ID, role, plan)
+			}
+		}
 	}
 }
 
@@ -135,4 +262,41 @@ func containsIssueScanValue(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type issueScanBriefStageForTest struct {
+	ID                string   `json:"id"`
+	RequiredRoles     []string `json:"required_roles"`
+	RequiredEvidence  []string `json:"required_evidence"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+type issueScanBriefPlanForTest struct {
+	ID                string   `json:"id"`
+	StageID           string   `json:"stage_id"`
+	Role              string   `json:"role"`
+	CanOperate        bool     `json:"can_operate"`
+	RequiredInputs    []string `json:"required_inputs"`
+	RequiredOutputs   []string `json:"required_outputs"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	CompletionGate    string   `json:"completion_gate"`
+}
+
+func issueScanStageByID(stages []issueScanBriefStageForTest, id string) *issueScanBriefStageForTest {
+	for i := range stages {
+		if stages[i].ID == id {
+			return &stages[i]
+		}
+	}
+	return nil
+}
+
+func issueScanPlanStepByRole(steps []issueScanBriefPlanForTest, stageID, role string) *issueScanBriefPlanForTest {
+	for i := range steps {
+		if steps[i].StageID == stageID && steps[i].Role == role {
+			return &steps[i]
+		}
+	}
+	return nil
 }

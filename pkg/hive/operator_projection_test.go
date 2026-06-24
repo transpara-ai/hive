@@ -642,6 +642,18 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	sourceEventID := newTestEventID(t)
 	briefEventID := newTestEventID(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+		Body:   "The Civilization should scan Transpara-AI repos, then surface a ready-for-Human PR.",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
 
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
 		RunID:      "run_queued",
@@ -662,6 +674,7 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 		TargetRepos:   []string{"transpara-ai/hive", "transpara-ai/eventgraph"},
 		SourceEventID: sourceEventID,
 		BriefEventID:  briefEventID,
+		Brief:         brief,
 	})
 
 	projection := BuildOperatorProjection(s, 50)
@@ -692,11 +705,294 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if len(queued.TargetRepos) != 2 || queued.TargetRepos[0] != "transpara-ai/hive" {
 		t.Fatalf("queued target repos = %+v", queued.TargetRepos)
 	}
+	if queued.BriefKind != "transpara_ai_github_issue_scan" || queued.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.3" {
+		t.Fatalf("queued brief metadata = %+v", queued)
+	}
+	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
+		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
+	}
+	if len(queued.DevelopmentLifecycle) != 7 {
+		t.Fatalf("development lifecycle = %+v, want 7 stages", queued.DevelopmentLifecycle)
+	}
+	if queued.DevelopmentLifecycle[0].ID != "research_issue_and_repo_context" || queued.DevelopmentLifecycle[0].EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("first lifecycle stage = %+v", queued.DevelopmentLifecycle[0])
+	}
+	reviewStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "run_adversarial_review")
+	if reviewStage == nil {
+		t.Fatalf("queued lifecycle missing review stage: %+v", queued.DevelopmentLifecycle)
+	}
+	if !containsModelProjectionString(reviewStage.RequiredRoles, "reviewer") || !containsModelProjectionString(reviewStage.RequiredRoles, "guardian") {
+		t.Fatalf("review stage roles = %+v", reviewStage.RequiredRoles)
+	}
+	if !containsModelProjectionString(reviewStage.RequiredEvidence, "exact_head_review_artifact") || !containsModelProjectionString(reviewStage.RequiredEvidence, "finding_disposition") {
+		t.Fatalf("review stage evidence = %+v", reviewStage.RequiredEvidence)
+	}
+	readyStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil || readyStage.AuthorityBoundary != "human_approval_required_no_merge" {
+		t.Fatalf("ready lifecycle stage = %+v", readyStage)
+	}
+	if len(queued.AgentExecutionPlan) != 18 {
+		t.Fatalf("agent execution plan = %+v, want 18 expected steps", queued.AgentExecutionPlan)
+	}
+	implementStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementStep == nil || !implementStep.CanOperate || implementStep.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("implementer plan step = %+v", implementStep)
+	}
+	if !containsModelProjectionString(implementStep.RequiredOutputs, "validation_output") {
+		t.Fatalf("implementer required outputs = %+v", implementStep.RequiredOutputs)
+	}
+	reviewStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "run_adversarial_review", "reviewer")
+	if reviewStep == nil || reviewStep.CanOperate || !containsModelProjectionString(reviewStep.RequiredOutputs, "exact_head_review_artifact") {
+		t.Fatalf("reviewer plan step = %+v", reviewStep)
+	}
+	readyGuardianStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "surface_ready_for_Human_result_PR", "guardian")
+	if readyGuardianStep == nil || readyGuardianStep.AuthorityBoundary != "human_approval_required_no_merge" || !containsModelProjectionString(readyGuardianStep.RequiredOutputs, "human_approval_boundary_check") {
+		t.Fatalf("ready guardian plan step = %+v", readyGuardianStep)
+	}
 	if runtimeEvidence.AgentEvents.Scope != "none" || runtimeEvidence.AgentEvents.ObservedActive != 0 {
 		t.Fatalf("agent evidence = %+v, want no runtime agents", runtimeEvidence.AgentEvents)
 	}
 	if !containsModelProjectionString(runtimeEvidence.Limitations, "factory.run.requested is queued launch intent, not runtime-start proof") {
 		t.Fatalf("limitations = %+v, want queued-intent boundary", runtimeEvidence.Limitations)
+	}
+	if !containsModelProjectionString(runtimeEvidence.Limitations, "queued run development_lifecycle stages are expected evidence, not completed stage proof") {
+		t.Fatalf("limitations = %+v, want lifecycle-not-complete boundary", runtimeEvidence.Limitations)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefLeavesGenericBriefEmpty(t *testing.T) {
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief([]byte(`{"goal":"generic launch brief"}`))
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle", kind, version, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefRejectsIssueScanBriefWithEmptyLifecycle(t *testing.T) {
+	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","lifecycle_version":"civilization_issue_to_human_ready_pr_v0.3","development_lifecycle":[]}`)
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err == nil || !strings.Contains(err.Error(), "missing development lifecycle") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want missing lifecycle error", err, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefAllowsLegacyKindOnlyIssueScanBrief(t *testing.T) {
+	raw := []byte(`{"kind":"transpara_ai_github_issue_scan","required_agent_flow":["research_issue_and_repo_context"]}`)
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != "" || version != "" || len(lifecycle) != 0 || len(agentPlan) != 0 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %+v plan %+v, want empty lifecycle for legacy kind-only issue scan", kind, version, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV02
+	delete(doc, "agent_execution_plan")
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	foundReadyStage := false
+	for _, rawStage := range stages {
+		stage, ok := rawStage.(map[string]any)
+		if !ok || stage["id"] != "surface_ready_for_Human_result_PR" {
+			continue
+		}
+		foundReadyStage = true
+		evidence, ok := stage["required_evidence"].([]any)
+		if !ok {
+			t.Fatalf("ready stage evidence = %#v, want array", stage["required_evidence"])
+		}
+		for i, item := range evidence {
+			if item == "ready_pr_url" {
+				evidence[i] = "draft_pr_url"
+			}
+		}
+	}
+	if !foundReadyStage {
+		t.Fatalf("development_lifecycle missing ready stage: %#v", stages)
+	}
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV02 {
+		t.Fatalf("metadata = kind %q version %q, want legacy issue-scan v0.2", kind, version)
+	}
+	if len(lifecycle) != 7 || len(agentPlan) != 0 {
+		t.Fatalf("legacy lifecycle = %+v plan = %+v, want 7 stages and no agent plan", lifecycle, agentPlan)
+	}
+	readyStage := queuedRunLifecycleStageByID(lifecycle, "surface_ready_for_Human_result_PR")
+	if readyStage == nil || !containsModelProjectionString(readyStage.RequiredEvidence, "draft_pr_url") || containsModelProjectionString(readyStage.RequiredEvidence, "ready_pr_url") {
+		t.Fatalf("legacy ready stage = %+v, want draft_pr_url evidence", readyStage)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefRejectsAgentPlanStepCountMismatch(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	plan, ok := doc["agent_execution_plan"].([]any)
+	if !ok || len(plan) == 0 {
+		t.Fatalf("agent_execution_plan = %#v, want plan steps", doc["agent_execution_plan"])
+	}
+	doc["agent_execution_plan"] = plan[:len(plan)-1]
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated brief: %v", err)
+	}
+
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "agent execution plan step count") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want plan count mismatch", err, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefRejectsLegacyV02WithAgentPlan(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV02
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	for _, rawStage := range stages {
+		stage, ok := rawStage.(map[string]any)
+		if !ok || stage["id"] != "surface_ready_for_Human_result_PR" {
+			continue
+		}
+		evidence, ok := stage["required_evidence"].([]any)
+		if !ok {
+			t.Fatalf("ready stage evidence = %#v, want array", stage["required_evidence"])
+		}
+		for i, item := range evidence {
+			if item == "ready_pr_url" {
+				evidence[i] = "draft_pr_url"
+			}
+		}
+	}
+	legacyWithPlan, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy brief: %v", err)
+	}
+
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacyWithPlan)
+	if err == nil || !strings.Contains(err.Error(), "agent execution plan is not supported") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want v0.2 agent plan rejection", err, lifecycle, agentPlan)
+	}
+}
+
+func TestQueuedRunLifecycleFromBriefRejectsMutatedLifecycle(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	stages, ok := doc["development_lifecycle"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("development_lifecycle = %#v, want stages", doc["development_lifecycle"])
+	}
+	first, ok := stages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first stage = %#v, want object", stages[0])
+	}
+	first["required_roles"] = []any{"unknown_role"}
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated brief: %v", err)
+	}
+
+	_, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "roles") {
+		t.Fatalf("queuedRunLifecycleFromBrief error = %v, lifecycle = %+v plan = %+v; want role validation failure", err, lifecycle, agentPlan)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsBriefDecodeError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_bad_brief",
+		IntakeID:   "intake_bad_brief",
+		OperatorID: "operator_001",
+		Title:      "Bad brief still projects queued request",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "operator-launch",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 1,
+			MaxCostUSD:    0,
+		},
+		TargetRepos: []string{"transpara-ai/hive"},
+		Brief:       []byte(`{"development_lifecycle":{}}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil || queued.RunID != "run_bad_brief" {
+		t.Fatalf("queued request = %+v, want run_bad_brief", queued)
+	}
+	if queued.LifecycleEvidenceKind != "" || len(queued.DevelopmentLifecycle) != 0 || len(queued.AgentExecutionPlan) != 0 {
+		t.Fatalf("queued lifecycle = kind %q stages %+v plan %+v, want empty on decode error", queued.LifecycleEvidenceKind, queued.DevelopmentLifecycle, queued.AgentExecutionPlan)
+	}
+	if len(projection.Errors) == 0 || !strings.Contains(projection.Errors[0], "brief lifecycle projection") {
+		t.Fatalf("projection errors = %+v, want brief lifecycle projection error", projection.Errors)
 	}
 }
 
@@ -1678,6 +1974,24 @@ func containsModelProjectionString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func queuedRunLifecycleStageByID(stages []OperatorQueuedRunLifecycleStage, id string) *OperatorQueuedRunLifecycleStage {
+	for i := range stages {
+		if stages[i].ID == id {
+			return &stages[i]
+		}
+	}
+	return nil
+}
+
+func queuedRunAgentPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, stageID, role string) *OperatorQueuedRunAgentPlanStep {
+	for i := range steps {
+		if steps[i].StageID == stageID && steps[i].Role == role {
+			return &steps[i]
+		}
+	}
+	return nil
 }
 
 func findRuntimeEventEvidence(events []OperatorRuntimeEventEvidence, eventID string) (OperatorRuntimeEventEvidence, bool) {
