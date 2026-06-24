@@ -30,6 +30,9 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	if len(result.DispatchedTaskIDs) != 1 || len(result.DispatchedOrderIDs) != 1 {
 		t.Fatalf("dispatch identifiers = %+v", result)
 	}
+	if len(result.DispatchedStageTaskIDs) != 0 {
+		t.Fatalf("generic run launch stage task ids = %+v, want none", result.DispatchedStageTaskIDs)
+	}
 
 	tasks, err := rt.tasks.List(10)
 	if err != nil {
@@ -366,6 +369,8 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if len(tasks) != 1 {
 		t.Fatalf("task count after partial dispatch = %d, want 1", len(tasks))
 	}
+	parentTaskID := tasks[0].ID
+	parentFactoryOrderID := tasks[0].FactoryOrderID
 	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
 	if err != nil {
 		t.Fatalf("ListArtifacts after partial dispatch: %v", err)
@@ -381,7 +386,7 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if second.Dispatched != 0 || second.AlreadyDispatched != 1 || second.Failed != 0 {
 		t.Fatalf("second dispatch result = %+v, want repaired already-dispatched task", second)
 	}
-	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	artifacts, err = rt.tasks.ListArtifacts(parentTaskID)
 	if err != nil {
 		t.Fatalf("ListArtifacts after repair: %v", err)
 	}
@@ -391,6 +396,15 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if countArtifactsWithLabelPrefix(artifacts, IssueScanLifecycleStageArtifactPrefix) != len(issueScanDevelopmentLifecycle()) {
 		t.Fatalf("stage artifacts after repair = %+v, want %d issue-scan lifecycle stage artifacts", artifacts, len(issueScanDevelopmentLifecycle()))
 	}
+	tasks, err = rt.tasks.List(100)
+	if err != nil {
+		t.Fatalf("List tasks after stage draft repair: %v", err)
+	}
+	expectedStages := issueScanDevelopmentLifecycle()
+	if len(tasks) != 1+len(expectedStages) {
+		t.Fatalf("task count after stage draft repair = %d, want parent plus %d stage drafts: %+v", len(tasks), len(expectedStages), tasks)
+	}
+	assertIssueScanStageTaskDrafts(t, rt, tasks, parentTaskID, parentFactoryOrderID, expectedStages)
 
 	third, err := rt.DispatchQueuedRunLaunch(queued.RunID)
 	if err != nil {
@@ -399,7 +413,7 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if third.Dispatched != 0 || third.AlreadyDispatched != 1 || third.Failed != 0 {
 		t.Fatalf("third dispatch result = %+v, want idempotent already-dispatched task", third)
 	}
-	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	artifacts, err = rt.tasks.ListArtifacts(parentTaskID)
 	if err != nil {
 		t.Fatalf("ListArtifacts after idempotent pass: %v", err)
 	}
@@ -409,6 +423,14 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	if countArtifactsWithLabelPrefix(artifacts, IssueScanLifecycleStageArtifactPrefix) != len(issueScanDevelopmentLifecycle()) {
 		t.Fatalf("stage artifacts after idempotent pass = %+v, want %d issue-scan lifecycle stage artifacts", artifacts, len(issueScanDevelopmentLifecycle()))
 	}
+	tasks, err = rt.tasks.List(100)
+	if err != nil {
+		t.Fatalf("List tasks after idempotent stage draft pass: %v", err)
+	}
+	if len(tasks) != 1+len(expectedStages) {
+		t.Fatalf("task count after idempotent stage draft pass = %d, want parent plus %d stage drafts: %+v", len(tasks), len(expectedStages), tasks)
+	}
+	assertIssueScanStageTaskDrafts(t, rt, tasks, parentTaskID, parentFactoryOrderID, expectedStages)
 }
 
 func TestIssueScanLifecycleStageArtifactsRejectsUnsafeLabels(t *testing.T) {
@@ -435,6 +457,15 @@ func TestIssueScanLifecycleStageArtifactsRejectsUnsafeLabels(t *testing.T) {
 				t.Fatalf("issueScanLifecycleStageArtifactsFromLifecycle error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestIssueScanLifecycleStageTaskDraftsRejectsUnsafeCanonicalIDs(t *testing.T) {
+	content := FactoryRunRequestedContent{RunID: "run_stage_collision"}
+	order := work.FactoryOrder{ID: "fo_stage_collision", RiskClass: "high"}
+	_, err := issueScanLifecycleStageTaskDraftsFromLifecycle(content, order, []OperatorQueuedRunLifecycleStage{{ID: "review!"}, {ID: "review?"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "collides with stage id") {
+		t.Fatalf("issueScanLifecycleStageTaskDraftsFromLifecycle err = %v, want canonical id collision", err)
 	}
 }
 
@@ -659,6 +690,46 @@ func countArtifactsWithLabelPrefix(artifacts []work.ArtifactEvent, prefix string
 		}
 	}
 	return count
+}
+
+func assertIssueScanStageTaskDrafts(t *testing.T, rt *Runtime, tasks []work.Task, parentTaskID types.EventID, factoryOrderID string, stages []issueScanLifecycleStage) {
+	t.Helper()
+	var previous types.EventID
+	for i, stage := range stages {
+		canonicalTaskID := issueScanLifecycleStageTaskCanonicalID(factoryOrderID, stage.ID)
+		stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, canonicalTaskID)
+		if !ok {
+			t.Fatalf("missing stage task %q in %+v", canonicalTaskID, tasks)
+		}
+		deps, err := rt.tasks.GetDependencies(stageTask.ID)
+		if err != nil {
+			t.Fatalf("GetDependencies %s: %v", stageTask.ID, err)
+		}
+		if i == 0 {
+			if len(deps) != 1 || deps[0] != parentTaskID {
+				t.Fatalf("first stage task dependencies = %+v, want parent task %s", deps, parentTaskID)
+			}
+		} else if len(deps) != 2 || !containsEventID(deps, parentTaskID) || !containsEventID(deps, previous) {
+			t.Fatalf("stage task %q dependencies = %+v, want parent task %s and previous stage %s", stage.ID, deps, parentTaskID, previous)
+		}
+		artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+		if err != nil {
+			t.Fatalf("ListArtifacts %s: %v", stageTask.ID, err)
+		}
+		if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 || countArtifactsWithLabelPrefix(artifacts, IssueScanLifecycleStageArtifactPrefix) != 0 {
+			t.Fatalf("stage task %q artifacts = %+v, want issue-scan dispatch artifacts to stay on parent task", stage.ID, artifacts)
+		}
+		previous = stageTask.ID
+	}
+}
+
+func findTaskByCanonicalTaskIDForTest(tasks []work.Task, canonicalTaskID string) (work.Task, bool) {
+	for _, task := range tasks {
+		if task.CanonicalTaskID == canonicalTaskID {
+			return task, true
+		}
+	}
+	return work.Task{}, false
 }
 
 func appendStaleRunLaunchRequest(t *testing.T, s store.Store, writer *operatorRunLaunchWriter) event.Event {

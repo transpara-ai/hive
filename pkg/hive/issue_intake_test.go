@@ -2,10 +2,13 @@ package hive
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
@@ -177,14 +180,27 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if result.Dispatched != 1 || result.Failed != 0 {
 		t.Fatalf("dispatch result = %+v, want one dispatched and no failures", result)
 	}
+	if len(result.DispatchedStageTaskIDs) != len(expectedStageIDs) {
+		t.Fatalf("stage task ids = %+v, want %d lifecycle stage task drafts", result.DispatchedStageTaskIDs, len(expectedStageIDs))
+	}
 	tasks, err := rt.tasks.List(10)
 	if err != nil {
 		t.Fatalf("List tasks: %v", err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("task count = %d, want 1", len(tasks))
+	if len(tasks) != 1+len(expectedStageIDs) {
+		t.Fatalf("task count = %d, want parent plus %d stage drafts: %+v", len(tasks), len(expectedStageIDs), tasks)
 	}
-	task := tasks[0]
+	taskIndex := -1
+	for i := range tasks {
+		if tasks[i].ID == result.DispatchedTaskIDs[0] {
+			taskIndex = i
+			break
+		}
+	}
+	if taskIndex < 0 {
+		t.Fatalf("parent task %s not found in %+v", result.DispatchedTaskIDs[0], tasks)
+	}
+	task := tasks[taskIndex]
 	if task.FactoryOrderID != result.DispatchedOrderIDs[0] {
 		t.Fatalf("task factory order = %q, want %q", task.FactoryOrderID, result.DispatchedOrderIDs[0])
 	}
@@ -218,6 +234,98 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !strings.Contains(task.Description, "\"agent_execution_plan\"") || !strings.Contains(task.Description, "human_approval_boundary_check") {
 		t.Fatalf("task description does not include agent execution plan: %s", task.Description)
+	}
+	stageTaskIDsByStage := map[string]types.EventID{}
+	var previousStageTaskID types.EventID
+	wantStageCells := map[string]string{
+		"research_issue_and_repo_context":   "planning",
+		"debate_with_correct_civic_roles":   "planning",
+		"select_and_design_approach":        "planning",
+		"run_adversarial_review":            "review",
+		"surface_ready_for_Human_result_PR": "governance",
+	}
+	for i, stageID := range expectedStageIDs {
+		wantCanonicalID := issueScanLifecycleStageTaskCanonicalID(task.FactoryOrderID, stageID)
+		stageTaskIndex := -1
+		for j := range tasks {
+			if tasks[j].CanonicalTaskID == wantCanonicalID {
+				stageTaskIndex = j
+				break
+			}
+		}
+		if stageTaskIndex < 0 {
+			t.Fatalf("missing stage task %q in %+v", wantCanonicalID, tasks)
+		}
+		stageTask := tasks[stageTaskIndex]
+		if stageTask.FactoryOrderID != task.FactoryOrderID {
+			t.Fatalf("stage task %q factory order = %q, want %q", stageID, stageTask.FactoryOrderID, task.FactoryOrderID)
+		}
+		if strings.Join(stageTask.RequirementIDs, "\n") != strings.Join(task.RequirementIDs, "\n") {
+			t.Fatalf("stage task %q requirement ids = %+v, want parent ids %+v", stageID, stageTask.RequirementIDs, task.RequirementIDs)
+		}
+		if strings.Join(stageTask.AcceptanceCriterionIDs, "\n") != strings.Join(task.AcceptanceCriterionIDs, "\n") {
+			t.Fatalf("stage task %q acceptance criterion ids = %+v, want parent ids %+v", stageID, stageTask.AcceptanceCriterionIDs, task.AcceptanceCriterionIDs)
+		}
+		wantCell := wantStageCells[stageID]
+		if wantCell == "" {
+			wantCell = "implementation"
+		}
+		if stageTask.Cell != wantCell {
+			t.Fatalf("stage task %q cell = %q, want %q", stageID, stageTask.Cell, wantCell)
+		}
+		if !strings.Contains(stageTask.Description, "Stage ID: "+stageID) {
+			t.Fatalf("stage task %q description = %s", stageID, stageTask.Description)
+		}
+		if !containsIssueScanValue(stageTask.ExpectedOutputs, "stage declaration artifact remains pending runtime evidence") {
+			t.Fatalf("stage task %q expected outputs = %+v, want declaration boundary output", stageID, stageTask.ExpectedOutputs)
+		}
+		readiness, err := rt.tasks.Readiness(stageTask.ID)
+		if err != nil {
+			t.Fatalf("Readiness %s: %v", stageTask.ID, err)
+		}
+		if readiness.Ready {
+			t.Fatalf("stage task %q readiness = ready, want blocked draft with missing readiness gates", stageID)
+		}
+		blocked, err := rt.tasks.IsBlocked(stageTask.ID)
+		if err != nil {
+			t.Fatalf("IsBlocked %s: %v", stageTask.ID, err)
+		}
+		if !blocked {
+			t.Fatalf("stage task %q is not blocked, want parent task dependency barrier", stageID)
+		}
+		deps, err := rt.tasks.GetDependencies(stageTask.ID)
+		if err != nil {
+			t.Fatalf("GetDependencies %s: %v", stageTask.ID, err)
+		}
+		if i == 0 {
+			if len(deps) != 1 || deps[0] != task.ID {
+				t.Fatalf("first stage task dependencies = %+v, want parent task %s", deps, task.ID)
+			}
+		} else if len(deps) != 2 || !containsEventID(deps, task.ID) || !containsEventID(deps, previousStageTaskID) {
+			t.Fatalf("stage task %q dependencies = %+v, want parent task %s and previous stage %s", stageID, deps, task.ID, previousStageTaskID)
+		}
+		stageTaskIDsByStage[stageID] = stageTask.ID
+		previousStageTaskID = stageTask.ID
+	}
+	if len(stageTaskIDsByStage) != len(expectedStageIDs) {
+		t.Fatalf("stage task ids by stage = %+v", stageTaskIDsByStage)
+	}
+	if err := rt.tasks.Complete(writer.human, task.ID, "parent FactoryOrder completed for stage draft barrier check", []types.EventID{task.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete parent task: %v", err)
+	}
+	for _, stageID := range expectedStageIDs {
+		stageTaskID := stageTaskIDsByStage[stageID]
+		readiness, err := rt.tasks.Readiness(stageTaskID)
+		if err != nil {
+			t.Fatalf("Readiness after parent completion %s: %v", stageTaskID, err)
+		}
+		if readiness.Ready || len(readiness.MissingGates) == 0 {
+			t.Fatalf("stage task %q readiness after parent completion = %+v, want missing readiness gates", stageID, readiness)
+		}
+	}
+	firstStageTaskID := stageTaskIDsByStage[expectedStageIDs[0]]
+	if err := rt.tasks.Complete(writer.human, firstStageTaskID, "stage draft must not complete without an artifact", []types.EventID{firstStageTaskID}, writer.conv); !errors.Is(err, work.ErrArtifactRequired) {
+		t.Fatalf("Complete first stage draft err = %v, want ErrArtifactRequired", err)
 	}
 	storedTask, err := rt.store.Get(task.ID)
 	if err != nil {
@@ -405,6 +513,15 @@ func TestIssueScanOperatorIDIsRunLaunchSafe(t *testing.T) {
 }
 
 func containsIssueScanValue(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEventID(values []types.EventID, want types.EventID) bool {
 	for _, value := range values {
 		if value == want {
 			return true

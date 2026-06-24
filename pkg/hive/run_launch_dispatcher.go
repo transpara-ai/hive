@@ -35,14 +35,15 @@ type issueScanDispatchArtifact struct {
 // RunLaunchDispatchResult summarizes one dispatcher pass over queued
 // factory.run.requested events.
 type RunLaunchDispatchResult struct {
-	Scanned              int
-	Dispatched           int
-	AlreadyDispatched    int
-	SkippedNonQueued     int
-	Failed               int
-	DispatchedTaskIDs    []types.EventID
-	DispatchedOrderIDs   []string
-	AlreadyDispatchedIDs []string
+	Scanned                int
+	Dispatched             int
+	AlreadyDispatched      int
+	SkippedNonQueued       int
+	Failed                 int
+	DispatchedTaskIDs      []types.EventID
+	DispatchedStageTaskIDs []types.EventID
+	DispatchedOrderIDs     []string
+	AlreadyDispatchedIDs   []string
 }
 
 // DispatchQueuedRunLaunches binds queued POST /api/hive/runs requests into the
@@ -135,6 +136,12 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 				errs = append(errs, fmt.Errorf("run %q: repair issue-scan lifecycle stage artifacts: %w", content.RunID, err))
 				continue
 			}
+			order := factoryOrderFromRunLaunch(content, orderID)
+			if _, err := r.ensureIssueScanLifecycleStageTaskDrafts(content, order, request.ID(), taskID, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: repair issue-scan lifecycle stage task drafts: %w", content.RunID, err))
+				continue
+			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
 			continue
@@ -158,7 +165,8 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 		}
 
 		convID := runLaunchConversationID(content.RunID, r.convID)
-		task, err := work.SeedFactoryOrder(r.tasks, r.humanID, factoryOrderFromRunLaunch(content, orderID), []types.EventID{request.ID()}, convID)
+		order := factoryOrderFromRunLaunch(content, orderID)
+		task, err := work.SeedFactoryOrder(r.tasks, r.humanID, order, []types.EventID{request.ID()}, convID)
 		if err != nil {
 			result.Failed++
 			errs = append(errs, fmt.Errorf("run %q: seed factory order: %w", content.RunID, err))
@@ -177,8 +185,15 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			errs = append(errs, fmt.Errorf("run %q: attach issue-scan lifecycle stage artifacts: %w", content.RunID, err))
 			continue
 		}
+		stageTaskIDs, err := r.ensureIssueScanLifecycleStageTaskDrafts(content, order, request.ID(), task.ID, convID)
+		if err != nil {
+			result.Failed++
+			errs = append(errs, fmt.Errorf("run %q: create issue-scan lifecycle stage task drafts: %w", content.RunID, err))
+			continue
+		}
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
+		result.DispatchedStageTaskIDs = append(result.DispatchedStageTaskIDs, stageTaskIDs...)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
 	}
 	if !matchedRequestedRun {
@@ -354,6 +369,302 @@ func issueScanLifecycleStageArtifactsFromLifecycle(runID, lifecycleVersion strin
 	return out, nil
 }
 
+func (r *Runtime) ensureIssueScanLifecycleStageTaskDrafts(content FactoryRunRequestedContent, order work.FactoryOrder, requestID, parentTaskID types.EventID, convID types.ConversationID) ([]types.EventID, error) {
+	if r == nil || r.tasks == nil {
+		return nil, nil
+	}
+	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.EventID, 0, len(drafts))
+	var previous types.EventID
+	for _, draft := range drafts {
+		stageTaskID, err := r.ensureIssueScanLifecycleStageTaskDraft(draft, requestID, parentTaskID, convID)
+		if err != nil {
+			return out, err
+		}
+		if err := r.ensureIssueScanStageTaskDependency(stageTaskID, parentTaskID, requestID, parentTaskID, convID); err != nil {
+			return out, fmt.Errorf("link stage task %q to parent task: %w", draft.StageID, err)
+		}
+		if previous != (types.EventID{}) {
+			if err := r.ensureIssueScanStageTaskDependency(stageTaskID, previous, requestID, parentTaskID, convID); err != nil {
+				return out, fmt.Errorf("link stage task %q after previous stage: %w", draft.StageID, err)
+			}
+		}
+		previous = stageTaskID
+		out = append(out, stageTaskID)
+	}
+	return out, nil
+}
+
+func (r *Runtime) ensureIssueScanLifecycleStageTaskDraft(draft issueScanLifecycleStageTaskDraft, requestID, parentTaskID types.EventID, convID types.ConversationID) (types.EventID, error) {
+	canonicalTaskID := strings.TrimSpace(draft.Options.CanonicalTaskID)
+	if canonicalTaskID == "" {
+		return types.EventID{}, fmt.Errorf("stage task %q canonical task id is required", draft.StageID)
+	}
+	taskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, canonicalTaskID)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("find stage task %q by canonical id: %w", draft.StageID, err)
+	}
+	if exists {
+		if strings.TrimSpace(factoryOrderID) != strings.TrimSpace(draft.Options.FactoryOrderID) {
+			return types.EventID{}, fmt.Errorf("stage task %q canonical id %q belongs to factory order %q, want %q", draft.StageID, canonicalTaskID, factoryOrderID, draft.Options.FactoryOrderID)
+		}
+		return taskID, nil
+	}
+	stageTask, err := r.tasks.CreateV39(r.humanID, draft.Options, []types.EventID{requestID, parentTaskID}, convID)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("create stage task %q: %w", draft.StageID, err)
+	}
+	return stageTask.ID, nil
+}
+
+func (r *Runtime) ensureIssueScanStageTaskDependency(taskID, dependsOnID, requestID, parentTaskID types.EventID, convID types.ConversationID) error {
+	if taskID == (types.EventID{}) || dependsOnID == (types.EventID{}) {
+		return nil
+	}
+	if taskID == dependsOnID {
+		return nil
+	}
+	deps, err := r.tasks.GetDependencies(taskID)
+	if err != nil {
+		return err
+	}
+	for _, dep := range deps {
+		if dep == dependsOnID {
+			return nil
+		}
+	}
+	return r.tasks.AddDependency(r.humanID, taskID, dependsOnID, compactEventIDs([]types.EventID{requestID, parentTaskID, dependsOnID, taskID}), convID)
+}
+
+func workTaskByCanonicalTaskID(s store.Store, canonicalTaskID string) (types.EventID, string, bool, error) {
+	canonicalTaskID = strings.TrimSpace(canonicalTaskID)
+	if s == nil || canonicalTaskID == "" {
+		return types.EventID{}, "", false, nil
+	}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(work.EventTypeTaskCreated, 100, cursor)
+		if err != nil {
+			return types.EventID{}, "", false, fmt.Errorf("fetch work.task.created events: %w", err)
+		}
+		for _, ev := range page.Items() {
+			content, ok := ev.Content().(work.TaskCreatedContent)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(content.CanonicalTaskID) == canonicalTaskID {
+				return ev.ID(), content.FactoryOrderID, true, nil
+			}
+		}
+		if !page.HasMore() {
+			return types.EventID{}, "", false, nil
+		}
+		cursor = page.Cursor()
+	}
+}
+
+type issueScanLifecycleStageTaskDraft struct {
+	StageID string
+	Options work.TaskCreateOptions
+}
+
+func issueScanLifecycleStageTaskDrafts(content FactoryRunRequestedContent, order work.FactoryOrder) ([]issueScanLifecycleStageTaskDraft, error) {
+	raw := bytes.TrimSpace(content.Brief)
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if raw[0] != '{' {
+		return nil, nil
+	}
+	var meta struct {
+		Kind json.RawMessage `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, fmt.Errorf("decode run launch brief for lifecycle stage task drafts: %w", err)
+	}
+	if len(meta.Kind) == 0 {
+		return nil, nil
+	}
+	var kind string
+	if err := json.Unmarshal(meta.Kind, &kind); err != nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(kind) != issueScanBriefKind {
+		return nil, nil
+	}
+	briefKind, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw)
+	if err != nil {
+		return nil, fmt.Errorf("derive issue-scan lifecycle stage task drafts: %w", err)
+	}
+	if briefKind != issueScanBriefKind || len(lifecycle) == 0 {
+		return nil, nil
+	}
+	return issueScanLifecycleStageTaskDraftsFromLifecycle(content, order, lifecycle, agentPlan)
+}
+
+func issueScanLifecycleStageTaskDraftsFromLifecycle(content FactoryRunRequestedContent, order work.FactoryOrder, lifecycle []OperatorQueuedRunLifecycleStage, agentPlan []OperatorQueuedRunAgentPlanStep) ([]issueScanLifecycleStageTaskDraft, error) {
+	planByStage := map[string][]OperatorQueuedRunAgentPlanStep{}
+	for _, step := range agentPlan {
+		planByStage[step.StageID] = append(planByStage[step.StageID], step)
+	}
+	requirementIDs := factoryOrderRequirementIDs(order)
+	acceptanceCriterionIDs := factoryOrderAcceptanceCriterionIDs(order)
+	out := make([]issueScanLifecycleStageTaskDraft, 0, len(lifecycle))
+	canonicalTaskIDsByStageID := map[string]string{}
+	for i, stage := range lifecycle {
+		stageID := safeRunLaunchID(stage.ID)
+		if stageID == "" {
+			return nil, fmt.Errorf("stage %d has empty id", i+1)
+		}
+		canonicalTaskID := issueScanLifecycleStageTaskCanonicalID(order.ID, stage.ID)
+		if canonicalTaskID == "" {
+			return nil, fmt.Errorf("stage %d has empty canonical task id", i+1)
+		}
+		if existingStageID, ok := canonicalTaskIDsByStageID[canonicalTaskID]; ok {
+			return nil, fmt.Errorf("stage %d id %q collides with stage id %q for canonical task id %q", i+1, stage.ID, existingStageID, canonicalTaskID)
+		}
+		canonicalTaskIDsByStageID[canonicalTaskID] = stage.ID
+		steps := append([]OperatorQueuedRunAgentPlanStep(nil), planByStage[stage.ID]...)
+		riskClass := valueOr(order.RiskClass, "high")
+		out = append(out, issueScanLifecycleStageTaskDraft{
+			StageID: stageID,
+			Options: work.TaskCreateOptions{
+				Title:                  issueScanLifecycleStageTaskTitle(stage),
+				Description:            issueScanLifecycleStageTaskDescription(content, stage, steps, i+1, len(lifecycle)),
+				CanonicalTaskID:        canonicalTaskID,
+				FactoryOrderID:         order.ID,
+				RequirementIDs:         requirementIDs,
+				AcceptanceCriterionIDs: acceptanceCriterionIDs,
+				Cell:                   issueScanLifecycleStageTaskCell(stage),
+				RiskClass:              riskClass,
+				ExpectedOutputs:        issueScanLifecycleStageTaskExpectedOutputs(stage, steps),
+				Priority:               issueScanLifecycleStageTaskPriority(riskClass),
+			},
+		})
+	}
+	return out, nil
+}
+
+func issueScanLifecycleStageTaskTitle(stage OperatorQueuedRunLifecycleStage) string {
+	name := strings.TrimSpace(stage.Name)
+	if name == "" {
+		name = strings.TrimSpace(stage.ID)
+	}
+	return strings.TrimSpace("Issue-scan stage: " + name)
+}
+
+func issueScanLifecycleStageTaskDescription(content FactoryRunRequestedContent, stage OperatorQueuedRunLifecycleStage, steps []OperatorQueuedRunAgentPlanStep, index, count int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Issue-scan lifecycle stage %d/%d for queued run %s.\n\n", index, count, strings.TrimSpace(content.RunID))
+	fmt.Fprintf(&b, "Stage ID: %s\n", strings.TrimSpace(stage.ID))
+	fmt.Fprintf(&b, "Authority boundary: %s\n", valueOr(stage.AuthorityBoundary, "not projected"))
+	fmt.Fprintf(&b, "Completion gate: %s\n", valueOr(stage.CompletionGate, "not projected"))
+	fmt.Fprintf(&b, "Required roles: %s\n", strings.Join(stage.RequiredRoles, ", "))
+	fmt.Fprintf(&b, "Required evidence: %s\n\n", strings.Join(stage.RequiredEvidence, ", "))
+	if len(steps) > 0 {
+		b.WriteString("Agent execution plan:\n")
+		for _, step := range steps {
+			mode := "review"
+			if step.CanOperate {
+				mode = "operate"
+			}
+			fmt.Fprintf(&b, "- %s (%s): %s", strings.TrimSpace(step.Role), mode, strings.TrimSpace(step.Objective))
+			if len(step.RequiredOutputs) > 0 {
+				fmt.Fprintf(&b, " Outputs: %s.", strings.Join(step.RequiredOutputs, ", "))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Status boundary: this task draft declares expected governed work for the stage. It is not runtime progress, blocker resolution, PR readiness, approval, merge, or deploy evidence.")
+	return strings.TrimSpace(b.String())
+}
+
+func issueScanLifecycleStageTaskCanonicalID(orderID, stageID string) string {
+	suffix := factoryOrderIDSuffix(orderID)
+	stageID = safeRunLaunchID(stageID)
+	if suffix == "" || stageID == "" {
+		return ""
+	}
+	return "tsk_" + suffix + "_" + stageID
+}
+
+func issueScanLifecycleStageTaskCell(stage OperatorQueuedRunLifecycleStage) string {
+	switch safeRunLaunchID(stage.ID) {
+	case "research_issue_and_repo_context", "debate_with_correct_civic_roles", "select_and_design_approach":
+		return "planning"
+	case "run_adversarial_review":
+		return "review"
+	case "surface_ready_for_human_result_pr":
+		return "governance"
+	default:
+		return "implementation"
+	}
+}
+
+func issueScanLifecycleStageTaskExpectedOutputs(stage OperatorQueuedRunLifecycleStage, steps []OperatorQueuedRunAgentPlanStep) []string {
+	out := []string{"stage declaration artifact remains pending runtime evidence"}
+	out = append(out, stage.RequiredEvidence...)
+	for _, step := range steps {
+		out = append(out, step.RequiredOutputs...)
+	}
+	return compactStrings(out)
+}
+
+func issueScanLifecycleStageTaskPriority(riskClass string) work.TaskPriority {
+	switch strings.TrimSpace(riskClass) {
+	case "critical":
+		return work.PriorityCritical
+	case "high":
+		return work.PriorityHigh
+	case "low":
+		return work.PriorityLow
+	default:
+		return work.PriorityMedium
+	}
+}
+
+func factoryOrderRequirementIDs(order work.FactoryOrder) []string {
+	if len(order.RequirementIDs) > 0 {
+		return compactStrings(order.RequirementIDs)
+	}
+	return []string{"req_" + factoryOrderIDSuffix(order.ID)}
+}
+
+func factoryOrderAcceptanceCriterionIDs(order work.FactoryOrder) []string {
+	if len(order.AcceptanceCriterionIDs) > 0 {
+		return compactStrings(order.AcceptanceCriterionIDs)
+	}
+	return []string{"ac_" + factoryOrderIDSuffix(order.ID)}
+}
+
+func factoryOrderIDSuffix(orderID string) string {
+	orderID = strings.TrimSpace(orderID)
+	if suffix, ok := strings.CutPrefix(orderID, "fo_"); ok {
+		return safeRunLaunchID(suffix)
+	}
+	return safeRunLaunchID(orderID)
+}
+
+func compactEventIDs(values []types.EventID) []types.EventID {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]types.EventID, 0, len(values))
+	seen := make(map[types.EventID]bool, len(values))
+	for _, value := range values {
+		if value == (types.EventID{}) || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
 func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		return
@@ -449,7 +760,21 @@ func dispatchedFactoryOrderIDs(s store.Store) (map[string]types.EventID, error) 
 			}
 			orderID := strings.TrimSpace(content.FactoryOrderID)
 			if orderID != "" {
-				out[orderID] = ev.ID()
+				// Work v3.9 requires FactoryOrderID when a stage draft carries a
+				// stable CanonicalTaskID. The parent FactoryOrder task seeded by
+				// work.SeedFactoryOrder is therefore identified by the empty
+				// CanonicalTaskID; stage drafts are one-to-many declaration children
+				// and must never become the dispatcher repair target. Current Hive
+				// audit: this dispatcher repair map is the only runtime path that
+				// resolves a single task from FactoryOrderID; Civilization Assembly
+				// projection intentionally aggregates all matching TaskRefs.
+				if strings.TrimSpace(content.CanonicalTaskID) == "" {
+					out[orderID] = ev.ID()
+					continue
+				}
+				if _, exists := out[orderID]; !exists {
+					out[orderID] = ev.ID()
+				}
 			}
 		}
 		if !page.HasMore() {
