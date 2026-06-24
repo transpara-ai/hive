@@ -687,6 +687,307 @@ func TestIssueScanAgentExecutionPlanCoversEveryRequiredStageRole(t *testing.T) {
 	}
 }
 
+func TestAdvanceIssueScanLifecycleStageReleasesNextRunnableStage(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"civilization", "autonomy"},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	parentTask, ok := findTaskByCanonicalTaskIDForTest(tasks, "")
+	if !ok {
+		t.Fatalf("missing parent FactoryOrder task in %+v", tasks)
+	}
+	firstStageID := "research_issue_and_repo_context"
+	secondStageID := "debate_with_correct_civic_roles"
+	firstStageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, firstStageID))
+	if !ok {
+		t.Fatalf("missing first stage task in %+v", tasks)
+	}
+	secondStageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, secondStageID))
+	if !ok {
+		t.Fatalf("missing second stage task in %+v", tasks)
+	}
+	blocked, err := rt.tasks.IsBlocked(firstStageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked first stage: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("first stage starts unblocked; want dependency barrier before advance")
+	}
+
+	advance, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, "")
+	if err != nil {
+		t.Fatalf("AdvanceIssueScanLifecycleStage first: %v", err)
+	}
+	if !advance.Released || advance.AlreadyReady || advance.StageID != firstStageID || advance.StageTaskID != firstStageTask.ID {
+		t.Fatalf("first advance = %+v, want released first stage", advance)
+	}
+	parentStatus, err := rt.tasks.GetCompatibilityStatus(parentTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus parent: %v", err)
+	}
+	if parentStatus == work.LegacyStatusCompleted {
+		t.Fatalf("parent FactoryOrder task was completed by stage advance")
+	}
+	blocked, err = rt.tasks.IsBlocked(firstStageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked first stage after advance: %v", err)
+	}
+	if blocked {
+		t.Fatalf("first stage remains blocked after advance")
+	}
+	firstDepsAfterAdvance, err := rt.tasks.GetDependencies(firstStageTask.ID)
+	if err != nil {
+		t.Fatalf("GetDependencies first stage after advance: %v", err)
+	}
+	if len(firstDepsAfterAdvance) != 1 || firstDepsAfterAdvance[0] != parentTask.ID {
+		t.Fatalf("first stage dependencies after advance = %+v, want preserved parent dependency %s", firstDepsAfterAdvance, parentTask.ID)
+	}
+	secondBlocked, err := rt.tasks.IsBlocked(secondStageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked second stage: %v", err)
+	}
+	if !secondBlocked {
+		t.Fatalf("second stage advanced before first stage completion")
+	}
+	again, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, "")
+	if err != nil {
+		t.Fatalf("AdvanceIssueScanLifecycleStage idempotent first: %v", err)
+	}
+	if again.Released || !again.AlreadyReady || again.StageID != firstStageID {
+		t.Fatalf("idempotent first advance = %+v, want already ready first stage", again)
+	}
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, secondStageID); err == nil || !strings.Contains(err.Error(), "previous stage") {
+		t.Fatalf("explicit second stage before first completion error = %v, want previous stage blocker", err)
+	}
+
+	if err := rt.tasks.Complete(writer.human, firstStageTask.ID, "research stage evidence recorded", []types.EventID{firstStageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete first stage: %v", err)
+	}
+	next, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, "")
+	if err != nil {
+		t.Fatalf("AdvanceIssueScanLifecycleStage second: %v", err)
+	}
+	if !next.Released || next.StageID != secondStageID || next.PreviousStageID != firstStageID || next.PreviousStageTaskID != firstStageTask.ID {
+		t.Fatalf("second advance = %+v, want released second stage after first completion", next)
+	}
+	secondBlocked, err = rt.tasks.IsBlocked(secondStageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked second stage after advance: %v", err)
+	}
+	if secondBlocked {
+		t.Fatalf("second stage remains blocked after advance")
+	}
+}
+
+func TestAdvanceIssueScanLifecycleStageReportsAlreadyReadyWithIncompletePredecessor(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	secondStageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "debate_with_correct_civic_roles"))
+	if !ok {
+		t.Fatalf("missing second stage task in %+v", tasks)
+	}
+	if err := rt.tasks.UnblockTask(writer.human, secondStageTask.ID, []types.EventID{secondStageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("UnblockTask second stage: %v", err)
+	}
+
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, "debate_with_correct_civic_roles"); err == nil || !strings.Contains(err.Error(), "already unblocked before previous stage") {
+		t.Fatalf("AdvanceIssueScanLifecycleStage already-ready inconsistent error = %v, want predecessor warning", err)
+	}
+}
+
+func TestAdvanceIssueScanLifecycleStageRejectsNonIssueScanBeforeDispatch(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_generic_advance", json.RawMessage(`{"goal":"generic queued run"}`))
+
+	if _, err := rt.AdvanceIssueScanLifecycleStage("run_generic_advance", ""); err == nil || !strings.Contains(err.Error(), "not an issue-scan run") {
+		t.Fatalf("AdvanceIssueScanLifecycleStage generic error = %v, want issue-scan rejection", err)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("generic run was dispatched before type validation: %+v", tasks)
+	}
+}
+
+func TestAdvanceIssueScanLifecycleStageRejectsUnexpectedDependencies(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if _, err := rt.DispatchQueuedRunLaunch(queued.RunID); err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	firstStageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context"))
+	if !ok {
+		t.Fatalf("missing first stage task in %+v", tasks)
+	}
+	extra, err := rt.tasks.Create(writer.human, "Unexpected blocker", "Not part of the issue-scan stage scheduling chain.", []types.EventID{firstStageTask.ID}, writer.conv, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create unexpected blocker: %v", err)
+	}
+	if err := rt.tasks.AddDependency(writer.human, firstStageTask.ID, extra.ID, []types.EventID{firstStageTask.ID, extra.ID}, writer.conv); err != nil {
+		t.Fatalf("AddDependency unexpected blocker: %v", err)
+	}
+
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, ""); err == nil || !strings.Contains(err.Error(), "unexpected dependencies") {
+		t.Fatalf("AdvanceIssueScanLifecycleStage unexpected dependency error = %v, want refusal", err)
+	}
+	blocked, err := rt.tasks.IsBlocked(firstStageTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked first stage: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("first stage was unblocked despite unexpected dependency")
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsMissingContract(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	head, err := rt.store.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("Head: %v", err)
+	}
+	stageTask, err := rt.tasks.CreateV39(writer.human, work.TaskCreateOptions{
+		Title:                  "Issue-scan stage: Missing output contract",
+		CanonicalTaskID:        "tsk_missing_contract",
+		FactoryOrderID:         "fo_missing_contract",
+		RequirementIDs:         []string{"req_missing_contract"},
+		AcceptanceCriterionIDs: []string{"ac_missing_contract"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+	}, []types.EventID{head.Unwrap().ID()}, writer.conv)
+	if err != nil {
+		t.Fatalf("CreateV39 stage task: %v", err)
+	}
+	for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+		if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, label, "text/markdown", "present", []types.EventID{stageTask.ID}, writer.conv); err != nil {
+			t.Fatalf("AddArtifact %s: %v", label, err)
+		}
+	}
+	if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_role_contract"}`, []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact role contract: %v", err)
+	}
+
+	err = rt.verifyIssueScanStageTaskContracts(&issueScanStageAdvanceTarget{
+		Draft:  issueScanLifecycleStageTaskDraft{StageID: "research_issue_and_repo_context"},
+		TaskID: stageTask.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), IssueScanStageOutputContractArtifactLabel) {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want missing output contract", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsMissingReadinessGate(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	head, err := rt.store.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("Head: %v", err)
+	}
+	stageTask, err := rt.tasks.CreateV39(writer.human, work.TaskCreateOptions{
+		Title:                  "Issue-scan stage: Missing readiness gate",
+		CanonicalTaskID:        "tsk_missing_gate",
+		FactoryOrderID:         "fo_missing_gate",
+		RequirementIDs:         []string{"req_missing_gate"},
+		AcceptanceCriterionIDs: []string{"ac_missing_gate"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+	}, []types.EventID{head.Unwrap().ID()}, writer.conv)
+	if err != nil {
+		t.Fatalf("CreateV39 stage task: %v", err)
+	}
+	for _, artifact := range []struct {
+		label     string
+		mediaType string
+		body      string
+	}{
+		{work.GateAcceptanceCriteria, "text/markdown", "present"},
+		{work.GateTestPlan, "text/markdown", "present"},
+		{IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_role_contract"}`},
+		{IssueScanStageOutputContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_output_contract"}`},
+	} {
+		if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, artifact.label, artifact.mediaType, artifact.body, []types.EventID{stageTask.ID}, writer.conv); err != nil {
+			t.Fatalf("AddArtifact %s: %v", artifact.label, err)
+		}
+	}
+
+	err = rt.verifyIssueScanStageTaskContracts(&issueScanStageAdvanceTarget{
+		Draft:  issueScanLifecycleStageTaskDraft{StageID: "research_issue_and_repo_context"},
+		TaskID: stageTask.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), work.GateDefinitionOfDone) {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want missing definition_of_done", err)
+	}
+}
+
 func TestQueueIssueScanRunLaunchRejectsNonTransparaAIRepo(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	_, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{

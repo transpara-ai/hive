@@ -38,6 +38,9 @@ import (
 //   order        → work.SeedFactoryOrder (W1): one Order → one Work task.
 //   scan-issues  → scan Transpara-AI GitHub issues, then queue one governed
 //                  run request for the existing FactoryOrder dispatcher.
+//   advance-issue-scan
+//               → release the next issue-scan stage dependency barrier after
+//                  its lifecycle contracts are present.
 //   request-pr   → (*hive.Runtime).RaiseDraftPRAuthorityRequest (H2): raise the
 //                  guardian authority request; the gate HOLDS by design.
 //   create-pr    → hive.LoadApprovedDraftPRTarget (the governance gate: load the
@@ -47,7 +50,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -58,16 +61,18 @@ func cmdFactory(args []string) error {
 		return cmdFactoryOrder(rest)
 	case "scan-issues":
 		return cmdFactoryScanIssues(rest)
+	case "advance-issue-scan":
+		return cmdFactoryAdvanceIssueScan(rest)
 	case "request-pr":
 		return cmdFactoryRequestPR(rest)
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|request-pr|create-pr)", subverb)
 	}
 }
 
