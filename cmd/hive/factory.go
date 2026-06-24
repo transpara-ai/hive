@@ -180,9 +180,13 @@ func cmdFactoryDaemon(args []string) error {
 	fs.Var(&blockerRepairRunnerArgs, "issue-scan-blocker-repair-runner-arg", "Argument passed to --issue-scan-blocker-repair-runner (repeatable)")
 	issueScanDraftPRCreate := fs.Bool("issue-scan-draft-pr-create", false, "Create approved issue-scan draft PRs after recorded Human approval; requires GITHUB_TOKEN")
 	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
+	readyPRMarkReady := fs.Bool("issue-scan-ready-pr-mark-ready", false, "Mark created issue-scan draft PRs ready, run exact-head ready-state review, then record ready-for-Human evidence; requires GITHUB_TOKEN")
+	readyPRReviewRunner := fs.String("issue-scan-ready-pr-review-runner", "", "Executable ready-state exact-head review runner used with --issue-scan-ready-pr-mark-ready; receives JSON context on stdin and returns review receipt JSON")
 	readyPRTimeout := fs.Duration("issue-scan-ready-pr-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-ready-pr-runner")
 	readyPRRunnerArgs := repeatedStringFlag{}
+	readyPRReviewRunnerArgs := repeatedStringFlag{}
 	fs.Var(&readyPRRunnerArgs, "issue-scan-ready-pr-runner-arg", "Argument passed to --issue-scan-ready-pr-runner (repeatable)")
+	fs.Var(&readyPRReviewRunnerArgs, "issue-scan-ready-pr-review-runner-arg", "Argument passed to --issue-scan-ready-pr-review-runner (repeatable)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -204,6 +208,12 @@ func cmdFactoryDaemon(args []string) error {
 	}
 	if *issueScanDraftPRCreate && *approveRoles {
 		return fmt.Errorf("--issue-scan-draft-pr-create cannot be combined with --approve-roles")
+	}
+	if *readyPRMarkReady && *approveRequests {
+		return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --approve-requests")
+	}
+	if *readyPRMarkReady && *approveRoles {
+		return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --approve-roles")
 	}
 	var issueScanScanner *issueScanScannerConfig
 	if *issueScanInterval > 0 {
@@ -296,7 +306,27 @@ func cmdFactoryDaemon(args []string) error {
 		issueScanDraftPRCreator = work.NewEpic11GitHubPullRequestCreator(token)
 	}
 	var issueScanReadyPRRunner hive.IssueScanReadyPRRunner
-	if strings.TrimSpace(*readyPRRunner) == "" {
+	if *readyPRMarkReady {
+		if strings.TrimSpace(*readyPRRunner) != "" || len(readyPRRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --issue-scan-ready-pr-runner")
+		}
+		if strings.TrimSpace(*readyPRReviewRunner) == "" {
+			return fmt.Errorf("--issue-scan-ready-pr-review-runner is required when --issue-scan-ready-pr-mark-ready is enabled")
+		}
+		if *readyPRTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-timeout must be greater than zero")
+		}
+		token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+		if token == "" {
+			return fmt.Errorf("GITHUB_TOKEN is required when --issue-scan-ready-pr-mark-ready is enabled")
+		}
+		issueScanReadyPRRunner = hive.NewIssueScanReadyPRFinalizerRunner(
+			newIssueScanReadyPRGitHubClient(token),
+			issueScanReadyStateReviewCommandRunner(*readyPRReviewRunner, readyPRReviewRunnerArgs, *readyPRTimeout),
+		)
+	} else if strings.TrimSpace(*readyPRReviewRunner) != "" || len(readyPRReviewRunnerArgs) > 0 {
+		return fmt.Errorf("--issue-scan-ready-pr-mark-ready is required when --issue-scan-ready-pr-review-runner is set")
+	} else if strings.TrimSpace(*readyPRRunner) == "" {
 		if len(readyPRRunnerArgs) > 0 {
 			return fmt.Errorf("--issue-scan-ready-pr-runner is required when --issue-scan-ready-pr-runner-arg is set")
 		}

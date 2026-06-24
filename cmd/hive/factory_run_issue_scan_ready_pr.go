@@ -119,3 +119,70 @@ func runIssueScanReadyPRRunner(ctx context.Context, runner string, args []string
 	}
 	return result, nil
 }
+
+func issueScanReadyStateReviewCommandRunner(runner string, args []string, timeout time.Duration) hive.IssueScanReadyStateReviewRunner {
+	runner = strings.TrimSpace(runner)
+	copiedArgs := append([]string(nil), args...)
+	return func(ctx context.Context, reviewContext hive.IssueScanReadyStateReviewContext) (hive.IssueScanReadyStateReviewReceipt, error) {
+		return runIssueScanReadyStateReviewRunner(ctx, runner, copiedArgs, reviewContext, timeout)
+	}
+}
+
+func runIssueScanReadyStateReviewRunner(ctx context.Context, runner string, args []string, reviewContext hive.IssueScanReadyStateReviewContext, timeout time.Duration) (hive.IssueScanReadyStateReviewReceipt, error) {
+	runner = strings.TrimSpace(runner)
+	if runner == "" {
+		return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("runner is required")
+	}
+	if timeout <= 0 {
+		return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("timeout must be greater than zero")
+	}
+	payload, err := json.MarshalIndent(reviewContext, "", "  ")
+	if err != nil {
+		return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("marshal ready-state review context: %w", err)
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, runner, args...)
+	cmd.Stdin = bytes.NewReader(payload)
+	cmd.Env = append(sanitizedReadyStateReviewEnv(os.Environ()),
+		"HIVE_ISSUE_SCAN_READY_STATE_REVIEW_CONTEXT=stdin",
+		"HIVE_ISSUE_SCAN_RUN_ID="+reviewContext.RunID,
+		"HIVE_ISSUE_SCAN_FACTORY_ORDER_ID="+reviewContext.FactoryOrderID,
+		"HIVE_ISSUE_SCAN_REPOSITORY="+reviewContext.Repository,
+		"HIVE_ISSUE_SCAN_PR_NUMBER="+fmt.Sprintf("%d", reviewContext.PRNumber),
+		"HIVE_ISSUE_SCAN_OPERATE_COMMIT="+reviewContext.OperateCommit,
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if runCtx.Err() == context.DeadlineExceeded {
+			return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("issue-scan ready-state review runner timed out after %s", timeout)
+		}
+		return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("issue-scan ready-state review runner failed: %w%s", err, runnerStderrSuffix(stderr.String()))
+	}
+	var receipt hive.IssueScanReadyStateReviewReceipt
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &receipt); err != nil {
+		return hive.IssueScanReadyStateReviewReceipt{}, fmt.Errorf("parse issue-scan ready-state review runner stdout as receipt JSON: %w%s", err, runnerStderrSuffix(stderr.String()))
+	}
+	return receipt, nil
+}
+
+func sanitizedReadyStateReviewEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, found := strings.Cut(entry, "=")
+		if !found {
+			out = append(out, entry)
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(name)) {
+		case "GITHUB_TOKEN", "GH_TOKEN":
+			continue
+		default:
+			out = append(out, entry)
+		}
+	}
+	return out
+}

@@ -1,0 +1,403 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/transpara-ai/hive/pkg/hive"
+)
+
+type issueScanReadyPRGitHubClient struct {
+	token   string
+	baseURL string
+	http    *http.Client
+}
+
+func newIssueScanReadyPRGitHubClient(token string) *issueScanReadyPRGitHubClient {
+	return &issueScanReadyPRGitHubClient{
+		token:   strings.TrimSpace(token),
+		baseURL: "https://api.github.com",
+		http:    &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+	if c == nil || strings.TrimSpace(c.token) == "" {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
+	}
+	state, nodeID, err := c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if err := validateGitHubReadyPRTarget("preflight", mutation, state); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if !state.Draft {
+		return state, nil
+	}
+	state, nodeID, err = c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if err := validateGitHubReadyPRTarget("pre-mutation", mutation, state); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if !state.Draft {
+		return state, nil
+	}
+	if err := c.markPullRequestReadyForReview(ctx, nodeID); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	state, _, err = c.fetchPullRequestState(ctx, mutation)
+	return state, err
+}
+
+func (c *issueScanReadyPRGitHubClient) FetchReadyPRState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+	if c == nil || strings.TrimSpace(c.token) == "" {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
+	}
+	state, _, err := c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return state, err
+	}
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	decision, err := c.fetchPullRequestReviewDecision(ctx, owner, repo, mutation.PRNumber)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	state.ReviewDecision = decision
+	return state, err
+}
+
+func (c *issueScanReadyPRGitHubClient) fetchPullRequestReviewDecision(ctx context.Context, owner, repo string, number int) (string, error) {
+	payload := map[string]any{
+		"query": `query($owner: String!, $repo: String!, $number: Int!) {
+			repository(owner: $owner, name: $repo) {
+				pullRequest(number: $number) {
+					reviewDecision
+				}
+			}
+		}`,
+		"variables": map[string]any{
+			"owner":  owner,
+			"repo":   repo,
+			"number": number,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphQLURL(), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewDecision string `json:"reviewDecision"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("github ready PR client: decode review decision response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := ""
+		if len(result.Errors) > 0 {
+			msg = result.Errors[0].Message
+		}
+		return "", fmt.Errorf("github ready PR client: review decision returned %s: %s", resp.Status, msg)
+	}
+	if len(result.Errors) > 0 {
+		return "", fmt.Errorf("github ready PR client: review decision graphql error: %s", result.Errors[0].Message)
+	}
+	return strings.TrimSpace(result.Data.Repository.PullRequest.ReviewDecision), nil
+}
+
+func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	var gh struct {
+		Number         int    `json:"number"`
+		HTMLURL        string `json:"html_url"`
+		NodeID         string `json:"node_id"`
+		State          string `json:"state"`
+		Draft          bool   `json:"draft"`
+		MergeableState string `json:"mergeable_state"`
+		Base           struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"base"`
+		Head struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, mutation.PRNumber), &gh); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", fmt.Errorf("github ready PR client: pull request: %w", err)
+	}
+	ciStatus, err := c.fetchCIStatus(ctx, owner, repo, gh.Head.SHA)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	mergeState := strings.TrimSpace(gh.MergeableState)
+	if mergeState == "" {
+		mergeState = "unknown"
+	}
+	state := hive.IssueScanReadyPRLiveState{
+		Repository:       strings.ToLower(strings.TrimSpace(mutation.Repository)),
+		PRNumber:         gh.Number,
+		PRURL:            strings.TrimSpace(gh.HTMLURL),
+		BaseRef:          strings.TrimSpace(gh.Base.Ref),
+		BaseSHA:          strings.TrimSpace(gh.Base.SHA),
+		HeadRef:          strings.TrimSpace(gh.Head.Ref),
+		HeadSHA:          strings.TrimSpace(gh.Head.SHA),
+		State:            strings.TrimSpace(gh.State),
+		Draft:            gh.Draft,
+		ReadyForReview:   !gh.Draft,
+		MergeStateStatus: mergeState,
+		CIStatus:         ciStatus,
+		SourceRefs:       []string{strings.TrimSpace(gh.HTMLURL)},
+	}
+	return state, strings.TrimSpace(gh.NodeID), nil
+}
+
+func (c *issueScanReadyPRGitHubClient) fetchCIStatus(ctx context.Context, owner, repo, sha string) (string, error) {
+	statusState := ""
+	var combined struct {
+		State      string `json:"state"`
+		TotalCount int    `json:"total_count"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/repos/%s/%s/commits/%s/status", c.baseURL, owner, repo, sha), &combined); err != nil {
+		return "", fmt.Errorf("github ready PR client: commit status: %w", err)
+	}
+	if combined.TotalCount > 0 {
+		statusState = strings.ToLower(strings.TrimSpace(combined.State))
+	}
+	checkState, err := c.fetchCheckRunStatus(ctx, owner, repo, sha)
+	if err != nil {
+		return "", err
+	}
+	return combineGitHubCIStatus(statusState, checkState), nil
+}
+
+func (c *issueScanReadyPRGitHubClient) fetchCheckRunStatus(ctx context.Context, owner, repo, sha string) (string, error) {
+	const perPage = 100
+	seen := 0
+	total := -1
+	pending := false
+	for page := 1; ; page++ {
+		var checks struct {
+			TotalCount int `json:"total_count"`
+			CheckRuns  []struct {
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"check_runs"`
+		}
+		url := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs?per_page=%d&page=%d", c.baseURL, owner, repo, sha, perPage, page)
+		if err := c.getJSON(ctx, url, &checks); err != nil {
+			return "", fmt.Errorf("github ready PR client: check-runs: %w", err)
+		}
+		if checks.TotalCount == 0 {
+			return "", nil
+		}
+		total = checks.TotalCount
+		if len(checks.CheckRuns) == 0 {
+			pending = true
+			break
+		}
+		for _, check := range checks.CheckRuns {
+			if !strings.EqualFold(strings.TrimSpace(check.Status), "completed") {
+				pending = true
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(check.Conclusion)) {
+			case "success", "skipped", "neutral":
+			case "":
+				pending = true
+			default:
+				return "failure", nil
+			}
+		}
+		seen += len(checks.CheckRuns)
+		if total <= 0 || seen >= total {
+			break
+		}
+	}
+	if pending || seen < total {
+		return "pending", nil
+	}
+	return "success", nil
+}
+
+func combineGitHubCIStatus(statusState, checkState string) string {
+	states := []string{strings.ToLower(strings.TrimSpace(statusState)), strings.ToLower(strings.TrimSpace(checkState))}
+	hasSuccess := false
+	hasPending := false
+	for _, state := range states {
+		switch state {
+		case "failure", "error", "cancelled", "timed_out", "action_required", "startup_failure":
+			return "failure"
+		case "pending", "queued", "in_progress", "requested", "waiting":
+			hasPending = true
+		case "success", "passed", "green":
+			hasSuccess = true
+		}
+	}
+	if hasPending {
+		return "pending"
+	}
+	if hasSuccess {
+		return "success"
+	}
+	return "unknown"
+}
+
+func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context.Context, nodeID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("github ready PR client: pull request node_id is required")
+	}
+	payload := map[string]any{
+		"query": "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }",
+		"variables": map[string]string{
+			"id": nodeID,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphQLURL(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("github ready PR client: decode mark-ready response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := ""
+		if len(result.Errors) > 0 {
+			msg = result.Errors[0].Message
+		}
+		return fmt.Errorf("github ready PR client: graphql returned %s: %s", resp.Status, msg)
+	}
+	if len(result.Errors) > 0 {
+		return fmt.Errorf("github ready PR client: graphql error: %s", result.Errors[0].Message)
+	}
+	return nil
+}
+
+func (c *issueScanReadyPRGitHubClient) getJSON(ctx context.Context, url string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var ghErr struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&ghErr)
+		return fmt.Errorf("github returned %s: %s", resp.Status, ghErr.Message)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
+func (c *issueScanReadyPRGitHubClient) graphQLURL() string {
+	base := strings.TrimRight(c.baseURL, "/")
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	return base + "/graphql"
+}
+
+func issueScanReadyPROwnerRepo(repository string) (string, string, error) {
+	owner, repo, ok := strings.Cut(strings.TrimSpace(repository), "/")
+	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" {
+		return "", "", fmt.Errorf("repository %q is not owner/repo", repository)
+	}
+	return owner, repo, nil
+}
+
+func validateGitHubReadyPRTarget(label string, mutation hive.IssueScanReadyPRFinalizerMutation, state hive.IssueScanReadyPRLiveState) error {
+	if state.PRNumber != mutation.PRNumber {
+		return fmt.Errorf("%s github PR number %d does not match %d", label, state.PRNumber, mutation.PRNumber)
+	}
+	if baseRef := strings.TrimSpace(mutation.BaseRef); baseRef != "" && !strings.EqualFold(strings.TrimSpace(state.BaseRef), baseRef) {
+		return fmt.Errorf("%s github PR base_ref %q does not match %q", label, state.BaseRef, baseRef)
+	}
+	if !strings.EqualFold(strings.TrimSpace(state.HeadSHA), mutation.HeadSHA) {
+		return fmt.Errorf("%s github PR head %q does not match %q", label, state.HeadSHA, mutation.HeadSHA)
+	}
+	if strings.ToLower(strings.TrimSpace(state.State)) != "open" {
+		return fmt.Errorf("%s github PR state %q is not open", label, state.State)
+	}
+	acceptedMergeStates := []string{"clean", "blocked"}
+	if state.Draft {
+		acceptedMergeStates = append(acceptedMergeStates, "draft")
+	}
+	if !issueScanReadyStatusOKForCLI(state.MergeStateStatus, acceptedMergeStates) {
+		return fmt.Errorf("%s github PR merge_state_status %q is not clean", label, state.MergeStateStatus)
+	}
+	if !issueScanReadyStatusOKForCLI(state.CIStatus, []string{"success", "passed", "green"}) {
+		return fmt.Errorf("%s github PR ci_status %q is not successful", label, state.CIStatus)
+	}
+	return nil
+}
+
+func issueScanReadyStatusOKForCLI(got string, accepted []string) bool {
+	got = strings.ToLower(strings.TrimSpace(got))
+	for _, want := range accepted {
+		if got == strings.ToLower(strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
+}
