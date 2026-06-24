@@ -941,6 +941,7 @@ func TestAdvanceIssueScanLifecycleStageReleasesNextRunnableStage(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing first stage task in %+v", tasks)
 	}
+	assertIssueScanStageTaskContractRunBindingForTest(t, rt, firstStageTask.ID, queued.RunID, orderID)
 	secondStageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, secondStageID))
 	if !ok {
 		t.Fatalf("missing second stage task in %+v", tasks)
@@ -6223,35 +6224,11 @@ func TestAdvanceIssueScanLifecycleStageRejectsUnexpectedDependencies(t *testing.
 
 func TestVerifyIssueScanStageTaskContractsRejectsMissingContract(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
-	head, err := rt.store.Head()
-	if err != nil || head.IsNone() {
-		t.Fatalf("Head: %v", err)
-	}
-	stageTask, err := rt.tasks.CreateV39(writer.human, work.TaskCreateOptions{
-		Title:                  "Issue-scan stage: Missing output contract",
-		CanonicalTaskID:        "tsk_missing_contract",
-		FactoryOrderID:         "fo_missing_contract",
-		RequirementIDs:         []string{"req_missing_contract"},
-		AcceptanceCriterionIDs: []string{"ac_missing_contract"},
-		Cell:                   "planning",
-		RiskClass:              "high",
-	}, []types.EventID{head.Unwrap().ID()}, writer.conv)
-	if err != nil {
-		t.Fatalf("CreateV39 stage task: %v", err)
-	}
-	for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
-		if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, label, "text/markdown", "present", []types.EventID{stageTask.ID}, writer.conv); err != nil {
-			t.Fatalf("AddArtifact %s: %v", label, err)
-		}
-	}
-	if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_role_contract"}`, []types.EventID{stageTask.ID}, writer.conv); err != nil {
-		t.Fatalf("AddArtifact role contract: %v", err)
-	}
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
 
-	err = rt.verifyIssueScanStageTaskContracts(&issueScanStageAdvanceTarget{
-		Draft:  issueScanLifecycleStageTaskDraft{StageID: "research_issue_and_repo_context"},
-		TaskID: stageTask.ID,
-	})
+	err := rt.verifyIssueScanStageTaskContracts(target)
 	if err == nil || !strings.Contains(err.Error(), IssueScanStageOutputContractArtifactLabel) {
 		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want missing output contract", err)
 	}
@@ -6259,22 +6236,7 @@ func TestVerifyIssueScanStageTaskContractsRejectsMissingContract(t *testing.T) {
 
 func TestVerifyIssueScanStageTaskContractsRejectsMissingReadinessGate(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
-	head, err := rt.store.Head()
-	if err != nil || head.IsNone() {
-		t.Fatalf("Head: %v", err)
-	}
-	stageTask, err := rt.tasks.CreateV39(writer.human, work.TaskCreateOptions{
-		Title:                  "Issue-scan stage: Missing readiness gate",
-		CanonicalTaskID:        "tsk_missing_gate",
-		FactoryOrderID:         "fo_missing_gate",
-		RequirementIDs:         []string{"req_missing_gate"},
-		AcceptanceCriterionIDs: []string{"ac_missing_gate"},
-		Cell:                   "planning",
-		RiskClass:              "high",
-	}, []types.EventID{head.Unwrap().ID()}, writer.conv)
-	if err != nil {
-		t.Fatalf("CreateV39 stage task: %v", err)
-	}
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
 	for _, artifact := range []struct {
 		label     string
 		mediaType string
@@ -6282,20 +6244,235 @@ func TestVerifyIssueScanStageTaskContractsRejectsMissingReadinessGate(t *testing
 	}{
 		{work.GateAcceptanceCriteria, "text/markdown", "present"},
 		{work.GateTestPlan, "text/markdown", "present"},
-		{IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_role_contract"}`},
-		{IssueScanStageOutputContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, `{"kind":"issue_scan_stage_output_contract"}`},
 	} {
-		if err := rt.tasks.AddArtifact(writer.human, stageTask.ID, artifact.label, artifact.mediaType, artifact.body, []types.EventID{stageTask.ID}, writer.conv); err != nil {
+		if err := rt.tasks.AddArtifact(writer.human, target.TaskID, artifact.label, artifact.mediaType, artifact.body, []types.EventID{target.TaskID}, writer.conv); err != nil {
 			t.Fatalf("AddArtifact %s: %v", artifact.label, err)
 		}
 	}
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
 
-	err = rt.verifyIssueScanStageTaskContracts(&issueScanStageAdvanceTarget{
-		Draft:  issueScanLifecycleStageTaskDraft{StageID: "research_issue_and_repo_context"},
-		TaskID: stageTask.ID,
-	})
+	err := rt.verifyIssueScanStageTaskContracts(target)
 	if err == nil || !strings.Contains(err.Error(), work.GateDefinitionOfDone) {
 		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want missing definition_of_done", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsAcceptsGeneratedContracts(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+
+	if err := rt.verifyIssueScanStageTaskContracts(target); err != nil {
+		t.Fatalf("verifyIssueScanStageTaskContracts: %v, want generated contracts accepted", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsRunIDDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	roleBody, err := issueScanLifecycleStageTaskRoleContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskRoleContractBody: %v", err)
+	}
+	var roleDoc map[string]any
+	if err := json.Unmarshal([]byte(roleBody), &roleDoc); err != nil {
+		t.Fatalf("unmarshal role contract: %v", err)
+	}
+	roleDoc["run_id"] = "run_different_issue_scan"
+	tamperedRoleBody, err := json.Marshal(roleDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered role contract: %v", err)
+	}
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedRoleBody))
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "run_id") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want run_id drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsCanOperateDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	roleBody, err := issueScanLifecycleStageTaskRoleContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskRoleContractBody: %v", err)
+	}
+	var roleDoc map[string]any
+	if err := json.Unmarshal([]byte(roleBody), &roleDoc); err != nil {
+		t.Fatalf("unmarshal role contract: %v", err)
+	}
+	plan, ok := roleDoc["agent_execution_plan"].([]any)
+	if !ok || len(plan) == 0 {
+		t.Fatalf("agent_execution_plan = %#v, want steps", roleDoc["agent_execution_plan"])
+	}
+	first, ok := plan[0].(map[string]any)
+	if !ok {
+		t.Fatalf("agent_execution_plan[0] = %#v, want object", plan[0])
+	}
+	first["can_operate"] = true
+	tamperedRoleBody, err := json.Marshal(roleDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered role contract: %v", err)
+	}
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedRoleBody))
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "can_operate") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want can_operate drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsOutputCanOperateDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+	outputBody, err := issueScanLifecycleStageTaskOutputContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskOutputContractBody: %v", err)
+	}
+	var outputDoc map[string]any
+	if err := json.Unmarshal([]byte(outputBody), &outputDoc); err != nil {
+		t.Fatalf("unmarshal output contract: %v", err)
+	}
+	contracts, ok := outputDoc["role_output_contracts"].([]any)
+	if !ok || len(contracts) == 0 {
+		t.Fatalf("role_output_contracts = %#v, want contracts", outputDoc["role_output_contracts"])
+	}
+	first, ok := contracts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("role_output_contracts[0] = %#v, want object", contracts[0])
+	}
+	first["can_operate"] = true
+	tamperedOutputBody, err := json.Marshal(outputDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered output contract: %v", err)
+	}
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedOutputBody))
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "can_operate") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want output can_operate drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsEvidenceStatusDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+	outputBody, err := issueScanLifecycleStageTaskOutputContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskOutputContractBody: %v", err)
+	}
+	var outputDoc map[string]any
+	if err := json.Unmarshal([]byte(outputBody), &outputDoc); err != nil {
+		t.Fatalf("unmarshal output contract: %v", err)
+	}
+	outputDoc["evidence_status"] = civilizationAssemblyQueuedStageCompletedStatus
+	tamperedOutputBody, err := json.Marshal(outputDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered output contract: %v", err)
+	}
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedOutputBody))
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "evidence_status") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want evidence_status drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsCrossStageContractSubstitution(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	siblingDraft := issueScanStageDraftForTest(t, content, order, "debate_with_correct_civic_roles")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	siblingRoleBody, err := issueScanLifecycleStageTaskRoleContractBody(content, order, siblingDraft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskRoleContractBody sibling: %v", err)
+	}
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, siblingRoleBody)
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || (!strings.Contains(err.Error(), "stage_id") && !strings.Contains(err.Error(), "stage_index")) {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want cross-stage contract substitution drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsRoleContractDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	roleBody, err := issueScanLifecycleStageTaskRoleContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskRoleContractBody: %v", err)
+	}
+	var roleDoc map[string]any
+	if err := json.Unmarshal([]byte(roleBody), &roleDoc); err != nil {
+		t.Fatalf("unmarshal role contract: %v", err)
+	}
+	plan, ok := roleDoc["agent_execution_plan"].([]any)
+	if !ok || len(plan) == 0 {
+		t.Fatalf("agent_execution_plan = %#v, want steps", roleDoc["agent_execution_plan"])
+	}
+	first, ok := plan[0].(map[string]any)
+	if !ok {
+		t.Fatalf("agent_execution_plan[0] = %#v, want object", plan[0])
+	}
+	first["role"] = "guardian"
+	tamperedRoleBody, err := json.Marshal(roleDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered role contract: %v", err)
+	}
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedRoleBody))
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "agent_execution_plan") || !strings.Contains(err.Error(), "role") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want agent role contract drift", err)
+	}
+}
+
+func TestVerifyIssueScanStageTaskContractsRejectsOutputContractDrift(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	content, order, draft, target := issueScanStageContractTargetForTest(t, rt, writer, "research_issue_and_repo_context")
+	attachIssueScanStageTaskReadinessGatesForTest(t, rt, writer, target.TaskID)
+	attachIssueScanStageTaskRoleContractForTest(t, rt, writer, content, order, draft, target.TaskID, "")
+	outputBody, err := issueScanLifecycleStageTaskOutputContractBody(content, order, draft)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskOutputContractBody: %v", err)
+	}
+	var outputDoc map[string]any
+	if err := json.Unmarshal([]byte(outputBody), &outputDoc); err != nil {
+		t.Fatalf("unmarshal output contract: %v", err)
+	}
+	contracts, ok := outputDoc["role_output_contracts"].([]any)
+	if !ok || len(contracts) == 0 {
+		t.Fatalf("role_output_contracts = %#v, want contracts", outputDoc["role_output_contracts"])
+	}
+	first, ok := contracts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("role_output_contracts[0] = %#v, want object", contracts[0])
+	}
+	first["required_outputs"] = []any{"wrong_output_key"}
+	tamperedOutputBody, err := json.Marshal(outputDoc)
+	if err != nil {
+		t.Fatalf("marshal tampered output contract: %v", err)
+	}
+	attachIssueScanStageTaskOutputContractForTest(t, rt, writer, content, order, draft, target.TaskID, string(tamperedOutputBody))
+
+	err = rt.verifyIssueScanStageTaskContracts(target)
+	if err == nil || !strings.Contains(err.Error(), "role_output_contracts") || !strings.Contains(err.Error(), "required_outputs") {
+		t.Fatalf("verifyIssueScanStageTaskContracts error = %v, want output contract drift", err)
 	}
 }
 
@@ -6312,6 +6489,140 @@ func TestQueueIssueScanRunLaunchRejectsNonTransparaAIRepo(t *testing.T) {
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "transpara-ai") {
 		t.Fatalf("error = %v, want transpara-ai repo rejection", err)
+	}
+}
+
+func issueScanStageContractTargetForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, stageID string) (FactoryRunRequestedContent, work.FactoryOrder, issueScanLifecycleStageTaskDraft, *issueScanStageAdvanceTarget) {
+	t.Helper()
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+		Body:   "The Civilization should scan Transpara-AI repos and surface a ready-for-Human PR.",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	content := FactoryRunRequestedContent{
+		RunID:      "run_contract_" + safeRunLaunchID(stageID),
+		IntakeID:   "intake_contract_" + safeRunLaunchID(stageID),
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Title:      "Verify issue-scan stage contracts",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "issue-scan-contract-verification",
+		},
+		Budget:      RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos: []string{"transpara-ai/hive"},
+		Sources:     []RunLaunchSource{{Type: "issue", Ref: issue.URL, Title: issue.Title}},
+		Brief:       brief,
+	}
+	orderID, err := factoryOrderIDForRunLaunch(content.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	order := factoryOrderFromRunLaunch(content, orderID)
+	draft := issueScanStageDraftForTest(t, content, order, stageID)
+	head, err := rt.store.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("Head: %v", err)
+	}
+	stageTask, err := rt.tasks.CreateV39(writer.human, draft.Options, []types.EventID{head.Unwrap().ID()}, writer.conv)
+	if err != nil {
+		t.Fatalf("CreateV39 stage task: %v", err)
+	}
+	return content, order, draft, &issueScanStageAdvanceTarget{Draft: draft, TaskID: stageTask.ID}
+}
+
+func issueScanStageDraftForTest(t *testing.T, content FactoryRunRequestedContent, order work.FactoryOrder, stageID string) issueScanLifecycleStageTaskDraft {
+	t.Helper()
+	briefKind, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(content.Brief)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if briefKind != issueScanBriefKind {
+		t.Fatalf("brief kind = %q, want %q", briefKind, issueScanBriefKind)
+	}
+	drafts, err := issueScanLifecycleStageTaskDraftsFromLifecycle(content, order, lifecycle, agentPlan)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageTaskDraftsFromLifecycle: %v", err)
+	}
+	var draft issueScanLifecycleStageTaskDraft
+	found := false
+	for _, candidate := range drafts {
+		if safeRunLaunchID(candidate.StageID) == safeRunLaunchID(stageID) {
+			draft = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing stage draft %q in %+v", stageID, drafts)
+	}
+	return draft
+}
+
+func assertIssueScanStageTaskContractRunBindingForTest(t *testing.T, rt *Runtime, taskID types.EventID, runID, factoryOrderID string) {
+	t.Helper()
+	artifacts, err := rt.tasks.ListArtifacts(taskID)
+	if err != nil {
+		t.Fatalf("ListArtifacts %s: %v", taskID, err)
+	}
+	for _, label := range []string{IssueScanStageRoleContractArtifactLabel, IssueScanStageOutputContractArtifactLabel} {
+		artifact := issueScanArtifactByLabel(artifacts, label)
+		if artifact == nil {
+			t.Fatalf("stage task %s missing %s in %+v", taskID, label, artifacts)
+		}
+		var contract struct {
+			RunID          string `json:"run_id"`
+			FactoryOrderID string `json:"factory_order_id"`
+		}
+		if err := json.Unmarshal([]byte(artifact.Body), &contract); err != nil {
+			t.Fatalf("unmarshal %s: %v", label, err)
+		}
+		if contract.RunID != runID || contract.FactoryOrderID != factoryOrderID {
+			t.Fatalf("%s run/order = %q/%q, want %q/%q", label, contract.RunID, contract.FactoryOrderID, runID, factoryOrderID)
+		}
+	}
+}
+
+func attachIssueScanStageTaskReadinessGatesForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, taskID types.EventID) {
+	t.Helper()
+	for _, label := range []string{work.GateDefinitionOfDone, work.GateAcceptanceCriteria, work.GateTestPlan} {
+		if err := rt.tasks.AddArtifact(writer.human, taskID, label, "text/markdown", "present", []types.EventID{taskID}, writer.conv); err != nil {
+			t.Fatalf("AddArtifact %s: %v", label, err)
+		}
+	}
+}
+
+func attachIssueScanStageTaskRoleContractForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft, taskID types.EventID, body string) {
+	t.Helper()
+	if strings.TrimSpace(body) == "" {
+		var err error
+		body, err = issueScanLifecycleStageTaskRoleContractBody(content, order, draft)
+		if err != nil {
+			t.Fatalf("issueScanLifecycleStageTaskRoleContractBody: %v", err)
+		}
+	}
+	if err := rt.tasks.AddArtifact(writer.human, taskID, IssueScanStageRoleContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, body, []types.EventID{taskID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact role contract: %v", err)
+	}
+}
+
+func attachIssueScanStageTaskOutputContractForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, content FactoryRunRequestedContent, order work.FactoryOrder, draft issueScanLifecycleStageTaskDraft, taskID types.EventID, body string) {
+	t.Helper()
+	if strings.TrimSpace(body) == "" {
+		var err error
+		body, err = issueScanLifecycleStageTaskOutputContractBody(content, order, draft)
+		if err != nil {
+			t.Fatalf("issueScanLifecycleStageTaskOutputContractBody: %v", err)
+		}
+	}
+	if err := rt.tasks.AddArtifact(writer.human, taskID, IssueScanStageOutputContractArtifactLabel, issueScanExecutionPlanArtifactMediaType, body, []types.EventID{taskID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact output contract: %v", err)
 	}
 }
 
