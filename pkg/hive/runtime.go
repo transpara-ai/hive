@@ -83,6 +83,7 @@ type Runtime struct {
 	runLaunchDispatchInterval        time.Duration
 	providerFactory                  func(intelligence.Config) (intelligence.Provider, error)
 	issueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner
+	issueScanReadyPRRunner           IssueScanReadyPRRunner
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -119,6 +120,7 @@ type Config struct {
 	CatalogReloadInterval            time.Duration                    // reload --catalog for future spawns; 0 disables
 	RunLaunchDispatchInterval        time.Duration                    // dispatch queued run-launch requests; <0 disables
 	IssueScanAdversarialReviewRunner IssueScanAdversarialReviewRunner // optional exact-head issue-scan review runner
+	IssueScanReadyPRRunner           IssueScanReadyPRRunner           // optional terminal ready-PR evidence runner
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -184,6 +186,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		catalogReloadInterval:            cfg.CatalogReloadInterval,
 		runLaunchDispatchInterval:        cfg.RunLaunchDispatchInterval,
 		issueScanAdversarialReviewRunner: cfg.IssueScanAdversarialReviewRunner,
+		issueScanReadyPRRunner:           cfg.IssueScanReadyPRRunner,
 		telemetryWriter:                  cfg.TelemetryWriter,
 		apiClient:                        cfg.APIClient,
 		providerFactory:                  intelligence.New,

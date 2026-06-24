@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 const (
 	IssueScanReadyPREvidenceArtifactLabel = "issue_scan_ready_pr_evidence"
 	issueScanReadyPREvidenceArtifactKind  = "issue_scan_ready_pr_evidence"
+	issueScanReadyPRRunnerContextKind     = "issue_scan_ready_pr_runner_context"
 )
 
 // IssueScanReadyPREvidence is the terminal evidence packet for a Civilization
@@ -92,6 +94,43 @@ type IssueScanReadyPREvidenceRecordResult struct {
 	ReadyPREvidenceAlreadyRecorded bool
 }
 
+// IssueScanReadyPRRunner receives exact implementation/blocker context and
+// returns the draft-PR receipt plus ready-for-Human PR evidence to validate and
+// record. The runtime performs all authoritative validation before completing
+// the terminal ready stage.
+type IssueScanReadyPRRunner func(context.Context, IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error)
+
+type IssueScanReadyPRRunnerContext struct {
+	Kind                    string                   `json:"kind"`
+	LifecycleVersion        string                   `json:"lifecycle_version"`
+	RunID                   string                   `json:"run_id"`
+	FactoryOrderID          string                   `json:"factory_order_id"`
+	Repository              string                   `json:"repository"`
+	ReadyStageTaskID        string                   `json:"ready_stage_task_id"`
+	BlockerStageTaskID      string                   `json:"blocker_stage_task_id"`
+	ImplementationTaskID    string                   `json:"implementation_task_id"`
+	OperateBranch           string                   `json:"operate_branch"`
+	OperateCommit           string                   `json:"operate_commit"`
+	OperateRange            string                   `json:"operate_range,omitempty"`
+	ChangedFilesSummary     string                   `json:"changed_files_summary,omitempty"`
+	ExpectedReadyPREvidence IssueScanReadyPREvidence `json:"expected_ready_pr_evidence"`
+	BoundaryDisclaimers     []string                 `json:"boundary_disclaimers,omitempty"`
+}
+
+type IssueScanReadyPRRunnerResult struct {
+	DraftPRReceipt  TransparaAIDraftPRReceipt `json:"draft_pr_receipt"`
+	ReadyPREvidence IssueScanReadyPREvidence  `json:"ready_pr_evidence"`
+}
+
+type IssueScanReadyPRRunnerRecordResult struct {
+	RunID            string
+	FactoryOrderID   string
+	ReadyStageTaskID types.EventID
+	DraftPRReceipt   IssueScanDraftPRReceiptRecordResult
+	ReadyPREvidence  IssueScanReadyPREvidenceRecordResult
+	Recorded         bool
+}
+
 // IssueScanReadyPREvidenceArtifactBody serializes a ready-PR evidence packet so
 // operators or terminal PR machinery can attach it to the final lifecycle stage.
 func IssueScanReadyPREvidenceArtifactBody(evidence IssueScanReadyPREvidence) (string, error) {
@@ -102,6 +141,67 @@ func IssueScanReadyPREvidenceArtifactBody(evidence IssueScanReadyPREvidence) (st
 		return "", fmt.Errorf("marshal issue-scan ready PR evidence: %w", err)
 	}
 	return string(encoded), nil
+}
+
+func (r *Runtime) IssueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRRunnerContext, error) {
+	readyContext, ready, err := r.issueScanReadyPRRunnerContext(runID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, err
+	}
+	if !ready {
+		return IssueScanReadyPRRunnerContext{}, fmt.Errorf("issue-scan run %q is not ready for ready-PR evidence collection", strings.TrimSpace(runID))
+	}
+	return readyContext, nil
+}
+
+func (r *Runtime) RunConfiguredIssueScanReadyPRRunners(ctx context.Context, result RunLaunchDispatchResult) ([]IssueScanReadyPRRunnerRecordResult, error) {
+	if r == nil || r.issueScanReadyPRRunner == nil {
+		return nil, nil
+	}
+	runIDs := compactStrings(append(append([]string(nil), result.DispatchedIssueScanRunIDs...), result.AlreadyDispatchedIssueScanRunIDs...))
+	out := make([]IssueScanReadyPRRunnerRecordResult, 0, len(runIDs))
+	var errs []error
+	for _, runID := range runIDs {
+		recorded, ready, err := r.RunConfiguredIssueScanReadyPRRunner(ctx, runID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("run %q: %w", runID, err))
+			continue
+		}
+		if ready {
+			out = append(out, recorded)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+func (r *Runtime) RunConfiguredIssueScanReadyPRRunner(ctx context.Context, runID string) (IssueScanReadyPRRunnerRecordResult, bool, error) {
+	runID = strings.TrimSpace(runID)
+	result := IssueScanReadyPRRunnerRecordResult{RunID: runID}
+	if r == nil || r.issueScanReadyPRRunner == nil {
+		return result, false, nil
+	}
+	readyContext, ready, err := r.issueScanReadyPRRunnerContext(runID)
+	if err != nil || !ready {
+		return result, ready, err
+	}
+	runnerResult, err := r.issueScanReadyPRRunner(ctx, readyContext)
+	if err != nil {
+		return result, true, err
+	}
+	draftResult, err := r.RecordIssueScanDraftPRReceipt(runID, runnerResult.DraftPRReceipt)
+	if err != nil {
+		return result, true, err
+	}
+	readyResult, err := r.RecordIssueScanReadyPREvidence(runID, runnerResult.ReadyPREvidence)
+	if err != nil {
+		return result, true, err
+	}
+	result.FactoryOrderID = readyContext.FactoryOrderID
+	result.ReadyStageTaskID = draftResult.ReadyStageTaskID
+	result.DraftPRReceipt = draftResult
+	result.ReadyPREvidence = readyResult
+	result.Recorded = draftResult.Recorded || readyResult.Recorded
+	return result, true, nil
 }
 
 // RecordIssueScanDraftPRReceipt records the draft-PR creation receipt on the
@@ -391,6 +491,92 @@ func (r *Runtime) issueScanReadyStageTarget(runID string) (FactoryRunRequestedCo
 	return content, orderID, requests[0].ID(), readyStage, nil
 }
 
+func (r *Runtime) issueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRRunnerContext, bool, error) {
+	content, orderID, _, readyStage, err := r.issueScanReadyStageTarget(runID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	stageCompleted, err := r.issueScanStageTaskCompleted(readyStage.TaskID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	if stageCompleted {
+		return IssueScanReadyPRRunnerContext{}, false, nil
+	}
+	order := factoryOrderFromRunLaunch(content, orderID)
+	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	blockerStage, err := r.issueScanStageTargetByStageID(drafts, "drive_blockers_to_zero", orderID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	blockerCompleted, err := r.issueScanStageTaskCompleted(blockerStage.TaskID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	if !blockerCompleted {
+		return IssueScanReadyPRRunnerContext{}, false, nil
+	}
+	implementationTaskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, issueScanImplementationTaskCanonicalID(order.ID))
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, fmt.Errorf("find concrete implementation task: %w", err)
+	}
+	if !exists {
+		return IssueScanReadyPRRunnerContext{}, false, nil
+	}
+	if strings.TrimSpace(factoryOrderID) != orderID {
+		return IssueScanReadyPRRunnerContext{}, false, fmt.Errorf("implementation task belongs to factory order %q, want %q", factoryOrderID, orderID)
+	}
+	implementation, ok, err := r.issueScanImplementationCompletionEvidence(implementationTaskID, readyStage.TaskID)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	if !ok {
+		return IssueScanReadyPRRunnerContext{}, false, nil
+	}
+	if _, ready, err := r.issueScanReadyStageEvidence(content, orderID, implementationTaskID, blockerStage, readyStage); err != nil || ready {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	repo, err := issueScanReadyRunnerRepository(content)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	expected := IssueScanReadyPREvidence{
+		Kind:                  issueScanReadyPREvidenceArtifactKind,
+		LifecycleVersion:      issueScanLifecycleVersion,
+		RunID:                 strings.TrimSpace(content.RunID),
+		FactoryOrderID:        orderID,
+		Repository:            repo,
+		HeadSHA:               implementation.OperateCommit,
+		State:                 "open",
+		Draft:                 false,
+		ReadyForReview:        true,
+		HumanApprovalRequired: true,
+	}
+	return IssueScanReadyPRRunnerContext{
+		Kind:                    issueScanReadyPRRunnerContextKind,
+		LifecycleVersion:        issueScanLifecycleVersion,
+		RunID:                   strings.TrimSpace(content.RunID),
+		FactoryOrderID:          orderID,
+		Repository:              repo,
+		ReadyStageTaskID:        readyStage.TaskID.Value(),
+		BlockerStageTaskID:      blockerStage.TaskID.Value(),
+		ImplementationTaskID:    implementationTaskID.Value(),
+		OperateBranch:           implementation.OperateBranch,
+		OperateCommit:           implementation.OperateCommit,
+		OperateRange:            implementation.OperateRange,
+		ChangedFilesSummary:     implementation.ChangedFilesSummary,
+		ExpectedReadyPREvidence: expected,
+		BoundaryDisclaimers: compactStrings([]string{
+			"ready PR evidence is not Human approval",
+			"ready PR evidence is not merge or deploy authorization",
+			"ready PR head_sha must match operate_commit",
+		}),
+	}, true, nil
+}
+
 func (r *Runtime) issueScanReadyPrerequisites(content FactoryRunRequestedContent, orderID string, readyStage *issueScanStageAdvanceTarget) (*issueScanStageAdvanceTarget, types.EventID, issueScanOperateCompletionEvidence, error) {
 	order := factoryOrderFromRunLaunch(content, orderID)
 	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
@@ -426,6 +612,21 @@ func (r *Runtime) issueScanReadyPrerequisites(content FactoryRunRequestedContent
 		return nil, types.EventID{}, issueScanOperateCompletionEvidence{}, fmt.Errorf("implementation task %s has no live completion evidence", implementationTaskID.Value())
 	}
 	return blockerStage, implementationTaskID, implementation, nil
+}
+
+func issueScanReadyRunnerRepository(content FactoryRunRequestedContent) (string, error) {
+	brief, err := issueScanResearchBriefFromContent(content)
+	if err != nil {
+		return "", err
+	}
+	repo := strings.ToLower(strings.TrimSpace(brief.SelectedIssue.Repo))
+	if repo == "" && len(content.TargetRepos) > 0 {
+		repo = strings.ToLower(strings.TrimSpace(content.TargetRepos[0]))
+	}
+	if !ValidTransparaAIRepo(repo) {
+		return "", fmt.Errorf("selected issue repository %q is not a Transpara-AI repo", repo)
+	}
+	return repo, nil
 }
 
 func (r *Runtime) issueScanReadyPREvidenceForStage(content FactoryRunRequestedContent, orderID string, stageTaskID types.EventID, implementation issueScanOperateCompletionEvidence) (IssueScanReadyPREvidence, types.EventID, bool, error) {

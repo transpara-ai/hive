@@ -126,6 +126,10 @@ func cmdFactoryDaemon(args []string) error {
 	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
 	reviewRunnerArgs := repeatedStringFlag{}
 	fs.Var(&reviewRunnerArgs, "issue-scan-review-runner-arg", "Argument passed to --issue-scan-review-runner (repeatable)")
+	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
+	readyPRTimeout := fs.Duration("issue-scan-ready-pr-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-ready-pr-runner")
+	readyPRRunnerArgs := repeatedStringFlag{}
+	fs.Var(&readyPRRunnerArgs, "issue-scan-ready-pr-runner-arg", "Argument passed to --issue-scan-ready-pr-runner (repeatable)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -147,13 +151,24 @@ func cmdFactoryDaemon(args []string) error {
 		}
 		issueScanReviewRunner = issueScanReviewCommandRunner(*reviewRunner, reviewRunnerArgs, *reviewTimeout)
 	}
+	var issueScanReadyPRRunner hive.IssueScanReadyPRRunner
+	if strings.TrimSpace(*readyPRRunner) == "" {
+		if len(readyPRRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-runner is required when --issue-scan-ready-pr-runner-arg is set")
+		}
+	} else {
+		if *readyPRTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-ready-pr-timeout must be greater than zero")
+		}
+		issueScanReadyPRRunner = issueScanReadyPRCommandRunner(*readyPRRunner, readyPRRunnerArgs, *readyPRTimeout)
+	}
 	if *seedSpec != "" {
 		if err := runIngest(*seedSpec, *space, *apiBase, "high"); err != nil {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanReviewRunner, issueScanReadyPRRunner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

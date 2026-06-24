@@ -150,6 +150,9 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 	}
 	printIssueScanRoleOutputCount("review", progress.ReviewRoleOutputs)
 	printIssueScanRoleOutputCount("blocker", progress.BlockerRoleOutputs)
+	if recorded := countRecordedIssueScanReadyPRRunsForCLI(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Printf("issue-scan ready PR evidence recorded: %d\n", recorded)
+	}
 	printIssueScanRoleOutputCount("ready-PR", progress.ReadyRoleOutputs)
 	for _, completion := range progress.Completions {
 		fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
@@ -189,6 +192,16 @@ func countExistingIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImple
 }
 
 func countRecordedIssueScanAdversarialReviewRunsForCLI(runs []hive.IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanReadyPRRunsForCLI(runs []hive.IssueScanReadyPRRunnerRecordResult) int {
 	count := 0
 	for _, run := range runs {
 		if run.Recorded {

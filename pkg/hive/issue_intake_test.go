@@ -2398,6 +2398,89 @@ func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
 	}
 }
 
+func TestProgressIssueScanLifecycleRunsConfiguredReadyPRRunner(t *testing.T) {
+	rt, _, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	calls := 0
+	rt.issueScanReadyPRRunner = func(ctx context.Context, readyContext IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error) {
+		calls++
+		if readyContext.RunID != runID || readyContext.FactoryOrderID != orderID {
+			t.Fatalf("ready context run/order = %q/%q, want %q/%q", readyContext.RunID, readyContext.FactoryOrderID, runID, orderID)
+		}
+		if readyContext.ReadyStageTaskID != readyStage.ID.Value() {
+			t.Fatalf("ready stage task = %q, want %s", readyContext.ReadyStageTaskID, readyStage.ID)
+		}
+		if readyContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+			t.Fatalf("operate commit = %q", readyContext.OperateCommit)
+		}
+		readyEvidence := readyContext.ExpectedReadyPREvidence
+		readyEvidence.PRNumber = 321
+		readyEvidence.PRURL = "https://github.com/transpara-ai/hive/pull/321"
+		readyEvidence.BaseRef = "main"
+		readyEvidence.BaseSHA = "dddddddddddddddddddddddddddddddddddddddd"
+		readyEvidence.HeadRef = "codex/run-issue-001-repair"
+		readyEvidence.MergeStateStatus = "clean"
+		readyEvidence.CIStatus = "success"
+		readyEvidence.ReadyStateReviewRef = "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review"
+		readyEvidence.ReadyStateReviewStatus = "passed"
+		readyEvidence.Summary = "Ready-for-Human result PR is surfaced with exact-head ready-state review evidence and awaits Human approval."
+		return IssueScanReadyPRRunnerResult{
+			DraftPRReceipt: TransparaAIDraftPRReceipt{
+				Kind:                   transparaAIDraftPRReceiptKind,
+				Repository:             readyContext.Repository,
+				PRNumber:               readyEvidence.PRNumber,
+				PRURL:                  readyEvidence.PRURL,
+				BaseRef:                readyEvidence.BaseRef,
+				BaseSHA:                readyEvidence.BaseSHA,
+				HeadRef:                readyEvidence.HeadRef,
+				HeadSHA:                readyEvidence.HeadSHA,
+				RemoteHeadSHA:          readyEvidence.HeadSHA,
+				ChangedFiles:           []string{"README.md"},
+				Draft:                  true,
+				State:                  "open",
+				PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+				PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+				AuthorityNonce:         "nonce-ready-pr-test",
+				HumanApprovalRequired:  true,
+				NoMergeOrDeployClaim:   true,
+				ReadyForReviewRequired: true,
+			},
+			ReadyPREvidence: readyEvidence,
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with configured ready PR runner: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("ready PR runner calls = %d, want 1", calls)
+	}
+	if len(progress.ReadyPRRuns) != 1 || !progress.ReadyPRRuns[0].Recorded {
+		t.Fatalf("ready PR runs = %+v, want one recorded packet", progress.ReadyPRRuns)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 3 {
+		t.Fatalf("ready role outputs = %+v, want strategist/reviewer/guardian", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if !readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR stage was not completed")
+	}
+
+	again, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("ready PR runner calls after completion = %d, want still 1", calls)
+	}
+	if len(again.ReadyPRRuns) != 0 {
+		t.Fatalf("second ready PR runs = %+v, want none after ready stage completed", again.ReadyPRRuns)
+	}
+}
+
 func TestProgressIssueScanLifecycleRejectsReadyPREvidenceWithoutDraftReceipt(t *testing.T) {
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{

@@ -977,6 +977,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan blocker evidence bridge: recorded %d role output(s)\n", recorded)
 			}
+			if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan ready PR evidence runner: recorded %d ready PR evidence packet(s)\n", recorded)
+			}
 			if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan ready-PR evidence bridge: recorded %d role output(s)\n", recorded)
 			}
@@ -999,6 +1002,7 @@ type IssueScanLifecycleProgress struct {
 	ReviewRuns                []IssueScanAdversarialReviewRecordResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
+	ReadyPRRuns               []IssueScanReadyPRRunnerRecordResult
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
 }
 
@@ -1148,6 +1152,11 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-blocker auto-completion: %w", err))
 		}
 	}
+	readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
+	progress.ReadyPRRuns = readyPRRuns
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
+	}
 	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(dispatch)
 	progress.ReadyRoleOutputs = readyRoleOutputs
 	if err != nil {
@@ -1208,6 +1217,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d blocker role output(s)\n", recorded)
 	}
+	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
+	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
 	}
@@ -1245,6 +1257,9 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d blocker role output(s)\n", recorded)
 	}
+	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
+	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
 	}
@@ -1280,6 +1295,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d blocker role output(s)\n", recorded)
+	}
+	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
 	}
 	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
 		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
@@ -1342,6 +1360,16 @@ func countRecordedIssueScanRoleOutputs(values []IssueScanStageRoleOutputResult) 
 }
 
 func countRecordedIssueScanAdversarialReviewRuns(values []IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanReadyPRRuns(values []IssueScanReadyPRRunnerRecordResult) int {
 	count := 0
 	for _, value := range values {
 		if value.Recorded {
