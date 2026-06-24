@@ -2099,6 +2099,150 @@ func TestProgressIssueScanLifecycleRecordsImplementationRoleOutputAndCompletesSt
 	}
 }
 
+func TestProgressIssueScanLifecycleRunsConfiguredImplementationRunnerAndCompletesStage(t *testing.T) {
+	rt, _, queued, orderID, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	calls := 0
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		calls++
+		if runnerContext.RunID != queued.RunID || runnerContext.FactoryOrderID != orderID {
+			t.Fatalf("implementation runner run/order = %q/%q, want %q/%q", runnerContext.RunID, runnerContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if runnerContext.Repository != "transpara-ai/hive" {
+			t.Fatalf("implementation runner repo = %q", runnerContext.Repository)
+		}
+		if runnerContext.RepoPath == "" {
+			t.Fatalf("implementation runner context missing repo_path: %+v", runnerContext)
+		}
+		if runnerContext.ImplementationTaskID != implementationTask.ID.Value() {
+			t.Fatalf("implementation task id = %q, want %s", runnerContext.ImplementationTaskID, implementationTask.ID)
+		}
+		if len(runnerContext.DesignOutputs) == 0 || len(runnerContext.ImplementationTaskContext) == 0 {
+			t.Fatalf("implementation runner context missing design/task context: %+v", runnerContext)
+		}
+		if !containsIssueScanString(runnerContext.BoundaryDisclaimers, "runner output is not PR creation or PR readiness") {
+			t.Fatalf("implementation runner context missing PR boundary: %+v", runnerContext.BoundaryDisclaimers)
+		}
+		return IssueScanImplementationRunnerResult{
+			OperateResultBody: issueScanOperateResultBodyForTest(),
+			CompletionSummary: "validation output: go test ./pkg/hive passed from configured implementation runner",
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with implementation runner: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("implementation runner calls = %d, want 1", calls)
+	}
+	if len(progress.ImplementationRuns) != 1 || !progress.ImplementationRuns[0].Recorded {
+		t.Fatalf("implementation runs = %+v, want one recorded implementation result", progress.ImplementationRuns)
+	}
+	if len(progress.ImplementationRoleOutputs) != 1 || !progress.ImplementationRoleOutputs[0].Recorded {
+		t.Fatalf("implementation role outputs = %+v, want one recorded output", progress.ImplementationRoleOutputs)
+	}
+	if issueScanCompletionByStageForTest(progress.Completions, "implement_on_branch") == nil {
+		t.Fatalf("completions = %+v, want implement_on_branch auto-completion", progress.Completions)
+	}
+
+	status, err := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("implementation task status: %v", err)
+	}
+	if status != work.LegacyStatusCompleted {
+		t.Fatalf("implementation task status = %q, want completed", status)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks after implementation runner: %v", err)
+	}
+	implementStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "implement_on_branch"))
+	if !ok {
+		t.Fatalf("missing implement stage task")
+	}
+	completed, err := rt.issueScanStageTaskCompleted(implementStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted implement stage: %v", err)
+	}
+	if !completed {
+		t.Fatalf("implement_on_branch stage was not completed")
+	}
+
+	again, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("implementation runner calls after second progress = %d, want still 1", calls)
+	}
+	if len(again.ImplementationRuns) != 0 {
+		t.Fatalf("second implementation runs = %+v, want none after task completed", again.ImplementationRuns)
+	}
+}
+
+func TestProgressIssueScanLifecycleDoesNotRunImplementationRunnerBeforeDesign(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	rt.repoPath = currentHiveRepoPathForTest(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	calls := 0
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		calls++
+		return IssueScanImplementationRunnerResult{}, fmt.Errorf("implementation runner should not run before design is complete")
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("implementation runner calls = %d, want none before design completion", calls)
+	}
+	if len(progress.ImplementationRuns) != 0 {
+		t.Fatalf("implementation runs = %+v, want none before design completion", progress.ImplementationRuns)
+	}
+	if len(progress.Dispatch.DispatchedIssueScanRunIDs) != 1 || progress.Dispatch.DispatchedIssueScanRunIDs[0] != queued.RunID {
+		t.Fatalf("dispatch issue-scan run ids = %+v, want %s", progress.Dispatch.DispatchedIssueScanRunIDs, queued.RunID)
+	}
+}
+
+func TestConfiguredImplementationRunnerRejectsInvalidOperateResult(t *testing.T) {
+	rt, _, _, _, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		return IssueScanImplementationRunnerResult{
+			OperateResultBody: "branch: codex/run-issue-001\n\npkg/hive/example.go | 1 +",
+			CompletionSummary: "validation output: go test ./pkg/hive passed",
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "commit/head is required") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want invalid Operate result", err)
+	}
+	if len(progress.ImplementationRuns) != 0 {
+		t.Fatalf("implementation runs = %+v, want no recorded invalid result", progress.ImplementationRuns)
+	}
+	status, statusErr := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if statusErr != nil {
+		t.Fatalf("implementation task status: %v", statusErr)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("implementation task completed despite invalid Operate result")
+	}
+}
+
 func TestProgressIssueScanLifecycleRecordsReviewRoleOutputsAndCompletesStage(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
@@ -2379,11 +2523,16 @@ func TestProgressIssueScanLifecycleRunsConfiguredAdversarialReviewOnce(t *testin
 func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testing.T) {
 	rt, _, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	stageRoleCalls := 0
+	implementationCalls := 0
 	reviewCalls := 0
 	readyPRCalls := 0
 	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
 		stageRoleCalls++
 		return IssueScanStageRoleOutputRunnerResult{}, fmt.Errorf("post-event progress must not invoke configured stage role-output runner")
+	}
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		implementationCalls++
+		return IssueScanImplementationRunnerResult{}, fmt.Errorf("post-event progress must not invoke configured implementation runner")
 	}
 	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
 		reviewCalls++
@@ -2400,6 +2549,9 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 
 	if stageRoleCalls != 0 {
 		t.Fatalf("stage role-output runner calls = %d, want none from post-event progress", stageRoleCalls)
+	}
+	if implementationCalls != 0 {
+		t.Fatalf("implementation runner calls = %d, want none from post-event progress", implementationCalls)
 	}
 	if reviewCalls != 0 {
 		t.Fatalf("review runner calls = %d, want none from post-event progress", reviewCalls)
@@ -3544,9 +3696,10 @@ func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 	}
 }
 
-func issueScanCompletedImplementationFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
+func issueScanReadyImplementationTaskFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
 	t.Helper()
 	rt, writer := newRunLaunchDispatchRuntime(t)
+	rt.repoPath = currentHiveRepoPathForTest(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
 		OperatorID: IssueScanOperatorID("Michael Saucier"),
 		Issues: []GitHubIssueCandidate{{
@@ -3592,6 +3745,12 @@ func issueScanCompletedImplementationFixtureForTest(t *testing.T) (*Runtime, *op
 	if !ok {
 		t.Fatalf("missing implementation task in %+v", tasks)
 	}
+	return rt, writer, queued, orderID, implementationTask
+}
+
+func issueScanCompletedImplementationFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
+	t.Helper()
+	rt, writer, queued, orderID, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
 	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", issueScanOperateResultBodyForTest(), []types.EventID{implementationTask.ID}, writer.conv); err != nil {
 		t.Fatalf("AddArtifact initial Operate result: %v", err)
 	}
@@ -5015,6 +5174,15 @@ func issueScanOperateResultBodyForTestWith(base, head, branch, stat string) stri
 		"range: " + base + ".." + head + "\n" +
 		"branch: " + branch + "\n\n" +
 		stat + "\n"
+}
+
+func currentHiveRepoPathForTest(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel: %v", err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func appendIssueScanCodeReviewForTest(rt *Runtime, writer *operatorRunLaunchWriter, taskID types.EventID, verdict, summary string, issues []string) error {
