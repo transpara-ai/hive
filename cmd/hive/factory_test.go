@@ -733,7 +733,7 @@ func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) 
 				Number: 192,
 				Title:  "Teach Civilization to scan Transpara-AI repos",
 				URL:    "https://github.com/transpara-ai/hive/issues/192",
-				Labels: []string{"civilization"},
+				Labels: []string{"civilization", "cc:pr-ready"},
 			}},
 		},
 	}
@@ -788,6 +788,7 @@ func TestRunIssueScanScannerCycleQueuedRunCanBeRedrivenByRuntimeProgress(t *test
 				Number: 193,
 				Title:  "Redrive queued issue-scan run",
 				URL:    "https://github.com/transpara-ai/hive/issues/193",
+				Labels: []string{"cc:pr-ready"},
 			}},
 		},
 	}
@@ -860,6 +861,7 @@ func TestRunIssueScanScannerCycleSkipsExistingSourceWhenIntakeMissing(t *testing
 				Number: 172,
 				Title:  "Gate S closeout PR #171 approval artifact residual",
 				URL:    "https://github.com/transpara-ai/docs/issues/172",
+				Labels: []string{"cc:pr-ready"},
 			}},
 		},
 	}
@@ -880,6 +882,166 @@ func TestRunIssueScanScannerCycleSkipsExistingSourceWhenIntakeMissing(t *testing
 	}
 }
 
+func TestRunIssueScanScannerCycleSkipsNonPRReadyIssues(t *testing.T) {
+	ctx := context.Background()
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 204,
+				Title:  "Human-required value-allocation surface candidate",
+				URL:    "https://github.com/transpara-ai/hive/issues/204",
+				Labels: []string{"cc:intake", "cc:needs-human-scope", "cc:protected-action"},
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("runIssueScanScannerCycle: %v", err)
+	}
+	if result.Queued {
+		t.Fatalf("cycle queued non-PR-ready issue: %+v", result)
+	}
+	if result.ScannedIssues != 1 || result.SkippedNotPRReady != 1 {
+		t.Fatalf("cycle = %+v, want one scanned non-PR-ready skip", result)
+	}
+}
+
+func TestRunIssueScanScannerCycleQueuesOnlyPRReadyIssue(t *testing.T) {
+	ctx := context.Background()
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {
+				{
+					Repo:   "transpara-ai/hive",
+					Number: 204,
+					Title:  "Human-required value-allocation surface candidate",
+					URL:    "https://github.com/transpara-ai/hive/issues/204",
+					Labels: []string{"cc:intake", "cc:needs-human-scope", "cc:protected-action"},
+				},
+				{
+					Repo:   "transpara-ai/hive",
+					Number: 205,
+					Title:  "PR-ready issue-scan hardening",
+					URL:    "https://github.com/transpara-ai/hive/issues/205",
+					Labels: []string{"cc:intake", "cc:pr-ready"},
+				},
+			},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("runIssueScanScannerCycle: %v", err)
+	}
+	if !result.Queued || result.QueuedIssue.Number != 205 {
+		t.Fatalf("cycle = %+v, want queued PR-ready issue 205", result)
+	}
+	if result.SkippedNotPRReady != 1 {
+		t.Fatalf("skipped non-PR-ready = %d, want 1", result.SkippedNotPRReady)
+	}
+}
+
+func TestIssueScanCandidatePRReadyRequiresPositiveReadyLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   bool
+	}{
+		{name: "ready", labels: []string{"cc:intake", "cc:pr-ready"}, want: true},
+		{name: "missing ready", labels: []string{"cc:intake"}, want: false},
+		{name: "deferred wins", labels: []string{"cc:pr-ready", "cc:pr-deferred"}, want: false},
+		{name: "needs human scope wins", labels: []string{"cc:pr-ready", "cc:needs-human-scope"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := issueScanCandidatePRReady(hive.GitHubIssueCandidate{Labels: tt.labels})
+			if got != tt.want {
+				t.Fatalf("issueScanCandidatePRReady(%v) = %v, want %v", tt.labels, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
+	raw := []byte(`[
+		{
+			"number": 205,
+			"title": "PR-ready issue-scan hardening",
+			"url": "https://github.com/transpara-ai/hive/issues/205",
+			"body": "ready to implement",
+			"labels": [
+				{"name": "cc:intake"},
+				{"name": "cc:pr-ready"}
+			]
+		}
+	]`)
+
+	issues, err := parseGitHubIssueCandidates("transpara-ai/hive", raw)
+	if err != nil {
+		t.Fatalf("parseGitHubIssueCandidates: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues length = %d, want 1", len(issues))
+	}
+	got := strings.Join(issues[0].Labels, ",")
+	if got != "cc:intake,cc:pr-ready" {
+		t.Fatalf("labels = %q, want cc:intake,cc:pr-ready", got)
+	}
+	if !issueScanCandidatePRReady(issues[0]) {
+		t.Fatalf("parsed issue should be PR-ready: %+v", issues[0])
+	}
+}
+
+func TestFactoryScanIssuesRejectsNonPRReadyGitHubIssueBeforeFactoryOpen(t *testing.T) {
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' '[{"number":204,"title":"Human-required value-allocation surface candidate","url":"https://github.com/transpara-ai/hive/issues/204","body":"needs human scope","labels":[{"name":"cc:intake"},{"name":"cc:needs-human-scope"},{"name":"cc:protected-action"}]}]'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael", "--repo", "transpara-ai/hive", "--label", "cc:intake", "--limit", "1"})
+	if err == nil || !strings.Contains(err.Error(), "no PR-ready GitHub issues found") {
+		t.Fatalf("expected no PR-ready issue error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "skipped 1 non-PR-ready") {
+		t.Fatalf("expected skipped count in error, got %v", err)
+	}
+}
+
 func TestRunIssueScanScannerLoopStopsOnCancelAndHonorsMaxNewRunCap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
@@ -897,6 +1059,7 @@ func TestRunIssueScanScannerLoopStopsOnCancelAndHonorsMaxNewRunCap(t *testing.T)
 				Number: 194,
 				Title:  "Loop scanner cap",
 				URL:    "https://github.com/transpara-ai/hive/issues/194",
+				Labels: []string{"cc:pr-ready"},
 			}},
 		},
 	}
