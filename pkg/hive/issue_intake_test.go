@@ -85,10 +85,10 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.4" {
 		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
 	}
-	if brief.SelectedIssue.Rank != 1 || brief.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || brief.SelectionPolicy.SelectedRank != 1 || brief.SelectionPolicy.CandidateCount != 1 {
+	if brief.SelectedIssue.Rank != 1 || brief.SelectionPolicy.PolicyID != "deterministic_actionability_rank_v0.2" || brief.SelectionPolicy.SelectedRank != 1 || brief.SelectionPolicy.CandidateCount != 1 {
 		t.Fatalf("selection policy = %+v selected=%+v", brief.SelectionPolicy, brief.SelectedIssue)
 	}
-	if !containsIssueScanValue(brief.SelectionPolicy.RankingInputs, "scanner_return_order") || !strings.Contains(brief.SelectionPolicy.Rationale, "civic debate") {
+	if !containsIssueScanValue(brief.SelectionPolicy.RankingInputs, "actionability_keyword_score") || !strings.Contains(brief.SelectionPolicy.Rationale, "actionability signals") {
 		t.Fatalf("selection policy rationale/inputs = %+v", brief.SelectionPolicy)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
@@ -602,7 +602,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if artifactBrief.Kind != issueScanBriefKind || artifactBrief.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("artifact brief identity = %+v", artifactBrief)
 	}
-	if artifactBrief.SelectionPolicy.PolicyID != "scanner_order_first_candidate_v0.1" || artifactBrief.SelectionPolicy.SelectedRank != 1 {
+	if artifactBrief.SelectionPolicy.PolicyID != "deterministic_actionability_rank_v0.2" || artifactBrief.SelectionPolicy.SelectedRank != 1 {
 		t.Fatalf("artifact selection policy = %+v", artifactBrief.SelectionPolicy)
 	}
 	if !containsIssueScanValue(artifactBrief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
@@ -671,6 +671,73 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if causes := storedArtifact.Causes(); len(causes) != 2 || causes[0] != request.ID() || causes[1] != task.ID {
 		t.Fatalf("artifact causes = %+v, want request %s and task %s", causes, request.ID(), task.ID)
+	}
+}
+
+func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	req := IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{
+			{
+				Repo:   "transpara-ai/site",
+				Number: 12,
+				Title:  "General discussion cleanup",
+				URL:    "https://github.com/transpara-ai/site/issues/12",
+				Labels: []string{"discussion"},
+			},
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 321,
+				Title:  "Teach the Civilization to scan Transpara-AI repos",
+				URL:    "https://github.com/transpara-ai/hive/issues/321",
+				Body:   "Create a FactoryOrder, run adversarial review, drive zero blockers, and surface a ready-for-Human PR.",
+				Labels: []string{"civilization", "autonomy"},
+			},
+		},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}
+
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, req, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if queued.Selected.Repo != "transpara-ai/hive" || queued.Selected.Number != 321 {
+		t.Fatalf("selected issue = %+v, want ranked hive#321 over first scanner result", queued.Selected)
+	}
+	if got := strings.Join(queued.TargetRepos, ","); got != "transpara-ai/hive" {
+		t.Fatalf("target repos = %q, want selected repo only", got)
+	}
+
+	requestEvents := requireRunLaunchEvents(t, rt.store, EventTypeFactoryRunRequested, 1)
+	content := requestEvents[0].Content().(FactoryRunRequestedContent)
+	var brief struct {
+		SelectedIssue struct {
+			Rank   int    `json:"rank"`
+			Repo   string `json:"repo"`
+			Number int    `json:"number"`
+		} `json:"selected_issue"`
+		CandidateIssues []struct {
+			Rank   int    `json:"rank"`
+			Repo   string `json:"repo"`
+			Number int    `json:"number"`
+		} `json:"candidate_issues"`
+		SelectionPolicy struct {
+			PolicyID      string   `json:"policy_id"`
+			RankingInputs []string `json:"ranking_inputs"`
+		} `json:"selection_policy"`
+	}
+	if err := json.Unmarshal(content.Brief, &brief); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	if brief.SelectedIssue.Rank != 1 || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
+		t.Fatalf("brief selected issue = %+v", brief.SelectedIssue)
+	}
+	if len(brief.CandidateIssues) != 2 || brief.CandidateIssues[0].Number != 321 || brief.CandidateIssues[1].Number != 12 {
+		t.Fatalf("candidate issue ranks = %+v, want actionable issue rank 1", brief.CandidateIssues)
+	}
+	if brief.SelectionPolicy.PolicyID != "deterministic_actionability_rank_v0.2" || !containsIssueScanValue(brief.SelectionPolicy.RankingInputs, "scanner_return_order_tie_breaker") {
+		t.Fatalf("selection policy = %+v", brief.SelectionPolicy)
 	}
 }
 
