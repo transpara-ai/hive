@@ -110,65 +110,79 @@ func cmdFactoryScanIssues(args []string) error {
 
 	fmt.Printf("queued issue-scan run %s for %s#%d (first event %s)\n", queued.RunID, queued.Selected.Repo, queued.Selected.Number, queued.FirstEventID)
 	if *dispatch {
-		result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+		progress, err := rt.ProgressIssueScanRunLifecycle(queued.RunID)
 		if err != nil {
-			return fmt.Errorf("dispatch queued run launches: %w", err)
+			return fmt.Errorf("progress issue-scan lifecycle: %w", err)
 		}
-		fmt.Printf("dispatch scanned=%d dispatched=%d already_dispatched=%d failed=%d\n", result.Scanned, result.Dispatched, result.AlreadyDispatched, result.Failed)
-		if len(result.DispatchedOrderIDs) > 0 {
-			fmt.Printf("factory order(s): %s\n", strings.Join(result.DispatchedOrderIDs, ", "))
-		}
-		advances, err := rt.StartDispatchedIssueScanLifecycleStages(result)
-		if err != nil {
-			return fmt.Errorf("start issue-scan lifecycle: %w", err)
-		}
-		for _, advance := range advances {
-			if advance.Released {
-				fmt.Printf("issue-scan stage started: %s task %s\n", advance.StageID, advance.StageTaskID)
-			} else if advance.AlreadyReady {
-				fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
-			}
-		}
-		researchOutputs, err := rt.RecordQueuedIssueScanResearchRoleOutputs(result)
-		if err != nil {
-			return fmt.Errorf("record issue-scan research role outputs: %w", err)
-		}
-		if len(researchOutputs) > 0 {
-			fmt.Printf("issue-scan research role outputs recorded: %d\n", len(researchOutputs))
-		}
-		completions, err := rt.CompleteReadyIssueScanLifecycleStages(result)
-		if err != nil {
-			return fmt.Errorf("auto-complete ready issue-scan lifecycle stages: %w", err)
-		}
-		debateOutputs, err := rt.RecordCompletedIssueScanDebateRoleOutputs(result)
-		if err != nil {
-			return fmt.Errorf("record issue-scan debate role outputs: %w", err)
-		}
-		if len(debateOutputs) > 0 {
-			fmt.Printf("issue-scan debate role outputs recorded: %d\n", len(debateOutputs))
-		}
-		moreCompletions, err := rt.CompleteReadyIssueScanLifecycleStages(result)
-		if err != nil {
-			return fmt.Errorf("auto-complete debated issue-scan lifecycle stages: %w", err)
-		}
-		completions = append(completions, moreCompletions...)
-		designOutputs, err := rt.RecordCompletedIssueScanDesignRoleOutputs(result)
-		if err != nil {
-			return fmt.Errorf("record issue-scan design role outputs: %w", err)
-		}
-		if len(designOutputs) > 0 {
-			fmt.Printf("issue-scan design role outputs recorded: %d\n", len(designOutputs))
-		}
-		moreCompletions, err = rt.CompleteReadyIssueScanLifecycleStages(result)
-		if err != nil {
-			return fmt.Errorf("auto-complete designed issue-scan lifecycle stages: %w", err)
-		}
-		completions = append(completions, moreCompletions...)
-		for _, completion := range completions {
-			fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
-		}
+		printIssueScanLifecycleProgress(progress)
 	}
 	return nil
+}
+
+func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
+	dispatch := progress.Dispatch
+	fmt.Printf("dispatch scanned=%d dispatched=%d already_dispatched=%d failed=%d\n", dispatch.Scanned, dispatch.Dispatched, dispatch.AlreadyDispatched, dispatch.Failed)
+	if len(dispatch.DispatchedOrderIDs) > 0 {
+		fmt.Printf("factory order(s): %s\n", strings.Join(dispatch.DispatchedOrderIDs, ", "))
+	}
+	if len(dispatch.AlreadyDispatchedIDs) > 0 {
+		fmt.Printf("already-dispatched task(s): %s\n", strings.Join(dispatch.AlreadyDispatchedIDs, ", "))
+	}
+	for _, advance := range progress.Advances {
+		if advance.Released {
+			fmt.Printf("issue-scan stage started: %s task %s\n", advance.StageID, advance.StageTaskID)
+		} else if advance.AlreadyReady {
+			fmt.Printf("issue-scan stage already ready: %s task %s\n", advance.StageID, advance.StageTaskID)
+		}
+	}
+	printIssueScanRoleOutputCount("research", progress.ResearchRoleOutputs)
+	printIssueScanRoleOutputCount("debate", progress.DebateRoleOutputs)
+	printIssueScanRoleOutputCount("design", progress.DesignRoleOutputs)
+	if created := countCreatedIssueScanImplementationTasksForCLI(progress.ImplementationTasks); created > 0 {
+		fmt.Printf("issue-scan implementation task created: %d\n", created)
+	}
+	if existing := countExistingIssueScanImplementationTasksForCLI(progress.ImplementationTasks); existing > 0 {
+		fmt.Printf("issue-scan implementation task already exists: %d\n", existing)
+	}
+	printIssueScanRoleOutputCount("implementation", progress.ImplementationRoleOutputs)
+	printIssueScanRoleOutputCount("review", progress.ReviewRoleOutputs)
+	printIssueScanRoleOutputCount("blocker", progress.BlockerRoleOutputs)
+	printIssueScanRoleOutputCount("ready-PR", progress.ReadyRoleOutputs)
+	for _, completion := range progress.Completions {
+		fmt.Printf("issue-scan stage auto-completed: %s task %s evidence %s\n", completion.StageID, completion.StageTaskID, completion.EvidenceArtifactID)
+	}
+}
+
+func printIssueScanRoleOutputCount(stage string, outputs []hive.IssueScanStageRoleOutputResult) {
+	recorded := 0
+	for _, output := range outputs {
+		if output.Recorded {
+			recorded++
+		}
+	}
+	if recorded > 0 {
+		fmt.Printf("issue-scan %s role outputs recorded: %d\n", stage, recorded)
+	}
+}
+
+func countCreatedIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImplementationTaskResult) int {
+	count := 0
+	for _, task := range tasks {
+		if task.Created {
+			count++
+		}
+	}
+	return count
+}
+
+func countExistingIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImplementationTaskResult) int {
+	count := 0
+	for _, task := range tasks {
+		if task.AlreadyExists {
+			count++
+		}
+	}
+	return count
 }
 
 func resolveIssueScanRepos(values []string, useRegistry bool, registryPath string) ([]string, error) {

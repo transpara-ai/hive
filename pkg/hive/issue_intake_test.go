@@ -763,9 +763,9 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
 	}
 
-	progress, err := rt.progressIssueScanLifecycle()
+	progress, err := rt.ProgressIssueScanRunLifecycle(queued.RunID)
 	if err != nil {
-		t.Fatalf("progressIssueScanLifecycle: %v", err)
+		t.Fatalf("ProgressIssueScanRunLifecycle: %v", err)
 	}
 	if progress.Dispatch.Dispatched != 1 {
 		t.Fatalf("dispatch = %+v, want one dispatched issue-scan run", progress.Dispatch)
