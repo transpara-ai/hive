@@ -43,6 +43,13 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	}
 }
 
+func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
 func TestResolveIssueScanReposLoadsTransparaAIReposFromRegistry(t *testing.T) {
 	dir := t.TempDir()
 	registryPath := filepath.Join(dir, "repos.json")

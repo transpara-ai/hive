@@ -1827,6 +1827,103 @@ func TestProgressIssueScanLifecycleRecordsReviewRoleOutputsAndCompletesStage(t *
 	}
 }
 
+func TestRecordIssueScanAdversarialReviewReceiptEmitsExactHeadReview(t *testing.T) {
+	rt, _, queued, orderID, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	result, err := rt.RecordIssueScanAdversarialReview(queued.RunID, IssueScanAdversarialReviewReceipt{
+		Repository:      "transpara-ai/hive",
+		ReviewRef:       "artifact://adversarial-review/run-001/claude.result.md",
+		ReviewedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Verdict:         "request_changes",
+		Summary:         "exact-head adversarial review found one blocker",
+		Issues:          []string{"missing regression test"},
+		Confidence:      0.93,
+		Tool:            "claude",
+	})
+	if err != nil {
+		t.Fatalf("RecordIssueScanAdversarialReview: %v", err)
+	}
+	if !result.Recorded {
+		t.Fatalf("result = %+v, want newly recorded receipt/review", result)
+	}
+	if result.FactoryOrderID != orderID {
+		t.Fatalf("FactoryOrderID = %q, want %q", result.FactoryOrderID, orderID)
+	}
+	if result.ImplementationTaskID != implementationTask.ID {
+		t.Fatalf("ImplementationTaskID = %s, want %s", result.ImplementationTaskID, implementationTask.ID)
+	}
+	if result.ReceiptArtifactID == (types.EventID{}) || result.ReviewEventID == (types.EventID{}) {
+		t.Fatalf("missing receipt or review event ids: %+v", result)
+	}
+	reviewEventID, review, _, ok, err := rt.latestIssueScanCodeReviewForTask(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("latestIssueScanCodeReviewForTask: %v", err)
+	}
+	if !ok {
+		t.Fatalf("missing code.review.submitted event")
+	}
+	if reviewEventID != result.ReviewEventID {
+		t.Fatalf("review event = %s, want %s", reviewEventID, result.ReviewEventID)
+	}
+	if review.Verdict != "request_changes" || review.Confidence != 0.93 {
+		t.Fatalf("review content = %+v", review)
+	}
+	if !strings.Contains(review.Summary, result.ReceiptArtifactID.Value()) {
+		t.Fatalf("review summary does not reference receipt %s: %s", result.ReceiptArtifactID, review.Summary)
+	}
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after review receipt: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs) != 2 {
+		t.Fatalf("review role outputs = %+v, want reviewer and guardian", progress.ReviewRoleOutputs)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks after review progress: %v", err)
+	}
+	reviewStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "run_adversarial_review"))
+	if !ok {
+		t.Fatalf("missing review stage task in %+v", tasks)
+	}
+	reviewCompleted, err := rt.issueScanStageTaskCompleted(reviewStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted review stage: %v", err)
+	}
+	if !reviewCompleted {
+		t.Fatalf("run_adversarial_review stage was not completed")
+	}
+}
+
+func TestRecordIssueScanAdversarialReviewReceiptRejectsHeadMismatch(t *testing.T) {
+	rt, _, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	_, err := rt.RecordIssueScanAdversarialReview(queued.RunID, IssueScanAdversarialReviewReceipt{
+		Repository:      "transpara-ai/hive",
+		ReviewRef:       "artifact://adversarial-review/run-001/claude.result.md",
+		ReviewedHeadSHA: "cccccccccccccccccccccccccccccccccccccccc",
+		Verdict:         "approve",
+		Summary:         "reviewed a different head",
+		Issues:          []string{},
+		Confidence:      0.93,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match implementation commit") {
+		t.Fatalf("expected head mismatch error, got %v", err)
+	}
+	reviews, err := rt.issueScanCodeReviewsForTask(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanCodeReviewsForTask: %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("reviews = %+v, want none after rejected receipt", reviews)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts implementation task: %v", err)
+	}
+	if artifact := issueScanArtifactByLabel(artifacts, IssueScanAdversarialReviewReceiptArtifactLabel); artifact != nil {
+		t.Fatalf("unexpected adversarial review receipt artifact: %+v", artifact)
+	}
+}
+
 func TestProgressIssueScanLifecycleRecordsBlockerRoleOutputsAndCompletesStage(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
@@ -2201,7 +2298,7 @@ func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 	}
 }
 
-func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, string, string, work.Task, work.Task) {
+func issueScanCompletedImplementationFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
 	t.Helper()
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
@@ -2258,6 +2355,12 @@ func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaun
 	if _, err := rt.progressIssueScanLifecycle(); err != nil {
 		t.Fatalf("progressIssueScanLifecycle complete implementation stage: %v", err)
 	}
+	return rt, writer, queued, orderID, implementationTask
+}
+
+func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, string, string, work.Task, work.Task) {
+	t.Helper()
+	rt, writer, queued, orderID, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "request_changes", "exact-head review found blockers", []string{"missing regression test"}); err != nil {
 		t.Fatalf("append request_changes review: %v", err)
 	}
@@ -2288,7 +2391,7 @@ func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaun
 	if _, err := rt.progressIssueScanLifecycle(); err != nil {
 		t.Fatalf("progressIssueScanLifecycle after approving rerun: %v", err)
 	}
-	tasks, err = rt.tasks.List(50)
+	tasks, err := rt.tasks.List(50)
 	if err != nil {
 		t.Fatalf("List tasks after blocker progress: %v", err)
 	}
