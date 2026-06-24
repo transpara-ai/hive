@@ -722,6 +722,245 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionMarksQueuedLifecycleStageDeclarations(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	sourceEventID := newTestEventID(t)
+	briefEventID := newTestEventID(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 322,
+		Title:  "Project declared stage evidence",
+		URL:    "https://github.com/transpara-ai/hive/issues/322",
+		Body:   "The Civilization should show declared lifecycle stage evidence without claiming runtime completion.",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	request := FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_stage_declared_001",
+		IntakeID:   "intake_issue_scan_stage_declared_001",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#322",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget: RunLaunchBudget{
+			MaxIterations: 12,
+			MaxCostUSD:    25,
+		},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: sourceEventID,
+		BriefEventID:  briefEventID,
+		Brief:         brief,
+	}
+	appendEvent(EventTypeFactoryRunRequested, request)
+	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:          "Implement declared lifecycle stage projection",
+		Description:    "FactoryOrder lifecycle stage artifact should enrich the queued run view.",
+		CreatedBy:      actorID,
+		FactoryOrderID: "fo_run_issue_scan_stage_declared_001",
+		RiskClass:      "high",
+		ExpectedOutputs: []string{
+			"queued lifecycle stage declaration status",
+		},
+	})
+	stageArtifacts, err := issueScanLifecycleStageArtifacts(request)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageArtifacts: %v", err)
+	}
+	stageArtifactByLabel := func(artifacts []issueScanDispatchArtifact, label string) issueScanDispatchArtifact {
+		t.Helper()
+		for _, artifact := range artifacts {
+			if artifact.Label == label {
+				return artifact
+			}
+		}
+		t.Fatalf("missing stage artifact %q in %+v", label, artifacts)
+		return issueScanDispatchArtifact{}
+	}
+	researchArtifact := stageArtifactByLabel(stageArtifacts, IssueScanLifecycleStageArtifactLabel("research_issue_and_repo_context"))
+	researchArtifactEvent := appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     researchArtifact.Label,
+		MediaType: researchArtifact.MediaType,
+		Body:      researchArtifact.Body,
+		CreatedBy: actorID,
+	})
+	otherRunRequest := request
+	otherRunRequest.RunID = "run_issue_scan_other_001"
+	otherStageArtifacts, err := issueScanLifecycleStageArtifacts(otherRunRequest)
+	if err != nil {
+		t.Fatalf("issueScanLifecycleStageArtifacts other run: %v", err)
+	}
+	otherImplementArtifact := stageArtifactByLabel(otherStageArtifacts, IssueScanLifecycleStageArtifactLabel("implement_on_branch"))
+	appendEvent(work.EventTypeTaskArtifact, work.TaskArtifactContent{
+		TaskID:    taskEvent.ID(),
+		Label:     otherImplementArtifact.Label,
+		MediaType: otherImplementArtifact.MediaType,
+		Body:      otherImplementArtifact.Body,
+		CreatedBy: actorID,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	queued := projection.QueuedRunRequest
+	if queued == nil {
+		t.Fatalf("queued run request was not projected: %+v", projection)
+	}
+	researchStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "research_issue_and_repo_context")
+	if researchStage == nil || researchStage.EvidenceStatus != civilizationAssemblyQueuedStageDeclaredStatus {
+		t.Fatalf("research stage = %+v, want declared pending runtime evidence", researchStage)
+	}
+	implementStage := queuedRunLifecycleStageByID(queued.DevelopmentLifecycle, "implement_on_branch")
+	if implementStage == nil || implementStage.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("implement stage = %+v, want unrelated run artifact ignored", implementStage)
+	}
+	strategistStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "research_issue_and_repo_context", "strategist")
+	if strategistStep == nil || strategistStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepDeclaredStatus {
+		t.Fatalf("strategist step = %+v, want declared pending runtime evidence", strategistStep)
+	}
+	implementStep := queuedRunAgentPlanStepByRole(queued.AgentExecutionPlan, "implement_on_branch", "implementer")
+	if implementStep == nil || implementStep.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("implementer step = %+v, want unrelated run artifact ignored", implementStep)
+	}
+	if civilizationProjectionArtifactEvidenceByID(projection.WorkEvidenceSummary.Artifacts, researchArtifactEvent.ID().Value()) == nil {
+		t.Fatalf("artifact evidence = %+v, want research stage artifact %s", projection.WorkEvidenceSummary.Artifacts, researchArtifactEvent.ID().Value())
+	}
+	operatorProjection := BuildOperatorProjection(s, 50)
+	operatorResearchStage := queuedRunLifecycleStageByID(operatorProjection.RuntimeEvidence.LastQueuedRunRequest.DevelopmentLifecycle, "research_issue_and_repo_context")
+	if operatorResearchStage == nil || operatorResearchStage.EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("operator projection research stage = %+v, want raw queued evidence unchanged", operatorResearchStage)
+	}
+}
+
+func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeStatuses(t *testing.T) {
+	queued := &OperatorQueuedRunRequestEvidence{
+		RunID: "run_status_preservation",
+		DevelopmentLifecycle: []OperatorQueuedRunLifecycleStage{
+			{ID: "runtime_completed_stage", EvidenceStatus: "runtime_completed"},
+			{ID: "declared_stage", EvidenceStatus: "expected_not_observed"},
+		},
+		AgentExecutionPlan: []OperatorQueuedRunAgentPlanStep{
+			{StageID: "runtime_completed_stage", Role: "guardian", EvidenceStatus: "runtime_completed"},
+			{StageID: "declared_stage", Role: "implementer", EvidenceStatus: "expected_not_observed"},
+		},
+	}
+
+	out := civilizationAssemblyQueuedRunRequestWithStageEvidence(queued, []civilizationAssemblyStageArtifactRef{
+		{RunID: "run_status_preservation", StageID: "runtime_completed_stage", EventRef: "artifact_runtime"},
+		{RunID: "run_status_preservation", StageID: "declared_stage", EventRef: "artifact_declared"},
+	})
+	if out == nil {
+		t.Fatal("queued run with stage evidence returned nil")
+	}
+	runtimeStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "runtime_completed_stage")
+	if runtimeStage == nil || runtimeStage.EvidenceStatus != "runtime_completed" {
+		t.Fatalf("runtime stage = %+v, want runtime_completed preserved", runtimeStage)
+	}
+	declaredStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "declared_stage")
+	if declaredStage == nil || declaredStage.EvidenceStatus != civilizationAssemblyQueuedStageDeclaredStatus {
+		t.Fatalf("declared stage = %+v, want declared pending runtime evidence", declaredStage)
+	}
+	runtimeStep := queuedRunAgentPlanStepByRole(out.AgentExecutionPlan, "runtime_completed_stage", "guardian")
+	if runtimeStep == nil || runtimeStep.EvidenceStatus != "runtime_completed" {
+		t.Fatalf("runtime step = %+v, want runtime_completed preserved", runtimeStep)
+	}
+	declaredStep := queuedRunAgentPlanStepByRole(out.AgentExecutionPlan, "declared_stage", "implementer")
+	if declaredStep == nil || declaredStep.EvidenceStatus != civilizationAssemblyQueuedPlanStepDeclaredStatus {
+		t.Fatalf("declared step = %+v, want declared pending runtime evidence", declaredStep)
+	}
+	if queued.DevelopmentLifecycle[1].EvidenceStatus != "expected_not_observed" || queued.AgentExecutionPlan[1].EvidenceStatus != "expected_not_observed" {
+		t.Fatalf("source queued evidence mutated: %+v %+v", queued.DevelopmentLifecycle, queued.AgentExecutionPlan)
+	}
+}
+
+func TestCivilizationAssemblyIssueScanStageArtifactRefRejectsMalformedBodies(t *testing.T) {
+	label := IssueScanLifecycleStageArtifactLabel("research_issue_and_repo_context")
+	tests := []struct {
+		name  string
+		label string
+		body  string
+		want  string
+	}{
+		{
+			name:  "empty body",
+			label: label,
+			body:  "",
+			want:  "empty artifact body",
+		},
+		{
+			name:  "invalid json",
+			label: label,
+			body:  `{`,
+			want:  "decode artifact body",
+		},
+		{
+			name:  "kind mismatch",
+			label: label,
+			body:  `{"kind":"other","run_id":"run_issue","stage":{"id":"research_issue_and_repo_context"}}`,
+			want:  "does not match",
+		},
+		{
+			name:  "missing run",
+			label: label,
+			body:  `{"kind":"issue_scan_lifecycle_stage","stage":{"id":"research_issue_and_repo_context"}}`,
+			want:  "missing run_id",
+		},
+		{
+			name:  "missing stage",
+			label: label,
+			body:  `{"kind":"issue_scan_lifecycle_stage","run_id":"run_issue","stage":{}}`,
+			want:  "missing stage.id",
+		},
+		{
+			name:  "stage mismatch",
+			label: IssueScanLifecycleStageArtifactLabel("implement_on_branch"),
+			body:  `{"kind":"issue_scan_lifecycle_stage","run_id":"run_issue","stage":{"id":"research_issue_and_repo_context"}}`,
+			want:  "does not match body stage",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok, err := civilizationAssemblyIssueScanStageArtifactRef("artifact_event", tt.label, tt.body)
+			if ok {
+				t.Fatalf("artifact ref ok = true, want false")
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("artifact ref error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompactCivilizationAssemblyStageArtifactRefsDedupesAndSorts(t *testing.T) {
+	refs := compactCivilizationAssemblyStageArtifactRefs([]civilizationAssemblyStageArtifactRef{
+		{RunID: "run_b", StageID: "stage_b", EventRef: "event_002"},
+		{RunID: "run_a", StageID: "stage_b", EventRef: "event_003"},
+		{RunID: "run_a", StageID: "stage_a", EventRef: "event_001"},
+		{RunID: "run_a", StageID: "stage_a", EventRef: "event_001"},
+		{RunID: "", StageID: "stage_a", EventRef: "event_ignored"},
+	})
+	if len(refs) != 3 {
+		t.Fatalf("stage refs = %+v, want 3 compact refs", refs)
+	}
+	want := []civilizationAssemblyStageArtifactRef{
+		{RunID: "run_a", StageID: "stage_a", EventRef: "event_001"},
+		{RunID: "run_a", StageID: "stage_b", EventRef: "event_003"},
+		{RunID: "run_b", StageID: "stage_b", EventRef: "event_002"},
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("stage ref[%d] = %+v, want %+v; all refs=%+v", i, refs[i], want[i], refs)
+		}
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionDistinguishesFactoryOrderQueryFailure(t *testing.T) {
 	s, _, _ := newOperatorProjectionStore(t)
 	projection := BuildCivilizationAssemblyProjection(factoryOrderReadFailureStore{Store: s}, 50)

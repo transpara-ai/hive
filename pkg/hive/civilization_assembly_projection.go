@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.1.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.2.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
@@ -21,6 +22,10 @@ const (
 	civilizationAssemblyFieldUnavailable  = "unavailable"
 	civilizationAssemblyReadOnlyRoutePath = "GET /api/hive/civilization/assembly-projection"
 	civilizationAssemblyWorkTaskRef       = "event_type:work.task.created field:FactoryOrderID"
+
+	civilizationAssemblyQueuedStageDeclaredStatus    = "declared_pending_runtime_evidence"
+	civilizationAssemblyQueuedPlanStepDeclaredStatus = "stage_declared_pending_runtime_evidence"
+	civilizationAssemblyIssueScanStageArtifactKind   = "issue_scan_lifecycle_stage"
 )
 
 // CivilizationAssemblyProjection is Hive's read-only Site-facing Civilization
@@ -199,6 +204,7 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	TaskRefs                    []string
 	ArtifactRefs                []string
 	Artifacts                   []CivilizationAssemblyArtifactEvidence
+	StageArtifactRefs           []civilizationAssemblyStageArtifactRef
 	TestRunRefs                 []string
 	GateResultRefs              []string
 	SourceRefs                  []string
@@ -208,9 +214,16 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 }
 
 type civilizationAssemblyTaskArtifactEvidence struct {
-	ArtifactRefs []string
-	Artifacts    []CivilizationAssemblyArtifactEvidence
-	SourceRefs   []string
+	ArtifactRefs      []string
+	Artifacts         []CivilizationAssemblyArtifactEvidence
+	StageArtifactRefs []civilizationAssemblyStageArtifactRef
+	SourceRefs        []string
+}
+
+type civilizationAssemblyStageArtifactRef struct {
+	RunID    string
+	StageID  string
+	EventRef string
 }
 
 type civilizationAssemblyTaskLifecycleEvidence struct {
@@ -248,7 +261,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		AgentLifecycleSummary:              civilizationAssemblyLifecycle(operatorProjection),
 		FactoryOrderSummary:                factoryOrders,
 		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection, factoryOrders, factoryOrderWorkEvidence),
-		QueuedRunRequest:                   operatorProjection.RuntimeEvidence.LastQueuedRunRequest,
+		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs),
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
@@ -551,6 +564,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		if artifactEvidence, ok := artifactByTask[ev.ID()]; ok {
 			workEvidence.ArtifactRefs = append(workEvidence.ArtifactRefs, artifactEvidence.ArtifactRefs...)
 			workEvidence.Artifacts = append(workEvidence.Artifacts, artifactEvidence.Artifacts...)
+			workEvidence.StageArtifactRefs = append(workEvidence.StageArtifactRefs, artifactEvidence.StageArtifactRefs...)
 			workEvidence.SourceRefs = append(workEvidence.SourceRefs, artifactEvidence.SourceRefs...)
 		}
 		if lifecycleEvidence, ok := lifecycleByTask[ev.ID()]; ok {
@@ -572,6 +586,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	workEvidence.TaskRefs = compactStrings(workEvidence.TaskRefs)
 	workEvidence.ArtifactRefs = compactStrings(workEvidence.ArtifactRefs)
 	workEvidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(workEvidence.Artifacts)
+	workEvidence.StageArtifactRefs = compactCivilizationAssemblyStageArtifactRefs(workEvidence.StageArtifactRefs)
 	workEvidence.TestRunRefs = compactStrings(workEvidence.TestRunRefs)
 	workEvidence.GateResultRefs = compactStrings(workEvidence.GateResultRefs)
 	workEvidence.SourceRefs = compactStrings(workEvidence.SourceRefs)
@@ -615,24 +630,81 @@ func civilizationAssemblyWorkTaskArtifactEvidence(s store.Store, limit int) (map
 			continue
 		}
 		evidence := byTask[content.TaskID]
+		label := strings.TrimSpace(content.Label)
 		evidence.ArtifactRefs = append(evidence.ArtifactRefs, ev.ID().Value())
 		evidence.Artifacts = append(evidence.Artifacts, CivilizationAssemblyArtifactEvidence{
 			ID:         ev.ID().Value(),
 			TaskRef:    content.TaskID.Value(),
-			Label:      strings.TrimSpace(content.Label),
+			Label:      label,
 			MediaType:  strings.TrimSpace(content.MediaType),
 			SourceRefs: []string{ev.ID().Value()},
 		})
+		stageRef, ok, err := civilizationAssemblyIssueScanStageArtifactRef(ev.ID().Value(), label, content.Body)
+		if err != nil {
+			projectionErrors = append(projectionErrors, fmt.Sprintf("project issue-scan lifecycle stage artifact %s: %v", ev.ID().Value(), err))
+		} else if ok {
+			evidence.StageArtifactRefs = append(evidence.StageArtifactRefs, stageRef)
+		}
 		evidence.SourceRefs = append(evidence.SourceRefs, ev.ID().Value())
 		byTask[content.TaskID] = evidence
 	}
 	for taskID, evidence := range byTask {
 		evidence.ArtifactRefs = compactStrings(evidence.ArtifactRefs)
 		evidence.Artifacts = compactCivilizationAssemblyArtifactEvidence(evidence.Artifacts)
+		evidence.StageArtifactRefs = compactCivilizationAssemblyStageArtifactRefs(evidence.StageArtifactRefs)
 		evidence.SourceRefs = compactStrings(evidence.SourceRefs)
 		byTask[taskID] = evidence
 	}
 	return byTask, page.HasMore(), projectionErrors, nil
+}
+
+func civilizationAssemblyIssueScanStageArtifactRef(eventRef, label, body string) (civilizationAssemblyStageArtifactRef, bool, error) {
+	stageID, ok := civilizationAssemblyIssueScanStageArtifactKey(label)
+	if !ok {
+		return civilizationAssemblyStageArtifactRef{}, false, nil
+	}
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("label %q has empty artifact body", label)
+	}
+	var payload struct {
+		Kind  string `json:"kind"`
+		RunID string `json:"run_id"`
+		Stage struct {
+			ID string `json:"id"`
+		} `json:"stage"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("decode artifact body: %w", err)
+	}
+	if strings.TrimSpace(payload.Kind) != civilizationAssemblyIssueScanStageArtifactKind {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("kind %q does not match %q", payload.Kind, civilizationAssemblyIssueScanStageArtifactKind)
+	}
+	runID := safeRunLaunchID(payload.RunID)
+	if runID == "" {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("missing run_id")
+	}
+	bodyStageID := safeRunLaunchID(payload.Stage.ID)
+	if bodyStageID == "" {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("missing stage.id")
+	}
+	if bodyStageID != stageID {
+		return civilizationAssemblyStageArtifactRef{}, false, fmt.Errorf("label stage %q does not match body stage %q", stageID, bodyStageID)
+	}
+	return civilizationAssemblyStageArtifactRef{
+		RunID:    runID,
+		StageID:  stageID,
+		EventRef: strings.TrimSpace(eventRef),
+	}, true, nil
+}
+
+func civilizationAssemblyIssueScanStageArtifactKey(label string) (string, bool) {
+	suffix, ok := strings.CutPrefix(strings.TrimSpace(label), IssueScanLifecycleStageArtifactPrefix)
+	if !ok {
+		return "", false
+	}
+	stageID := safeRunLaunchID(suffix)
+	return stageID, stageID != ""
 }
 
 func civilizationAssemblyWorkTaskLifecycleEvidence(s store.Store, limit int) (map[types.EventID]civilizationAssemblyTaskLifecycleEvidence, bool, []string, error) {
@@ -907,6 +979,56 @@ func civilizationAssemblyWorkEvidence(p OperatorProjection, factoryOrders []Civi
 	}
 }
 
+func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueuedRunRequestEvidence, stageArtifactRefs []civilizationAssemblyStageArtifactRef) *CivilizationAssemblyQueuedRunRequest {
+	if queued == nil {
+		return nil
+	}
+	out := *queued
+	out.TargetRepos = append([]string(nil), queued.TargetRepos...)
+	out.DevelopmentLifecycle = append([]OperatorQueuedRunLifecycleStage(nil), queued.DevelopmentLifecycle...)
+	for i := range out.DevelopmentLifecycle {
+		out.DevelopmentLifecycle[i].RequiredRoles = append([]string(nil), out.DevelopmentLifecycle[i].RequiredRoles...)
+		out.DevelopmentLifecycle[i].RequiredEvidence = append([]string(nil), out.DevelopmentLifecycle[i].RequiredEvidence...)
+	}
+	out.AgentExecutionPlan = append([]OperatorQueuedRunAgentPlanStep(nil), queued.AgentExecutionPlan...)
+	for i := range out.AgentExecutionPlan {
+		out.AgentExecutionPlan[i].RequiredInputs = append([]string(nil), out.AgentExecutionPlan[i].RequiredInputs...)
+		out.AgentExecutionPlan[i].RequiredOutputs = append([]string(nil), out.AgentExecutionPlan[i].RequiredOutputs...)
+	}
+
+	declaredStages := map[string]bool{}
+	runID := safeRunLaunchID(out.RunID)
+	for _, ref := range stageArtifactRefs {
+		if ref.RunID != runID || ref.StageID == "" || ref.EventRef == "" {
+			continue
+		}
+		declaredStages[ref.StageID] = true
+	}
+	if len(declaredStages) == 0 {
+		return &out
+	}
+	for i := range out.DevelopmentLifecycle {
+		if declaredStages[safeRunLaunchID(out.DevelopmentLifecycle[i].ID)] {
+			out.DevelopmentLifecycle[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.DevelopmentLifecycle[i].EvidenceStatus, civilizationAssemblyQueuedStageDeclaredStatus)
+		}
+	}
+	for i := range out.AgentExecutionPlan {
+		if declaredStages[safeRunLaunchID(out.AgentExecutionPlan[i].StageID)] {
+			out.AgentExecutionPlan[i].EvidenceStatus = civilizationAssemblyDeclaredEvidenceStatus(out.AgentExecutionPlan[i].EvidenceStatus, civilizationAssemblyQueuedPlanStepDeclaredStatus)
+		}
+	}
+	return &out
+}
+
+func civilizationAssemblyDeclaredEvidenceStatus(current, declared string) string {
+	switch strings.TrimSpace(current) {
+	case "", "expected_not_observed", declared:
+		return declared
+	default:
+		return current
+	}
+}
+
 func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyGateSummary {
 	gates := make([]CivilizationAssemblyGateSummary, 0, len(p.PendingApprovals))
 	for _, request := range p.PendingApprovals {
@@ -1105,6 +1227,35 @@ func compactCivilizationAssemblyArtifactEvidence(values []CivilizationAssemblyAr
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func compactCivilizationAssemblyStageArtifactRefs(values []civilizationAssemblyStageArtifactRef) []civilizationAssemblyStageArtifactRef {
+	seen := map[string]bool{}
+	out := make([]civilizationAssemblyStageArtifactRef, 0, len(values))
+	for _, value := range values {
+		value.RunID = safeRunLaunchID(value.RunID)
+		value.StageID = safeRunLaunchID(value.StageID)
+		value.EventRef = strings.TrimSpace(value.EventRef)
+		if value.RunID == "" || value.StageID == "" || value.EventRef == "" {
+			continue
+		}
+		key := value.RunID + "\x00" + value.StageID + "\x00" + value.EventRef
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RunID != out[j].RunID {
+			return out[i].RunID < out[j].RunID
+		}
+		if out[i].StageID != out[j].StageID {
+			return out[i].StageID < out[j].StageID
+		}
+		return out[i].EventRef < out[j].EventRef
 	})
 	return out
 }
