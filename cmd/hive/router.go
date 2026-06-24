@@ -96,6 +96,7 @@ func cmdCivilizationRun(args []string) error {
 	spec := fs.String("spec", "", "Path to markdown spec file (POSTed via hive ingest channel)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
@@ -112,7 +113,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, 0, false, *space, *apiBase)
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, *space, *apiBase)
 }
 
 func cmdCivilizationDaemon(args []string) error {
@@ -121,6 +122,7 @@ func cmdCivilizationDaemon(args []string) error {
 	seedSpec := fs.String("seed-spec", "", "Optional initial spec to ingest before daemon starts")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
@@ -138,7 +140,7 @@ func cmdCivilizationDaemon(args []string) error {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, *catalogReloadInterval, true, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, *space, *apiBase)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────

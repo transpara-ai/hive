@@ -98,6 +98,7 @@ type Runtime struct {
 	approveRequests       bool
 	approveRoles          bool
 	repoPath              string
+	repoWorkspaceRoot     string
 	loop                  bool
 	catalogPath           string
 	catalogReloadInterval time.Duration
@@ -111,6 +112,7 @@ type Config struct {
 	ApproveRequests           bool          // --approve-requests: auto-approve authority requests
 	ApproveRoles              bool          // --approve-roles: auto-approve role proposals
 	RepoPath                  string        // --repo: path to repo for Operate
+	RepoWorkspaceRoot         string        // parent directory containing Transpara-AI repo checkouts for issue-scan targets
 	Loop                      bool          // --loop: agents block on bus instead of quiescing
 	CatalogPath               string        // --catalog: custom YAML catalog file (merged with defaults)
 	CatalogReloadInterval     time.Duration // reload --catalog for future spawns; 0 disables
@@ -174,6 +176,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		approveRequests:           cfg.ApproveRequests,
 		approveRoles:              cfg.ApproveRoles,
 		repoPath:                  cfg.RepoPath,
+		repoWorkspaceRoot:         cfg.RepoWorkspaceRoot,
 		loop:                      cfg.Loop,
 		catalogPath:               cfg.CatalogPath,
 		catalogReloadInterval:     cfg.CatalogReloadInterval,
@@ -494,6 +497,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			CanOperate:             def.CanOperate,
 			RepoPath:               r.repoPath,
 			TaskOperateProvider:    r.taskOperateProviderFor(def),
+			TaskWorkspaceProvider:  r.taskWorkspaceProviderFor(def),
 			Keepalive:              r.loop,
 			KnowledgeStore:         r.knowledgeStore,
 			CostSummaryFunc: func() string {

@@ -59,13 +59,17 @@ type containmentBaseline map[string]repoContainmentState
 // the parent directory of the assigned workspace (which holds the sibling
 // worktrees a run could walk to). Nil only when the loop has no workspace.
 func (l *Loop) containmentRoots() []string {
-	if len(l.config.ContainmentWatchRoots) > 0 {
-		return l.config.ContainmentWatchRoots
+	return l.containmentRootsFor(l.config.RepoPath, l.config.ContainmentWatchRoots)
+}
+
+func (l *Loop) containmentRootsFor(repoPath string, configured []string) []string {
+	if len(configured) > 0 {
+		return configured
 	}
-	if l.config.RepoPath == "" {
+	if repoPath == "" {
 		return nil
 	}
-	return []string{filepath.Dir(l.config.RepoPath)}
+	return []string{filepath.Dir(repoPath)}
 }
 
 // resolvePath canonicalizes a path for identity comparison — the repos tree
@@ -189,17 +193,21 @@ func diffContainment(pre, post containmentBaseline) []string {
 // checkout must never auto-complete, however clean its workspace commit looks
 // (the v10 round-3 escape shape was exactly that).
 func (l *Loop) verifyOperateContainment(ctx context.Context, task work.Task, pre containmentBaseline) bool {
-	post, ok := snapshotContainment(l.containmentRoots(), l.config.RepoPath)
+	return l.verifyOperateContainmentInWorkspace(ctx, task, pre, l.config.RepoPath, l.containmentRoots())
+}
+
+func (l *Loop) verifyOperateContainmentInWorkspace(ctx context.Context, task work.Task, pre containmentBaseline, repoPath string, roots []string) bool {
+	post, ok := snapshotContainment(roots, repoPath)
 	if !ok {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"post-Operate containment state unreadable for watch roots %v — refusing to accept any output of an unwatchable run (fail closed)",
-			l.containmentRoots()))
+			roots))
 		return false
 	}
 	if violations := diffContainment(pre, post); len(violations) > 0 {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"workspace containment violated (v10-F2 tripwire) — the Operate produced checkout-state deltas outside its assigned workspace %s:\n  %s\nThe run's outputs are untrusted; the operator must inspect and restore the listed checkouts.",
-			l.config.RepoPath, strings.Join(violations, "\n  ")))
+			repoPath, strings.Join(violations, "\n  ")))
 		return false
 	}
 	return true

@@ -74,6 +74,18 @@ type TaskOperateProviderResult struct {
 // of falling back to the agent's default provider.
 type TaskOperateProviderFunc func(ctx context.Context, task work.Task, role string) (TaskOperateProviderResult, error)
 
+// TaskWorkspaceProviderResult is the optional per-task workspace selected for
+// one Operate call. Applied=false means the loop should use Config.RepoPath.
+type TaskWorkspaceProviderResult struct {
+	Applied               bool
+	RepoPath              string
+	ContainmentWatchRoots []string
+}
+
+// TaskWorkspaceProviderFunc resolves a task-scoped checkout for one Operate
+// call. Errors fail closed before any filesystem-capable subprocess launches.
+type TaskWorkspaceProviderFunc func(ctx context.Context, task work.Task, role string) (TaskWorkspaceProviderResult, error)
+
 // Config configures an agentic loop.
 type Config struct {
 	// Agent is the unified hive agent to run. Required.
@@ -150,6 +162,11 @@ type Config struct {
 	// TaskOperateProvider optionally selects a provider for this exact Work task.
 	// Used for structured FactoryOrder model overrides. Errors fail closed.
 	TaskOperateProvider TaskOperateProviderFunc
+
+	// TaskWorkspaceProvider optionally selects a checkout for this exact Work
+	// task. Operate, containment, commit verification, and Operate artifacts all
+	// use the selected checkout together. Errors fail closed.
+	TaskWorkspaceProvider TaskWorkspaceProviderFunc
 
 	// Keepalive prevents agents from exiting on quiescence. When true,
 	// waitForEvents blocks indefinitely on the bus wake channel instead
@@ -583,24 +600,33 @@ func (l *Loop) Run(ctx context.Context) Result {
 				return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", instrErr))
 			}
 
+			workspace, workspaceErr := l.taskWorkspace(ctx, task)
+			if workspaceErr != nil {
+				return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", workspaceErr))
+			}
+			if strings.TrimSpace(workspace.RepoPath) == "" {
+				return l.result(StopEscalation, iteration, "operate: no repo path configured for filesystem-capable task")
+			}
+			containmentRoots := l.containmentRootsFor(workspace.RepoPath, workspace.ContainmentWatchRoots)
+
 			// Record HEAD before Operate so we can detect new commits. gitTry
 			// reports whether the read succeeded: an unreadable pre-Operate HEAD
 			// makes the post-Operate result unverifiable (it must not be mistaken
 			// for a clean "first commit").
-			preOperateHead, preHeadReadable := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
+			preOperateHead, preHeadReadable := gitTry(workspace.RepoPath, "rev-parse", "HEAD")
 
 			// Workspace-containment baseline (v10-F2 / Finding 18): snapshot the
 			// watched sibling checkouts BEFORE the subprocess exists. Post-hoc
 			// detection cannot undo sibling damage, so an unreadable baseline
 			// refuses the launch outright (fail closed) instead of running
 			// unwatched and apologizing later.
-			preContainment, preContainOK := snapshotContainment(l.containmentRoots(), l.config.RepoPath)
+			preContainment, preContainOK := snapshotContainment(containmentRoots, workspace.RepoPath)
 			if !preContainOK {
 				return l.result(StopEscalation, iteration,
 					"operate: containment baseline unreadable — refusing to launch a filesystem-capable Operate without a verifiable sibling-checkout watch")
 			}
 
-			result, opErr := l.operateTask(ctx, task, instruction)
+			result, opErr := l.operateTask(ctx, task, instruction, workspace.RepoPath)
 			if opErr != nil {
 				if errors.Is(opErr, errTaskOperateProvider) {
 					return l.result(StopEscalation, iteration, fmt.Sprintf("operate: %v", opErr))
@@ -620,7 +646,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// auto-complete, however clean its workspace commit looks (the v10
 			// round-3 escape shape was exactly that). failOperateTask already
 			// escalated; the summary is untrusted and drives nothing further.
-			if !l.verifyOperateContainment(ctx, task, preContainment) {
+			if !l.verifyOperateContainmentInWorkspace(ctx, task, preContainment, workspace.RepoPath, containmentRoots) {
 				return l.result(StopEscalation, iteration,
 					"workspace containment violated; halting implementer for human review")
 			}
@@ -629,7 +655,7 @@ func (l *Loop) Run(ctx context.Context) Result {
 			// handleOperateResult compares HEAD before/after Operate and
 			// cross-checks the summary — a confabulated (or wrong-repo) commit
 			// fails the task instead of silently completing it.
-			if l.handleOperateResult(ctx, task, preOperateHead, preHeadReadable, result.Summary) {
+			if l.handleOperateResultInWorkspace(ctx, task, workspace.RepoPath, preOperateHead, preHeadReadable, result.Summary) {
 				if l.sink != nil {
 					l.captureBoundary(checkpoint.TaskCompleted, response)
 					l.lastCheckpointIter = l.iteration
@@ -1017,8 +1043,38 @@ Every response MUST end with exactly one /signal line.
 }
 
 var errTaskOperateProvider = errors.New("task operate provider")
+var errTaskWorkspaceProvider = errors.New("task workspace provider")
 
-func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction string) (decision.OperateResult, error) {
+type taskOperateWorkspace struct {
+	RepoPath              string
+	ContainmentWatchRoots []string
+}
+
+func (l *Loop) taskWorkspace(ctx context.Context, task work.Task) (taskOperateWorkspace, error) {
+	workspace := taskOperateWorkspace{
+		RepoPath:              l.config.RepoPath,
+		ContainmentWatchRoots: append([]string(nil), l.config.ContainmentWatchRoots...),
+	}
+	if l.config.TaskWorkspaceProvider == nil {
+		return workspace, nil
+	}
+	selected, err := l.config.TaskWorkspaceProvider(ctx, task, string(l.agent.Role()))
+	if err != nil {
+		return taskOperateWorkspace{}, fmt.Errorf("%w: %v", errTaskWorkspaceProvider, err)
+	}
+	if !selected.Applied {
+		return workspace, nil
+	}
+	if strings.TrimSpace(selected.RepoPath) == "" {
+		return taskOperateWorkspace{}, fmt.Errorf("%w: selected repo path is empty", errTaskWorkspaceProvider)
+	}
+	return taskOperateWorkspace{
+		RepoPath:              strings.TrimSpace(selected.RepoPath),
+		ContainmentWatchRoots: append([]string(nil), selected.ContainmentWatchRoots...),
+	}, nil
+}
+
+func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction, repoPath string) (decision.OperateResult, error) {
 	if l.config.TaskOperateProvider != nil {
 		selected, err := l.config.TaskOperateProvider(ctx, task, string(l.agent.Role()))
 		if err != nil {
@@ -1028,10 +1084,10 @@ func (l *Loop) operateTask(ctx context.Context, task work.Task, instruction stri
 			if selected.Provider == nil {
 				return decision.OperateResult{}, fmt.Errorf("%w: selected provider is nil", errTaskOperateProvider)
 			}
-			return l.agent.OperateWithProvider(ctx, selected.Provider, l.config.RepoPath, instruction)
+			return l.agent.OperateWithProvider(ctx, selected.Provider, repoPath, instruction)
 		}
 	}
-	return l.agent.Operate(ctx, l.config.RepoPath, instruction)
+	return l.agent.Operate(ctx, repoPath, instruction)
 }
 
 // reason calls the agent's LLM and returns the response text and token usage.
@@ -2122,6 +2178,10 @@ func (l *Loop) nextAssignedTask() work.Task {
 // Note: causes may be empty on the agent's very first event (bootstrap case).
 // The factory handles this by using the graph head as a fallback cause.
 func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) bool {
+	return l.attachOperateArtifactInWorkspace(task, l.config.RepoPath, baseHead, postHead)
+}
+
+func (l *Loop) attachOperateArtifactInWorkspace(task work.Task, repoPath, baseHead, postHead string) bool {
 	if l.config.TaskStore == nil {
 		return true
 	}
@@ -2130,7 +2190,7 @@ func (l *Loop) attachOperateArtifact(task work.Task, baseHead, postHead string) 
 		causes = []types.EventID{lastEv}
 	}
 
-	body := buildOperateArtifactBody(l.config.RepoPath, baseHead, postHead)
+	body := buildOperateArtifactBody(repoPath, baseHead, postHead)
 	err := l.config.TaskStore.AddArtifact(
 		l.agent.ID(), task.ID,
 		"Operate result",

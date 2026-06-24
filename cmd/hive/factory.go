@@ -98,6 +98,7 @@ func cmdFactoryDaemon(args []string) error {
 	seedSpec := fs.String("seed-spec", "", "Optional initial spec to seed the loop before it starts")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
@@ -116,7 +117,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *catalog, *catalogReloadInterval, true, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by
@@ -441,7 +442,7 @@ func cmdFactoryRequestPR(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, ".")
+	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, ".", "")
 	if err != nil {
 		return err
 	}
@@ -649,7 +650,7 @@ func (fc *factoryContext) headCauses() []types.EventID {
 
 // openFactoryRuntime builds a full hive.Runtime over the factory store context,
 // for the request-pr authority seam. repoPath defaults to current dir.
-func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath string) (*hive.Runtime, *factoryContext, error) {
+func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorkspaceRoot string) (*hive.Runtime, *factoryContext, error) {
 	fc, err := openFactoryContext(ctx, dsn, humanName)
 	if err != nil {
 		return nil, nil, err
@@ -658,10 +659,11 @@ func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath string) (*
 		repoPath = "."
 	}
 	rt, err := hive.New(ctx, hive.Config{
-		Store:    fc.store,
-		Actors:   fc.actors, // hive.New verifies the human and registers the system actor.
-		HumanID:  fc.humanID,
-		RepoPath: repoPath,
+		Store:             fc.store,
+		Actors:            fc.actors, // hive.New verifies the human and registers the system actor.
+		HumanID:           fc.humanID,
+		RepoPath:          repoPath,
+		RepoWorkspaceRoot: repoWorkspaceRoot,
 	})
 	if err != nil {
 		fc.close()

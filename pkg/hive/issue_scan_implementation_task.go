@@ -738,18 +738,11 @@ func (r *Runtime) verifyIssueScanImplementationWorkspace(content FactoryRunReque
 	if targetRepo == "" {
 		return fmt.Errorf("issue-scan target repo is required before implementation task creation")
 	}
-	if r == nil || strings.TrimSpace(r.repoPath) == "" {
+	if r == nil || (strings.TrimSpace(r.repoPath) == "" && strings.TrimSpace(r.repoWorkspaceRoot) == "") {
 		return nil
 	}
-	configuredRepo, ok, err := transparaAIRepoSlugForPath(r.repoPath)
-	if err != nil {
-		return fmt.Errorf("verify configured repo path for issue-scan implementation: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("configured repo path %q does not resolve to a Transpara-AI repo; cannot create executable implementation task for %q", r.repoPath, targetRepo)
-	}
-	if !strings.EqualFold(configuredRepo, targetRepo) {
-		return fmt.Errorf("configured repo path %q resolves to %q but issue-scan target repo is %q; refusing wrong-repo implementation task", r.repoPath, configuredRepo, targetRepo)
+	if _, err := r.resolveIssueScanWorkspaceForRepo(targetRepo); err != nil {
+		return fmt.Errorf("verify issue-scan implementation workspace: %w", err)
 	}
 	return nil
 }

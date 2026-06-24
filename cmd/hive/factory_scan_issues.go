@@ -23,6 +23,7 @@ func cmdFactoryScanIssues(args []string) error {
 	operatorID := fs.String("operator-id", "", "Operator id for queued run metadata (default: derived from --human)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repoPath := fs.String("repo-path", "", "Path to repo for dispatch Operate context (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for implementation targets")
 	limit := fs.Int("limit", 10, "Maximum open issues to read per repo")
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
@@ -82,7 +83,7 @@ func cmdFactoryScanIssues(args []string) error {
 		fc *factoryContext
 	)
 	if *dispatch {
-		rt, fc, err = openFactoryRuntime(ctx, *storeDSN, *human, *repoPath)
+		rt, fc, err = openFactoryRuntime(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
 	} else {
 		fc, err = openFactoryContext(ctx, *storeDSN, *human)
 	}

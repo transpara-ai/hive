@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1496,6 +1497,78 @@ func TestProgressIssueScanLifecycleRejectsWrongRepoImplementationTask(t *testing
 	}
 	if task, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID)); ok {
 		t.Fatalf("wrong-repo implementation task was created: %+v", task)
+	}
+}
+
+func TestProgressIssueScanLifecycleCreatesImplementationTaskForWorkspaceTargetRepo(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	workspaceRoot := t.TempDir()
+	rt.repoPath = issueScanGitRepoAtOrigin(t, filepath.Join(workspaceRoot, "hive"), "https://github.com/transpara-ai/hive.git")
+	rt.repoWorkspaceRoot = workspaceRoot
+	sitePath := issueScanGitRepoAtOrigin(t, filepath.Join(workspaceRoot, "site"), "https://github.com/transpara-ai/site.git")
+	absSitePath, err := filepath.Abs(sitePath)
+	if err != nil {
+		t.Fatalf("Abs sitePath: %v", err)
+	}
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/site",
+			Number: 109,
+			Title:  "Display Civilization runtime evidence",
+			URL:    "https://github.com/transpara-ai/site/issues/109",
+			Body:   "Site should show the runtime Civilization evidence for Transpara-AI operators.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	for _, stageID := range []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+	} {
+		if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, issueScanStageRuntimeEvidenceForTest(t, stageID), true); err != nil {
+			t.Fatalf("CompleteIssueScanLifecycleStage %s: %v", stageID, err)
+		}
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle: %v", err)
+	}
+	if len(progress.ImplementationTasks) != 1 || !progress.ImplementationTasks[0].Created {
+		t.Fatalf("implementation task progress = %+v, want one created task", progress.ImplementationTasks)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
+	if !ok {
+		t.Fatalf("missing concrete implementation task in %+v", tasks)
+	}
+	selected, err := rt.taskWorkspaceProviderFor(AgentDef{CanOperate: true})(context.Background(), implementationTask, "implementer")
+	if err != nil {
+		t.Fatalf("taskWorkspaceProviderFor: %v", err)
+	}
+	if !selected.Applied || selected.RepoPath != absSitePath {
+		t.Fatalf("selected workspace = %+v, want applied Site path %s", selected, absSitePath)
+	}
+	if len(selected.ContainmentWatchRoots) != 1 || selected.ContainmentWatchRoots[0] != workspaceRoot {
+		t.Fatalf("selected containment roots = %+v, want [%s]", selected.ContainmentWatchRoots, workspaceRoot)
 	}
 }
 
@@ -3343,6 +3416,11 @@ func issueScanOperatorPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, sta
 func issueScanGitRepoWithOrigin(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()
+	return issueScanGitRepoAtOrigin(t, dir, remote)
+}
+
+func issueScanGitRepoAtOrigin(t *testing.T, dir, remote string) string {
+	t.Helper()
 	issueScanRunTestCommand(t, "", "git", "init", dir)
 	issueScanRunTestCommand(t, dir, "git", "remote", "add", "origin", remote)
 	return dir

@@ -171,17 +171,21 @@ func shortHash(h string) string {
 // task is completed); every other outcome — including a no-change Operate —
 // fails the task and escalates.
 func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOperateHead string, preHeadReadable bool, summary string) bool {
+	return l.handleOperateResultInWorkspace(ctx, task, l.config.RepoPath, preOperateHead, preHeadReadable, summary)
+}
+
+func (l *Loop) handleOperateResultInWorkspace(ctx context.Context, task work.Task, repoPath string, preOperateHead string, preHeadReadable bool, summary string) bool {
 	// Inspect repo state with explicit success signals: gitTry distinguishes a
 	// genuine empty result (clean tree) from a git failure. Fail closed when any
 	// part of the state is unverifiable — the pre-Operate baseline (so a failed
 	// preflight is not mistaken for a "first commit"), the post-Operate HEAD, or
 	// the working-tree status.
-	postOperateHead, headOK := gitTry(l.config.RepoPath, "rev-parse", "HEAD")
-	status, statusOK := gitTry(l.config.RepoPath, "status", "--porcelain")
+	postOperateHead, headOK := gitTry(repoPath, "rev-parse", "HEAD")
+	status, statusOK := gitTry(repoPath, "status", "--porcelain")
 	if !preHeadReadable || !headOK || !statusOK {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"could not verify repo state in %s (unreadable pre/post HEAD or status) — refusing to complete on unverifiable state",
-			l.config.RepoPath))
+			repoPath))
 		return false
 	}
 	dirty := status != ""
@@ -190,11 +194,11 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 	// changes HEAD without advancing it and must not pass as a commit.
 	advanced := false
 	if postOperateHead != preOperateHead {
-		isAnc, ok := isAncestor(l.config.RepoPath, preOperateHead, postOperateHead)
+		isAnc, ok := isAncestor(repoPath, preOperateHead, postOperateHead)
 		if !ok {
 			l.failOperateTask(ctx, task, fmt.Sprintf(
 				"could not verify commit ancestry in %s — refusing to complete on unverifiable state",
-				l.config.RepoPath))
+				repoPath))
 			return false
 		}
 		advanced = isAnc
@@ -204,23 +208,23 @@ func (l *Loop) handleOperateResult(ctx context.Context, task work.Task, preOpera
 	// verdict — including an unrecognized/future one — refuses and escalates, so
 	// the completion path can never be reached by omission.
 	if !verdict.completesTask() {
-		l.failOperateTask(ctx, task, verdict.refusalReason(l.config.RepoPath, preOperateHead))
+		l.failOperateTask(ctx, task, verdict.refusalReason(repoPath, preOperateHead))
 		return false
 	}
 	// The only completing verdict is commitVerified — a real, clean, forward
 	// commit range from preOperateHead to postOperateHead. Attach that exact range
 	// so downstream review sees every commit produced by this Operate, not just
 	// the final HEAD commit.
-	if !l.attachOperateArtifact(task, preOperateHead, postOperateHead) {
+	if !l.attachOperateArtifactInWorkspace(task, repoPath, preOperateHead, postOperateHead) {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"could not record Operate artifact for verified range %s..%s in %s — refusing to complete without reviewable evidence",
-			shortHash(preOperateHead), shortHash(postOperateHead), l.config.RepoPath))
+			shortHash(preOperateHead), shortHash(postOperateHead), repoPath))
 		return false
 	}
 	if !l.completeTask(ctx, task, summary) {
 		l.failOperateTask(ctx, task, fmt.Sprintf(
 			"could not record task completion after verified range %s..%s in %s — refusing to report completion without a Work completion event",
-			shortHash(preOperateHead), shortHash(postOperateHead), l.config.RepoPath))
+			shortHash(preOperateHead), shortHash(postOperateHead), repoPath))
 		return false
 	}
 	return true

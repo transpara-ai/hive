@@ -16,6 +16,7 @@ func cmdFactoryAdvanceIssueScan(args []string) error {
 	stageID := fs.String("stage", "", "Lifecycle stage id to advance (default: next incomplete stage)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repoPath := fs.String("repo-path", "", "Path to repo for dispatch Operate context (default: current dir)")
+	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for implementation targets")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -26,7 +27,7 @@ func cmdFactoryAdvanceIssueScan(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, *repoPath)
+	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
 	if err != nil {
 		return err
 	}
