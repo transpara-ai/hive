@@ -4388,13 +4388,16 @@ func TestIssueScanDraftPRAuthorityRequestContextBuildsTargetAndBody(t *testing.T
 	if !strings.Contains(requestContext.DraftPRTitle, "transpara-ai/hive#321") {
 		t.Fatalf("title does not name source issue: %q", requestContext.DraftPRTitle)
 	}
-	for _, want := range []string{"FactoryOrder `" + orderID + "`", "Head SHA: `cccccccccccccccccccccccccccccccccccccccc`", "ready-for-review state"} {
+	for _, want := range []string{"FactoryOrder `" + orderID + "`", "Head SHA: `cccccccccccccccccccccccccccccccccccccccc`", "base branch may advance", "ready-for-review state"} {
 		if !strings.Contains(requestContext.DraftPRBody, want) {
 			t.Fatalf("draft PR body missing %q:\n%s", want, requestContext.DraftPRBody)
 		}
 	}
 	if !containsIssueScanString(requestContext.BoundaryDisclaimers, "authority request is not PR creation") {
 		t.Fatalf("missing authority boundary disclaimer: %+v", requestContext.BoundaryDisclaimers)
+	}
+	if !containsIssueScanString(requestContext.BoundaryDisclaimers, "base branch may advance before draft PR creation; head_sha is the pinned authority invariant") {
+		t.Fatalf("missing base-advance boundary disclaimer: %+v", requestContext.BoundaryDisclaimers)
 	}
 }
 

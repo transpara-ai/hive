@@ -207,6 +207,7 @@ func (r *Runtime) issueScanDraftPRAuthorityRequestContext(runID, baseRef, baseSH
 			"authority request is not Human approval",
 			"authority request is not merge or deploy authorization",
 			"approved head_sha must match operate_commit before draft PR creation",
+			"base branch may advance before draft PR creation; head_sha is the pinned authority invariant",
 		}),
 	}, true, nil
 }
@@ -289,6 +290,7 @@ func issueScanDraftPRBody(content FactoryRunRequestedContent, orderID string, re
 	b.WriteString("\n## Governance Boundary\n")
 	b.WriteString("- Create one draft PR only after this protected request is approved.\n")
 	b.WriteString("- Draft PR creation must use the approved repository, base, head, title hash, body hash, policy bundle, and nonce.\n")
+	b.WriteString("- The base branch may advance before draft PR creation; the approved head SHA remains the pinned authority invariant.\n")
 	b.WriteString("- This request does not grant ready-for-review state, Human approval, merge, deploy, production migration, protected setting changes, or broader runtime authority.\n")
 	b.WriteString("- Ready-for-Human PR evidence remains a later governed stage after the draft PR is created, marked ready, checked, and exact-head reviewed.\n")
 	return strings.TrimSpace(b.String())

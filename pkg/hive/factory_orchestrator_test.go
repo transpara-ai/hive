@@ -22,6 +22,7 @@ type fakePRClient struct {
 	resultDraft    *bool
 	resultState    string
 	resultBaseSHA  string
+	forceBaseSHA   bool
 }
 
 func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11DraftPullRequestMutation) (work.Epic11DraftPullRequestResult, error) {
@@ -43,7 +44,9 @@ func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11Dr
 		state = f.resultState
 	}
 	baseSHA := m.BaseSHA
-	if f.resultBaseSHA != "" {
+	if f.forceBaseSHA {
+		baseSHA = f.resultBaseSHA
+	} else if f.resultBaseSHA != "" {
 		baseSHA = f.resultBaseSHA
 	}
 	return work.Epic11DraftPullRequestResult{
@@ -213,6 +216,38 @@ func TestCreateTransparaAIDraftPRAcceptsAdvancedBaseSHA(t *testing.T) {
 	}
 	if run.Receipt.BaseSHA != "approved-base-sha" {
 		t.Fatalf("receipt base SHA = %q, want approved base evidence", run.Receipt.BaseSHA)
+	}
+}
+
+func TestCreateTransparaAIDraftPRRejectsEmptyResultBaseSHA(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	client := &fakePRClient{
+		preflightFiles: []string{"src/App.tsx"},
+		forceBaseSHA:   true,
+	}
+	title := "[codex] Display Civilization runtime evidence"
+	body := "## Summary\nDisplay runtime evidence for Transpara-AI operators.\n"
+	target := DraftPRTarget{
+		Repository:       "transpara-ai/site",
+		BaseRef:          "main",
+		BaseSHA:          "approved-base-sha",
+		HeadRef:          "codex/site-civilization-runtime",
+		HeadSHA:          "headsha",
+		TitleHash:        sha256HexPrefixed([]byte(title)),
+		BodyHash:         sha256HexPrefixed([]byte(body)),
+		PolicyBundleID:   TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash: TransparaAIDraftPRPolicyBundleHash(),
+		SingleUseNonce:   "nonce-site",
+	}
+
+	_, err := CreateTransparaAIDraftPRFromApprovedDecision(context.Background(), ts, source, conv, client, DraftPRArtifact{
+		Target:       target,
+		Title:        title,
+		Body:         body,
+		ChangedFiles: []string{"src/App.tsx"},
+	}, cause)
+	if err == nil || !strings.Contains(err.Error(), "created PR base_sha is empty") {
+		t.Fatalf("CreateTransparaAIDraftPRFromApprovedDecision error = %v, want empty base_sha refusal", err)
 	}
 }
 

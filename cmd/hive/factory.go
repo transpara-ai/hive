@@ -1017,6 +1017,9 @@ func gitBaseCommitSHA(ctx context.Context, repoPath, baseRef string) (string, er
 
 func gitFetchBaseRef(ctx context.Context, repoPath, baseRef string) error {
 	base := gitBaseBranchRef(baseRef)
+	if err := validateGitBaseBranchRef(base); err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", base+":refs/remotes/origin/"+base)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
@@ -1038,6 +1041,29 @@ func gitBaseBranchRef(baseRef string) string {
 		base = "main"
 	}
 	return base
+}
+
+func validateGitBaseBranchRef(base string) error {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return fmt.Errorf("issue-scan draft PR base ref is empty")
+	}
+	if strings.HasPrefix(base, "-") {
+		return fmt.Errorf("issue-scan draft PR base ref %q must not start with '-'", base)
+	}
+	if strings.HasPrefix(base, "/") || strings.HasSuffix(base, "/") || strings.Contains(base, "//") {
+		return fmt.Errorf("issue-scan draft PR base ref %q is not a valid branch path", base)
+	}
+	if strings.Contains(base, "..") || strings.Contains(base, "@{") || strings.HasSuffix(base, ".") || strings.HasSuffix(base, ".lock") {
+		return fmt.Errorf("issue-scan draft PR base ref %q is not a valid branch name", base)
+	}
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '/' || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("issue-scan draft PR base ref %q contains invalid character %q", base, r)
+	}
+	return nil
 }
 
 func issueScanDraftPRAuthorityNonce(requestContext hive.IssueScanDraftPRAuthorityRequestRunnerContext, baseRef, baseSHA string) string {

@@ -269,6 +269,25 @@ func TestIssueScanDraftPRBaseRefNormalization(t *testing.T) {
 	}
 }
 
+func TestIssueScanDraftPRBaseRefValidation(t *testing.T) {
+	valid := []string{"main", "release/2026-06", "feature.issue_scan_2026"}
+	for _, base := range valid {
+		t.Run("valid_"+strings.ReplaceAll(base, "/", "_"), func(t *testing.T) {
+			if err := validateGitBaseBranchRef(base); err != nil {
+				t.Fatalf("validateGitBaseBranchRef(%q): %v", base, err)
+			}
+		})
+	}
+	invalid := []string{"-main", "release//2026", "/main", "main/", "release..main", "release@{1}", "main.lock", "main:prod", "main\nprod"}
+	for _, base := range invalid {
+		t.Run("invalid_"+strings.NewReplacer("/", "_", "\n", "_").Replace(base), func(t *testing.T) {
+			if err := validateGitBaseBranchRef(base); err == nil {
+				t.Fatalf("validateGitBaseBranchRef(%q) succeeded, want error", base)
+			}
+		})
+	}
+}
+
 func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

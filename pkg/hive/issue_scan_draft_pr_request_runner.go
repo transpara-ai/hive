@@ -248,6 +248,7 @@ func (r *Runtime) issueScanDraftPRAuthorityRequestRunnerContext(runID string) (I
 			"authority request is not PR creation or ready-for-review state",
 			"authority request is not merge or deploy authorization",
 			"approved head_sha must match operate_commit before draft PR creation",
+			"base branch may advance before draft PR creation; head_sha is the pinned authority invariant",
 		}),
 	}, true, nil
 }
