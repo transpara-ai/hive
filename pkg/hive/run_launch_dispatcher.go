@@ -977,6 +977,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanBlockerRepairRuns(progress.BlockerRepairRuns); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan blocker repair runner: recorded %d repair result(s)\n", recorded)
 			}
+			if raised := countRaisedIssueScanDraftPRRequests(progress.DraftPRRequests); raised > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan draft PR authority requester: raised %d Human approval request(s)\n", raised)
+			}
 			if created := countCreatedIssueScanDraftPRs(progress.DraftPRCreations); created > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan draft PR creation runner: created %d approved draft PR(s)\n", created)
 			}
@@ -1005,6 +1008,7 @@ type IssueScanLifecycleProgress struct {
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
 	BlockerRoleOutputs        []IssueScanStageRoleOutputResult
 	BlockerRepairRuns         []IssueScanBlockerRepairRunnerRecordResult
+	DraftPRRequests           []IssueScanDraftPRAuthorityRequestRunnerRecordResult
 	DraftPRCreations          []IssueScanDraftPRCreationResult
 	ReadyPRRuns               []IssueScanReadyPRRunnerRecordResult
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
@@ -1167,6 +1171,17 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 		return progress, errors.Join(append(errs, ctx.Err())...)
 	default:
 	}
+	draftPRRequests, err := r.RunConfiguredIssueScanDraftPRAuthorityRequests(ctx, dispatch)
+	progress.DraftPRRequests = draftPRRequests
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan draft PR authority requester: %w", err))
+	}
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
 	draftPRCreations, err := r.RunConfiguredIssueScanDraftPRCreations(ctx, dispatch)
 	progress.DraftPRCreations = draftPRCreations
 	if err != nil {
@@ -1310,6 +1325,7 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 	dst.ReviewRoleOutputs = append(dst.ReviewRoleOutputs, src.ReviewRoleOutputs...)
 	dst.BlockerRoleOutputs = append(dst.BlockerRoleOutputs, src.BlockerRoleOutputs...)
 	dst.BlockerRepairRuns = append(dst.BlockerRepairRuns, src.BlockerRepairRuns...)
+	dst.DraftPRRequests = append(dst.DraftPRRequests, src.DraftPRRequests...)
 	dst.DraftPRCreations = append(dst.DraftPRCreations, src.DraftPRCreations...)
 	dst.ReadyPRRuns = append(dst.ReadyPRRuns, src.ReadyPRRuns...)
 	dst.ReadyRoleOutputs = append(dst.ReadyRoleOutputs, src.ReadyRoleOutputs...)
@@ -1512,6 +1528,16 @@ func countRecordedIssueScanBlockerRepairRuns(values []IssueScanBlockerRepairRunn
 	count := 0
 	for _, value := range values {
 		if value.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRaisedIssueScanDraftPRRequests(values []IssueScanDraftPRAuthorityRequestRunnerRecordResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Raised {
 			count++
 		}
 	}

@@ -3466,6 +3466,74 @@ func TestIssueScanLifecycleEndToEndSurfacesReadyForHumanPR(t *testing.T) {
 	}
 }
 
+func TestProgressIssueScanLifecycleRaisesConfiguredDraftPRAuthorityRequest(t *testing.T) {
+	rt, _, runID, orderID, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	calls := 0
+	rt.issueScanDraftPRAuthorityRequester = func(ctx context.Context, requestContext IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+		calls++
+		if requestContext.RunID != runID || requestContext.FactoryOrderID != orderID {
+			t.Fatalf("request context run/order = %q/%q, want %q/%q", requestContext.RunID, requestContext.FactoryOrderID, runID, orderID)
+		}
+		if requestContext.Repository != "transpara-ai/hive" {
+			t.Fatalf("request context repo = %q", requestContext.Repository)
+		}
+		if requestContext.ReadyStageTaskID != readyStage.ID.Value() || requestContext.ImplementationTaskID != implementationTask.ID.Value() {
+			t.Fatalf("request context stage/task = %q/%q, want %s/%s", requestContext.ReadyStageTaskID, requestContext.ImplementationTaskID, readyStage.ID, implementationTask.ID)
+		}
+		if requestContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+			t.Fatalf("request context operate commit = %q", requestContext.OperateCommit)
+		}
+		if !containsIssueScanString(requestContext.BoundaryDisclaimers, "authority request is not Human approval") {
+			t.Fatalf("request context missing Human boundary: %+v", requestContext.BoundaryDisclaimers)
+		}
+		return IssueScanDraftPRAuthorityRequestRunnerResult{
+			BaseRef: "main",
+			BaseSHA: "dddddddddddddddddddddddddddddddddddddddd",
+			Nonce:   "nonce-configured-draft-pr-request",
+		}, nil
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with draft PR authority requester: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("authority requester calls = %d, want 1", calls)
+	}
+	if len(progress.DraftPRRequests) != 1 {
+		t.Fatalf("draft PR authority requests = %+v, want one request result", progress.DraftPRRequests)
+	}
+	request := progress.DraftPRRequests[0]
+	if !request.Raised || !request.HeldPendingApproval || request.AutoApproved {
+		t.Fatalf("request result = %+v, want raised and held for Human approval only", request)
+	}
+	if request.DraftPRTarget.HeadSHA != "cccccccccccccccccccccccccccccccccccccccc" || request.DraftPRTarget.BaseSHA != "dddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("request target = %+v, want exact implementation/base heads", request.DraftPRTarget)
+	}
+	if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 0 || countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns) != 0 {
+		t.Fatalf("progress created/ready PR unexpectedly: creations=%+v ready=%+v", progress.DraftPRCreations, progress.ReadyPRRuns)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR completed after authority request only")
+	}
+
+	again, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("authority requester calls after second pass = %d, want idempotent target recheck", calls)
+	}
+	if len(again.DraftPRRequests) != 1 || !again.DraftPRRequests[0].AlreadyRaised || again.DraftPRRequests[0].Raised {
+		t.Fatalf("second draft PR authority requests = %+v, want already-raised without new request", again.DraftPRRequests)
+	}
+}
+
 func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{

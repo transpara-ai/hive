@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -178,6 +179,8 @@ func cmdFactoryDaemon(args []string) error {
 	blockerRepairTimeout := fs.Duration("issue-scan-blocker-repair-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-blocker-repair-runner")
 	blockerRepairRunnerArgs := repeatedStringFlag{}
 	fs.Var(&blockerRepairRunnerArgs, "issue-scan-blocker-repair-runner-arg", "Argument passed to --issue-scan-blocker-repair-runner (repeatable)")
+	issueScanDraftPRRequest := fs.Bool("issue-scan-draft-pr-request", false, "Raise issue-scan draft PR authority requests after zero blockers; does not create PRs or approve requests")
+	issueScanDraftPRRequestBase := fs.String("issue-scan-draft-pr-request-base", "main", "Base branch ref for --issue-scan-draft-pr-request")
 	issueScanDraftPRCreate := fs.Bool("issue-scan-draft-pr-create", false, "Create approved issue-scan draft PRs after recorded Human approval; requires GITHUB_TOKEN")
 	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
 	readyPRMarkReady := fs.Bool("issue-scan-ready-pr-mark-ready", false, "Mark created issue-scan draft PRs ready, run exact-head ready-state review, then record ready-for-Human evidence; requires GITHUB_TOKEN")
@@ -208,6 +211,12 @@ func cmdFactoryDaemon(args []string) error {
 	}
 	if *issueScanDraftPRCreate && *approveRoles {
 		return fmt.Errorf("--issue-scan-draft-pr-create cannot be combined with --approve-roles")
+	}
+	if *issueScanDraftPRRequest && *approveRequests {
+		return fmt.Errorf("--issue-scan-draft-pr-request cannot be combined with --approve-requests")
+	}
+	if *issueScanDraftPRRequest && *approveRoles {
+		return fmt.Errorf("--issue-scan-draft-pr-request cannot be combined with --approve-roles")
 	}
 	if *readyPRMarkReady && *approveRequests {
 		return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --approve-requests")
@@ -297,6 +306,13 @@ func cmdFactoryDaemon(args []string) error {
 		}
 		issueScanBlockerRepairRunner = issueScanBlockerRepairCommandRunner(*blockerRepairRunner, blockerRepairRunnerArgs, *blockerRepairTimeout)
 	}
+	var issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester
+	if *issueScanDraftPRRequest {
+		if strings.TrimSpace(*issueScanDraftPRRequestBase) == "" {
+			return fmt.Errorf("--issue-scan-draft-pr-request-base is required when --issue-scan-draft-pr-request is enabled")
+		}
+		issueScanDraftPRAuthorityRequester = issueScanDraftPRAuthorityRequestLocalGitRunner(*issueScanDraftPRRequestBase)
+	}
 	var issueScanDraftPRCreator work.Epic11PullRequestCreator
 	if *issueScanDraftPRCreate {
 		token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
@@ -342,7 +358,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by
@@ -951,6 +967,89 @@ func requireFlags(flags []requiredFlag) error {
 func sha256Hash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func issueScanDraftPRAuthorityRequestLocalGitRunner(baseRef string) hive.IssueScanDraftPRAuthorityRequester {
+	return func(ctx context.Context, requestContext hive.IssueScanDraftPRAuthorityRequestRunnerContext) (hive.IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+		repoPath := strings.TrimSpace(requestContext.RepoPath)
+		if repoPath == "" {
+			return hive.IssueScanDraftPRAuthorityRequestRunnerResult{}, fmt.Errorf("issue-scan draft PR authority request requires a resolved repository checkout")
+		}
+		base := valueOrString(strings.TrimSpace(baseRef), "main")
+		baseSHA, err := gitBaseCommitSHA(ctx, repoPath, base)
+		if err != nil {
+			return hive.IssueScanDraftPRAuthorityRequestRunnerResult{}, err
+		}
+		return hive.IssueScanDraftPRAuthorityRequestRunnerResult{
+			BaseRef: base,
+			BaseSHA: baseSHA,
+			Nonce:   issueScanDraftPRAuthorityNonce(requestContext, base, baseSHA),
+		}, nil
+	}
+}
+
+func gitBaseCommitSHA(ctx context.Context, repoPath, baseRef string) (string, error) {
+	remoteRef := gitRemoteBaseRef(baseRef)
+	if err := gitFetchBaseRef(ctx, repoPath, baseRef); err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", remoteRef+"^{commit}")
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("resolve issue-scan draft PR base %s in %s: %w%s", remoteRef, repoPath, err, runnerStderrSuffix(string(out)))
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("resolve issue-scan draft PR base %s in %s: empty commit SHA", remoteRef, repoPath)
+	}
+	return sha, nil
+}
+
+func gitFetchBaseRef(ctx context.Context, repoPath, baseRef string) error {
+	base := gitBaseBranchRef(baseRef)
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", base+":refs/remotes/origin/"+base)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("fetch issue-scan draft PR base origin/%s in %s: %w%s", base, repoPath, err, runnerStderrSuffix(string(out)))
+	}
+	return nil
+}
+
+func gitRemoteBaseRef(baseRef string) string {
+	return "origin/" + gitBaseBranchRef(baseRef)
+}
+
+func gitBaseBranchRef(baseRef string) string {
+	base := strings.TrimSpace(baseRef)
+	base = strings.TrimPrefix(base, "refs/heads/")
+	base = strings.TrimPrefix(base, "origin/")
+	if base == "" {
+		base = "main"
+	}
+	return base
+}
+
+func issueScanDraftPRAuthorityNonce(requestContext hive.IssueScanDraftPRAuthorityRequestRunnerContext, baseRef, baseSHA string) string {
+	seed := strings.Join([]string{
+		requestContext.RunID,
+		requestContext.FactoryOrderID,
+		requestContext.Repository,
+		requestContext.OperateBranch,
+		requestContext.OperateCommit,
+		baseRef,
+		baseSHA,
+	}, "\n")
+	sum := sha256.Sum256([]byte(seed))
+	return "issue-scan-" + hex.EncodeToString(sum[:])[:24]
+}
+
+func valueOrString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 // isExpectedAuthorityHold reports whether err is the benign "approval required"

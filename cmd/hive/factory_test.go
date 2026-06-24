@@ -216,6 +216,51 @@ func TestFactoryDaemonDraftPRCreateRejectsAutoApproveRoles(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonDraftPRRequestRejectsAutoApproveRequests(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected auto-approval guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRRequestRejectsAutoApproveRoles(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--approve-roles"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("expected auto-role guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonDraftPRRequestRequiresBase(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-request", "--issue-scan-draft-pr-request-base", ""})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-draft-pr-request-base") {
+		t.Fatalf("expected draft PR request base error, got %v", err)
+	}
+}
+
+func TestIssueScanDraftPRBaseRefNormalization(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		branch string
+		remote string
+	}{
+		{name: "default", input: "", branch: "main", remote: "origin/main"},
+		{name: "branch", input: "release/2026-06", branch: "release/2026-06", remote: "origin/release/2026-06"},
+		{name: "origin", input: "origin/main", branch: "main", remote: "origin/main"},
+		{name: "heads", input: "refs/heads/main", branch: "main", remote: "origin/main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gitBaseBranchRef(tt.input); got != tt.branch {
+				t.Fatalf("gitBaseBranchRef(%q) = %q, want %q", tt.input, got, tt.branch)
+			}
+			if got := gitRemoteBaseRef(tt.input); got != tt.remote {
+				t.Fatalf("gitRemoteBaseRef(%q) = %q, want %q", tt.input, got, tt.remote)
+			}
+		})
+	}
+}
+
 func TestFactoryDaemonIssueScanIntervalRequiresRepoBeforeStart(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m"})
 	if err == nil || !strings.Contains(err.Error(), "--registry") {
