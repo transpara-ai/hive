@@ -139,15 +139,22 @@ func cmdFactory(args []string) error {
 	}
 }
 
-// cmdFactoryDaemon runs the always-on governing loop. It mirrors
-// cmdCivilizationDaemon but forces the long-running Keepalive path: runLegacy's
-// loop=true flows to hive.Config.Loop, which runtime.go sets as
-// loop.Config.Keepalive — so governance roles block on the bus forever instead
-// of exiting at quiescence. This is the terminating-path's opposite by design.
+// cmdFactoryDaemon is the Factory spelling of the shared always-on governing
+// loop.
 func cmdFactoryDaemon(args []string) error {
-	fs := flag.NewFlagSet("factory daemon", flag.ContinueOnError)
+	return cmdGovernedDaemon("factory daemon", args)
+}
+
+// cmdGovernedDaemon runs the always-on Civilization governing loop. Both
+// `hive civilization daemon` and `hive factory daemon` use this parser so the
+// operator-facing Civilization command exposes the same governed issue-scan
+// controls as the Factory command. The final loop=true runLegacy call flows to
+// hive.Config.Loop, which runtime.go maps to Keepalive, so governance roles block
+// on the bus forever instead of exiting at quiescence.
+func cmdGovernedDaemon(name string, args []string) error {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	human := fs.String("human", "", "Operator name (required)")
-	seedSpec := fs.String("seed-spec", "", "Optional initial spec to seed the loop before it starts")
+	seedSpec := fs.String("seed-spec", "", "Optional initial spec to ingest before daemon starts")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
 	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")

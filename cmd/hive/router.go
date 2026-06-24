@@ -51,14 +51,14 @@ func helpText() string {
 	var b strings.Builder
 	b.WriteString("Verbs:\n")
 	b.WriteString("  civilization run         Multi-agent runtime, one-shot (seed and exit at quiescence)\n")
-	b.WriteString("  civilization daemon      Multi-agent runtime, long-running (block on bus)\n")
+	b.WriteString("  civilization daemon      Multi-agent runtime, long-running with governed issue-scan controls\n")
 	b.WriteString("  pipeline run             Scout→Builder→Critic, one cycle\n")
 	b.WriteString("  pipeline daemon          Scout→Builder→Critic, loops at --interval\n")
 	b.WriteString("  role <name> run          Single agent (builder|scout|critic|monitor), one task\n")
 	b.WriteString("  role <name> daemon       Single agent, continuous with throttling\n")
 	b.WriteString("  ingest <file>            Post a markdown spec as a task\n")
 	b.WriteString("  council [--topic ...]    Convene one deliberation\n")
-	b.WriteString("  factory daemon           Always-on governing loop (Keepalive; block on bus)\n")
+	b.WriteString("  factory daemon           Always-on governing loop with governed issue-scan controls\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
 	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
 	b.WriteString("  factory run-issue-scan-stage-role-output\n")
@@ -135,30 +135,7 @@ func cmdCivilizationRun(args []string) error {
 }
 
 func cmdCivilizationDaemon(args []string) error {
-	fs := flag.NewFlagSet("civilization daemon", flag.ContinueOnError)
-	human := fs.String("human", "", "Operator name (required)")
-	seedSpec := fs.String("seed-spec", "", "Optional initial spec to ingest before daemon starts")
-	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
-	repo := fs.String("repo", "", "Path to repo for Operate (default: current dir)")
-	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for issue-scan implementation targets")
-	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
-	catalogReloadInterval := fs.Duration("catalog-reload-interval", 0, "Reload --catalog on this interval for future model resolution; 0 disables")
-	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
-	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
-	space := fs.String("space", "hive", "transpara.ai space slug")
-	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *human == "" {
-		return fmt.Errorf("--human is required")
-	}
-	if *seedSpec != "" {
-		if err := runIngest(*seedSpec, *space, *apiBase, "high"); err != nil {
-			return fmt.Errorf("ingest seed-spec: %w", err)
-		}
-	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase)
+	return cmdGovernedDaemon("civilization daemon", args)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────
