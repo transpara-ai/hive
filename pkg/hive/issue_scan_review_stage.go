@@ -24,6 +24,12 @@ type issueScanReviewStageEvidence struct {
 	ImplementationRuntimeID    types.EventID
 }
 
+type issueScanCodeReviewEvidence struct {
+	EventID   types.EventID
+	Review    event.CodeReviewContent
+	Timestamp time.Time
+}
+
 // RecordCompletedIssueScanReviewRoleOutputs records run_adversarial_review
 // role-output artifacts once the existing Reviewer loop has produced a durable
 // code.review.submitted verdict for the concrete implementation task.
@@ -188,29 +194,41 @@ func (r *Runtime) issueScanImplementationStageEvidenceRefs(stageTaskID types.Eve
 }
 
 func (r *Runtime) latestIssueScanCodeReviewForTask(taskID types.EventID) (types.EventID, event.CodeReviewContent, time.Time, bool, error) {
+	reviews, err := r.issueScanCodeReviewsForTask(taskID)
+	if err != nil {
+		return types.EventID{}, event.CodeReviewContent{}, time.Time{}, false, err
+	}
+	if len(reviews) == 0 {
+		return types.EventID{}, event.CodeReviewContent{}, time.Time{}, false, nil
+	}
+	latest := reviews[len(reviews)-1]
+	return latest.EventID, latest.Review, latest.Timestamp, true, nil
+}
+
+func (r *Runtime) issueScanCodeReviewsForTask(taskID types.EventID) ([]issueScanCodeReviewEvidence, error) {
 	page, err := r.store.ByType(event.EventTypeCodeReviewSubmitted, 1000, types.None[types.Cursor]())
 	if err != nil {
-		return types.EventID{}, event.CodeReviewContent{}, time.Time{}, false, fmt.Errorf("code.review.submitted: %w", err)
+		return nil, fmt.Errorf("code.review.submitted: %w", err)
 	}
-	var bestID types.EventID
-	var best event.CodeReviewContent
-	var bestAt time.Time
+	reviews := []issueScanCodeReviewEvidence{}
 	for _, ev := range page.Items() {
 		content, ok := ev.Content().(event.CodeReviewContent)
 		if !ok || strings.TrimSpace(content.TaskID) != taskID.Value() {
 			continue
 		}
-		at := ev.Timestamp().Value()
-		if bestID == (types.EventID{}) || at.After(bestAt) || (at.Equal(bestAt) && ev.ID().Value() > bestID.Value()) {
-			bestID = ev.ID()
-			best = content
-			bestAt = at
+		reviews = append(reviews, issueScanCodeReviewEvidence{
+			EventID:   ev.ID(),
+			Review:    content,
+			Timestamp: ev.Timestamp().Value(),
+		})
+	}
+	sort.Slice(reviews, func(i, j int) bool {
+		if reviews[i].Timestamp.Equal(reviews[j].Timestamp) {
+			return reviews[i].EventID.Value() < reviews[j].EventID.Value()
 		}
-	}
-	if bestID == (types.EventID{}) {
-		return types.EventID{}, event.CodeReviewContent{}, time.Time{}, false, nil
-	}
-	return bestID, best, bestAt, true, nil
+		return reviews[i].Timestamp.Before(reviews[j].Timestamp)
+	})
+	return reviews, nil
 }
 
 func issueScanReviewerRoleOutputFromReview(review issueScanReviewStageEvidence) IssueScanStageRoleOutputEvidence {

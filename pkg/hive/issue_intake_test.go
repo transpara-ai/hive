@@ -1448,6 +1448,157 @@ func TestProgressIssueScanLifecycleRecordsReviewRoleOutputsAndCompletesStage(t *
 	}
 }
 
+func TestProgressIssueScanLifecycleRecordsBlockerRoleOutputsAndCompletesStage(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	for _, stageID := range []string{
+		"research_issue_and_repo_context",
+		"debate_with_correct_civic_roles",
+		"select_and_design_approach",
+	} {
+		if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, stageID, issueScanStageRuntimeEvidenceForTest(t, stageID), true); err != nil {
+			t.Fatalf("CompleteIssueScanLifecycleStage %s: %v", stageID, err)
+		}
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle seed implementation task: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	tasks, err := rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
+	if !ok {
+		t.Fatalf("missing implementation task in %+v", tasks)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", issueScanOperateResultBodyForTest(), []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact initial Operate result: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, implementationTask.ID, "validation output: go test ./pkg/hive passed", []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete initial implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle complete implementation stage: %v", err)
+	}
+	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "request_changes", "exact-head review found blockers", []string{"missing regression test"}); err != nil {
+		t.Fatalf("append request_changes review: %v", err)
+	}
+	if err := rt.tasks.Reopen(writer.human, implementationTask.ID, "request_changes (review 1 of 3): exact-head review found blockers", []string{"missing regression test"}, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Reopen implementation task: %v", err)
+	}
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after request_changes: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs) != 2 {
+		t.Fatalf("review role outputs after request_changes = %+v, want reviewer and guardian", progress.ReviewRoleOutputs)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs) != 0 {
+		t.Fatalf("blocker role outputs after request_changes = %+v, want none before repair approval", progress.BlockerRoleOutputs)
+	}
+
+	repairedBody := issueScanOperateResultBodyForTestWith(
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccccccccccc",
+		"codex/run-issue-001-repair",
+		"pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++\n2 files changed, 30 insertions(+), 2 deletions(-)",
+	)
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "Operate result", "text/plain", repairedBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact repaired Operate result: %v", err)
+	}
+	if err := rt.tasks.Complete(writer.human, implementationTask.ID, "validation output: go test ./pkg/hive -run TestProgressIssueScanLifecycleRecordsBlockerRoleOutputsAndCompletesStage passed", []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Complete repaired implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after repair completion: %v", err)
+	}
+	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "approve", "rerun review approved repaired exact head with zero blockers", nil); err != nil {
+		t.Fatalf("append approving review: %v", err)
+	}
+	progress, err = rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle after approving rerun: %v", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs) != 3 {
+		t.Fatalf("blocker role outputs = %+v, want implementer/reviewer/guardian", progress.BlockerRoleOutputs)
+	}
+
+	tasks, err = rt.tasks.List(50)
+	if err != nil {
+		t.Fatalf("List tasks after blocker progress: %v", err)
+	}
+	blockerStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "drive_blockers_to_zero"))
+	if !ok {
+		t.Fatalf("missing blocker stage task in %+v", tasks)
+	}
+	blockerCompleted, err := rt.issueScanStageTaskCompleted(blockerStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted blocker stage: %v", err)
+	}
+	if !blockerCompleted {
+		t.Fatalf("drive_blockers_to_zero stage was not completed")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(blockerStage.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts blocker stage: %v", err)
+	}
+	roleOutputs := issueScanRoleOutputArtifactsForTest(t, artifacts)
+	for _, role := range []string{"implementer", "reviewer", "guardian"} {
+		if roleOutputs[role] == nil {
+			t.Fatalf("missing %s blocker role output in %+v", role, roleOutputs)
+		}
+	}
+	for _, key := range []string{"blocker_fixes", "rerun_validation"} {
+		if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["implementer"].Outputs, key) == nil {
+			t.Fatalf("implementer blocker role output missing %s: %+v", key, roleOutputs["implementer"].Outputs)
+		}
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["reviewer"].Outputs, "rerun_review") == nil {
+		t.Fatalf("reviewer blocker role output missing rerun_review: %+v", roleOutputs["reviewer"].Outputs)
+	}
+	if issueScanStageRuntimeEvidenceItemByKey(roleOutputs["guardian"].Outputs, "zero_blocker_gate_disposition") == nil {
+		t.Fatalf("guardian blocker role output missing zero_blocker_gate_disposition: %+v", roleOutputs["guardian"].Outputs)
+	}
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
+		t.Fatalf("missing blocker runtime evidence artifact: %+v", artifacts)
+	}
+	readyStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "surface_ready_for_Human_result_PR"))
+	if !ok {
+		t.Fatalf("missing ready-for-Human stage task in %+v", tasks)
+	}
+	blocked, err := rt.tasks.IsBlocked(readyStage.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked ready stage: %v", err)
+	}
+	if blocked {
+		t.Fatalf("surface_ready_for_Human_result_PR remains blocked after blocker stage completion")
+	}
+}
+
 func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
@@ -2545,15 +2696,37 @@ func issueScanEvidenceItemForTest(stageID, role, key string) IssueScanStageRunti
 }
 
 func issueScanOperateResultBodyForTest() string {
-	base := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	head := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	return issueScanOperateResultBodyForTestWith(
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"codex/run-issue-001",
+		"pkg/hive/example.go | 12 ++++++++++++\n1 file changed, 12 insertions(+)\n",
+	)
+}
+
+func issueScanOperateResultBodyForTestWith(base, head, branch, stat string) string {
+	base = strings.TrimSpace(base)
+	head = strings.TrimSpace(head)
+	branch = strings.TrimSpace(branch)
+	stat = strings.TrimSpace(stat)
+	if base == "" {
+		base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	}
+	if head == "" {
+		head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	}
+	if branch == "" {
+		branch = "codex/run-issue-001"
+	}
+	if stat == "" {
+		stat = "pkg/hive/example.go | 12 ++++++++++++\n1 file changed, 12 insertions(+)"
+	}
 	return "commit: " + head + "\n" +
 		"base: " + base + "\n" +
 		"head: " + head + "\n" +
 		"range: " + base + ".." + head + "\n" +
-		"branch: codex/run-issue-001\n\n" +
-		"pkg/hive/example.go | 12 ++++++++++++\n" +
-		"1 file changed, 12 insertions(+)\n"
+		"branch: " + branch + "\n\n" +
+		stat + "\n"
 }
 
 func appendIssueScanCodeReviewForTest(rt *Runtime, writer *operatorRunLaunchWriter, taskID types.EventID, verdict, summary string, issues []string) error {

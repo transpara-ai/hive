@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
@@ -37,6 +38,7 @@ type IssueScanImplementationTaskResult struct {
 type issueScanOperateCompletionEvidence struct {
 	TaskID                  types.EventID
 	CompletionEventID       types.EventID
+	CompletionTimestamp     time.Time
 	CompletionSummary       string
 	OperateArtifactID       types.EventID
 	OperateBranch           string
@@ -446,7 +448,7 @@ func (r *Runtime) attachIssueScanImplementationTaskContext(content FactoryRunReq
 }
 
 func (r *Runtime) issueScanImplementationCompletionEvidence(taskID, implementationStageTaskID types.EventID) (issueScanOperateCompletionEvidence, bool, error) {
-	completionID, completion, ok, err := r.liveIssueScanImplementationCompletion(taskID)
+	completionID, completion, completionAt, ok, err := r.liveIssueScanImplementationCompletion(taskID)
 	if err != nil || !ok {
 		return issueScanOperateCompletionEvidence{}, ok, err
 	}
@@ -469,6 +471,7 @@ func (r *Runtime) issueScanImplementationCompletionEvidence(taskID, implementati
 	return issueScanOperateCompletionEvidence{
 		TaskID:                  taskID,
 		CompletionEventID:       completionID,
+		CompletionTimestamp:     completionAt,
 		CompletionSummary:       summary,
 		OperateArtifactID:       operate.ID,
 		OperateBranch:           parsed.Branch,
@@ -479,14 +482,14 @@ func (r *Runtime) issueScanImplementationCompletionEvidence(taskID, implementati
 	}, true, nil
 }
 
-func (r *Runtime) liveIssueScanImplementationCompletion(taskID types.EventID) (types.EventID, work.TaskCompletedContent, bool, error) {
+func (r *Runtime) liveIssueScanImplementationCompletion(taskID types.EventID) (types.EventID, work.TaskCompletedContent, time.Time, bool, error) {
 	completedPage, err := r.store.ByType(work.EventTypeTaskCompleted, 1000, types.None[types.Cursor]())
 	if err != nil {
-		return types.EventID{}, work.TaskCompletedContent{}, false, fmt.Errorf("work.task.completed: %w", err)
+		return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, fmt.Errorf("work.task.completed: %w", err)
 	}
 	reopenedPage, err := r.store.ByType(work.EventTypeTaskReopened, 1000, types.None[types.Cursor]())
 	if err != nil {
-		return types.EventID{}, work.TaskCompletedContent{}, false, fmt.Errorf("work.task.reopened: %w", err)
+		return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, fmt.Errorf("work.task.reopened: %w", err)
 	}
 	superseded := map[types.EventID]bool{}
 	for _, ev := range reopenedPage.Items() {
@@ -501,9 +504,9 @@ func (r *Runtime) liveIssueScanImplementationCompletion(taskID types.EventID) (t
 		if !ok || superseded[ev.ID()] || c.TaskID != taskID {
 			continue
 		}
-		return ev.ID(), c, true, nil
+		return ev.ID(), c, ev.Timestamp().Value(), true, nil
 	}
-	return types.EventID{}, work.TaskCompletedContent{}, false, nil
+	return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, nil
 }
 
 func latestIssueScanOperateResultArtifact(artifacts []work.ArtifactEvent) (work.ArtifactEvent, bool) {
