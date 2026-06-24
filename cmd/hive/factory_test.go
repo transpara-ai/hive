@@ -138,6 +138,60 @@ func TestFactoryDaemonRequiresReadyPRRunnerBeforeRunnerArg(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-review-runner") {
+		t.Fatalf("expected missing ready PR review runner error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRMarkReadyRequiresGitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true"})
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("expected missing GITHUB_TOKEN error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRMarkReadyRejectsGenericRunner(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true", "--issue-scan-ready-pr-runner", "/bin/true"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-runner") {
+		t.Fatalf("expected generic runner conflict error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRReviewRunnerRequiresMarkReady(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-review-runner", "/bin/true"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-mark-ready") {
+		t.Fatalf("expected mark-ready required error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRMarkReadyRequiresPositiveTimeout(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true", "--issue-scan-ready-pr-timeout", "0s"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-timeout") {
+		t.Fatalf("expected ready PR timeout error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRMarkReadyRejectsAutoApproveRequests(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true", "--approve-requests"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-requests") {
+		t.Fatalf("expected auto-approval guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonReadyPRMarkReadyRejectsAutoApproveRoles(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "token")
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true", "--approve-roles"})
+	if err == nil || !strings.Contains(err.Error(), "--approve-roles") {
+		t.Fatalf("expected auto-role guard error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonDraftPRCreateRequiresGitHubToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-draft-pr-create"})
@@ -403,6 +457,70 @@ printf '%s\n' '{"draft_pr_receipt":{"kind":"transpara_ai_draft_pr_receipt","repo
 	}
 	if sent.RunID != readyContext.RunID || sent.OperateCommit != readyContext.OperateCommit {
 		t.Fatalf("sent context = %+v, want run/head from %+v", sent, readyContext)
+	}
+}
+
+func TestRunIssueScanReadyStateReviewRunnerScrubsGitHubTokenAndParsesReceipt(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "write-capable-token")
+	t.Setenv("GH_TOKEN", "alternate-write-capable-token")
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	envPath := filepath.Join(dir, "env.txt")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+env > "$2"
+printf '%s\n' '{"review_ref":"artifact://ready-state/review.md","reviewed_head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","status":"passed","summary":"no blockers"}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	reviewContext := hive.IssueScanReadyStateReviewContext{
+		Kind:             "issue_scan_ready_state_review_context",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:            "run_issue_001",
+		FactoryOrderID:   "fo_run_issue_001",
+		Repository:       "transpara-ai/hive",
+		PRNumber:         321,
+		PRURL:            "https://github.com/transpara-ai/hive/pull/321",
+		OperateCommit:    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+
+	receipt, err := runIssueScanReadyStateReviewRunner(context.Background(), runner, []string{contextPath, envPath}, reviewContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanReadyStateReviewRunner: %v", err)
+	}
+	if receipt.ReviewRef != "artifact://ready-state/review.md" || receipt.Status != "passed" || receipt.ReviewedHeadSHA != reviewContext.OperateCommit {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanReadyStateReviewContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != reviewContext.RunID || sent.PRNumber != reviewContext.PRNumber || sent.OperateCommit != reviewContext.OperateCommit {
+		t.Fatalf("sent context = %+v, want run/PR/head from %+v", sent, reviewContext)
+	}
+	envRaw, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read runner env: %v", err)
+	}
+	envText := string(envRaw)
+	if strings.Contains(envText, "GITHUB_TOKEN=") || strings.Contains(envText, "GH_TOKEN=") {
+		t.Fatalf("ready-state review runner inherited GitHub token env:\n%s", envText)
+	}
+	for _, want := range []string{
+		"HIVE_ISSUE_SCAN_READY_STATE_REVIEW_CONTEXT=stdin",
+		"HIVE_ISSUE_SCAN_RUN_ID=" + reviewContext.RunID,
+		"HIVE_ISSUE_SCAN_REPOSITORY=" + reviewContext.Repository,
+		"HIVE_ISSUE_SCAN_PR_NUMBER=321",
+	} {
+		if !strings.Contains(envText, want) {
+			t.Fatalf("runner env missing %q:\n%s", want, envText)
+		}
 	}
 }
 

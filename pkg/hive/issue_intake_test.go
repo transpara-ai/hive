@@ -3709,6 +3709,426 @@ func TestProgressIssueScanLifecycleRunsConfiguredReadyPRRunner(t *testing.T) {
 	}
 }
 
+func TestProgressIssueScanLifecycleRunsConfiguredReadyPRFinalizer(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	client := &fakeReadyPRFinalizerClient{}
+	reviewCalls := 0
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		reviewCalls++
+		if reviewContext.RunID != runID || reviewContext.FactoryOrderID != orderID {
+			t.Fatalf("review context run/order = %q/%q, want %q/%q", reviewContext.RunID, reviewContext.FactoryOrderID, runID, orderID)
+		}
+		if reviewContext.PRNumber != readyEvidence.PRNumber || reviewContext.OperateCommit != readyEvidence.HeadSHA {
+			t.Fatalf("review context PR/head = #%d/%s, want #%d/%s", reviewContext.PRNumber, reviewContext.OperateCommit, readyEvidence.PRNumber, readyEvidence.HeadSHA)
+		}
+		if reviewContext.ReadyPRState.Draft || !reviewContext.ReadyPRState.ReadyForReview {
+			t.Fatalf("review context ready PR state = %+v, want non-draft ready PR", reviewContext.ReadyPRState)
+		}
+		return IssueScanReadyStateReviewReceipt{
+			ReviewRef:       readyEvidence.ReadyStateReviewRef,
+			ReviewedHeadSHA: readyEvidence.HeadSHA,
+			Status:          "passed",
+			Summary:         readyEvidence.Summary,
+			SourceRefs:      []string{"test://ready-state-review"},
+		}, nil
+	})
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with ready PR finalizer: %v", err)
+	}
+	if client.markCalls != 1 || client.fetchCalls != 1 || reviewCalls != 1 {
+		t.Fatalf("finalizer calls mark/fetch/review = %d/%d/%d, want 1/1/1", client.markCalls, client.fetchCalls, reviewCalls)
+	}
+	if len(progress.ReadyPRRuns) != 1 || !progress.ReadyPRRuns[0].Recorded {
+		t.Fatalf("ready PR finalizer runs = %+v, want one recorded packet", progress.ReadyPRRuns)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 3 {
+		t.Fatalf("ready role outputs = %+v, want strategist/reviewer/guardian", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if !readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR stage was not completed")
+	}
+
+	again, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("second progressIssueScanLifecycle: %v", err)
+	}
+	if client.markCalls != 1 || client.fetchCalls != 1 || reviewCalls != 1 {
+		t.Fatalf("finalizer calls after completion mark/fetch/review = %d/%d/%d, want still 1/1/1", client.markCalls, client.fetchCalls, reviewCalls)
+	}
+	if len(again.ReadyPRRuns) != 0 {
+		t.Fatalf("second ready PR finalizer runs = %+v, want none after ready stage completed", again.ReadyPRRuns)
+	}
+}
+
+func TestIssueScanReadyPRRunnerContextJSONOmitsDraftPRReceipt(t *testing.T) {
+	context := IssueScanReadyPRRunnerContext{
+		Kind:              issueScanReadyPRRunnerContextKind,
+		RunID:             "run_issue_001",
+		FactoryOrderID:    "fo_run_issue_001",
+		Repository:        "transpara-ai/hive",
+		DraftPRReceiptRef: "evt_receipt",
+		DraftPRReceipt: &TransparaAIDraftPRReceipt{
+			Repository:     "transpara-ai/hive",
+			PRNumber:       321,
+			AuthorityNonce: "nonce-must-not-leave-process",
+		},
+	}
+	body, err := json.Marshal(context)
+	if err != nil {
+		t.Fatalf("Marshal ready PR context: %v", err)
+	}
+	encoded := string(body)
+	if strings.Contains(encoded, `"draft_pr_receipt":`) || strings.Contains(encoded, "nonce-must-not-leave-process") {
+		t.Fatalf("serialized ready PR context leaked receipt: %s", encoded)
+	}
+	if !strings.Contains(encoded, "evt_receipt") {
+		t.Fatalf("serialized ready PR context missing receipt ref: %s", encoded)
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerWaitsForDraftReceipt(t *testing.T) {
+	rt, _, _, _, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	client := &fakeReadyPRFinalizerClient{}
+	reviewCalls := 0
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		reviewCalls++
+		return IssueScanReadyStateReviewReceipt{}, fmt.Errorf("review must not run without draft receipt")
+	})
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle without draft receipt: %v", err)
+	}
+	if len(progress.ReadyPRRuns) != 0 || client.markCalls != 0 || reviewCalls != 0 {
+		t.Fatalf("progress/client/review = %+v/%d/%d, want no ready run while awaiting draft receipt", progress.ReadyPRRuns, client.markCalls, reviewCalls)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed while awaiting draft receipt")
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsDraftReceiptWithoutAuthority(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	receipt := TransparaAIDraftPRReceipt{
+		Kind:                   transparaAIDraftPRReceiptKind,
+		Repository:             readyEvidence.Repository,
+		PRNumber:               readyEvidence.PRNumber,
+		PRURL:                  readyEvidence.PRURL,
+		BaseRef:                readyEvidence.BaseRef,
+		BaseSHA:                readyEvidence.BaseSHA,
+		HeadRef:                readyEvidence.HeadRef,
+		HeadSHA:                readyEvidence.HeadSHA,
+		RemoteHeadSHA:          readyEvidence.HeadSHA,
+		ChangedFiles:           []string{"README.md"},
+		Draft:                  true,
+		State:                  "open",
+		PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+		AuthorityNonce:         "nonce-without-approved-decision",
+		HumanApprovalRequired:  true,
+		NoMergeOrDeployClaim:   true,
+		ReadyForReviewRequired: true,
+	}
+	body, err := transparaAIDraftPRReceiptBody(receipt)
+	if err != nil {
+		t.Fatalf("transparaAIDraftPRReceiptBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, TransparaAIDraftPRReceiptArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact draft receipt: %v", err)
+	}
+	client := &fakeReadyPRFinalizerClient{}
+	reviewCalls := 0
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		reviewCalls++
+		return IssueScanReadyStateReviewReceipt{}, fmt.Errorf("review must not run with unauthorized draft receipt")
+	})
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "has no approved authority decision") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want visible unauthorized receipt refusal; progress=%+v", err, progress)
+	}
+	if len(progress.ReadyPRRuns) != 0 || client.markCalls != 0 || reviewCalls != 0 {
+		t.Fatalf("progress/client/review = %+v/%d/%d, want no ready mutation for unauthorized receipt", progress.ReadyPRRuns, client.markCalls, reviewCalls)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed with unauthorized draft receipt")
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsMovedHead(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	client := &fakeReadyPRFinalizerClient{
+		markState: IssueScanReadyPRLiveState{
+			Repository:       "transpara-ai/hive",
+			PRNumber:         readyEvidence.PRNumber,
+			PRURL:            readyEvidence.PRURL,
+			BaseRef:          readyEvidence.BaseRef,
+			BaseSHA:          readyEvidence.BaseSHA,
+			HeadRef:          readyEvidence.HeadRef,
+			HeadSHA:          "dddddddddddddddddddddddddddddddddddddddd",
+			State:            "open",
+			Draft:            false,
+			ReadyForReview:   true,
+			MergeStateStatus: "clean",
+			CIStatus:         "success",
+		},
+	}
+	reviewCalls := 0
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		reviewCalls++
+		return IssueScanReadyStateReviewReceipt{}, fmt.Errorf("review must not run after moved head")
+	})
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "head_sha") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want moved head refusal; progress=%+v", err, progress)
+	}
+	if client.markCalls != 1 || client.fetchCalls != 0 || reviewCalls != 0 {
+		t.Fatalf("finalizer calls mark/fetch/review = %d/%d/%d, want 1/0/0", client.markCalls, client.fetchCalls, reviewCalls)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed after moved head refusal")
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsUnsafeFinalEvidence(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutateFetch func(*IssueScanReadyPRLiveState)
+		review      IssueScanReadyStateReviewReceipt
+		wantError   string
+		wantFetch   int
+		wantReview  int
+	}{
+		{
+			name: "failing CI",
+			mutateFetch: func(state *IssueScanReadyPRLiveState) {
+				state.CIStatus = "failure"
+			},
+			review:     IssueScanReadyStateReviewReceipt{Status: "passed"},
+			wantError:  "ci_status",
+			wantFetch:  1,
+			wantReview: 1,
+		},
+		{
+			name: "dirty merge state",
+			mutateFetch: func(state *IssueScanReadyPRLiveState) {
+				state.MergeStateStatus = "dirty"
+			},
+			review:     IssueScanReadyStateReviewReceipt{Status: "passed"},
+			wantError:  "merge_state_status",
+			wantFetch:  1,
+			wantReview: 1,
+		},
+		{
+			name:       "failing review status",
+			review:     IssueScanReadyStateReviewReceipt{Status: "failed"},
+			wantError:  "review status",
+			wantFetch:  0,
+			wantReview: 1,
+		},
+		{
+			name:       "mismatched review head",
+			review:     IssueScanReadyStateReviewReceipt{ReviewedHeadSHA: "dddddddddddddddddddddddddddddddddddddddd", Status: "passed"},
+			wantError:  "reviewed_head_sha",
+			wantFetch:  0,
+			wantReview: 1,
+		},
+		{
+			name: "retargeted base ref",
+			mutateFetch: func(state *IssueScanReadyPRLiveState) {
+				state.BaseRef = "release"
+			},
+			review:     IssueScanReadyStateReviewReceipt{Status: "passed"},
+			wantError:  "base_ref",
+			wantFetch:  1,
+			wantReview: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+			readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+			if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+				t.Fatalf("attach draft PR receipt: %v", err)
+			}
+			fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
+				Repository: readyEvidence.Repository,
+				PRNumber:   readyEvidence.PRNumber,
+				PRURL:      readyEvidence.PRURL,
+				BaseRef:    readyEvidence.BaseRef,
+				BaseSHA:    readyEvidence.BaseSHA,
+				HeadRef:    readyEvidence.HeadRef,
+				HeadSHA:    readyEvidence.HeadSHA,
+			})
+			if tt.mutateFetch != nil {
+				tt.mutateFetch(&fetchState)
+			}
+			client := &fakeReadyPRFinalizerClient{fetchState: fetchState}
+			reviewCalls := 0
+			rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+				reviewCalls++
+				receipt := tt.review
+				if strings.TrimSpace(receipt.ReviewRef) == "" {
+					receipt.ReviewRef = readyEvidence.ReadyStateReviewRef
+				}
+				if strings.TrimSpace(receipt.ReviewedHeadSHA) == "" {
+					receipt.ReviewedHeadSHA = readyEvidence.HeadSHA
+				}
+				return receipt, nil
+			})
+			progress, err := rt.progressIssueScanLifecycle()
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("progressIssueScanLifecycle error = %v, want %q; progress=%+v", err, tt.wantError, progress)
+			}
+			if client.fetchCalls != tt.wantFetch || reviewCalls != tt.wantReview {
+				t.Fatalf("fetch/review calls = %d/%d, want %d/%d", client.fetchCalls, reviewCalls, tt.wantFetch, tt.wantReview)
+			}
+			readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+			if err != nil {
+				t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+			}
+			if readyCompleted {
+				t.Fatalf("ready stage completed after %s refusal", tt.name)
+			}
+		})
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerAcceptsBlockedForHumanReview(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
+		Repository: readyEvidence.Repository,
+		PRNumber:   readyEvidence.PRNumber,
+		PRURL:      readyEvidence.PRURL,
+		BaseRef:    readyEvidence.BaseRef,
+		BaseSHA:    readyEvidence.BaseSHA,
+		HeadRef:    readyEvidence.HeadRef,
+		HeadSHA:    readyEvidence.HeadSHA,
+	})
+	fetchState.MergeStateStatus = "blocked"
+	client := &fakeReadyPRFinalizerClient{fetchState: fetchState}
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		return IssueScanReadyStateReviewReceipt{
+			ReviewRef:       readyEvidence.ReadyStateReviewRef,
+			ReviewedHeadSHA: readyEvidence.HeadSHA,
+			Status:          "passed",
+			Summary:         readyEvidence.Summary,
+		}, nil
+	})
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with blocked ready PR: %v", err)
+	}
+	if len(progress.ReadyPRRuns) != 1 || !progress.ReadyPRRuns[0].Recorded {
+		t.Fatalf("ready PR runs = %+v, want recorded blocked-by-Human-review evidence", progress.ReadyPRRuns)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(readyStage.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts ready stage: %v", err)
+	}
+	var recorded IssueScanReadyPREvidence
+	found := false
+	for _, artifact := range artifacts {
+		parsed, ok, err := issueScanReadyPREvidenceArtifact(artifact.ID.Value(), artifact.Label, artifact.Body)
+		if err != nil {
+			t.Fatalf("parse ready evidence artifact %s: %v", artifact.ID, err)
+		}
+		if ok {
+			recorded = parsed
+			found = true
+		}
+	}
+	if !found || recorded.MergeStateStatus != "blocked" {
+		t.Fatalf("ready evidence = %+v found=%v, want blocked merge state", recorded, found)
+	}
+}
+
+func TestProgressIssueScanLifecycleReadyPRFinalizerAcceptsAdvancedBaseSHA(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
+		Repository: readyEvidence.Repository,
+		PRNumber:   readyEvidence.PRNumber,
+		PRURL:      readyEvidence.PRURL,
+		BaseRef:    readyEvidence.BaseRef,
+		BaseSHA:    readyEvidence.BaseSHA,
+		HeadRef:    readyEvidence.HeadRef,
+		HeadSHA:    readyEvidence.HeadSHA,
+	})
+	fetchState.BaseSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	client := &fakeReadyPRFinalizerClient{fetchState: fetchState}
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		return IssueScanReadyStateReviewReceipt{
+			ReviewRef:       readyEvidence.ReadyStateReviewRef,
+			ReviewedHeadSHA: readyEvidence.HeadSHA,
+			Status:          "passed",
+			Summary:         readyEvidence.Summary,
+		}, nil
+	})
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycle with advanced base SHA: %v", err)
+	}
+	if len(progress.ReadyPRRuns) != 1 || !progress.ReadyPRRuns[0].Recorded {
+		t.Fatalf("ready PR runs = %+v, want recorded evidence despite advanced live base SHA", progress.ReadyPRRuns)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(readyStage.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts ready stage: %v", err)
+	}
+	var recorded IssueScanReadyPREvidence
+	found := false
+	for _, artifact := range artifacts {
+		parsed, ok, err := issueScanReadyPREvidenceArtifact(artifact.ID.Value(), artifact.Label, artifact.Body)
+		if err != nil {
+			t.Fatalf("parse ready evidence artifact %s: %v", artifact.ID, err)
+		}
+		if ok {
+			recorded = parsed
+			found = true
+		}
+	}
+	if !found || recorded.BaseSHA != readyEvidence.BaseSHA {
+		t.Fatalf("ready evidence = %+v found=%v, want receipt base SHA %q", recorded, found, readyEvidence.BaseSHA)
+	}
+}
+
 func TestProgressIssueScanLifecycleRejectsReadyPREvidenceWithoutDraftReceipt(t *testing.T) {
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{
@@ -4396,6 +4816,71 @@ func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaun
 		t.Fatalf("ready stage remains blocked before ready evidence is attached")
 	}
 	return rt, writer, queued.RunID, orderID, implementationTask, readyStage
+}
+
+func issueScanReadyPREvidenceForTest(runID, orderID string) IssueScanReadyPREvidence {
+	return IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+		Summary:                "Ready-for-Human result PR is surfaced with exact-head ready-state review evidence and awaits Human approval.",
+		SourceRefs:             []string{"test://ready-pr"},
+	}
+}
+
+type fakeReadyPRFinalizerClient struct {
+	markCalls  int
+	fetchCalls int
+	markState  IssueScanReadyPRLiveState
+	fetchState IssueScanReadyPRLiveState
+}
+
+func (f *fakeReadyPRFinalizerClient) MarkReadyForReview(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+	f.markCalls++
+	if f.markState.PRNumber != 0 {
+		return f.markState, nil
+	}
+	return readyPRLiveStateFromMutationForTest(mutation), nil
+}
+
+func (f *fakeReadyPRFinalizerClient) FetchReadyPRState(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+	f.fetchCalls++
+	if f.fetchState.PRNumber != 0 {
+		return f.fetchState, nil
+	}
+	return readyPRLiveStateFromMutationForTest(mutation), nil
+}
+
+func readyPRLiveStateFromMutationForTest(mutation IssueScanReadyPRFinalizerMutation) IssueScanReadyPRLiveState {
+	return IssueScanReadyPRLiveState{
+		Repository:       mutation.Repository,
+		PRNumber:         mutation.PRNumber,
+		PRURL:            mutation.PRURL,
+		BaseRef:          mutation.BaseRef,
+		BaseSHA:          mutation.BaseSHA,
+		HeadRef:          mutation.HeadRef,
+		HeadSHA:          mutation.HeadSHA,
+		State:            "open",
+		Draft:            false,
+		ReadyForReview:   true,
+		MergeStateStatus: "clean",
+		CIStatus:         "success",
+		SourceRefs:       []string{"test://github-ready-state"},
+	}
 }
 
 func attachIssueScanDraftPRReceiptForReadyTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, stageTaskID types.EventID, evidence IssueScanReadyPREvidence) error {
