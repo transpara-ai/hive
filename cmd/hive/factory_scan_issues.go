@@ -153,6 +153,9 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 	}
 	printIssueScanRoleOutputCount("review", progress.ReviewRoleOutputs)
 	printIssueScanRoleOutputCount("blocker", progress.BlockerRoleOutputs)
+	if recorded := countRecordedIssueScanBlockerRepairRunsForCLI(progress.BlockerRepairRuns); recorded > 0 {
+		fmt.Printf("issue-scan blocker repair runner records: %d\n", recorded)
+	}
 	if recorded := countRecordedIssueScanReadyPRRunsForCLI(progress.ReadyPRRuns); recorded > 0 {
 		fmt.Printf("issue-scan ready PR evidence recorded: %d\n", recorded)
 	}
@@ -222,6 +225,16 @@ func countExistingIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImple
 }
 
 func countRecordedIssueScanAdversarialReviewRunsForCLI(runs []hive.IssueScanAdversarialReviewRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		if run.Recorded {
+			count++
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanBlockerRepairRunsForCLI(runs []hive.IssueScanBlockerRepairRunnerRecordResult) int {
 	count := 0
 	for _, run := range runs {
 		if run.Recorded {

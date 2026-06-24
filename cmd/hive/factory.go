@@ -57,6 +57,9 @@ import (
 //   run-issue-scan-review
 //               → invoke a configured adversarial review runner with exact-head
 //                  context, then record the returned receipt.
+//   run-issue-scan-blocker-repair
+//               → invoke a configured blocker repair runner after request_changes
+//                  reopens implementation work, then record its Operate result.
 //   record-issue-scan-draft-pr
 //               → link the governed draft-PR creation receipt to the terminal
 //                  issue-scan ready stage.
@@ -79,7 +82,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -102,6 +105,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryRecordIssueScanReview(rest)
 	case "run-issue-scan-review":
 		return cmdFactoryRunIssueScanReview(rest)
+	case "run-issue-scan-blocker-repair":
+		return cmdFactoryRunIssueScanBlockerRepair(rest)
 	case "record-issue-scan-draft-pr":
 		return cmdFactoryRecordIssueScanDraftPR(rest)
 	case "record-issue-scan-ready-pr":
@@ -115,11 +120,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
@@ -159,6 +164,10 @@ func cmdFactoryDaemon(args []string) error {
 	reviewTimeout := fs.Duration("issue-scan-review-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-review-runner")
 	reviewRunnerArgs := repeatedStringFlag{}
 	fs.Var(&reviewRunnerArgs, "issue-scan-review-runner-arg", "Argument passed to --issue-scan-review-runner (repeatable)")
+	blockerRepairRunner := fs.String("issue-scan-blocker-repair-runner", "", "Executable issue-scan blocker repair runner; receives JSON context on stdin and returns Operate result JSON")
+	blockerRepairTimeout := fs.Duration("issue-scan-blocker-repair-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-blocker-repair-runner")
+	blockerRepairRunnerArgs := repeatedStringFlag{}
+	fs.Var(&blockerRepairRunnerArgs, "issue-scan-blocker-repair-runner-arg", "Argument passed to --issue-scan-blocker-repair-runner (repeatable)")
 	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
 	readyPRTimeout := fs.Duration("issue-scan-ready-pr-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-ready-pr-runner")
 	readyPRRunnerArgs := repeatedStringFlag{}
@@ -250,6 +259,17 @@ func cmdFactoryDaemon(args []string) error {
 		}
 		issueScanReviewRunner = issueScanReviewCommandRunner(*reviewRunner, reviewRunnerArgs, *reviewTimeout)
 	}
+	var issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner
+	if strings.TrimSpace(*blockerRepairRunner) == "" {
+		if len(blockerRepairRunnerArgs) > 0 {
+			return fmt.Errorf("--issue-scan-blocker-repair-runner is required when --issue-scan-blocker-repair-runner-arg is set")
+		}
+	} else {
+		if *blockerRepairTimeout <= 0 {
+			return fmt.Errorf("--issue-scan-blocker-repair-timeout must be greater than zero")
+		}
+		issueScanBlockerRepairRunner = issueScanBlockerRepairCommandRunner(*blockerRepairRunner, blockerRepairRunnerArgs, *blockerRepairTimeout)
+	}
 	var issueScanReadyPRRunner hive.IssueScanReadyPRRunner
 	if strings.TrimSpace(*readyPRRunner) == "" {
 		if len(readyPRRunnerArgs) > 0 {
@@ -267,7 +287,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

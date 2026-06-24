@@ -106,6 +106,38 @@ func TestNewWiresIssueScanImplementationRunner(t *testing.T) {
 	}
 }
 
+func TestNewWiresIssueScanBlockerRepairRunner(t *testing.T) {
+	ctx := context.Background()
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	runner := func(context.Context, IssueScanBlockerRepairRunnerContext) (IssueScanBlockerRepairRunnerResult, error) {
+		return IssueScanBlockerRepairRunnerResult{
+			OperateResultBody: "branch: codex/test-repair\ncommit: def456\n\npkg/hive/file.go | 1 +",
+			CompletionSummary: "validation output: go test ./pkg/hive passed after repair",
+		}, nil
+	}
+	rt, err := New(ctx, Config{
+		Store:                        store.NewInMemoryStore(),
+		Actors:                       actors,
+		HumanID:                      humanID,
+		IssueScanBlockerRepairRunner: runner,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.issueScanBlockerRepairRunner == nil {
+		t.Fatal("issueScanBlockerRepairRunner was not wired from Config")
+	}
+	result, err := rt.issueScanBlockerRepairRunner(ctx, IssueScanBlockerRepairRunnerContext{})
+	if err != nil {
+		t.Fatalf("configured runner returned error: %v", err)
+	}
+	if !strings.Contains(result.OperateResultBody, "branch:") || result.CompletionSummary == "" {
+		t.Fatalf("configured runner result = %+v", result)
+	}
+}
+
 func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 	tests := []struct {
 		name          string
