@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -1999,6 +2000,59 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	}
 }
 
+func TestPostEventIssueScanProgressDoesNotWaitForConfiguredRunner(t *testing.T) {
+	rt, _, _, _, _ := issueScanCompletedImplementationFixtureForTest(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return IssueScanAdversarialReviewReceipt{}, ctx.Err()
+		}
+		receipt := reviewContext.ExpectedReceipt
+		receipt.ReviewRef = "artifact://adversarial-review/configured-runner/result.md"
+		receipt.Verdict = "approve"
+		receipt.Summary = "configured runner approved the verified Operate head"
+		receipt.Issues = []string{}
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		return receipt, nil
+	}
+
+	progressDone := make(chan error, 1)
+	go func() {
+		_, err := rt.progressIssueScanLifecycle()
+		progressDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("configured runner did not start")
+	}
+	go func() {
+		rt.progressIssueScanLifecycleAfterTaskCommands(context.Background(), 1, 1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		close(release)
+		t.Fatal("post-event progress waited on configured runner")
+	}
+	close(release)
+	select {
+	case err := <-progressDone:
+		if err != nil {
+			t.Fatalf("progressIssueScanLifecycle: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("configured runner progress did not finish after release")
+	}
+}
+
 func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.T) {
 	rt, writer, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	calls := 0
@@ -2409,6 +2463,67 @@ func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
 	}
 	if !readyCompleted {
 		t.Fatalf("surface_ready_for_Human_result_PR stage was not completed")
+	}
+}
+
+func TestRecordIssueScanReadyPREvidenceRejectsDraftReceiptWithoutApprovedAuthorityDecision(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+	}
+	receipt := TransparaAIDraftPRReceipt{
+		Kind:                   transparaAIDraftPRReceiptKind,
+		Repository:             readyEvidence.Repository,
+		PRNumber:               readyEvidence.PRNumber,
+		PRURL:                  readyEvidence.PRURL,
+		BaseRef:                readyEvidence.BaseRef,
+		BaseSHA:                readyEvidence.BaseSHA,
+		HeadRef:                readyEvidence.HeadRef,
+		HeadSHA:                readyEvidence.HeadSHA,
+		RemoteHeadSHA:          readyEvidence.HeadSHA,
+		ChangedFiles:           []string{"README.md"},
+		Draft:                  true,
+		State:                  "open",
+		PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+		AuthorityNonce:         "nonce-without-approved-decision",
+		HumanApprovalRequired:  true,
+		NoMergeOrDeployClaim:   true,
+		ReadyForReviewRequired: true,
+	}
+	body, err := transparaAIDraftPRReceiptBody(receipt)
+	if err != nil {
+		t.Fatalf("transparaAIDraftPRReceiptBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, TransparaAIDraftPRReceiptArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact draft receipt: %v", err)
+	}
+
+	if _, err := rt.RecordIssueScanReadyPREvidence(runID, readyEvidence); err == nil || !strings.Contains(err.Error(), "no approved draft PR authority decision matches receipt") {
+		t.Fatalf("RecordIssueScanReadyPREvidence error = %v, want approved authority decision refusal", err)
+	}
+	completed, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if completed {
+		t.Fatalf("ready stage completed without approved draft PR authority decision")
 	}
 }
 

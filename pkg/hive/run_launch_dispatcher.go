@@ -1008,10 +1008,6 @@ type IssueScanLifecycleProgress struct {
 
 type issueScanLifecycleProgress = IssueScanLifecycleProgress
 
-type issueScanLifecycleProgressOptions struct {
-	RunConfiguredRunners bool
-}
-
 // ProgressIssueScanLifecycle advances all queued/dispatched issue-scan runs
 // through the evidence bridge. Daemon paths use this as a bounded local progress
 // pass; it never creates, marks ready, merges, deploys, or approves a PR by
@@ -1049,7 +1045,7 @@ func (r *Runtime) ProgressIssueScanRunLifecycleContext(ctx context.Context, runI
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{})
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
@@ -1062,16 +1058,52 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 	if r == nil {
 		return progress, nil
 	}
-	r.issueScanLifecycleMu.Lock()
-	defer r.issueScanLifecycleMu.Unlock()
 
 	var errs []error
+	r.issueScanLifecycleMu.Lock()
 	dispatch, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit)
 	progress.Dispatch = dispatch
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{RunConfiguredRunners: true})
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	r.issueScanLifecycleMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
+	reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
+	progress.ReviewRuns = reviewRuns
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
+	}
+	if len(reviewRuns) > 0 {
+		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+		mergeIssueScanLifecycleProgress(&progress, after)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
+	readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
+	progress.ReadyPRRuns = readyPRRuns
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
+	}
+	if len(readyPRRuns) > 0 {
+		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+		mergeIssueScanLifecycleProgress(&progress, after)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return progress, errors.Join(errs...)
 }
 
@@ -1089,11 +1121,20 @@ func (r *Runtime) progressIssueScanLifecycleInlineContext(ctx context.Context) (
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{})
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
-func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error, options issueScanLifecycleProgressOptions) {
+func (r *Runtime) progressDispatchedIssueScanLifecycleReconcile(ctx context.Context, dispatch RunLaunchDispatchResult) (IssueScanLifecycleProgress, error) {
+	var progress IssueScanLifecycleProgress
+	var errs []error
+	r.issueScanLifecycleMu.Lock()
+	defer r.issueScanLifecycleMu.Unlock()
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	return progress, errors.Join(errs...)
+}
+
+func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
 	if r == nil || progress == nil || errs == nil {
 		return
 	}
@@ -1124,13 +1165,6 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-implementation auto-completion: %w", err))
 		}
 	}
-	if options.RunConfiguredRunners {
-		reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
-		progress.ReviewRuns = reviewRuns
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
-		}
-	}
 	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(dispatch)
 	progress.ReviewRoleOutputs = reviewRoleOutputs
 	if err != nil {
@@ -1155,13 +1189,6 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-blocker auto-completion: %w", err))
 		}
 	}
-	if options.RunConfiguredRunners {
-		readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
-		progress.ReadyPRRuns = readyPRRuns
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
-		}
-	}
 	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(dispatch)
 	progress.ReadyRoleOutputs = readyRoleOutputs
 	if err != nil {
@@ -1174,6 +1201,24 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-ready auto-completion: %w", err))
 		}
 	}
+}
+
+func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueScanLifecycleProgress) {
+	if dst == nil {
+		return
+	}
+	dst.Advances = append(dst.Advances, src.Advances...)
+	dst.Completions = append(dst.Completions, src.Completions...)
+	dst.ResearchRoleOutputs = append(dst.ResearchRoleOutputs, src.ResearchRoleOutputs...)
+	dst.DebateRoleOutputs = append(dst.DebateRoleOutputs, src.DebateRoleOutputs...)
+	dst.DesignRoleOutputs = append(dst.DesignRoleOutputs, src.DesignRoleOutputs...)
+	dst.ImplementationTasks = append(dst.ImplementationTasks, src.ImplementationTasks...)
+	dst.ImplementationRoleOutputs = append(dst.ImplementationRoleOutputs, src.ImplementationRoleOutputs...)
+	dst.ReviewRuns = append(dst.ReviewRuns, src.ReviewRuns...)
+	dst.ReviewRoleOutputs = append(dst.ReviewRoleOutputs, src.ReviewRoleOutputs...)
+	dst.BlockerRoleOutputs = append(dst.BlockerRoleOutputs, src.BlockerRoleOutputs...)
+	dst.ReadyPRRuns = append(dst.ReadyPRRuns, src.ReadyPRRuns...)
+	dst.ReadyRoleOutputs = append(dst.ReadyRoleOutputs, src.ReadyRoleOutputs...)
 }
 
 func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Context, executed, total int) {
