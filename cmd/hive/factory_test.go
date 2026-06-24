@@ -893,6 +893,21 @@ func TestFactoryRequestIssueScanPRRequiresHuman(t *testing.T) {
 	}
 }
 
+func TestFactoryCreateIssueScanDraftPRRequiresHuman(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "create-issue-scan-draft-pr"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing-flag error mentioning human, got %v", err)
+	}
+}
+
+func TestFactoryCreateIssueScanDraftPRRequiresGitHubTokenBeforeRuntime(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	err := routeAndDispatch([]string{"factory", "create-issue-scan-draft-pr", "--human", "Michael", "--run", "run_issue_001", "--request", "evt_issue_001"})
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("expected missing GITHUB_TOKEN error, got %v", err)
+	}
+}
+
 // TestFactoryCreatePRRequiresRequest asserts create-pr validates --request
 // before opening a store or calling GitHub.
 func TestFactoryCreatePRRequiresRequest(t *testing.T) {
