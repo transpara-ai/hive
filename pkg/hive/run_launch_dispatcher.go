@@ -302,9 +302,34 @@ func factoryOrderFromRunLaunch(content FactoryRunRequestedContent, orderID strin
 		DefinitionOfDone:   runLaunchDefinitionOfDone(content),
 		AcceptanceCriteria: runLaunchAcceptanceCriteria(content),
 		TestPlan:           runLaunchTestPlan(content),
-		ExpectedOutputs:    []string{"draft pull request or governed execution artifact", "validation evidence", "operator-facing status update"},
+		ExpectedOutputs:    runLaunchExpectedOutputs(content),
 		ModelOverrides:     workModelOverridesFromRunLaunch(content.ModelOverrides),
 	}
+}
+
+func runLaunchExpectedOutputs(content FactoryRunRequestedContent) []string {
+	if isIssueScanRunLaunch(content) {
+		return []string{
+			"ready-for-Human result pull request",
+			"exact-head adversarial review with zero blockers",
+			"validation evidence and operator-facing status update",
+		}
+	}
+	return []string{
+		"draft pull request or governed execution artifact",
+		"validation evidence",
+		"operator-facing status update",
+	}
+}
+
+func isIssueScanRunLaunch(content FactoryRunRequestedContent) bool {
+	var brief struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(content.Brief, &brief); err != nil {
+		return false
+	}
+	return strings.TrimSpace(brief.Kind) == issueScanBriefKind
 }
 
 func workModelOverridesFromRunLaunch(overrides []RunLaunchModelOverride) []work.FactoryOrderModelOverride {
