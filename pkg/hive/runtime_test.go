@@ -74,6 +74,38 @@ func TestNewWiresIssueScanStageRoleOutputRunner(t *testing.T) {
 	}
 }
 
+func TestNewWiresIssueScanImplementationRunner(t *testing.T) {
+	ctx := context.Background()
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	runner := func(context.Context, IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		return IssueScanImplementationRunnerResult{
+			OperateResultBody: "branch: codex/test\ncommit: abc123\n\npkg/hive/file.go | 1 +",
+			CompletionSummary: "validation output: go test ./pkg/hive passed",
+		}, nil
+	}
+	rt, err := New(ctx, Config{
+		Store:                         store.NewInMemoryStore(),
+		Actors:                        actors,
+		HumanID:                       humanID,
+		IssueScanImplementationRunner: runner,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.issueScanImplementationRunner == nil {
+		t.Fatal("issueScanImplementationRunner was not wired from Config")
+	}
+	result, err := rt.issueScanImplementationRunner(ctx, IssueScanImplementationRunnerContext{})
+	if err != nil {
+		t.Fatalf("configured runner returned error: %v", err)
+	}
+	if !strings.Contains(result.OperateResultBody, "branch:") || result.CompletionSummary == "" {
+		t.Fatalf("configured runner result = %+v", result)
+	}
+}
+
 func TestSpawnAgent_WarnsWhenCanOperateButProviderLacksIOperator(t *testing.T) {
 	tests := []struct {
 		name          string

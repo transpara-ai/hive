@@ -962,6 +962,9 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan implementation evidence bridge: recorded %d role output(s)\n", recorded)
 			}
+			if recorded := countRecordedIssueScanImplementationRuns(progress.ImplementationRuns); recorded > 0 {
+				fmt.Fprintf(os.Stderr, "Issue-scan implementation runner: recorded %d implementation result(s)\n", recorded)
+			}
 			if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
 				fmt.Fprintf(os.Stderr, "Issue-scan adversarial review runner: recorded %d exact-head review(s)\n", recorded)
 			}
@@ -990,6 +993,7 @@ type IssueScanLifecycleProgress struct {
 	Completions               []IssueScanStageCompletionResult
 	StageRoleOutputRuns       []IssueScanStageRoleOutputRunnerRecordResult
 	ImplementationTasks       []IssueScanImplementationTaskResult
+	ImplementationRuns        []IssueScanImplementationRunnerRecordResult
 	ImplementationRoleOutputs []IssueScanStageRoleOutputResult
 	ReviewRuns                []IssueScanAdversarialReviewRecordResult
 	ReviewRoleOutputs         []IssueScanStageRoleOutputResult
@@ -1072,6 +1076,24 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 		errs = append(errs, fmt.Errorf("issue-scan stage role-output runner: %w", err))
 	}
 	if len(stageRoleOutputRuns) > 0 {
+		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
+		mergeIssueScanLifecycleProgress(&progress, after)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return progress, errors.Join(append(errs, ctx.Err())...)
+	default:
+	}
+	implementationRuns, err := r.RunConfiguredIssueScanImplementationRunners(ctx, dispatch)
+	progress.ImplementationRuns = implementationRuns
+	if err != nil {
+		errs = append(errs, fmt.Errorf("issue-scan implementation runner: %w", err))
+	}
+	if len(implementationRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
 		mergeIssueScanLifecycleProgress(&progress, after)
 		if err != nil {
@@ -1221,6 +1243,7 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 	dst.Completions = append(dst.Completions, src.Completions...)
 	dst.StageRoleOutputRuns = append(dst.StageRoleOutputRuns, src.StageRoleOutputRuns...)
 	dst.ImplementationTasks = append(dst.ImplementationTasks, src.ImplementationTasks...)
+	dst.ImplementationRuns = append(dst.ImplementationRuns, src.ImplementationRuns...)
 	dst.ImplementationRoleOutputs = append(dst.ImplementationRoleOutputs, src.ImplementationRoleOutputs...)
 	dst.ReviewRuns = append(dst.ReviewRuns, src.ReviewRuns...)
 	dst.ReviewRoleOutputs = append(dst.ReviewRoleOutputs, src.ReviewRoleOutputs...)
@@ -1397,6 +1420,16 @@ func countRecordedIssueScanStageRoleOutputRuns(values []IssueScanStageRoleOutput
 			if output.Recorded {
 				count++
 			}
+		}
+	}
+	return count
+}
+
+func countRecordedIssueScanImplementationRuns(values []IssueScanImplementationRunnerRecordResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Recorded {
+			count++
 		}
 	}
 	return count

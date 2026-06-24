@@ -68,6 +68,13 @@ func TestFactoryRunIssueScanStageRoleOutputRequiresHumanBeforeRunner(t *testing.
 	}
 }
 
+func TestFactoryRunIssueScanImplementationRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-implementation", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
 func TestFactoryRecordIssueScanDraftPRRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-draft-pr", "--run", "run_issue_001", "--receipt-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
@@ -100,6 +107,13 @@ func TestFactoryDaemonRequiresStageRoleRunnerBeforeRunnerArg(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-stage-role-runner-arg=--json"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-stage-role-runner") {
 		t.Fatalf("expected missing stage role runner error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequiresImplementationRunnerBeforeRunnerArg(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-implementation-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-implementation-runner") {
+		t.Fatalf("expected missing implementation runner error, got %v", err)
 	}
 }
 
@@ -183,6 +197,48 @@ func TestRequireIssueScanStageRoleOutputRunnerOutputsRejectsEmpty(t *testing.T) 
 	err := requireIssueScanStageRoleOutputRunnerOutputs("research_issue_and_repo_context", nil)
 	if err == nil || !strings.Contains(err.Error(), "no role outputs") {
 		t.Fatalf("expected empty role-output guard error, got %v", err)
+	}
+}
+
+func TestRunIssueScanImplementationRunnerPassesContextAndParsesResult(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+printf '%s\n' '{"operate_result_body":"branch: codex/run-issue-001\ncommit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nrange: origin/main..HEAD\n\npkg/hive/issue_scan.go | 12 ++++++++++++","completion_summary":"validation output: go test ./pkg/hive passed"}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	runnerContext := hive.IssueScanImplementationRunnerContext{
+		Kind:                      "issue_scan_implementation_runner_context",
+		LifecycleVersion:          "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:                     "run_issue_001",
+		FactoryOrderID:            "fo_run_issue_001",
+		Repository:                "transpara-ai/hive",
+		RepoPath:                  dir,
+		ImplementationTaskID:      "01911111-1111-7111-8111-111111111111",
+		ImplementationStageTaskID: "01922222-2222-7222-8222-222222222222",
+	}
+
+	result, err := runIssueScanImplementationRunner(context.Background(), runner, []string{contextPath}, runnerContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanImplementationRunner: %v", err)
+	}
+	if !strings.Contains(result.OperateResultBody, "branch: codex/run-issue-001") || !strings.Contains(result.CompletionSummary, "go test ./pkg/hive passed") {
+		t.Fatalf("result = %+v", result)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanImplementationRunnerContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != runnerContext.RunID || sent.ImplementationTaskID != runnerContext.ImplementationTaskID || sent.Repository != runnerContext.Repository {
+		t.Fatalf("sent context = %+v, want run/task/repo from %+v", sent, runnerContext)
 	}
 }
 
