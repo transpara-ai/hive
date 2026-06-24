@@ -2,6 +2,7 @@ package hive
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,6 +60,15 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
 		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
 	}
+	artifacts, err := rt.tasks.ListArtifacts(task.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+			t.Fatalf("generic run launch created %s artifact: %+v", IssueScanExecutionPlanArtifactLabel, artifact)
+		}
+	}
 
 	projection, err := rt.tasks.ProjectTask(task.ID)
 	if err != nil {
@@ -103,6 +113,197 @@ func TestDispatchQueuedRunLaunchesSeedsFactoryOrderWithModelOverrides(t *testing
 	}
 }
 
+func TestDispatchQueuedRunLaunchesPreservesGenericNonObjectBrief(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_string_brief", json.RawMessage(`"dispatch this generic task"`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic non-object brief artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
+func TestDispatchQueuedRunLaunchesPreservesGenericObjectWithoutKind(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_object_no_kind_brief", json.RawMessage(`{"goal":"dispatch this generic task"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic missing-kind brief artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
+func TestDispatchQueuedRunLaunchesPreservesGenericObjectWithNonStringKind(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_object_kind_brief", json.RawMessage(`{"kind":{"name":"generic"},"goal":"dispatch this generic task"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic object brief artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
+func TestDispatchQueuedRunLaunchesPreservesGenericObjectWithNonIssueScanKind(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_object_other_kind_brief", json.RawMessage(`{"kind":"feature_request","goal":"dispatch this generic task"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one generic dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("generic non-issue-scan kind artifacts = %+v, want no %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
+func TestDispatchQueuedRunLaunchRejectsIssueScanBriefMissingLifecycle(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	runID := "run_bad_issue_scan_lifecycle"
+	appendRunLaunchRequestWithBrief(t, rt.store, writer, runID, json.RawMessage(`{"kind":"`+issueScanBriefKind+`","lifecycle_version":"`+issueScanLifecycleVersion+`"}`))
+
+	result, err := rt.DispatchQueuedRunLaunch(runID)
+	if err == nil || !strings.Contains(err.Error(), "issue scan brief missing development lifecycle") {
+		t.Fatalf("DispatchQueuedRunLaunch err = %v, want missing lifecycle failure", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 0 || result.Failed != 1 {
+		t.Fatalf("dispatch result = %+v, want one failed issue-scan dispatch", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after invalid issue-scan brief = %+v, want none", tasks)
+	}
+}
+
+func TestDispatchQueuedRunLaunchAllowsLegacyIssueScanBriefWithoutPlanArtifact(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendRunLaunchRequestWithBrief(t, rt.store, writer, "run_legacy_issue_scan_brief", json.RawMessage(`{"kind":"`+issueScanBriefKind+`"}`))
+
+	result, err := rt.DispatchQueuedRunLaunches(10)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunches: %v", err)
+	}
+	if result.Scanned != 1 || result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one legacy issue-scan dispatch and no failures", result)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d, want 1: %+v", len(tasks), tasks)
+	}
+	storedTask, err := rt.store.Get(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("get task event: %v", err)
+	}
+	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != requestEvent.ID() {
+		t.Fatalf("task causes = %+v, want original run request %s", causes, requestEvent.ID())
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 0 {
+		t.Fatalf("legacy issue-scan artifacts = %+v, want no %s without lifecycle or plan", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+}
+
 func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	requestEvent := appendStaleRunLaunchRequest(t, rt.store, writer)
@@ -124,6 +325,80 @@ func TestDispatchQueuedRunLaunchesRejectsStoredResolutionDrift(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Fatalf("dispatch created task(s) despite stale override on %s: %+v", requestEvent.ID(), tasks)
+	}
+}
+
+func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	failing := &failOnceTaskArtifactAppendStore{Store: rt.store}
+	rt.store = failing
+	rt.tasks = work.NewTaskStore(failing, writer.factory, writer.signer)
+
+	first, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err == nil || !strings.Contains(err.Error(), "injected work.task.artifact append failure") {
+		t.Fatalf("first DispatchQueuedRunLaunch err = %v, want injected artifact failure", err)
+	}
+	if first.Dispatched != 0 || first.Failed != 1 {
+		t.Fatalf("first dispatch result = %+v, want failed partial dispatch", first)
+	}
+	tasks, err := rt.tasks.List(10)
+	if err != nil {
+		t.Fatalf("List tasks after partial dispatch: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count after partial dispatch = %d, want 1", len(tasks))
+	}
+	artifacts, err := rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after partial dispatch: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("artifacts after failed append = %+v, want none", artifacts)
+	}
+
+	second, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("second DispatchQueuedRunLaunch: %v", err)
+	}
+	if second.Dispatched != 0 || second.AlreadyDispatched != 1 || second.Failed != 0 {
+		t.Fatalf("second dispatch result = %+v, want repaired already-dispatched task", second)
+	}
+	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after repair: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
+		t.Fatalf("artifacts after repair = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
+	}
+
+	third, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("third DispatchQueuedRunLaunch: %v", err)
+	}
+	if third.Dispatched != 0 || third.AlreadyDispatched != 1 || third.Failed != 0 {
+		t.Fatalf("third dispatch result = %+v, want idempotent already-dispatched task", third)
+	}
+	artifacts, err = rt.tasks.ListArtifacts(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts after idempotent pass: %v", err)
+	}
+	if countArtifactsWithLabel(artifacts, IssueScanExecutionPlanArtifactLabel) != 1 {
+		t.Fatalf("artifacts after idempotent pass = %+v, want one %s", artifacts, IssueScanExecutionPlanArtifactLabel)
 	}
 }
 
@@ -283,6 +558,61 @@ func appendValidatedRunLaunch(t *testing.T, s store.Store, writer *operatorRunLa
 	}
 	t.Fatalf("missing factory.run.requested for run %s", result.RunID)
 	return event.Event{}
+}
+
+func appendRunLaunchRequestWithBrief(t *testing.T, s store.Store, writer *operatorRunLaunchWriter, runID string, brief json.RawMessage) event.Event {
+	t.Helper()
+	head, err := s.Head()
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	content := FactoryRunRequestedContent{
+		RunID:      runID,
+		IntakeID:   "intake_" + runID,
+		OperatorID: "user_" + runID,
+		Title:      "Generic queued run",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "operator-launch",
+		},
+		Budget:      RunLaunchBudget{MaxIterations: 4, MaxCostUSD: 12.5},
+		TargetRepos: []string{"transpara-ai/hive"},
+		Sources:     []RunLaunchSource{{Type: "issue", Ref: "https://github.com/transpara-ai/hive/issues/142"}},
+		Brief:       append(json.RawMessage(nil), brief...),
+	}
+	ev, err := writer.factory.Create(EventTypeFactoryRunRequested, writer.human, content, []types.EventID{head.Unwrap().ID()}, writer.conv, s, writer.signer)
+	if err != nil {
+		t.Fatalf("create factory.run.requested with brief: %v", err)
+	}
+	stored, err := s.Append(ev)
+	if err != nil {
+		t.Fatalf("append factory.run.requested with brief: %v", err)
+	}
+	return stored
+}
+
+type failOnceTaskArtifactAppendStore struct {
+	store.Store
+	failed bool
+}
+
+func (s *failOnceTaskArtifactAppendStore) Append(ev event.Event) (event.Event, error) {
+	if !s.failed && ev.Type() == work.EventTypeTaskArtifact {
+		s.failed = true
+		return event.Event{}, fmt.Errorf("injected work.task.artifact append failure")
+	}
+	return s.Store.Append(ev)
+}
+
+func countArtifactsWithLabel(artifacts []work.ArtifactEvent, label string) int {
+	count := 0
+	for _, artifact := range artifacts {
+		if artifact.Label == label {
+			count++
+		}
+	}
+	return count
 }
 
 func appendStaleRunLaunchRequest(t *testing.T, s store.Store, writer *operatorRunLaunchWriter) event.Event {

@@ -226,6 +226,69 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != request.ID() {
 		t.Fatalf("task causes = %+v, want factory.run.requested %s", causes, request.ID())
 	}
+
+	artifacts, err := rt.tasks.ListArtifacts(task.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	var planArtifactBody string
+	var planArtifactID string
+	planArtifactIndex := -1
+	for i, artifact := range artifacts {
+		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+			if artifact.TaskID != task.ID {
+				t.Fatalf("artifact task id = %s, want %s", artifact.TaskID, task.ID)
+			}
+			if artifact.MediaType != issueScanExecutionPlanArtifactMediaType {
+				t.Fatalf("artifact media type = %q, want %q", artifact.MediaType, issueScanExecutionPlanArtifactMediaType)
+			}
+			if artifact.CreatedBy != writer.human {
+				t.Fatalf("artifact created_by = %s, want %s", artifact.CreatedBy, writer.human)
+			}
+			planArtifactBody = artifact.Body
+			planArtifactID = artifact.ID.Value()
+			planArtifactIndex = i
+		}
+	}
+	if planArtifactBody == "" {
+		t.Fatalf("missing %s artifact in %+v", IssueScanExecutionPlanArtifactLabel, artifacts)
+	}
+	var artifactBrief struct {
+		Kind                 string                       `json:"kind"`
+		LifecycleVersion     string                       `json:"lifecycle_version"`
+		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
+		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
+	}
+	if err := json.Unmarshal([]byte(planArtifactBody), &artifactBrief); err != nil {
+		t.Fatalf("unmarshal execution plan artifact: %v", err)
+	}
+	if artifactBrief.Kind != issueScanBriefKind || artifactBrief.LifecycleVersion != issueScanLifecycleVersion {
+		t.Fatalf("artifact brief identity = %+v", artifactBrief)
+	}
+	if !containsIssueScanValue(artifactBrief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
+		t.Fatalf("artifact required agent flow = %+v, want ready-for-Human PR stage", artifactBrief.RequiredAgentFlow)
+	}
+	if issueScanStageByID(artifactBrief.DevelopmentLifecycle, "run_adversarial_review") == nil {
+		t.Fatalf("artifact lifecycle missing adversarial review stage: %+v", artifactBrief.DevelopmentLifecycle)
+	}
+	if issueScanPlanStepByRole(artifactBrief.AgentExecutionPlan, "surface_ready_for_Human_result_PR", "guardian") == nil {
+		t.Fatalf("artifact agent execution plan missing guardian ready-for-Human step: %+v", artifactBrief.AgentExecutionPlan)
+	}
+	if !containsIssueScanValue(artifactBrief.AuthorityBoundaries, "no_merge") {
+		t.Fatalf("artifact authority boundaries = %+v, want no_merge", artifactBrief.AuthorityBoundaries)
+	}
+	storedArtifact, err := rt.store.Get(artifacts[planArtifactIndex].ID)
+	if err != nil {
+		t.Fatalf("get artifact event: %v", err)
+	}
+	if storedArtifact.ID().Value() != planArtifactID {
+		t.Fatalf("stored artifact id = %s, want %s", storedArtifact.ID(), planArtifactID)
+	}
+	if causes := storedArtifact.Causes(); len(causes) != 2 || causes[0] != request.ID() || causes[1] != task.ID {
+		t.Fatalf("artifact causes = %+v, want request %s and task %s", causes, request.ID(), task.ID)
+	}
 }
 
 func TestIssueScanAgentExecutionPlanCoversEveryRequiredStageRole(t *testing.T) {

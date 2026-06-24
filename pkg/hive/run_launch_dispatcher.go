@@ -20,6 +20,9 @@ import (
 const (
 	defaultRunLaunchDispatchLimit    = 100
 	defaultRunLaunchDispatchInterval = 15 * time.Second
+
+	IssueScanExecutionPlanArtifactLabel     = "issue_scan_execution_plan"
+	issueScanExecutionPlanArtifactMediaType = "application/json"
 )
 
 // RunLaunchDispatchResult summarizes one dispatcher pass over queued
@@ -101,6 +104,19 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			continue
 		}
 		if taskID, ok := dispatched[orderID]; ok {
+			planArtifactBody, hasPlanArtifact, err := issueScanExecutionPlanArtifactBody(content)
+			if err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
+				continue
+			}
+			if hasPlanArtifact {
+				if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), taskID, planArtifactBody); err != nil {
+					result.Failed++
+					errs = append(errs, fmt.Errorf("run %q: repair issue-scan execution plan artifact: %w", content.RunID, err))
+					continue
+				}
+			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
 			continue
@@ -110,14 +126,28 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
 			continue
 		}
+		planArtifactBody, hasPlanArtifact, err := issueScanExecutionPlanArtifactBody(content)
+		if err != nil {
+			result.Failed++
+			errs = append(errs, fmt.Errorf("run %q: %w", content.RunID, err))
+			continue
+		}
 
-		task, err := work.SeedFactoryOrder(r.tasks, r.humanID, factoryOrderFromRunLaunch(content, orderID), []types.EventID{request.ID()}, runLaunchConversationID(content.RunID, r.convID))
+		convID := runLaunchConversationID(content.RunID, r.convID)
+		task, err := work.SeedFactoryOrder(r.tasks, r.humanID, factoryOrderFromRunLaunch(content, orderID), []types.EventID{request.ID()}, convID)
 		if err != nil {
 			result.Failed++
 			errs = append(errs, fmt.Errorf("run %q: seed factory order: %w", content.RunID, err))
 			continue
 		}
 		dispatched[orderID] = task.ID
+		if hasPlanArtifact {
+			if err := r.ensureIssueScanExecutionPlanArtifact(content, request.ID(), task.ID, planArtifactBody); err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("run %q: attach issue-scan execution plan artifact: %w", content.RunID, err))
+				continue
+			}
+		}
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedOrderIDs = append(result.DispatchedOrderIDs, orderID)
@@ -127,6 +157,63 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 	}
 
 	return result, errors.Join(errs...)
+}
+
+func (r *Runtime) ensureIssueScanExecutionPlanArtifact(content FactoryRunRequestedContent, requestID, taskID types.EventID, body string) error {
+	artifacts, err := r.tasks.ListArtifacts(taskID)
+	if err != nil {
+		return fmt.Errorf("list task artifacts: %w", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanExecutionPlanArtifactLabel {
+			return nil
+		}
+	}
+	return r.tasks.AddArtifact(
+		r.humanID,
+		taskID,
+		IssueScanExecutionPlanArtifactLabel,
+		issueScanExecutionPlanArtifactMediaType,
+		body,
+		[]types.EventID{requestID, taskID},
+		runLaunchConversationID(content.RunID, r.convID),
+	)
+}
+
+func issueScanExecutionPlanArtifactBody(content FactoryRunRequestedContent) (string, bool, error) {
+	raw := bytes.TrimSpace(content.Brief)
+	if len(raw) == 0 {
+		return "", false, nil
+	}
+	if raw[0] != '{' {
+		return "", false, nil
+	}
+	var meta struct {
+		Kind json.RawMessage `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return "", false, fmt.Errorf("decode run launch brief for execution plan artifact: %w", err)
+	}
+	if len(meta.Kind) == 0 {
+		return "", false, nil
+	}
+	var kind string
+	if err := json.Unmarshal(meta.Kind, &kind); err != nil {
+		return "", false, nil
+	}
+	if strings.TrimSpace(kind) != issueScanBriefKind {
+		return "", false, nil
+	}
+	if _, _, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(raw); err != nil {
+		return "", false, fmt.Errorf("validate issue-scan execution plan artifact: %w", err)
+	} else if len(lifecycle) == 0 && len(agentPlan) == 0 {
+		return "", false, nil
+	}
+	var encoded bytes.Buffer
+	if err := json.Indent(&encoded, raw, "", "  "); err != nil {
+		return "", false, fmt.Errorf("format issue-scan execution plan artifact: %w", err)
+	}
+	return encoded.String(), true, nil
 }
 
 func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Duration) {
