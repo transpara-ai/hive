@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 const (
@@ -38,6 +39,7 @@ type IssueScanReadyPREvidence struct {
 	ReadyStateReviewRef    string   `json:"ready_state_review_ref"`
 	ReadyStateReviewStatus string   `json:"ready_state_review_status"`
 	HumanApprovalRequired  bool     `json:"human_approval_required"`
+	DraftPRReceiptRef      string   `json:"draft_pr_receipt_ref,omitempty"`
 	Summary                string   `json:"summary,omitempty"`
 	SourceRefs             []string `json:"source_refs,omitempty"`
 }
@@ -50,6 +52,11 @@ type issueScanReadyStageEvidence struct {
 	BlockerStageTaskID     types.EventID
 	BlockerRuntimeID       types.EventID
 	ImplementationEvidence issueScanOperateCompletionEvidence
+}
+
+type issueScanDraftPRReceiptEvidence struct {
+	ArtifactID types.EventID
+	Receipt    TransparaAIDraftPRReceipt
 }
 
 // IssueScanReadyPREvidenceArtifactBody serializes a ready-PR evidence packet so
@@ -202,6 +209,10 @@ func (r *Runtime) issueScanReadyPREvidenceForStage(content FactoryRunRequestedCo
 	if err != nil {
 		return IssueScanReadyPREvidence{}, types.EventID{}, false, fmt.Errorf("list ready stage artifacts: %w", err)
 	}
+	draftReceipts, err := issueScanDraftPRReceiptArtifacts(artifacts)
+	if err != nil {
+		return IssueScanReadyPREvidence{}, types.EventID{}, false, err
+	}
 	for i := len(artifacts) - 1; i >= 0; i-- {
 		artifact := artifacts[i]
 		parsed, ok, err := issueScanReadyPREvidenceArtifact(artifact.ID.Value(), artifact.Label, artifact.Body)
@@ -211,7 +222,7 @@ func (r *Runtime) issueScanReadyPREvidenceForStage(content FactoryRunRequestedCo
 		if !ok {
 			continue
 		}
-		normalized, err := normalizeIssueScanReadyPREvidence(content, orderID, parsed, implementation)
+		normalized, err := normalizeIssueScanReadyPREvidence(content, orderID, parsed, implementation, draftReceipts)
 		if err != nil {
 			return IssueScanReadyPREvidence{}, types.EventID{}, false, fmt.Errorf("validate ready PR evidence artifact %s: %w", artifact.ID.Value(), err)
 		}
@@ -239,7 +250,43 @@ func issueScanReadyPREvidenceArtifact(eventRef, label, body string) (IssueScanRe
 	return payload, true, nil
 }
 
-func normalizeIssueScanReadyPREvidence(content FactoryRunRequestedContent, orderID string, evidence IssueScanReadyPREvidence, implementation issueScanOperateCompletionEvidence) (IssueScanReadyPREvidence, error) {
+func issueScanDraftPRReceiptArtifacts(artifacts []work.ArtifactEvent) ([]issueScanDraftPRReceiptEvidence, error) {
+	out := []issueScanDraftPRReceiptEvidence{}
+	for _, artifact := range artifacts {
+		receipt, ok, err := transparaAIDraftPRReceiptArtifact(artifact.ID.Value(), artifact.Label, artifact.Body)
+		if err != nil {
+			return nil, fmt.Errorf("parse draft PR receipt artifact %s: %w", artifact.ID.Value(), err)
+		}
+		if !ok {
+			continue
+		}
+		out = append(out, issueScanDraftPRReceiptEvidence{ArtifactID: artifact.ID, Receipt: receipt})
+	}
+	return out, nil
+}
+
+func transparaAIDraftPRReceiptArtifact(_ string, label, body string) (TransparaAIDraftPRReceipt, bool, error) {
+	if strings.TrimSpace(label) != TransparaAIDraftPRReceiptArtifactLabel {
+		return TransparaAIDraftPRReceipt{}, false, nil
+	}
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return TransparaAIDraftPRReceipt{}, false, fmt.Errorf("label %q has empty artifact body", label)
+	}
+	var payload TransparaAIDraftPRReceipt
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return TransparaAIDraftPRReceipt{}, false, fmt.Errorf("decode artifact body: %w", err)
+	}
+	if strings.TrimSpace(payload.Kind) != transparaAIDraftPRReceiptKind {
+		return TransparaAIDraftPRReceipt{}, false, fmt.Errorf("kind %q does not match %q", payload.Kind, transparaAIDraftPRReceiptKind)
+	}
+	payload.Repository = strings.ToLower(strings.TrimSpace(payload.Repository))
+	payload.PRURL = strings.TrimSpace(payload.PRURL)
+	payload.HeadSHA = strings.TrimSpace(payload.HeadSHA)
+	return payload, true, nil
+}
+
+func normalizeIssueScanReadyPREvidence(content FactoryRunRequestedContent, orderID string, evidence IssueScanReadyPREvidence, implementation issueScanOperateCompletionEvidence, draftReceipts []issueScanDraftPRReceiptEvidence) (IssueScanReadyPREvidence, error) {
 	if strings.TrimSpace(evidence.LifecycleVersion) != "" && strings.TrimSpace(evidence.LifecycleVersion) != issueScanLifecycleVersion {
 		return IssueScanReadyPREvidence{}, fmt.Errorf("lifecycle_version %q does not match %q", evidence.LifecycleVersion, issueScanLifecycleVersion)
 	}
@@ -294,12 +341,20 @@ func normalizeIssueScanReadyPREvidence(content FactoryRunRequestedContent, order
 	if !evidence.HumanApprovalRequired {
 		return IssueScanReadyPREvidence{}, fmt.Errorf("human_approval_required must be true")
 	}
+	receipt, err := matchingIssueScanDraftPRReceipt(evidence, repo, head, draftReceipts)
+	if err != nil {
+		return IssueScanReadyPREvidence{}, err
+	}
 	evidence.Kind = issueScanReadyPREvidenceArtifactKind
 	evidence.LifecycleVersion = issueScanLifecycleVersion
 	evidence.RunID = strings.TrimSpace(content.RunID)
 	evidence.FactoryOrderID = orderID
 	evidence.Repository = repo
 	evidence.PRURL = url
+	evidence.PRNumber = receipt.Receipt.PRNumber
+	evidence.BaseRef = valueOr(strings.TrimSpace(evidence.BaseRef), receipt.Receipt.BaseRef)
+	evidence.BaseSHA = valueOr(strings.TrimSpace(evidence.BaseSHA), receipt.Receipt.BaseSHA)
+	evidence.HeadRef = valueOr(strings.TrimSpace(evidence.HeadRef), receipt.Receipt.HeadRef)
 	evidence.HeadSHA = head
 	evidence.State = "open"
 	evidence.ReadyForReview = true
@@ -309,8 +364,91 @@ func normalizeIssueScanReadyPREvidence(content FactoryRunRequestedContent, order
 	evidence.ReadyStateReviewStatus = strings.ToLower(strings.TrimSpace(evidence.ReadyStateReviewStatus))
 	evidence.Summary = strings.TrimSpace(evidence.Summary)
 	evidence.ReadyStateReviewRef = strings.TrimSpace(evidence.ReadyStateReviewRef)
-	evidence.SourceRefs = compactStrings(evidence.SourceRefs)
+	evidence.DraftPRReceiptRef = receipt.ArtifactID.Value()
+	evidence.SourceRefs = compactStrings(append(evidence.SourceRefs, receipt.ArtifactID.Value(), receipt.Receipt.PRURL))
 	return evidence, nil
+}
+
+func matchingIssueScanDraftPRReceipt(evidence IssueScanReadyPREvidence, repo, head string, receipts []issueScanDraftPRReceiptEvidence) (issueScanDraftPRReceiptEvidence, error) {
+	if len(receipts) == 0 {
+		return issueScanDraftPRReceiptEvidence{}, fmt.Errorf("%s artifact is required before ready PR evidence can complete the stage", TransparaAIDraftPRReceiptArtifactLabel)
+	}
+	wantRef := strings.TrimSpace(evidence.DraftPRReceiptRef)
+	var lastMismatch error
+	for _, receipt := range receipts {
+		if wantRef != "" && receipt.ArtifactID.Value() != wantRef {
+			continue
+		}
+		if err := validateIssueScanDraftPRReceiptForReadyEvidence(receipt, evidence, repo, head); err != nil {
+			if wantRef != "" {
+				return issueScanDraftPRReceiptEvidence{}, err
+			}
+			lastMismatch = err
+			continue
+		}
+		return receipt, nil
+	}
+	if wantRef != "" {
+		return issueScanDraftPRReceiptEvidence{}, fmt.Errorf("draft_pr_receipt_ref %q was not found", wantRef)
+	}
+	if lastMismatch != nil {
+		return issueScanDraftPRReceiptEvidence{}, fmt.Errorf("no %s artifact matches ready PR evidence for %s#%d at head %s: %w", TransparaAIDraftPRReceiptArtifactLabel, repo, evidence.PRNumber, head, lastMismatch)
+	}
+	return issueScanDraftPRReceiptEvidence{}, fmt.Errorf("no %s artifact matches ready PR evidence for %s#%d at head %s", TransparaAIDraftPRReceiptArtifactLabel, repo, evidence.PRNumber, head)
+}
+
+func validateIssueScanDraftPRReceiptForReadyEvidence(receipt issueScanDraftPRReceiptEvidence, evidence IssueScanReadyPREvidence, repo, head string) error {
+	r := receipt.Receipt
+	if !ValidTransparaAIRepo(r.Repository) {
+		return fmt.Errorf("draft PR receipt repository %q is not a Transpara-AI repo", r.Repository)
+	}
+	if r.Repository != repo {
+		return fmt.Errorf("draft PR receipt repository %q does not match ready PR repository %q", r.Repository, repo)
+	}
+	if r.PRNumber <= 0 || r.PRNumber != evidence.PRNumber {
+		return fmt.Errorf("draft PR receipt number %d does not match ready PR number %d", r.PRNumber, evidence.PRNumber)
+	}
+	if strings.TrimSpace(r.PRURL) == "" || strings.TrimSpace(r.PRURL) != strings.TrimSpace(evidence.PRURL) {
+		return fmt.Errorf("draft PR receipt URL %q does not match ready PR URL %q", r.PRURL, evidence.PRURL)
+	}
+	if strings.TrimSpace(r.HeadSHA) != head {
+		return fmt.Errorf("draft PR receipt head %q does not match ready PR head %q", r.HeadSHA, head)
+	}
+	if strings.TrimSpace(r.RemoteHeadSHA) != head {
+		return fmt.Errorf("draft PR receipt remote head %q does not match ready PR head %q", r.RemoteHeadSHA, head)
+	}
+	files, err := normalizePRChangedFiles(r.ChangedFiles)
+	if err != nil {
+		return fmt.Errorf("draft PR receipt changed_files: %w", err)
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("draft PR receipt changed_files is required")
+	}
+	for field, values := range map[string][2]string{
+		"base_ref": {strings.TrimSpace(evidence.BaseRef), strings.TrimSpace(r.BaseRef)},
+		"base_sha": {strings.TrimSpace(evidence.BaseSHA), strings.TrimSpace(r.BaseSHA)},
+		"head_ref": {strings.TrimSpace(evidence.HeadRef), strings.TrimSpace(r.HeadRef)},
+	} {
+		if values[0] != "" && values[1] != "" && values[0] != values[1] {
+			return fmt.Errorf("ready PR %s %q does not match draft PR receipt %q", field, values[0], values[1])
+		}
+	}
+	if !r.Draft || !strings.EqualFold(strings.TrimSpace(r.State), "open") {
+		return fmt.Errorf("draft PR receipt must prove an open draft PR, got draft=%v state=%q", r.Draft, r.State)
+	}
+	if !r.HumanApprovalRequired || !r.NoMergeOrDeployClaim || !r.ReadyForReviewRequired {
+		return fmt.Errorf("draft PR receipt is missing required authority boundary flags")
+	}
+	if strings.TrimSpace(r.PolicyBundleID) != TransparaAIDraftPRPolicyBundleID {
+		return fmt.Errorf("draft PR receipt policy_bundle_id %q does not match %q", r.PolicyBundleID, TransparaAIDraftPRPolicyBundleID)
+	}
+	if strings.TrimSpace(r.PolicyBundleHash) != TransparaAIDraftPRPolicyBundleHash() {
+		return fmt.Errorf("draft PR receipt policy_bundle_hash %q does not match %q", r.PolicyBundleHash, TransparaAIDraftPRPolicyBundleHash())
+	}
+	if strings.TrimSpace(r.AuthorityNonce) == "" {
+		return fmt.Errorf("draft PR receipt authority_nonce is required")
+	}
+	return nil
 }
 
 func issueScanReadyStatusOK(value string, allowed []string) bool {

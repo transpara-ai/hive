@@ -2001,6 +2001,9 @@ func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *t
 		Summary:                "Ready-for-Human result PR is surfaced with exact-head ready-state review evidence and awaits Human approval.",
 		SourceRefs:             []string{"test://ready-pr"},
 	}
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
 	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
 	if err != nil {
 		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
@@ -2058,6 +2061,101 @@ func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *t
 	}
 }
 
+func TestProgressIssueScanLifecycleRejectsReadyPREvidenceWithoutDraftReceipt(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+	}
+	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, IssueScanReadyPREvidenceArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact ready PR evidence: %v", err)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), TransparaAIDraftPRReceiptArtifactLabel+" artifact is required") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want missing draft PR receipt rejection", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 0 {
+		t.Fatalf("ready role outputs = %+v, want none for missing receipt", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR completed without draft PR receipt")
+	}
+}
+
+func TestProgressIssueScanLifecycleRejectsReadyPREvidenceWithStaleDraftReceipt(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := IssueScanReadyPREvidence{
+		RunID:                  runID,
+		FactoryOrderID:         orderID,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		State:                  "open",
+		Draft:                  false,
+		ReadyForReview:         true,
+		MergeStateStatus:       "clean",
+		CIStatus:               "success",
+		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
+		ReadyStateReviewStatus: "passed",
+		HumanApprovalRequired:  true,
+	}
+	if err := attachIssueScanDraftPRReceiptForReadyTestWith(t, rt, writer, readyStage.ID, readyEvidence, func(receipt *TransparaAIDraftPRReceipt) {
+		receipt.PolicyBundleHash = "sha256:stale"
+	}); err != nil {
+		t.Fatalf("attach stale draft PR receipt: %v", err)
+	}
+	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, IssueScanReadyPREvidenceArtifactLabel, "application/json", body, []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact ready PR evidence: %v", err)
+	}
+
+	progress, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "draft PR receipt policy_bundle_hash") {
+		t.Fatalf("progressIssueScanLifecycle error = %v, want stale draft PR receipt rejection", err)
+	}
+	if countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs) != 0 {
+		t.Fatalf("ready role outputs = %+v, want none for stale receipt", progress.ReadyRoleOutputs)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("surface_ready_for_Human_result_PR completed with stale draft PR receipt")
+	}
+}
+
 func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{
@@ -2075,6 +2173,9 @@ func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 		ReadyStateReviewRef:    "https://github.com/transpara-ai/hive/pull/321#issuecomment-ready-state-review",
 		ReadyStateReviewStatus: "passed",
 		HumanApprovalRequired:  true,
+	}
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
 	}
 	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
 	if err != nil {
@@ -2203,6 +2304,43 @@ func issueScanReadyStageFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaun
 		t.Fatalf("ready stage remains blocked before ready evidence is attached")
 	}
 	return rt, writer, queued.RunID, orderID, implementationTask, readyStage
+}
+
+func attachIssueScanDraftPRReceiptForReadyTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, stageTaskID types.EventID, evidence IssueScanReadyPREvidence) error {
+	t.Helper()
+	return attachIssueScanDraftPRReceiptForReadyTestWith(t, rt, writer, stageTaskID, evidence, nil)
+}
+
+func attachIssueScanDraftPRReceiptForReadyTestWith(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, stageTaskID types.EventID, evidence IssueScanReadyPREvidence, mutate func(*TransparaAIDraftPRReceipt)) error {
+	t.Helper()
+	receipt := TransparaAIDraftPRReceipt{
+		Kind:                   transparaAIDraftPRReceiptKind,
+		Repository:             strings.ToLower(strings.TrimSpace(evidence.Repository)),
+		PRNumber:               evidence.PRNumber,
+		PRURL:                  strings.TrimSpace(evidence.PRURL),
+		BaseRef:                strings.TrimSpace(evidence.BaseRef),
+		BaseSHA:                strings.TrimSpace(evidence.BaseSHA),
+		HeadRef:                strings.TrimSpace(evidence.HeadRef),
+		HeadSHA:                strings.TrimSpace(evidence.HeadSHA),
+		RemoteHeadSHA:          strings.TrimSpace(evidence.HeadSHA),
+		ChangedFiles:           []string{"README.md"},
+		Draft:                  true,
+		State:                  "open",
+		PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+		AuthorityNonce:         "nonce-ready-pr-test",
+		HumanApprovalRequired:  true,
+		NoMergeOrDeployClaim:   true,
+		ReadyForReviewRequired: true,
+	}
+	if mutate != nil {
+		mutate(&receipt)
+	}
+	body, err := transparaAIDraftPRReceiptBody(receipt)
+	if err != nil {
+		return err
+	}
+	return rt.tasks.AddArtifact(writer.human, stageTaskID, TransparaAIDraftPRReceiptArtifactLabel, "application/json", body, []types.EventID{stageTaskID}, writer.conv)
 }
 
 func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testing.T) {
