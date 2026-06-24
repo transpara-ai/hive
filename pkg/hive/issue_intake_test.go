@@ -3970,6 +3970,16 @@ func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsUnsafeFinalEvidence(t 
 			wantFetch:  1,
 			wantReview: 1,
 		},
+		{
+			name: "already approved",
+			mutateFetch: func(state *IssueScanReadyPRLiveState) {
+				state.ReviewDecision = "APPROVED"
+			},
+			review:     IssueScanReadyStateReviewReceipt{Status: "passed"},
+			wantError:  "review_decision",
+			wantFetch:  1,
+			wantReview: 1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

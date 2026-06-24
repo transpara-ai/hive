@@ -62,7 +62,78 @@ func (c *issueScanReadyPRGitHubClient) FetchReadyPRState(ctx context.Context, mu
 		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
 	}
 	state, _, err := c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return state, err
+	}
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	decision, err := c.fetchPullRequestReviewDecision(ctx, owner, repo, mutation.PRNumber)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	state.ReviewDecision = decision
 	return state, err
+}
+
+func (c *issueScanReadyPRGitHubClient) fetchPullRequestReviewDecision(ctx context.Context, owner, repo string, number int) (string, error) {
+	payload := map[string]any{
+		"query": `query($owner: String!, $repo: String!, $number: Int!) {
+			repository(owner: $owner, name: $repo) {
+				pullRequest(number: $number) {
+					reviewDecision
+				}
+			}
+		}`,
+		"variables": map[string]any{
+			"owner":  owner,
+			"repo":   repo,
+			"number": number,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphQLURL(), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewDecision string `json:"reviewDecision"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("github ready PR client: decode review decision response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := ""
+		if len(result.Errors) > 0 {
+			msg = result.Errors[0].Message
+		}
+		return "", fmt.Errorf("github ready PR client: review decision returned %s: %s", resp.Status, msg)
+	}
+	if len(result.Errors) > 0 {
+		return "", fmt.Errorf("github ready PR client: review decision graphql error: %s", result.Errors[0].Message)
+	}
+	return strings.TrimSpace(result.Data.Repository.PullRequest.ReviewDecision), nil
 }
 
 func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {

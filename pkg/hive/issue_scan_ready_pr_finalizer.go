@@ -53,6 +53,7 @@ type IssueScanReadyPRLiveState struct {
 	ReadyForReview   bool     `json:"ready_for_review"`
 	MergeStateStatus string   `json:"merge_state_status"`
 	CIStatus         string   `json:"ci_status"`
+	ReviewDecision   string   `json:"review_decision,omitempty"`
 	SourceRefs       []string `json:"source_refs,omitempty"`
 }
 
@@ -272,6 +273,13 @@ func validateIssueScanReadyPRLiveState(label string, mutation IssueScanReadyPRFi
 		}
 		if !issueScanReadyStatusOK(state.CIStatus, []string{"success", "passed", "green"}) {
 			return fmt.Errorf("%s ci_status %q is not successful", label, state.CIStatus)
+		}
+		switch strings.ToLower(strings.TrimSpace(state.ReviewDecision)) {
+		case "", "review_required":
+		case "approved":
+			return fmt.Errorf("%s review_decision %q indicates Human approval is already satisfied", label, state.ReviewDecision)
+		default:
+			return fmt.Errorf("%s review_decision %q is not waiting on Human approval", label, state.ReviewDecision)
 		}
 	}
 	return nil

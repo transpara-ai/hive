@@ -218,6 +218,43 @@ func TestIssueScanReadyPRGitHubClientSkipsGraphQLWhenAlreadyReady(t *testing.T) 
 	}
 }
 
+func TestIssueScanReadyPRGitHubClientFetchesReviewDecision(t *testing.T) {
+	mutation := readyPRGitHubMutationForTest()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+			writeJSON(t, w, map[string]any{
+				"number":          321,
+				"html_url":        mutation.PRURL,
+				"node_id":         "PR_kwDOtest",
+				"state":           "open",
+				"draft":           false,
+				"mergeable_state": "blocked",
+				"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+				"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+			writeJSON(t, w, map[string]any{"state": "success", "total_count": 1})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+			writeJSON(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			writeJSON(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]string{"reviewDecision": "REVIEW_REQUIRED"}}}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+	state, err := client.FetchReadyPRState(context.Background(), mutation)
+	if err != nil {
+		t.Fatalf("FetchReadyPRState: %v", err)
+	}
+	if state.ReviewDecision != "REVIEW_REQUIRED" {
+		t.Fatalf("review decision = %q, want REVIEW_REQUIRED", state.ReviewDecision)
+	}
+}
+
 func TestIssueScanReadyPRGitHubClientPaginatesCheckRunsAndFailsOnLaterPage(t *testing.T) {
 	mutation := readyPRGitHubMutationForTest()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
