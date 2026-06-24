@@ -3974,6 +3974,89 @@ func TestIssueScanDraftPRAuthorityRequestRefusesAfterDraftReceipt(t *testing.T) 
 	}
 }
 
+func TestCreateIssueScanDraftPRFromApprovedRequestRecordsReceipt(t *testing.T) {
+	rt, writer, runID, _, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+
+	result, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client)
+	if err != nil {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("client calls = %d, want 1", client.calls)
+	}
+	if !result.Created || !result.NoReadyReviewMergeDeploy {
+		t.Fatalf("result = %+v, want draft creation with no ready/review/merge/deploy claim", result)
+	}
+	if result.PRNumber != 111 || result.PRURL != "https://github.com/transpara-ai/hive/pull/111" || result.HeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("result PR fields = %+v", result)
+	}
+	if result.DraftPRReceipt.DraftPRReceiptArtifactID == (types.EventID{}) {
+		t.Fatalf("missing ready-stage draft receipt artifact: %+v", result.DraftPRReceipt)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed after draft receipt only")
+	}
+	artifacts, err := rt.tasks.ListArtifacts(readyStage.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts ready stage: %v", err)
+	}
+	receipts, err := issueScanDraftPRReceiptArtifacts(artifacts)
+	if err != nil {
+		t.Fatalf("issueScanDraftPRReceiptArtifacts: %v", err)
+	}
+	if len(receipts) != 1 || receipts[0].Receipt.AuthorityRequestID != requestResult.RequestID.Value() {
+		t.Fatalf("ready-stage receipts = %+v, want one tied to request %s", receipts, requestResult.RequestID)
+	}
+}
+
+func TestCreateIssueScanDraftPRFromApprovedRequestRequiresApprovedDecision(t *testing.T) {
+	rt, _, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	if _, err := rt.CreateIssueScanDraftPRFromApprovedRequest(context.Background(), runID, requestResult.RequestID.Value(), client); err == nil || !strings.Contains(err.Error(), "no authority decision recorded") {
+		t.Fatalf("CreateIssueScanDraftPRFromApprovedRequest error = %v, want undecided request refusal", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none before approved decision", client.calls)
+	}
+}
+
+func seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, requestResult IssueScanDraftPRAuthorityRequestResult) types.EventID {
+	t.Helper()
+	content := AuthorityDecisionRecordedContent{
+		DecisionID:       requestResult.RequestID.Value(),
+		RequestID:        requestResult.RequestID,
+		ApproverActor:    writer.human,
+		DeciderRole:      "human",
+		Outcome:          draftPRApprovedOutcome,
+		ApprovedTarget:   requestResult.DraftPRTarget.Repository + " " + requestResult.DraftPRTarget.HeadRef,
+		ApprovedAction:   string(safety.ActionRepoPullRequestCreate),
+		Scope:            requestResult.DraftPRTarget.Scope(),
+		EvidenceReviewed: []types.EventID{requestResult.ReadyStageTaskID, requestResult.ImplementationTaskID},
+		Rationale:        "approved issue-scan draft PR creation test target",
+	}
+	decisionID, err := appendAuthorityDecisionRecorded(rt.store, writer.factory, writer.signer, writer.human, writer.conv, requestResult.RequestID, content)
+	if err != nil {
+		t.Fatalf("append approved draft PR decision: %v", err)
+	}
+	return decisionID
+}
+
 func issueScanReadyImplementationTaskFixtureForTest(t *testing.T) (*Runtime, *operatorRunLaunchWriter, IssueScanRunLaunchResult, string, work.Task) {
 	t.Helper()
 	rt, writer := newRunLaunchDispatchRuntime(t)

@@ -77,6 +77,8 @@ func helpText() string {
 	b.WriteString("                           Run configured terminal ready-PR evidence command\n")
 	b.WriteString("  factory request-issue-scan-pr\n")
 	b.WriteString("                           Raise issue-scan draft-PR authority request\n")
+	b.WriteString("  factory create-issue-scan-draft-pr\n")
+	b.WriteString("                           Create approved issue-scan draft PR and receipt\n")
 	b.WriteString("  factory request-pr       Raise a draft-PR authority request (gate holds)\n")
 	b.WriteString("  factory create-pr        Create the approved draft PR (gated GitHub step)\n")
 	b.WriteString("\nRun 'hive <verb> --help' for verb-specific flags.\n")
