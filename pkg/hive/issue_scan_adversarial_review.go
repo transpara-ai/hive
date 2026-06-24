@@ -9,6 +9,7 @@ import (
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/work"
 )
 
 const (
@@ -83,19 +84,20 @@ type IssueScanAdversarialReviewReceipt struct {
 // IssueScanAdversarialReviewRecordResult summarizes an exact-head review
 // receipt append and the corresponding code.review.submitted event.
 type IssueScanAdversarialReviewRecordResult struct {
-	RunID                  string
-	FactoryOrderID         string
-	Repository             string
-	ImplementationTaskID   types.EventID
-	ReviewStageTaskID      types.EventID
-	ReceiptArtifactID      types.EventID
-	ReviewEventID          types.EventID
-	ReviewRef              string
-	ReviewedHeadSHA        string
-	Verdict                string
-	Recorded               bool
-	ReceiptAlreadyRecorded bool
-	ReviewAlreadyRecorded  bool
+	RunID                      string
+	FactoryOrderID             string
+	Repository                 string
+	ImplementationTaskID       types.EventID
+	ReviewStageTaskID          types.EventID
+	ReceiptArtifactID          types.EventID
+	ReviewEventID              types.EventID
+	ReviewRef                  string
+	ReviewedHeadSHA            string
+	Verdict                    string
+	Recorded                   bool
+	ReopenedImplementationTask bool
+	ReceiptAlreadyRecorded     bool
+	ReviewAlreadyRecorded      bool
 }
 
 // IssueScanAdversarialReviewReceiptBody serializes a receipt for durable Work
@@ -438,8 +440,8 @@ func (r *Runtime) RecordIssueScanAdversarialReview(runID string, receipt IssueSc
 		return result, err
 	}
 	if !exists {
-		causes := compactEventIDs([]types.EventID{request.ID(), implementationTaskID, implementationStage.TaskID, reviewStage.TaskID, completion.CompletionEventID, completion.OperateArtifactID})
-		if err := r.tasks.AddArtifact(r.humanID, implementationTaskID, IssueScanAdversarialReviewReceiptArtifactLabel, issueScanStageRuntimeEvidenceMediaType, body, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+		artifactCauses := compactEventIDs([]types.EventID{request.ID(), implementationTaskID, implementationStage.TaskID, reviewStage.TaskID, completion.CompletionEventID, completion.OperateArtifactID})
+		if err := r.tasks.AddArtifact(r.humanID, implementationTaskID, IssueScanAdversarialReviewReceiptArtifactLabel, issueScanStageRuntimeEvidenceMediaType, body, artifactCauses, runLaunchConversationID(content.RunID, r.convID)); err != nil {
 			return result, fmt.Errorf("record issue-scan adversarial review receipt: %w", err)
 		}
 		receiptArtifactID, exists, err = r.findIssueScanAdversarialReviewReceiptArtifactID(implementationTaskID, body)
@@ -462,6 +464,11 @@ func (r *Runtime) RecordIssueScanAdversarialReview(runID string, receipt IssueSc
 	if exists {
 		result.ReviewEventID = reviewEventID
 		result.ReviewAlreadyRecorded = true
+		reopened, err := r.reopenIssueScanImplementationTaskForReviewBlockers(content, implementationTaskID, normalized, compactEventIDs([]types.EventID{request.ID(), implementationTaskID, implementationStage.TaskID, reviewStage.TaskID, completion.CompletionEventID, completion.OperateArtifactID, receiptArtifactID, reviewEventID}))
+		if err != nil {
+			return result, err
+		}
+		result.ReopenedImplementationTask = reopened
 		return result, nil
 	}
 	reviewContent := event.CodeReviewContent{
@@ -471,8 +478,8 @@ func (r *Runtime) RecordIssueScanAdversarialReview(runID string, receipt IssueSc
 		Issues:     append([]string(nil), normalized.Issues...),
 		Confidence: normalized.Confidence,
 	}
-	causes := compactEventIDs([]types.EventID{request.ID(), implementationTaskID, implementationStage.TaskID, reviewStage.TaskID, completion.CompletionEventID, completion.OperateArtifactID, receiptArtifactID})
-	ev, err := r.factory.Create(event.EventTypeCodeReviewSubmitted, r.humanID, reviewContent, causes, runLaunchConversationID(content.RunID, r.convID), r.store, r.signer)
+	reviewCauses := compactEventIDs([]types.EventID{request.ID(), implementationTaskID, implementationStage.TaskID, reviewStage.TaskID, completion.CompletionEventID, completion.OperateArtifactID, receiptArtifactID})
+	ev, err := r.factory.Create(event.EventTypeCodeReviewSubmitted, r.humanID, reviewContent, reviewCauses, runLaunchConversationID(content.RunID, r.convID), r.store, r.signer)
 	if err != nil {
 		return result, fmt.Errorf("create code.review.submitted: %w", err)
 	}
@@ -482,7 +489,34 @@ func (r *Runtime) RecordIssueScanAdversarialReview(runID string, receipt IssueSc
 	}
 	result.ReviewEventID = stored.ID()
 	result.Recorded = true
+	reopened, err := r.reopenIssueScanImplementationTaskForReviewBlockers(content, implementationTaskID, normalized, compactEventIDs(append(reviewCauses, stored.ID())))
+	if err != nil {
+		return result, err
+	}
+	result.ReopenedImplementationTask = reopened
 	return result, nil
+}
+
+func (r *Runtime) reopenIssueScanImplementationTaskForReviewBlockers(content FactoryRunRequestedContent, implementationTaskID types.EventID, receipt IssueScanAdversarialReviewReceipt, causes []types.EventID) (bool, error) {
+	if strings.TrimSpace(receipt.Verdict) != "request_changes" {
+		return false, nil
+	}
+	status, err := r.tasks.GetCompatibilityStatus(implementationTaskID)
+	if err != nil {
+		return false, fmt.Errorf("read implementation task status before blocker reopen: %w", err)
+	}
+	if status != work.LegacyStatusCompleted {
+		return false, nil
+	}
+	issues := compactStrings(receipt.Issues)
+	if len(issues) == 0 {
+		return false, fmt.Errorf("request_changes review %q has no issues to reopen", receipt.ReviewRef)
+	}
+	reason := fmt.Sprintf("request_changes from exact-head issue-scan adversarial review %s at %s: %s", receipt.ReviewRef, receipt.ReviewedHeadSHA, receipt.Summary)
+	if err := r.tasks.Reopen(r.humanID, implementationTaskID, reason, issues, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+		return false, fmt.Errorf("reopen implementation task for issue-scan blockers: %w", err)
+	}
+	return true, nil
 }
 
 func normalizeIssueScanAdversarialReviewReceipt(content FactoryRunRequestedContent, orderID string, implementationTaskID types.EventID, completion issueScanOperateCompletionEvidence, receipt IssueScanAdversarialReviewReceipt) (IssueScanAdversarialReviewReceipt, error) {

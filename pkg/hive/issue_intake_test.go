@@ -1854,6 +1854,16 @@ func TestRecordIssueScanAdversarialReviewReceiptEmitsExactHeadReview(t *testing.
 	if result.ReceiptArtifactID == (types.EventID{}) || result.ReviewEventID == (types.EventID{}) {
 		t.Fatalf("missing receipt or review event ids: %+v", result)
 	}
+	if !result.ReopenedImplementationTask {
+		t.Fatalf("result = %+v, want request_changes to reopen implementation task", result)
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus implementation task: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("implementation task status = %s, want reopened for repair", status)
+	}
 	reviewEventID, review, _, ok, err := rt.latestIssueScanCodeReviewForTask(implementationTask.ID)
 	if err != nil {
 		t.Fatalf("latestIssueScanCodeReviewForTask: %v", err)
@@ -2008,9 +2018,15 @@ func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.
 	if len(first.ReviewRuns) != 1 || first.ReviewRuns[0].Verdict != "request_changes" {
 		t.Fatalf("first review runs = %+v, want one request_changes review", first.ReviewRuns)
 	}
-
-	if err := rt.tasks.Reopen(writer.human, implementationTask.ID, "request_changes: missing regression test", []string{"missing regression test"}, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
-		t.Fatalf("Reopen implementation task: %v", err)
+	if !first.ReviewRuns[0].ReopenedImplementationTask {
+		t.Fatalf("first review run = %+v, want implementation task reopened", first.ReviewRuns[0])
+	}
+	status, err := rt.tasks.GetCompatibilityStatus(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus reopened implementation task: %v", err)
+	}
+	if status == work.LegacyStatusCompleted {
+		t.Fatalf("implementation task status = %s, want reopened for repair", status)
 	}
 	repairedBody := issueScanOperateResultBodyForTestWith(
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2034,6 +2050,9 @@ func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.
 	}
 	if len(second.ReviewRuns) != 1 || second.ReviewRuns[0].ReviewedHeadSHA != "cccccccccccccccccccccccccccccccccccccccc" || second.ReviewRuns[0].Verdict != "approve" {
 		t.Fatalf("second review runs = %+v, want approved repaired head", second.ReviewRuns)
+	}
+	if countRecordedIssueScanRoleOutputs(second.BlockerRoleOutputs) != 3 {
+		t.Fatalf("blocker role outputs = %+v, want implementer/reviewer/guardian zero-blocker evidence", second.BlockerRoleOutputs)
 	}
 }
 
