@@ -10,8 +10,15 @@ import (
 	"testing"
 	"time"
 
+	hiveagent "github.com/transpara-ai/agent"
+	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/intelligence"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/loop"
+	"github.com/transpara-ai/hive/pkg/resources"
 	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/work"
 )
@@ -1307,6 +1314,418 @@ func TestPostTaskCommandProgressCompletesIssueScanStageFromDirectRoleOutputArtif
 	}
 	if blocked {
 		t.Fatalf("next stage %s remains blocked after first stage auto-completion", nextStageID)
+	}
+}
+
+func TestAgentTaskArtifactCommandsCompleteIssueScanStageRoleOutputs(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	strategist := issueScanStageRoleOutputForTest(t, stageID, "strategist")
+	strategist.Outputs = append(strategist.Outputs, issueScanEvidenceItemForTest(stageID, "strategist", "issue_snapshot"))
+	planner := issueScanStageRoleOutputForTest(t, stageID, "planner")
+	planner.Outputs = append(planner.Outputs, issueScanEvidenceItemForTest(stageID, "planner", "repo_context"))
+	strategistResponse := strings.Join([]string{
+		issueScanStageRoleOutputTaskArtifactCommandForTest(t, stageTask.ID, strategist),
+		`/signal {"signal":"TASK_DONE","reason":"stage role outputs attached"}`,
+	}, "\n")
+	plannerResponse := strings.Join([]string{
+		issueScanStageRoleOutputTaskArtifactCommandForTest(t, stageTask.ID, planner),
+		`/signal {"signal":"TASK_DONE","reason":"stage role outputs attached"}`,
+	}, "\n")
+
+	agentGraph := graph.New(rt.store, actor.NewInMemoryActorStore())
+	if err := agentGraph.Start(); err != nil {
+		t.Fatalf("start agent graph: %v", err)
+	}
+	t.Cleanup(func() { agentGraph.Close() })
+	RegisterWithRegistry(agentGraph.Registry())
+	work.RegisterWithRegistry(agentGraph.Registry())
+	strategistAgent := issueScanRoleOutputAgentForTest(t, agentGraph, "strategist", strategistResponse, writer.conv)
+	plannerAgent := issueScanRoleOutputAgentForTest(t, agentGraph, "planner", plannerResponse, writer.conv)
+
+	runIssueScanRoleOutputCommandLoopForTest(t, rt, strategistAgent, writer.human, writer.conv)
+	completedAfterStrategist, err := rt.issueScanStageTaskCompleted(stageTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted after strategist: %v", err)
+	}
+	if completedAfterStrategist {
+		t.Fatalf("stage %s completed after only strategist output; planner output is still required", stageID)
+	}
+	runIssueScanRoleOutputCommandLoopForTest(t, rt, plannerAgent, writer.human, writer.conv)
+
+	completed, err := rt.issueScanStageTaskCompleted(stageTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted: %v", err)
+	}
+	if !completed {
+		t.Fatalf("stage %s was not completed after agent /task artifact role outputs", stageID)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(stageTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts stage: %v", err)
+	}
+	expectedCreators := map[string]types.ActorID{
+		"strategist": strategistAgent.ID(),
+		"planner":    plannerAgent.ID(),
+	}
+	seenRoles := map[string]bool{}
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanStageRoleOutputArtifactLabel {
+			roleOutput, ok, err := issueScanStageRoleOutputArtifact(artifact.ID.Value(), artifact.Label, artifact.Body)
+			if err != nil || !ok {
+				t.Fatalf("parse role output artifact %s ok=%v err=%v", artifact.ID, ok, err)
+			}
+			expected, ok := expectedCreators[roleOutput.Role]
+			if !ok {
+				t.Fatalf("unexpected role output role %q in %+v", roleOutput.Role, roleOutput)
+			}
+			if artifact.CreatedBy != expected {
+				t.Fatalf("role output %s created_by = %s, want role agent %s", roleOutput.Role, artifact.CreatedBy, expected)
+			}
+			seenRoles[roleOutput.Role] = true
+		}
+	}
+	for role := range expectedCreators {
+		if !seenRoles[role] {
+			t.Fatalf("missing role output artifact for %s in %+v", role, artifacts)
+		}
+	}
+	if runtimeEvidence := issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel); runtimeEvidence == nil {
+		t.Fatalf("missing %s after agent command path progress: %+v", IssueScanStageRuntimeEvidenceArtifactLabel, artifacts)
+	}
+	nextStageID := "debate_with_correct_civic_roles"
+	tasks, err = rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks after progress: %v", err)
+	}
+	nextStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, nextStageID))
+	if !ok {
+		t.Fatalf("missing next stage task in %+v", tasks)
+	}
+	blocked, err := rt.tasks.IsBlocked(nextStage.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked next stage: %v", err)
+	}
+	if blocked {
+		t.Fatalf("next stage %s remains blocked after agent command path completion", nextStageID)
+	}
+}
+
+func TestAgentTaskArtifactCommandsRejectSpoofedIssueScanStageRoleOutput(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	dispatch, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if _, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	stageID := "research_issue_and_repo_context"
+	tasks, err := rt.tasks.List(20)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	stageTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, stageID))
+	if !ok {
+		t.Fatalf("missing stage task in %+v", tasks)
+	}
+
+	strategist := issueScanStageRoleOutputForTest(t, stageID, "strategist")
+	strategist.Outputs = append(strategist.Outputs, issueScanEvidenceItemForTest(stageID, "strategist", "issue_snapshot"))
+	spoofedPlanner := issueScanStageRoleOutputForTest(t, stageID, "planner")
+	spoofedPlanner.Outputs = append(spoofedPlanner.Outputs, issueScanEvidenceItemForTest(stageID, "planner", "repo_context"))
+	planner := issueScanStageRoleOutputForTest(t, stageID, "planner")
+	planner.Outputs = append(planner.Outputs, issueScanEvidenceItemForTest(stageID, "planner", "repo_context"))
+	strategistResponse := strings.Join([]string{
+		issueScanStageRoleOutputTaskArtifactCommandForTest(t, stageTask.ID, strategist),
+		`/signal {"signal":"TASK_DONE","reason":"strategist output attached"}`,
+	}, "\n")
+	spoofedPlannerResponse := strings.Join([]string{
+		issueScanStageRoleOutputTaskArtifactCommandForTest(t, stageTask.ID, spoofedPlanner),
+		`/signal {"signal":"TASK_DONE","reason":"spoofed planner output attached"}`,
+	}, "\n")
+	plannerResponse := strings.Join([]string{
+		issueScanStageRoleOutputTaskArtifactCommandForTest(t, stageTask.ID, planner),
+		`/signal {"signal":"TASK_DONE","reason":"planner output attached"}`,
+	}, "\n")
+
+	agentGraph := graph.New(rt.store, actor.NewInMemoryActorStore())
+	if err := agentGraph.Start(); err != nil {
+		t.Fatalf("start agent graph: %v", err)
+	}
+	t.Cleanup(func() { agentGraph.Close() })
+	RegisterWithRegistry(agentGraph.Registry())
+	work.RegisterWithRegistry(agentGraph.Registry())
+	strategistAgent := issueScanNamedRoleOutputAgentForTest(t, agentGraph, "strategist", "valid-strategist", strategistResponse, writer.conv)
+	spoofingAgent := issueScanNamedRoleOutputAgentForTest(t, agentGraph, "strategist", "spoofed-planner", spoofedPlannerResponse, writer.conv)
+	plannerAgent := issueScanNamedRoleOutputAgentForTest(t, agentGraph, "planner", "valid-planner", plannerResponse, writer.conv)
+
+	runIssueScanRoleOutputCommandLoopForTest(t, rt, strategistAgent, writer.human, writer.conv)
+	runIssueScanRoleOutputCommandLoopForTest(t, rt, spoofingAgent, writer.human, writer.conv)
+
+	completed, err := rt.issueScanStageTaskCompleted(stageTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted: %v", err)
+	}
+	if completed {
+		t.Fatalf("stage %s completed after a strategist-created planner role output", stageID)
+	}
+	_, ready, err := rt.issueScanStageRuntimeEvidenceFromRecordedOutputs(queued.RunID, stageID)
+	if err != nil {
+		t.Fatalf("issueScanStageRuntimeEvidenceFromRecordedOutputs after spoof: %v", err)
+	}
+	if ready {
+		t.Fatalf("stage %s became ready after a strategist-created planner role output", stageID)
+	}
+
+	runIssueScanRoleOutputCommandLoopForTest(t, rt, plannerAgent, writer.human, writer.conv)
+	completed, err = rt.issueScanStageTaskCompleted(stageTask.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted after legitimate planner: %v", err)
+	}
+	if !completed {
+		t.Fatalf("stage %s did not recover after legitimate planner output", stageID)
+	}
+}
+
+func TestIssueScanRoleOutputCreatorRolesResolveGeneratedAgentAndFallbackEvents(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	agentGraph := graph.New(rt.store, actor.NewInMemoryActorStore())
+	if err := agentGraph.Start(); err != nil {
+		t.Fatalf("start agent graph: %v", err)
+	}
+	t.Cleanup(func() { agentGraph.Close() })
+	RegisterWithRegistry(agentGraph.Registry())
+	work.RegisterWithRegistry(agentGraph.Registry())
+	generatedAgent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:           hiveagent.Role("planner"),
+		Name:           "issue-scan-generated-planner-role-output-agent",
+		Graph:          agentGraph,
+		Provider:       issueScanTaskCommandProvider{response: `/signal {"signal":"TASK_DONE"}`},
+		ConversationID: writer.conv,
+	})
+	if err != nil {
+		t.Fatalf("create generated planner agent: %v", err)
+	}
+
+	spawnedOnly := types.MustActorID("actor_00000000000000000000000000abcd01")
+	registeredOnly := types.MustActorID("actor_00000000000000000000000000abcd02")
+	overrideActor := types.MustActorID("actor_00000000000000000000000000abcd03")
+	head, err := rt.store.Head()
+	if err != nil {
+		t.Fatalf("store head: %v", err)
+	}
+	if head.IsNone() {
+		t.Fatal("store head is empty")
+	}
+	cause := head.Unwrap().ID()
+	appendRoleEvent := func(eventType types.EventType, content event.EventContent) {
+		t.Helper()
+		ev, err := writer.factory.Create(eventType, writer.human, content, []types.EventID{cause}, writer.conv, rt.store, writer.signer)
+		if err != nil {
+			t.Fatalf("create %s role event: %v", eventType.Value(), err)
+		}
+		if _, err := rt.store.Append(ev); err != nil {
+			t.Fatalf("append %s role event: %v", eventType.Value(), err)
+		}
+	}
+	appendRoleEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "spawned reviewer",
+		Role:    "reviewer",
+		Model:   "mock",
+		ActorID: spawnedOnly.Value(),
+	})
+	appendRoleEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    "override spawned",
+		Role:    "reviewer",
+		Model:   "mock",
+		ActorID: overrideActor.Value(),
+	})
+	appendRoleEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:         registeredOnly,
+		DisplayName:     "registered guardian",
+		Role:            "guardian",
+		LifecycleStatus: "active",
+	})
+	appendRoleEvent(EventTypeAgentIdentityRegistered, AgentIdentityRegisteredContent{
+		ActorID:         overrideActor,
+		DisplayName:     "registered strategist",
+		Role:            "strategist",
+		LifecycleStatus: "active",
+	})
+	var overflowLast types.ActorID
+	for i := 0; i < defaultOperatorProjectionLimit+5; i++ {
+		actorID := types.MustActorID(fmt.Sprintf("actor_%032x", 0xabc100+i))
+		if i == defaultOperatorProjectionLimit+4 {
+			overflowLast = actorID
+		}
+		appendRoleEvent(EventTypeAgentSpawned, AgentSpawnedContent{
+			Name:    fmt.Sprintf("overflow reviewer %02d", i),
+			Role:    "reviewer",
+			Model:   "mock",
+			ActorID: actorID.Value(),
+		})
+	}
+
+	roles, err := rt.issueScanRoleOutputCreatorRoles()
+	if err != nil {
+		t.Fatalf("issueScanRoleOutputCreatorRoles: %v", err)
+	}
+	for actor, want := range map[string]string{
+		generatedAgent.ID().Value(): "planner",
+		spawnedOnly.Value():         "reviewer",
+		registeredOnly.Value():      "guardian",
+		overrideActor.Value():       "strategist",
+		overflowLast.Value():        "reviewer",
+	} {
+		if got := roles[actor]; got != want {
+			t.Fatalf("creator role for %s = %q, want %q; roles=%+v", actor, got, want, roles)
+		}
+	}
+	if !issueScanStageRoleOutputCreatorAccepted(generatedAgent.ID(), "planner", roles) {
+		t.Fatal("generated planner agent should satisfy planner output")
+	}
+	if issueScanStageRoleOutputCreatorAccepted(generatedAgent.ID(), "strategist", roles) {
+		t.Fatal("generated planner agent should not satisfy strategist output")
+	}
+	if !issueScanStageRoleOutputCreatorAccepted(types.ActorID{}, "planner", roles) {
+		t.Fatal("zero created_by should preserve existing human/system artifact acceptance")
+	}
+	unknown := types.MustActorID("actor_00000000000000000000000000abcd04")
+	if !issueScanStageRoleOutputCreatorAccepted(unknown, "planner", roles) {
+		t.Fatal("unknown creator should preserve existing human/system artifact acceptance")
+	}
+}
+
+func TestGeneratedAgentTaskArtifactCreatedByMatchesIdentityRoleMap(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	head, err := rt.store.Head()
+	if err != nil {
+		t.Fatalf("store head: %v", err)
+	}
+	if head.IsNone() {
+		t.Fatal("store head is empty")
+	}
+	task, err := rt.tasks.Create(writer.human, "Creator role probe", "Attach a command-path artifact.", []types.EventID{head.Unwrap().ID()}, writer.conv, work.PriorityMedium)
+	if err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	responsePayload, err := json.Marshal(struct {
+		TaskID    string `json:"task_id"`
+		Label     string `json:"label"`
+		MediaType string `json:"media_type"`
+		Body      string `json:"body"`
+	}{
+		TaskID:    task.ID.Value(),
+		Label:     "creator_role_probe",
+		MediaType: "text/plain",
+		Body:      "probe",
+	})
+	if err != nil {
+		t.Fatalf("marshal task artifact payload: %v", err)
+	}
+	response := "/task artifact " + string(responsePayload) + "\n" + `/signal {"signal":"TASK_DONE"}`
+	agentGraph := graph.New(rt.store, actor.NewInMemoryActorStore())
+	if err := agentGraph.Start(); err != nil {
+		t.Fatalf("start agent graph: %v", err)
+	}
+	t.Cleanup(func() { agentGraph.Close() })
+	RegisterWithRegistry(agentGraph.Registry())
+	work.RegisterWithRegistry(agentGraph.Registry())
+	generatedAgent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:           hiveagent.Role("planner"),
+		Name:           "issue-scan-generated-command-path-agent",
+		Graph:          agentGraph,
+		Provider:       issueScanTaskCommandProvider{response: response},
+		ConversationID: writer.conv,
+	})
+	if err != nil {
+		t.Fatalf("create generated command-path agent: %v", err)
+	}
+	commandLoop, err := loop.New(loop.Config{
+		Agent:     generatedAgent,
+		HumanID:   writer.human,
+		TaskStore: rt.tasks,
+		ConvID:    writer.conv,
+		Budget:    resources.BudgetConfig{MaxIterations: 1},
+	})
+	if err != nil {
+		t.Fatalf("loop.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := commandLoop.Run(ctx)
+	if result.Reason != loop.StopTaskDone {
+		t.Fatalf("loop stopped with %s, want %s: %+v", result.Reason, loop.StopTaskDone, result)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(task.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("artifact count = %d, want 1: %+v", len(artifacts), artifacts)
+	}
+	if artifacts[0].CreatedBy != generatedAgent.ID() {
+		t.Fatalf("artifact created_by = %s, want generated agent %s", artifacts[0].CreatedBy, generatedAgent.ID())
+	}
+	roles, err := rt.issueScanRoleOutputCreatorRoles()
+	if err != nil {
+		t.Fatalf("issueScanRoleOutputCreatorRoles: %v", err)
+	}
+	if got := roles[artifacts[0].CreatedBy.Value()]; got != "planner" {
+		t.Fatalf("creator role for artifact created_by = %q, want planner; roles=%+v", got, roles)
 	}
 }
 
@@ -4076,6 +4495,90 @@ func issueScanStageRoleOutputForTest(t *testing.T, stageID, role string) IssueSc
 		SourceRefs:   []string{refBase + "/source"},
 	}
 }
+
+func issueScanStageRoleOutputTaskArtifactCommandForTest(t *testing.T, taskID types.EventID, output IssueScanStageRoleOutputEvidence) string {
+	t.Helper()
+	output.Kind = issueScanStageRoleOutputArtifactKind
+	output.LifecycleVersion = ""
+	output.RunID = ""
+	output.FactoryOrderID = ""
+	output.StageID = ""
+	body, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("marshal role output body: %v", err)
+	}
+	payload, err := json.Marshal(struct {
+		TaskID    string `json:"task_id"`
+		Label     string `json:"label"`
+		MediaType string `json:"media_type"`
+		Body      string `json:"body"`
+	}{
+		TaskID:    taskID.Value(),
+		Label:     IssueScanStageRoleOutputArtifactLabel,
+		MediaType: issueScanStageRuntimeEvidenceMediaType,
+		Body:      string(body),
+	})
+	if err != nil {
+		t.Fatalf("marshal task artifact command: %v", err)
+	}
+	return "/task artifact " + string(payload)
+}
+
+func issueScanRoleOutputAgentForTest(t *testing.T, g *graph.Graph, role, response string, convID types.ConversationID) *hiveagent.Agent {
+	t.Helper()
+	return issueScanNamedRoleOutputAgentForTest(t, g, role, role, response, convID)
+}
+
+func issueScanNamedRoleOutputAgentForTest(t *testing.T, g *graph.Graph, role, nameSuffix, response string, convID types.ConversationID) *hiveagent.Agent {
+	t.Helper()
+	agent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:           hiveagent.Role(role),
+		Name:           "issue-scan-" + safeRunLaunchID(nameSuffix) + "-role-output-agent",
+		Graph:          g,
+		Provider:       issueScanTaskCommandProvider{response: response},
+		Environment:    hiveagent.IdentityEnvironmentTest,
+		IdentityMode:   hiveagent.IdentityModeDeterministic,
+		ConversationID: convID,
+	})
+	if err != nil {
+		t.Fatalf("create %s role agent: %v", role, err)
+	}
+	return agent
+}
+
+func runIssueScanRoleOutputCommandLoopForTest(t *testing.T, rt *Runtime, roleAgent *hiveagent.Agent, humanID types.ActorID, convID types.ConversationID) {
+	t.Helper()
+	commandLoop, err := loop.New(loop.Config{
+		Agent:                  roleAgent,
+		HumanID:                humanID,
+		TaskStore:              rt.tasks,
+		ConvID:                 convID,
+		Budget:                 resources.BudgetConfig{MaxIterations: 1},
+		OnTaskCommandsExecuted: rt.progressIssueScanLifecycleAfterTaskCommands,
+	})
+	if err != nil {
+		t.Fatalf("loop.New %s: %v", roleAgent.Name(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := commandLoop.Run(ctx)
+	if result.Reason != loop.StopTaskDone {
+		t.Fatalf("%s loop stopped with %s, want %s: %+v", roleAgent.Name(), result.Reason, loop.StopTaskDone, result)
+	}
+}
+
+type issueScanTaskCommandProvider struct {
+	response string
+}
+
+func (p issueScanTaskCommandProvider) Name() string  { return "issue-scan-task-command-test" }
+func (p issueScanTaskCommandProvider) Model() string { return "mock-model" }
+func (p issueScanTaskCommandProvider) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	confidence, _ := types.NewScore(0.8)
+	return decision.NewResponse(p.response, confidence, decision.TokenUsage{InputTokens: 1, OutputTokens: 1}), nil
+}
+
+var _ intelligence.Provider = issueScanTaskCommandProvider{}
 
 func issueScanEvidenceItemForTest(stageID, role, key string) IssueScanStageRuntimeEvidenceItem {
 	refBase := "test://" + safeRunLaunchID(stageID) + "/roles/" + safeRunLaunchID(role)
