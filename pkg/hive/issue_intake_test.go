@@ -3466,6 +3466,290 @@ func TestIssueScanLifecycleEndToEndSurfacesReadyForHumanPR(t *testing.T) {
 	}
 }
 
+func TestProgressIssueScanLifecycleConfiguredRunnersSurfaceReadyForHumanPR(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	rt.repoPath = currentHiveRepoPathForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Teach the Civilization to scan issues",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos, create a FactoryOrder, research, debate, design, implement, run adversarial review, drive blockers to zero, and surface a ready-for-Human PR.",
+			Labels: []string{"civilization", "autonomy"},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+
+	callsByStage := map[string]int{}
+	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		callsByStage[runnerContext.StageID]++
+		if runnerContext.RunID != queued.RunID || runnerContext.FactoryOrderID != orderID {
+			t.Fatalf("stage runner run/order = %q/%q, want %q/%q", runnerContext.RunID, runnerContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if runnerContext.Repository != "transpara-ai/hive" {
+			t.Fatalf("stage runner repo = %q", runnerContext.Repository)
+		}
+		if !issueScanStageRoleOutputRunnerEligibleStage(runnerContext.StageID) {
+			t.Fatalf("stage runner called for ineligible stage %q", runnerContext.StageID)
+		}
+		if len(runnerContext.RequestedRoleSteps) == 0 {
+			t.Fatalf("stage runner missing requested role steps: %+v", runnerContext)
+		}
+		outputs := make([]IssueScanStageRoleOutputEvidence, 0, len(runnerContext.RequestedRoleSteps))
+		for _, step := range runnerContext.RequestedRoleSteps {
+			outputs = append(outputs, issueScanStageRoleOutputWithStageEvidenceForTest(t, runnerContext.StageID, step.Role))
+		}
+		return IssueScanStageRoleOutputRunnerResult{RoleOutputs: outputs}, nil
+	}
+
+	implementationCalls := 0
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		implementationCalls++
+		if runnerContext.RunID != queued.RunID || runnerContext.FactoryOrderID != orderID {
+			t.Fatalf("implementation runner run/order = %q/%q, want %q/%q", runnerContext.RunID, runnerContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if runnerContext.Repository != "transpara-ai/hive" || runnerContext.RepoPath == "" {
+			t.Fatalf("implementation runner repo/path = %q/%q", runnerContext.Repository, runnerContext.RepoPath)
+		}
+		if len(runnerContext.DesignOutputs) == 0 || len(runnerContext.ImplementationReadinessGates) == 0 {
+			t.Fatalf("implementation runner missing design/gate context: %+v", runnerContext)
+		}
+		return IssueScanImplementationRunnerResult{
+			OperateResultBody: issueScanOperateResultBodyForTest(),
+			CompletionSummary: "validation output: go test ./pkg/hive passed from configured implementation runner",
+		}, nil
+	}
+
+	reviewCalls := 0
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		reviewCalls++
+		if reviewContext.RunID != queued.RunID || reviewContext.FactoryOrderID != orderID {
+			t.Fatalf("review runner run/order = %q/%q, want %q/%q", reviewContext.RunID, reviewContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		receipt := reviewContext.ExpectedReceipt
+		receipt.Confidence = 0.95
+		receipt.Tool = "test-configured-runner"
+		switch reviewCalls {
+		case 1:
+			if reviewContext.OperateCommit != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+				t.Fatalf("first review commit = %q, want initial implementation head", reviewContext.OperateCommit)
+			}
+			receipt.ReviewRef = "artifact://adversarial-review/configured-e2e/blockers.md"
+			receipt.Verdict = "request_changes"
+			receipt.Summary = "configured review found a blocker"
+			receipt.Issues = []string{"missing regression test"}
+		case 2:
+			if reviewContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+				t.Fatalf("second review commit = %q, want repaired implementation head", reviewContext.OperateCommit)
+			}
+			receipt.ReviewRef = "artifact://adversarial-review/configured-e2e/approved.md"
+			receipt.Verdict = "approve"
+			receipt.Summary = "configured review approved the repaired exact head with zero blockers"
+			receipt.Issues = []string{}
+		default:
+			t.Fatalf("unexpected review runner call %d with context %+v", reviewCalls, reviewContext)
+		}
+		return receipt, nil
+	}
+
+	repairCalls := 0
+	rt.issueScanBlockerRepairRunner = func(ctx context.Context, runnerContext IssueScanBlockerRepairRunnerContext) (IssueScanBlockerRepairRunnerResult, error) {
+		repairCalls++
+		if runnerContext.RunID != queued.RunID || runnerContext.FactoryOrderID != orderID {
+			t.Fatalf("repair runner run/order = %q/%q, want %q/%q", runnerContext.RunID, runnerContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if runnerContext.PreviousOperateCommit != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+			t.Fatalf("repair runner previous commit = %q, want reviewed blocker head", runnerContext.PreviousOperateCommit)
+		}
+		if !containsIssueScanValue(runnerContext.RequestChangesReviewIssues, "missing regression test") {
+			t.Fatalf("repair runner review issues = %+v", runnerContext.RequestChangesReviewIssues)
+		}
+		return IssueScanBlockerRepairRunnerResult{
+			OperateResultBody: issueScanOperateResultBodyForTestWith(
+				"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"cccccccccccccccccccccccccccccccccccccccc",
+				"codex/run-issue-001-repair",
+				"pkg/hive/example.go | 14 ++++++++++++--\npkg/hive/example_test.go | 18 ++++++++++++++++++\n2 files changed, 30 insertions(+), 2 deletions(-)",
+			),
+			CompletionSummary: "validation output: go test ./pkg/hive passed after configured blocker repair runner",
+		}, nil
+	}
+
+	draftRequestCalls := 0
+	rt.issueScanDraftPRAuthorityRequester = func(ctx context.Context, requestContext IssueScanDraftPRAuthorityRequestRunnerContext) (IssueScanDraftPRAuthorityRequestRunnerResult, error) {
+		draftRequestCalls++
+		if requestContext.RunID != queued.RunID || requestContext.FactoryOrderID != orderID {
+			t.Fatalf("draft authority requester run/order = %q/%q, want %q/%q", requestContext.RunID, requestContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if requestContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" || requestContext.OperateBranch != "codex/run-issue-001-repair" {
+			t.Fatalf("draft authority requester operate target = %q/%q", requestContext.OperateBranch, requestContext.OperateCommit)
+		}
+		if !containsIssueScanString(requestContext.BoundaryDisclaimers, "authority request is not Human approval") {
+			t.Fatalf("draft authority requester missing Human approval boundary: %+v", requestContext.BoundaryDisclaimers)
+		}
+		return IssueScanDraftPRAuthorityRequestRunnerResult{
+			BaseRef: "main",
+			BaseSHA: "dddddddddddddddddddddddddddddddddddddddd",
+			Nonce:   "nonce-configured-e2e-ready-pr",
+		}, nil
+	}
+
+	draftPRClient := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	rt.issueScanDraftPRCreator = draftPRClient
+	readyPRClient := &fakeReadyPRFinalizerClient{}
+	readyReviewCalls := 0
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(readyPRClient, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		readyReviewCalls++
+		if reviewContext.RunID != queued.RunID || reviewContext.FactoryOrderID != orderID {
+			t.Fatalf("ready-state review run/order = %q/%q, want %q/%q", reviewContext.RunID, reviewContext.FactoryOrderID, queued.RunID, orderID)
+		}
+		if reviewContext.PRNumber != 111 || reviewContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+			t.Fatalf("ready-state review PR/head = #%d/%s", reviewContext.PRNumber, reviewContext.OperateCommit)
+		}
+		if reviewContext.ReadyPRState.Draft || !reviewContext.ReadyPRState.ReadyForReview {
+			t.Fatalf("ready-state review PR state = %+v, want non-draft ready PR", reviewContext.ReadyPRState)
+		}
+		return IssueScanReadyStateReviewReceipt{
+			ReviewRef:       "https://github.com/transpara-ai/hive/pull/111#issuecomment-ready-state-review",
+			ReviewedHeadSHA: reviewContext.OperateCommit,
+			Status:          "passed",
+			Summary:         "ready-state exact-head review passed with no blockers",
+			SourceRefs:      []string{"test://ready-state-review"},
+		}, nil
+	})
+
+	var requestRecord IssueScanDraftPRAuthorityRequestRunnerRecordResult
+	for pass := 1; pass <= 10; pass++ {
+		progress, err := rt.progressIssueScanLifecycle()
+		if err != nil {
+			t.Fatalf("progressIssueScanLifecycle before approval pass %d: %v", pass, err)
+		}
+		for _, record := range progress.DraftPRRequests {
+			if record.Raised {
+				requestRecord = record
+			}
+		}
+		if requestRecord.RequestID != (types.EventID{}) {
+			break
+		}
+	}
+	if requestRecord.RequestID == (types.EventID{}) {
+		t.Fatalf("configured runners did not raise draft PR authority request")
+	}
+	if !requestRecord.HeldPendingApproval || requestRecord.AutoApproved {
+		t.Fatalf("request record = %+v, want held pending Human approval only", requestRecord)
+	}
+	if draftPRClient.calls != 0 || readyPRClient.markCalls != 0 || readyReviewCalls != 0 {
+		t.Fatalf("pre-approval PR calls draft/mark/review = %d/%d/%d, want none", draftPRClient.calls, readyPRClient.markCalls, readyReviewCalls)
+	}
+
+	tasks, err := rt.tasks.List(100)
+	if err != nil {
+		t.Fatalf("List tasks before approval: %v", err)
+	}
+	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
+	if !ok {
+		t.Fatalf("missing implementation task")
+	}
+	readyStage, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "surface_ready_for_Human_result_PR"))
+	if !ok {
+		t.Fatalf("missing ready-for-Human stage task")
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted before approval: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed before approved draft PR and ready-state review")
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, IssueScanDraftPRAuthorityRequestResult{
+		RunID:                requestRecord.RunID,
+		FactoryOrderID:       requestRecord.FactoryOrderID,
+		Repository:           requestRecord.Repository,
+		ReadyStageTaskID:     readyStage.ID,
+		ImplementationTaskID: implementationTask.ID,
+		RequestID:            requestRecord.RequestID,
+		DraftPRTarget:        requestRecord.DraftPRTarget,
+	})
+
+	for pass := 1; pass <= 5; pass++ {
+		progress, err := rt.progressIssueScanLifecycle()
+		if err != nil {
+			t.Fatalf("progressIssueScanLifecycle after approval pass %d: %v", pass, err)
+		}
+		readyCompleted, err = rt.issueScanStageTaskCompleted(readyStage.ID)
+		if err != nil {
+			t.Fatalf("issueScanStageTaskCompleted after approval pass %d: %v", pass, err)
+		}
+		if readyCompleted {
+			if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 1 {
+				t.Fatalf("draft PR creations on completion pass = %+v, want one created", progress.DraftPRCreations)
+			}
+			if countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns) != 1 {
+				t.Fatalf("ready PR runs on completion pass = %+v, want one recorded ready-state review", progress.ReadyPRRuns)
+			}
+			break
+		}
+	}
+	if !readyCompleted {
+		t.Fatalf("configured runners did not complete ready-for-Human stage after approval")
+	}
+
+	if draftPRClient.calls != 1 || readyPRClient.markCalls != 1 || readyPRClient.fetchCalls != 1 || readyReviewCalls != 1 {
+		t.Fatalf("PR calls draft/mark/fetch/review = %d/%d/%d/%d, want 1/1/1/1", draftPRClient.calls, readyPRClient.markCalls, readyPRClient.fetchCalls, readyReviewCalls)
+	}
+	if implementationCalls != 1 || reviewCalls != 2 || repairCalls != 1 || draftRequestCalls != 1 {
+		t.Fatalf("runner calls implementation/review/repair/draft-request = %d/%d/%d/%d, want 1/2/1/1", implementationCalls, reviewCalls, repairCalls, draftRequestCalls)
+	}
+	for _, stageID := range []string{"research_issue_and_repo_context", "debate_with_correct_civic_roles", "select_and_design_approach"} {
+		if callsByStage[stageID] != 1 {
+			t.Fatalf("stage runner calls for %s = %d, want 1 (all calls %+v)", stageID, callsByStage[stageID], callsByStage)
+		}
+	}
+	if len(callsByStage) != 3 {
+		t.Fatalf("stage runner called outside planning stages: %+v", callsByStage)
+	}
+
+	projection := BuildCivilizationAssemblyProjection(rt.store, 300)
+	for _, stage := range issueScanDevelopmentLifecycle() {
+		projected := queuedRunLifecycleStageByID(projection.QueuedRunRequest.DevelopmentLifecycle, stage.ID)
+		if projected == nil || projected.EvidenceStatus != civilizationAssemblyQueuedStageCompletedStatus {
+			t.Fatalf("projected stage %s = %+v, want completed", stage.ID, projected)
+		}
+	}
+	tasks, err = rt.tasks.List(100)
+	if err != nil {
+		t.Fatalf("List tasks before parent status: %v", err)
+	}
+	var parentMatches []work.Task
+	for _, task := range tasks {
+		if task.FactoryOrderID == orderID && task.CanonicalTaskID == "" {
+			parentMatches = append(parentMatches, task)
+		}
+	}
+	if len(parentMatches) != 1 {
+		t.Fatalf("parent FactoryOrder task matches for %s = %+v, want exactly one", orderID, parentMatches)
+	}
+	parentTask := parentMatches[0]
+	parentStatus, err := rt.tasks.GetCompatibilityStatus(parentTask.ID)
+	if err != nil {
+		t.Fatalf("GetCompatibilityStatus parent: %v", err)
+	}
+	if parentStatus != work.LegacyStatusReady {
+		t.Fatalf("parent FactoryOrder task status = %q, want ready for Human approval", parentStatus)
+	}
+}
+
 func TestProgressIssueScanLifecycleRaisesConfiguredDraftPRAuthorityRequest(t *testing.T) {
 	rt, _, runID, orderID, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
 	attachIssueScanAuthorityGraphForTest(t, rt)
