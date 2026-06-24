@@ -4050,6 +4050,53 @@ func TestCreateIssueScanDraftPRFromApprovedRequestRecordsReceipt(t *testing.T) {
 	}
 }
 
+func TestProgressIssueScanLifecycleCreatesApprovedIssueScanDraftPR(t *testing.T) {
+	rt, writer, runID, _, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	rt.issueScanDraftPRCreator = client
+
+	progress, err := rt.progressIssueScanLifecycleContext(context.Background())
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycleContext: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("client calls = %d, want one approved draft PR create", client.calls)
+	}
+	if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 1 {
+		t.Fatalf("draft PR creations = %+v, want one created", progress.DraftPRCreations)
+	}
+	readyCompleted, err := rt.issueScanStageTaskCompleted(readyStage.ID)
+	if err != nil {
+		t.Fatalf("issueScanStageTaskCompleted ready stage: %v", err)
+	}
+	if readyCompleted {
+		t.Fatalf("ready stage completed after approved draft PR creation only")
+	}
+}
+
+func TestProgressIssueScanLifecycleDoesNotCreateDraftPRWithoutApproval(t *testing.T) {
+	rt, _, _, _, _, _ := issueScanReadyStageFixtureForTest(t)
+	client := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
+	rt.issueScanDraftPRCreator = client
+
+	progress, err := rt.progressIssueScanLifecycleContext(context.Background())
+	if err != nil {
+		t.Fatalf("progressIssueScanLifecycleContext: %v", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client calls = %d, want none without approved authority decision", client.calls)
+	}
+	if countCreatedIssueScanDraftPRs(progress.DraftPRCreations) != 0 {
+		t.Fatalf("draft PR creations = %+v, want none without approval", progress.DraftPRCreations)
+	}
+}
+
 func TestCreateIssueScanDraftPRFromApprovedRequestRequiresApprovedDecision(t *testing.T) {
 	rt, _, runID, _, _, _ := issueScanReadyStageFixtureForTest(t)
 	attachIssueScanAuthorityGraphForTest(t, rt)

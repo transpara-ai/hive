@@ -131,7 +131,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase)
 }
 
 func cmdCivilizationDaemon(args []string) error {
@@ -158,7 +158,7 @@ func cmdCivilizationDaemon(args []string) error {
 			return fmt.Errorf("ingest seed-spec: %w", err)
 		}
 	}
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, nil, nil, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase)
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────

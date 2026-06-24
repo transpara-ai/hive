@@ -178,6 +178,7 @@ func cmdFactoryDaemon(args []string) error {
 	blockerRepairTimeout := fs.Duration("issue-scan-blocker-repair-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-blocker-repair-runner")
 	blockerRepairRunnerArgs := repeatedStringFlag{}
 	fs.Var(&blockerRepairRunnerArgs, "issue-scan-blocker-repair-runner-arg", "Argument passed to --issue-scan-blocker-repair-runner (repeatable)")
+	issueScanDraftPRCreate := fs.Bool("issue-scan-draft-pr-create", false, "Create approved issue-scan draft PRs after recorded Human approval; requires GITHUB_TOKEN")
 	readyPRRunner := fs.String("issue-scan-ready-pr-runner", "", "Executable terminal ready-PR evidence runner; receives JSON context on stdin and returns draft receipt plus ready evidence JSON")
 	readyPRTimeout := fs.Duration("issue-scan-ready-pr-timeout", 15*time.Minute, "Maximum runtime for --issue-scan-ready-pr-runner")
 	readyPRRunnerArgs := repeatedStringFlag{}
@@ -280,6 +281,14 @@ func cmdFactoryDaemon(args []string) error {
 		}
 		issueScanBlockerRepairRunner = issueScanBlockerRepairCommandRunner(*blockerRepairRunner, blockerRepairRunnerArgs, *blockerRepairTimeout)
 	}
+	var issueScanDraftPRCreator work.Epic11PullRequestCreator
+	if *issueScanDraftPRCreate {
+		token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+		if token == "" {
+			return fmt.Errorf("GITHUB_TOKEN is required when --issue-scan-draft-pr-create is enabled")
+		}
+		issueScanDraftPRCreator = work.NewEpic11GitHubPullRequestCreator(token)
+	}
 	var issueScanReadyPRRunner hive.IssueScanReadyPRRunner
 	if strings.TrimSpace(*readyPRRunner) == "" {
 		if len(readyPRRunnerArgs) > 0 {
@@ -297,7 +306,7 @@ func cmdFactoryDaemon(args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

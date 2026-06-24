@@ -1201,7 +1201,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1302,6 +1302,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		IssueScanImplementationRunner:    issueScanImplementationRunner,
 		IssueScanAdversarialReviewRunner: issueScanReviewRunner,
 		IssueScanBlockerRepairRunner:     issueScanBlockerRepairRunner,
+		IssueScanDraftPRCreator:          issueScanDraftPRCreator,
 		IssueScanReadyPRRunner:           issueScanReadyPRRunner,
 		TelemetryWriter:                  tw,
 		APIClient:                        siteClient,
