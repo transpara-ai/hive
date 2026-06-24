@@ -222,6 +222,12 @@ func (r *Runtime) RecordIssueScanDraftPRReceipt(runID string, receipt TransparaA
 	if err := validateIssueScanDraftPRReceiptForRecord(content, receipt); err != nil {
 		return result, err
 	}
+	authorityDecisionID, authorityRequestID, _, err := r.approvedDraftPRAuthorityDecisionForReceipt(receipt)
+	if err != nil {
+		return result, err
+	}
+	receipt.AuthorityDecisionRef = authorityDecisionID.Value()
+	receipt.AuthorityRequestID = authorityRequestID.Value()
 	body, err := transparaAIDraftPRReceiptBody(receipt)
 	if err != nil {
 		return result, err
@@ -231,7 +237,7 @@ func (r *Runtime) RecordIssueScanDraftPRReceipt(runID string, receipt TransparaA
 		return result, err
 	}
 	if !exists {
-		causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID})
+		causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID, authorityRequestID, authorityDecisionID})
 		if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, TransparaAIDraftPRReceiptArtifactLabel, "application/json", body, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
 			return result, fmt.Errorf("record issue-scan draft PR receipt: %w", err)
 		}
@@ -281,6 +287,11 @@ func (r *Runtime) RecordIssueScanReadyPREvidence(runID string, evidence IssueSca
 	if err != nil {
 		return result, err
 	}
+	authorityDecisionID, err := r.approvedDraftPRAuthorityDecisionForReadyEvidence(normalized, implementation, draftReceipts)
+	if err != nil {
+		return result, err
+	}
+	normalized.SourceRefs = compactStrings(append(normalized.SourceRefs, authorityDecisionID.Value()))
 	body, err := IssueScanReadyPREvidenceArtifactBody(normalized)
 	if err != nil {
 		return result, err
@@ -290,7 +301,7 @@ func (r *Runtime) RecordIssueScanReadyPREvidence(runID string, evidence IssueSca
 		return result, err
 	}
 	if !exists {
-		causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID, blockerStage.TaskID, implementationTaskID, implementation.CompletionEventID, implementation.OperateArtifactID})
+		causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID, blockerStage.TaskID, implementationTaskID, implementation.CompletionEventID, implementation.OperateArtifactID, authorityDecisionID})
 		if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, IssueScanReadyPREvidenceArtifactLabel, "application/json", body, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
 			return result, fmt.Errorf("record issue-scan ready PR evidence: %w", err)
 		}
@@ -651,6 +662,11 @@ func (r *Runtime) issueScanReadyPREvidenceForStage(content FactoryRunRequestedCo
 		if err != nil {
 			return IssueScanReadyPREvidence{}, types.EventID{}, false, fmt.Errorf("validate ready PR evidence artifact %s: %w", artifact.ID.Value(), err)
 		}
+		authorityDecisionID, err := r.approvedDraftPRAuthorityDecisionForReadyEvidence(normalized, implementation, draftReceipts)
+		if err != nil {
+			return IssueScanReadyPREvidence{}, types.EventID{}, false, fmt.Errorf("validate ready PR authority for artifact %s: %w", artifact.ID.Value(), err)
+		}
+		normalized.SourceRefs = compactStrings(append(normalized.SourceRefs, authorityDecisionID.Value()))
 		return normalized, artifact.ID, true, nil
 	}
 	return IssueScanReadyPREvidence{}, types.EventID{}, false, nil
@@ -708,7 +724,89 @@ func transparaAIDraftPRReceiptArtifact(_ string, label, body string) (TransparaA
 	payload.Repository = strings.ToLower(strings.TrimSpace(payload.Repository))
 	payload.PRURL = strings.TrimSpace(payload.PRURL)
 	payload.HeadSHA = strings.TrimSpace(payload.HeadSHA)
+	payload.AuthorityDecisionRef = strings.TrimSpace(payload.AuthorityDecisionRef)
+	payload.AuthorityRequestID = strings.TrimSpace(payload.AuthorityRequestID)
 	return payload, true, nil
+}
+
+func (r *Runtime) approvedDraftPRAuthorityDecisionForReadyEvidence(evidence IssueScanReadyPREvidence, implementation issueScanOperateCompletionEvidence, receipts []issueScanDraftPRReceiptEvidence) (types.EventID, error) {
+	repo := strings.ToLower(strings.TrimSpace(evidence.Repository))
+	head := strings.TrimSpace(evidence.HeadSHA)
+	if head == "" {
+		head = strings.TrimSpace(implementation.OperateCommit)
+	}
+	receipt, err := matchingIssueScanDraftPRReceipt(evidence, repo, head, receipts)
+	if err != nil {
+		return types.EventID{}, err
+	}
+	decisionID, _, _, err := r.approvedDraftPRAuthorityDecisionForReceipt(receipt.Receipt)
+	if err != nil {
+		return types.EventID{}, err
+	}
+	return decisionID, nil
+}
+
+func (r *Runtime) approvedDraftPRAuthorityDecisionForReceipt(receipt TransparaAIDraftPRReceipt) (types.EventID, types.EventID, DraftPRTarget, error) {
+	if r == nil || r.store == nil {
+		return types.EventID{}, types.EventID{}, DraftPRTarget{}, fmt.Errorf("runtime store is required to verify draft PR authority decision")
+	}
+	cursor := types.None[types.Cursor]()
+	var lastMismatch error
+	for {
+		page, err := r.store.ByType(EventTypeAuthorityDecisionRecorded, defaultOperatorProjectionLimit, cursor)
+		if err != nil {
+			return types.EventID{}, types.EventID{}, DraftPRTarget{}, fmt.Errorf("load authority decisions for draft PR receipt: %w", err)
+		}
+		for _, ev := range page.Items() {
+			content, ok := ev.Content().(AuthorityDecisionRecordedContent)
+			if !ok || strings.TrimSpace(content.Outcome) != draftPRApprovedOutcome {
+				continue
+			}
+			target, err := ParseDraftPRScope(content.Scope)
+			if err != nil {
+				continue
+			}
+			if err := validateDraftPRTargetMatchesReceipt(target, receipt); err != nil {
+				lastMismatch = err
+				continue
+			}
+			if ref := strings.TrimSpace(receipt.AuthorityDecisionRef); ref != "" && ref != ev.ID().Value() {
+				lastMismatch = fmt.Errorf("receipt authority_decision_ref %q does not match approved decision %s", ref, ev.ID().Value())
+				continue
+			}
+			if ref := strings.TrimSpace(receipt.AuthorityRequestID); ref != "" && ref != content.RequestID.Value() {
+				lastMismatch = fmt.Errorf("receipt authority_request_id %q does not match approved request %s", ref, content.RequestID.Value())
+				continue
+			}
+			return ev.ID(), content.RequestID, target, nil
+		}
+		if !page.HasMore() {
+			break
+		}
+		cursor = page.Cursor()
+	}
+	if lastMismatch != nil {
+		return types.EventID{}, types.EventID{}, DraftPRTarget{}, fmt.Errorf("no approved draft PR authority decision matches receipt for %s#%d: %w", receipt.Repository, receipt.PRNumber, lastMismatch)
+	}
+	return types.EventID{}, types.EventID{}, DraftPRTarget{}, fmt.Errorf("no approved draft PR authority decision matches receipt for %s#%d", receipt.Repository, receipt.PRNumber)
+}
+
+func validateDraftPRTargetMatchesReceipt(target DraftPRTarget, receipt TransparaAIDraftPRReceipt) error {
+	for field, values := range map[string][2]string{
+		"repository":         {strings.ToLower(strings.TrimSpace(receipt.Repository)), strings.ToLower(strings.TrimSpace(target.Repository))},
+		"base_ref":           {strings.TrimSpace(receipt.BaseRef), strings.TrimSpace(target.BaseRef)},
+		"base_sha":           {strings.TrimSpace(receipt.BaseSHA), strings.TrimSpace(target.BaseSHA)},
+		"head_ref":           {strings.TrimSpace(receipt.HeadRef), strings.TrimSpace(target.HeadRef)},
+		"head_sha":           {strings.TrimSpace(receipt.HeadSHA), strings.TrimSpace(target.HeadSHA)},
+		"policy_bundle_id":   {strings.TrimSpace(receipt.PolicyBundleID), strings.TrimSpace(target.PolicyBundleID)},
+		"policy_bundle_hash": {strings.TrimSpace(receipt.PolicyBundleHash), strings.TrimSpace(target.PolicyBundleHash)},
+		"authority_nonce":    {strings.TrimSpace(receipt.AuthorityNonce), strings.TrimSpace(target.SingleUseNonce)},
+	} {
+		if values[0] != values[1] {
+			return fmt.Errorf("%s %q does not match approved target %q", field, values[0], values[1])
+		}
+	}
+	return nil
 }
 
 func normalizeIssueScanReadyPREvidence(content FactoryRunRequestedContent, orderID string, evidence IssueScanReadyPREvidence, implementation issueScanOperateCompletionEvidence, draftReceipts []issueScanDraftPRReceiptEvidence) (IssueScanReadyPREvidence, error) {

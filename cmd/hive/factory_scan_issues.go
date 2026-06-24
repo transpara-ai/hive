@@ -110,7 +110,7 @@ func cmdFactoryScanIssues(args []string) error {
 
 	fmt.Printf("queued issue-scan run %s for %s#%d (first event %s)\n", queued.RunID, queued.Selected.Repo, queued.Selected.Number, queued.FirstEventID)
 	if *dispatch {
-		progress, err := rt.ProgressIssueScanRunLifecycle(queued.RunID)
+		progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, queued.RunID)
 		if err != nil {
 			return fmt.Errorf("progress issue-scan lifecycle: %w", err)
 		}

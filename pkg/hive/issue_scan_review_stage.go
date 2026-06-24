@@ -206,12 +206,12 @@ func (r *Runtime) latestIssueScanCodeReviewForTask(taskID types.EventID) (types.
 }
 
 func (r *Runtime) issueScanCodeReviewsForTask(taskID types.EventID) ([]issueScanCodeReviewEvidence, error) {
-	page, err := r.store.ByType(event.EventTypeCodeReviewSubmitted, 1000, types.None[types.Cursor]())
+	events, err := eventsByTypePaginated(r.store, event.EventTypeCodeReviewSubmitted, defaultOperatorProjectionLimit)
 	if err != nil {
 		return nil, fmt.Errorf("code.review.submitted: %w", err)
 	}
 	reviews := []issueScanCodeReviewEvidence{}
-	for _, ev := range page.Items() {
+	for _, ev := range events {
 		content, ok := ev.Content().(event.CodeReviewContent)
 		if !ok || strings.TrimSpace(content.TaskID) != taskID.Value() {
 			continue

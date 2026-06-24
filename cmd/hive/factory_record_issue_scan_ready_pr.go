@@ -90,7 +90,7 @@ func cmdFactoryRecordIssueScanReadyPR(args []string) error {
 		return fmt.Errorf("record issue-scan ready PR evidence: %w", err)
 	}
 	fmt.Printf("issue-scan ready PR evidence recorded=%v already_recorded=%v artifact=%s pr=%s#%d head=%s draft_receipt=%s\n", result.Recorded, result.ReadyPREvidenceAlreadyRecorded, result.ReadyPREvidenceArtifactID, result.Repository, result.PRNumber, result.HeadSHA, result.DraftPRReceiptRef)
-	progress, err := rt.ProgressIssueScanRunLifecycle(*runID)
+	progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, *runID)
 	if err != nil {
 		return fmt.Errorf("progress issue-scan lifecycle after ready PR evidence: %w", err)
 	}

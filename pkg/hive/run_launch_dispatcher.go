@@ -1008,6 +1008,10 @@ type IssueScanLifecycleProgress struct {
 
 type issueScanLifecycleProgress = IssueScanLifecycleProgress
 
+type issueScanLifecycleProgressOptions struct {
+	RunConfiguredRunners bool
+}
+
 // ProgressIssueScanLifecycle advances all queued/dispatched issue-scan runs
 // through the evidence bridge. Daemon paths use this as a bounded local progress
 // pass; it never creates, marks ready, merges, deploys, or approves a PR by
@@ -1020,6 +1024,14 @@ func (r *Runtime) ProgressIssueScanLifecycle() (IssueScanLifecycleProgress, erro
 // the same bounded evidence bridge. Operator commands use this after queueing a
 // single scan so they do not accidentally drain unrelated queued runs.
 func (r *Runtime) ProgressIssueScanRunLifecycle(runID string) (IssueScanLifecycleProgress, error) {
+	return r.ProgressIssueScanRunLifecycleContext(context.Background(), runID)
+}
+
+// ProgressIssueScanRunLifecycleContext is the context-aware form of
+// ProgressIssueScanRunLifecycle. It intentionally performs only local lifecycle
+// progress; configured external runners stay on daemon and explicit runner
+// commands so post-event callbacks cannot unexpectedly launch them.
+func (r *Runtime) ProgressIssueScanRunLifecycleContext(ctx context.Context, runID string) (IssueScanLifecycleProgress, error) {
 	runID = strings.TrimSpace(runID)
 	var progress IssueScanLifecycleProgress
 	if r == nil {
@@ -1037,7 +1049,7 @@ func (r *Runtime) ProgressIssueScanRunLifecycle(runID string) (IssueScanLifecycl
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(context.Background(), &progress, dispatch, &errs)
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{})
 	return progress, errors.Join(errs...)
 }
 
@@ -1059,11 +1071,29 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{RunConfiguredRunners: true})
 	return progress, errors.Join(errs...)
 }
 
-func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
+func (r *Runtime) progressIssueScanLifecycleInlineContext(ctx context.Context) (IssueScanLifecycleProgress, error) {
+	var progress IssueScanLifecycleProgress
+	if r == nil {
+		return progress, nil
+	}
+	r.issueScanLifecycleMu.Lock()
+	defer r.issueScanLifecycleMu.Unlock()
+
+	var errs []error
+	dispatch, err := r.DispatchQueuedRunLaunches(defaultRunLaunchDispatchLimit)
+	progress.Dispatch = dispatch
+	if err != nil {
+		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
+	}
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs, issueScanLifecycleProgressOptions{})
+	return progress, errors.Join(errs...)
+}
+
+func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error, options issueScanLifecycleProgressOptions) {
 	if r == nil || progress == nil || errs == nil {
 		return
 	}
@@ -1072,39 +1102,10 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan lifecycle start: %w", err))
 	}
-	researchRoleOutputs, err := r.RecordQueuedIssueScanResearchRoleOutputs(dispatch)
-	progress.ResearchRoleOutputs = researchRoleOutputs
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("issue-scan research role-output recording: %w", err))
-	}
 	completions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
 	progress.Completions = completions
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan lifecycle auto-completion: %w", err))
-	}
-	debateRoleOutputs, err := r.RecordCompletedIssueScanDebateRoleOutputs(dispatch)
-	progress.DebateRoleOutputs = debateRoleOutputs
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("issue-scan debate role-output recording: %w", err))
-	}
-	if len(debateRoleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
-		progress.Completions = append(progress.Completions, moreCompletions...)
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-debate auto-completion: %w", err))
-		}
-	}
-	designRoleOutputs, err := r.RecordCompletedIssueScanDesignRoleOutputs(dispatch)
-	progress.DesignRoleOutputs = designRoleOutputs
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("issue-scan design role-output recording: %w", err))
-	}
-	if len(designRoleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
-		progress.Completions = append(progress.Completions, moreCompletions...)
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-design auto-completion: %w", err))
-		}
 	}
 	implementationTasks, err := r.EnsureIssueScanImplementationTasks(dispatch)
 	progress.ImplementationTasks = implementationTasks
@@ -1123,10 +1124,12 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-implementation auto-completion: %w", err))
 		}
 	}
-	reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
-	progress.ReviewRuns = reviewRuns
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
+	if options.RunConfiguredRunners {
+		reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
+		progress.ReviewRuns = reviewRuns
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
+		}
 	}
 	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(dispatch)
 	progress.ReviewRoleOutputs = reviewRoleOutputs
@@ -1152,10 +1155,12 @@ func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, prog
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-blocker auto-completion: %w", err))
 		}
 	}
-	readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
-	progress.ReadyPRRuns = readyPRRuns
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
+	if options.RunConfiguredRunners {
+		readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
+		progress.ReadyPRRuns = readyPRRuns
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
+		}
 	}
 	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(dispatch)
 	progress.ReadyRoleOutputs = readyRoleOutputs
@@ -1180,7 +1185,7 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 		return
 	default:
 	}
-	progress, err := r.progressIssueScanLifecycle()
+	progress, err := r.progressIssueScanLifecycleInlineContext(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-task issue-scan lifecycle progress failed closed: %v\n", err)
 	}
@@ -1232,7 +1237,7 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 		return
 	default:
 	}
-	progress, err := r.progressIssueScanLifecycle()
+	progress, err := r.progressIssueScanLifecycleInlineContext(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-completion issue-scan lifecycle progress failed closed for task %s: %v\n", task.ID.Value(), err)
 	}
@@ -1274,7 +1279,7 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 		return
 	default:
 	}
-	progress, err := r.progressIssueScanLifecycle()
+	progress, err := r.progressIssueScanLifecycleInlineContext(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-review issue-scan lifecycle progress failed closed for task %s verdict %s: %v\n", taskID, verdict, err)
 	}

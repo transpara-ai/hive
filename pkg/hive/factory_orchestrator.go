@@ -55,6 +55,8 @@ type TransparaAIDraftPRReceipt struct {
 	PolicyBundleID         string   `json:"policy_bundle_id"`
 	PolicyBundleHash       string   `json:"policy_bundle_hash"`
 	AuthorityNonce         string   `json:"authority_nonce"`
+	AuthorityRequestID     string   `json:"authority_request_id,omitempty"`
+	AuthorityDecisionRef   string   `json:"authority_decision_ref,omitempty"`
 	HumanApprovalRequired  bool     `json:"human_approval_required"`
 	NoMergeOrDeployClaim   bool     `json:"no_merge_or_deploy_claim"`
 	ReadyForReviewRequired bool     `json:"ready_for_review_required"`

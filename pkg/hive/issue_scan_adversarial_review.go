@@ -632,12 +632,12 @@ func (r *Runtime) findIssueScanAdversarialReviewReceiptArtifactID(taskID types.E
 }
 
 func (r *Runtime) findIssueScanCodeReviewEventForReceipt(taskID, receiptArtifactID types.EventID) (types.EventID, bool, error) {
-	page, err := r.store.ByType(event.EventTypeCodeReviewSubmitted, 1000, types.None[types.Cursor]())
+	events, err := eventsByTypePaginated(r.store, event.EventTypeCodeReviewSubmitted, defaultOperatorProjectionLimit)
 	if err != nil {
 		return types.EventID{}, false, fmt.Errorf("code.review.submitted: %w", err)
 	}
 	var latest types.EventID
-	for _, ev := range page.Items() {
+	for _, ev := range events {
 		content, ok := ev.Content().(event.CodeReviewContent)
 		if !ok || strings.TrimSpace(content.TaskID) != taskID.Value() {
 			continue

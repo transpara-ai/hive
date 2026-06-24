@@ -59,7 +59,7 @@ func cmdFactoryRunIssueScanReview(args []string) error {
 		return fmt.Errorf("record issue-scan adversarial review: %w", err)
 	}
 	fmt.Printf("issue-scan adversarial review runner recorded verdict %s for head %s with receipt %s and review event %s (FactoryOrder %s)\n", result.Verdict, result.ReviewedHeadSHA, result.ReceiptArtifactID, result.ReviewEventID, result.FactoryOrderID)
-	progress, err := rt.ProgressIssueScanRunLifecycle(*runID)
+	progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, *runID)
 	if err != nil {
 		return fmt.Errorf("progress issue-scan lifecycle after review runner: %w", err)
 	}

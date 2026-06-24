@@ -216,12 +216,12 @@ func (r *Runtime) issueScanBlockerStageEvidence(implementationTaskID, reviewStag
 }
 
 func (r *Runtime) latestIssueScanReopenForTaskAfter(taskID types.EventID, at time.Time) (issueScanReopenEvidence, bool, error) {
-	page, err := r.store.ByType(work.EventTypeTaskReopened, 1000, types.None[types.Cursor]())
+	events, err := eventsByTypePaginated(r.store, work.EventTypeTaskReopened, defaultOperatorProjectionLimit)
 	if err != nil {
 		return issueScanReopenEvidence{}, false, fmt.Errorf("work.task.reopened: %w", err)
 	}
 	var reopens []issueScanReopenEvidence
-	for _, ev := range page.Items() {
+	for _, ev := range events {
 		content, ok := ev.Content().(work.TaskReopenedContent)
 		if !ok || content.TaskID != taskID {
 			continue

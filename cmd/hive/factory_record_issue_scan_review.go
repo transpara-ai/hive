@@ -54,7 +54,7 @@ func cmdFactoryRecordIssueScanReview(args []string) error {
 		state = "already recorded"
 	}
 	fmt.Printf("issue-scan adversarial review for run %s: %s verdict %s for head %s with receipt %s and review event %s (FactoryOrder %s)\n", result.RunID, state, result.Verdict, result.ReviewedHeadSHA, result.ReceiptArtifactID, result.ReviewEventID, result.FactoryOrderID)
-	progress, err := rt.ProgressIssueScanRunLifecycle(*runID)
+	progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, *runID)
 	if err != nil {
 		return fmt.Errorf("progress issue-scan lifecycle after review receipt: %w", err)
 	}

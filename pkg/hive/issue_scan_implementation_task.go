@@ -496,23 +496,23 @@ func (r *Runtime) issueScanImplementationCompletionEvidence(taskID, implementati
 }
 
 func (r *Runtime) liveIssueScanImplementationCompletion(taskID types.EventID) (types.EventID, work.TaskCompletedContent, time.Time, bool, error) {
-	completedPage, err := r.store.ByType(work.EventTypeTaskCompleted, 1000, types.None[types.Cursor]())
+	completedEvents, err := eventsByTypePaginated(r.store, work.EventTypeTaskCompleted, defaultOperatorProjectionLimit)
 	if err != nil {
 		return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, fmt.Errorf("work.task.completed: %w", err)
 	}
-	reopenedPage, err := r.store.ByType(work.EventTypeTaskReopened, 1000, types.None[types.Cursor]())
+	reopenedEvents, err := eventsByTypePaginated(r.store, work.EventTypeTaskReopened, defaultOperatorProjectionLimit)
 	if err != nil {
 		return types.EventID{}, work.TaskCompletedContent{}, time.Time{}, false, fmt.Errorf("work.task.reopened: %w", err)
 	}
 	superseded := map[types.EventID]bool{}
-	for _, ev := range reopenedPage.Items() {
+	for _, ev := range reopenedEvents {
 		if c, ok := ev.Content().(work.TaskReopenedContent); ok {
 			for _, ref := range c.CompletionRefs {
 				superseded[ref] = true
 			}
 		}
 	}
-	for _, ev := range completedPage.Items() {
+	for _, ev := range completedEvents {
 		c, ok := ev.Content().(work.TaskCompletedContent)
 		if !ok || superseded[ev.ID()] || c.TaskID != taskID {
 			continue

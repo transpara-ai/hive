@@ -3,6 +3,7 @@ package hive
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
+	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/work"
 )
 
@@ -743,7 +745,7 @@ func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testin
 	}
 }
 
-func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t *testing.T) {
+func TestProgressIssueScanLifecycleCreatesStageContractsWithoutFabricatingRoleOutputs(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
 		OperatorID: IssueScanOperatorID("Michael Saucier"),
@@ -770,35 +772,23 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if progress.Dispatch.Dispatched != 1 {
 		t.Fatalf("dispatch = %+v, want one dispatched issue-scan run", progress.Dispatch)
 	}
-	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 2 {
-		t.Fatalf("research role outputs = %+v, want strategist and planner recorded", progress.ResearchRoleOutputs)
+	if released := countReleasedIssueScanStageAdvances(progress.Advances); released != 1 {
+		t.Fatalf("advances = %+v, want exactly one released first stage", progress.Advances)
 	}
-	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 4 {
-		t.Fatalf("debate role outputs = %+v, want strategist/planner/reviewer/guardian recorded", progress.DebateRoleOutputs)
+	if countRecordedIssueScanRoleOutputs(progress.ResearchRoleOutputs) != 0 {
+		t.Fatalf("research role outputs = %+v, want none fabricated by runtime", progress.ResearchRoleOutputs)
 	}
-	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 3 {
-		t.Fatalf("design role outputs = %+v, want planner/reviewer/guardian recorded", progress.DesignRoleOutputs)
+	if countRecordedIssueScanRoleOutputs(progress.DebateRoleOutputs) != 0 {
+		t.Fatalf("debate role outputs = %+v, want none fabricated by runtime", progress.DebateRoleOutputs)
 	}
-	researchCompletion := issueScanCompletionByStageForTest(progress.Completions, "research_issue_and_repo_context")
-	if researchCompletion == nil || !researchCompletion.Completed {
-		t.Fatalf("completions = %+v, want completed research stage", progress.Completions)
+	if countRecordedIssueScanRoleOutputs(progress.DesignRoleOutputs) != 0 {
+		t.Fatalf("design role outputs = %+v, want none fabricated by runtime", progress.DesignRoleOutputs)
 	}
-	if researchCompletion.NextAdvance == nil || researchCompletion.NextAdvance.StageID != "debate_with_correct_civic_roles" || !researchCompletion.NextAdvance.Released {
-		t.Fatalf("research next advance = %+v, want debate stage released", researchCompletion.NextAdvance)
+	if len(progress.Completions) != 0 {
+		t.Fatalf("completions = %+v, want no stage completion without recorded role outputs", progress.Completions)
 	}
-	debateCompletion := issueScanCompletionByStageForTest(progress.Completions, "debate_with_correct_civic_roles")
-	if debateCompletion == nil || !debateCompletion.Completed {
-		t.Fatalf("completions = %+v, want completed debate stage", progress.Completions)
-	}
-	designCompletion := issueScanCompletionByStageForTest(progress.Completions, "select_and_design_approach")
-	if designCompletion == nil || !designCompletion.Completed {
-		t.Fatalf("completions = %+v, want completed design stage", progress.Completions)
-	}
-	if designCompletion.NextAdvance == nil || designCompletion.NextAdvance.StageID != "implement_on_branch" || !designCompletion.NextAdvance.Released {
-		t.Fatalf("design next advance = %+v, want implementation stage released", designCompletion.NextAdvance)
-	}
-	if len(progress.ImplementationTasks) != 1 || !progress.ImplementationTasks[0].Created {
-		t.Fatalf("implementation task progress = %+v, want one created task", progress.ImplementationTasks)
+	if len(progress.ImplementationTasks) != 0 {
+		t.Fatalf("implementation task progress = %+v, want no implementation task before design evidence", progress.ImplementationTasks)
 	}
 
 	orderID, err := factoryOrderIDForRunLaunch(queued.RunID)
@@ -817,27 +807,31 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if err != nil {
 		t.Fatalf("issueScanStageTaskCompleted research: %v", err)
 	}
-	if !researchCompleted {
-		t.Fatalf("research stage task was not completed")
+	if researchCompleted {
+		t.Fatalf("research stage task completed without role-output artifacts")
+	}
+	researchBlocked, err := rt.tasks.IsBlocked(researchTask.ID)
+	if err != nil {
+		t.Fatalf("IsBlocked research: %v", err)
+	}
+	if researchBlocked {
+		t.Fatalf("research stage task remains blocked after first stage release")
 	}
 	artifacts, err := rt.tasks.ListArtifacts(researchTask.ID)
 	if err != nil {
 		t.Fatalf("ListArtifacts research: %v", err)
 	}
-	roleOutputs := issueScanRoleOutputArtifactsForTest(t, artifacts)
-	strategist := roleOutputs["strategist"]
-	planner := roleOutputs["planner"]
-	if strategist == nil || planner == nil {
-		t.Fatalf("research role outputs = %+v, want strategist and planner", roleOutputs)
+	if roleOutputs := issueScanRoleOutputArtifactsForTest(t, artifacts); len(roleOutputs) != 0 {
+		t.Fatalf("research role outputs = %+v, want none until agents record artifacts", roleOutputs)
 	}
-	if issueScanStageRuntimeEvidenceItemByKey(strategist.Outputs, "issue_snapshot") == nil || issueScanStageRuntimeEvidenceItemByKey(strategist.Outputs, "risk_and_scope_notes") == nil {
-		t.Fatalf("strategist outputs = %+v, want issue snapshot and risk/scope", strategist.Outputs)
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRoleContractArtifactLabel) == nil {
+		t.Fatalf("missing research role contract artifact: %+v", artifacts)
 	}
-	if issueScanStageRuntimeEvidenceItemByKey(planner.Outputs, "repo_context") == nil || issueScanStageRuntimeEvidenceItemByKey(planner.Outputs, "repo_context_packet") == nil {
-		t.Fatalf("planner outputs = %+v, want repo context", planner.Outputs)
+	if issueScanArtifactByLabel(artifacts, IssueScanStageOutputContractArtifactLabel) == nil {
+		t.Fatalf("missing research output contract artifact: %+v", artifacts)
 	}
-	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
-		t.Fatalf("missing research runtime evidence artifact: %+v", artifacts)
+	if issueScanArtifactByLabel(artifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("research runtime evidence was fabricated before role outputs: %+v", artifacts)
 	}
 	debateTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "debate_with_correct_civic_roles"))
 	if !ok {
@@ -847,12 +841,14 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if err != nil {
 		t.Fatalf("ListArtifacts debate: %v", err)
 	}
-	debateOutputs := issueScanRoleOutputArtifactsForTest(t, debateArtifacts)
-	if debateOutputs["strategist"] == nil || debateOutputs["planner"] == nil || debateOutputs["reviewer"] == nil || debateOutputs["guardian"] == nil {
-		t.Fatalf("debate role outputs = %+v, want all debate roles", debateOutputs)
+	if debateOutputs := issueScanRoleOutputArtifactsForTest(t, debateArtifacts); len(debateOutputs) != 0 {
+		t.Fatalf("debate role outputs = %+v, want none until civic roles record artifacts", debateOutputs)
 	}
-	if issueScanArtifactByLabel(debateArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
-		t.Fatalf("missing debate runtime evidence artifact: %+v", debateArtifacts)
+	if issueScanArtifactByLabel(debateArtifacts, IssueScanStageRoleContractArtifactLabel) == nil {
+		t.Fatalf("missing debate role contract artifact: %+v", debateArtifacts)
+	}
+	if issueScanArtifactByLabel(debateArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("debate runtime evidence was fabricated before role outputs: %+v", debateArtifacts)
 	}
 	designTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanLifecycleStageTaskCanonicalID(orderID, "select_and_design_approach"))
 	if !ok {
@@ -862,22 +858,14 @@ func TestProgressIssueScanLifecycleRecordsResearchRoleOutputsAndCompletesStage(t
 	if err != nil {
 		t.Fatalf("ListArtifacts design: %v", err)
 	}
-	designOutputs := issueScanRoleOutputArtifactsForTest(t, designArtifacts)
-	if designOutputs["planner"] == nil || designOutputs["reviewer"] == nil || designOutputs["guardian"] == nil {
-		t.Fatalf("design role outputs = %+v, want planner/reviewer/guardian", designOutputs)
+	if designOutputs := issueScanRoleOutputArtifactsForTest(t, designArtifacts); len(designOutputs) != 0 {
+		t.Fatalf("design role outputs = %+v, want none until civic roles record artifacts", designOutputs)
 	}
-	if issueScanStageRuntimeEvidenceItemByKey(designOutputs["planner"].Outputs, "implementation_task_plan") == nil {
-		t.Fatalf("planner design outputs = %+v, want implementation_task_plan", designOutputs["planner"].Outputs)
+	if issueScanArtifactByLabel(designArtifacts, IssueScanStageRoleContractArtifactLabel) == nil {
+		t.Fatalf("missing design role contract artifact: %+v", designArtifacts)
 	}
-	if issueScanArtifactByLabel(designArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) == nil {
-		t.Fatalf("missing design runtime evidence artifact: %+v", designArtifacts)
-	}
-	implementationTask, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID))
-	if !ok {
-		t.Fatalf("missing concrete implementation task in %+v", tasks)
-	}
-	if implementationTask.ID != progress.ImplementationTasks[0].ImplementationTaskID {
-		t.Fatalf("implementation task id = %s, progress id = %s", implementationTask.ID.Value(), progress.ImplementationTasks[0].ImplementationTaskID.Value())
+	if issueScanArtifactByLabel(designArtifacts, IssueScanStageRuntimeEvidenceArtifactLabel) != nil {
+		t.Fatalf("design runtime evidence was fabricated before role outputs: %+v", designArtifacts)
 	}
 
 	progress, err = rt.progressIssueScanLifecycle()
@@ -1986,6 +1974,31 @@ func TestProgressIssueScanLifecycleRunsConfiguredAdversarialReviewOnce(t *testin
 	}
 }
 
+func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testing.T) {
+	rt, _, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	reviewCalls := 0
+	readyPRCalls := 0
+	rt.issueScanAdversarialReviewRunner = func(ctx context.Context, reviewContext IssueScanAdversarialReviewContext) (IssueScanAdversarialReviewReceipt, error) {
+		reviewCalls++
+		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("post-event progress must not invoke configured review runner")
+	}
+	rt.issueScanReadyPRRunner = func(ctx context.Context, readyContext IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error) {
+		readyPRCalls++
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("post-event progress must not invoke configured ready PR runner")
+	}
+
+	rt.progressIssueScanLifecycleAfterTaskCommands(context.Background(), 1, 1)
+	rt.handleTaskCompletion(context.Background(), implementationTask, "implementation finished")
+	rt.progressIssueScanLifecycleAfterReview(context.Background(), implementationTask.ID.Value(), "approve")
+
+	if reviewCalls != 0 {
+		t.Fatalf("review runner calls = %d, want none from post-event progress", reviewCalls)
+	}
+	if readyPRCalls != 0 {
+		t.Fatalf("ready PR runner calls = %d, want none from post-event progress", readyPRCalls)
+	}
+}
+
 func TestProgressIssueScanLifecycleRerunsConfiguredReviewAfterRepair(t *testing.T) {
 	rt, writer, _, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	calls := 0
@@ -2321,7 +2334,7 @@ func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *t
 }
 
 func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
-	rt, _, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := IssueScanReadyPREvidence{
 		RunID:                  runID,
 		FactoryOrderID:         orderID,
@@ -2363,6 +2376,7 @@ func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
 		NoMergeOrDeployClaim:   true,
 		ReadyForReviewRequired: true,
 	}
+	seedApprovedDraftPRAuthorityDecisionForReadyTest(t, rt, writer, receipt)
 
 	draftResult, err := rt.RecordIssueScanDraftPRReceipt(runID, receipt)
 	if err != nil {
@@ -2399,7 +2413,27 @@ func TestRecordIssueScanReadyPREvidenceCompletesReadyStage(t *testing.T) {
 }
 
 func TestProgressIssueScanLifecycleRunsConfiguredReadyPRRunner(t *testing.T) {
-	rt, _, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	seedApprovedDraftPRAuthorityDecisionForReadyTest(t, rt, writer, TransparaAIDraftPRReceipt{
+		Kind:                   transparaAIDraftPRReceiptKind,
+		Repository:             "transpara-ai/hive",
+		PRNumber:               321,
+		PRURL:                  "https://github.com/transpara-ai/hive/pull/321",
+		BaseRef:                "main",
+		BaseSHA:                "dddddddddddddddddddddddddddddddddddddddd",
+		HeadRef:                "codex/run-issue-001-repair",
+		HeadSHA:                "cccccccccccccccccccccccccccccccccccccccc",
+		RemoteHeadSHA:          "cccccccccccccccccccccccccccccccccccccccc",
+		ChangedFiles:           []string{"README.md"},
+		Draft:                  true,
+		State:                  "open",
+		PolicyBundleID:         TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash:       TransparaAIDraftPRPolicyBundleHash(),
+		AuthorityNonce:         "nonce-ready-pr-test",
+		HumanApprovalRequired:  true,
+		NoMergeOrDeployClaim:   true,
+		ReadyForReviewRequired: true,
+	})
 	calls := 0
 	rt.issueScanReadyPRRunner = func(ctx context.Context, readyContext IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error) {
 		calls++
@@ -2762,11 +2796,92 @@ func attachIssueScanDraftPRReceiptForReadyTestWith(t *testing.T, rt *Runtime, wr
 	if mutate != nil {
 		mutate(&receipt)
 	}
+	requestID, decisionID := seedApprovedDraftPRAuthorityDecisionForReadyTest(t, rt, writer, receipt)
+	receipt.AuthorityRequestID = requestID.Value()
+	receipt.AuthorityDecisionRef = decisionID.Value()
 	body, err := transparaAIDraftPRReceiptBody(receipt)
 	if err != nil {
 		return err
 	}
 	return rt.tasks.AddArtifact(writer.human, stageTaskID, TransparaAIDraftPRReceiptArtifactLabel, "application/json", body, []types.EventID{stageTaskID}, writer.conv)
+}
+
+func seedApprovedDraftPRAuthorityDecisionForReadyTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, receipt TransparaAIDraftPRReceipt) (types.EventID, types.EventID) {
+	t.Helper()
+	target := DraftPRTarget{
+		Repository:       strings.ToLower(strings.TrimSpace(receipt.Repository)),
+		BaseRef:          strings.TrimSpace(receipt.BaseRef),
+		BaseSHA:          strings.TrimSpace(receipt.BaseSHA),
+		HeadRef:          strings.TrimSpace(receipt.HeadRef),
+		HeadSHA:          strings.TrimSpace(receipt.HeadSHA),
+		TitleHash:        sha256HexPrefixed([]byte("issue-scan ready PR test title")),
+		BodyHash:         sha256HexPrefixed([]byte("issue-scan ready PR test body")),
+		PolicyBundleID:   strings.TrimSpace(receipt.PolicyBundleID),
+		PolicyBundleHash: strings.TrimSpace(receipt.PolicyBundleHash),
+		SingleUseNonce:   strings.TrimSpace(receipt.AuthorityNonce),
+	}
+	head, err := rt.store.Head()
+	if err != nil {
+		t.Fatalf("store head: %v", err)
+	}
+	if head.IsNone() {
+		t.Fatalf("store has no head event")
+	}
+	causes := []types.EventID{head.Unwrap().ID()}
+	requestContent := event.AuthorityRequestContent{
+		Action:        string(safety.ActionRepoPullRequestCreate),
+		Actor:         writer.human,
+		Level:         event.AuthorityLevelRequired,
+		Justification: "issue-scan ready PR test authority",
+		Causes:        types.MustNonEmpty(causes),
+	}
+	requestEvent, err := writer.factory.Create(event.EventTypeAuthorityRequested, writer.human, requestContent, causes, writer.conv, rt.store, writer.signer)
+	if err != nil {
+		t.Fatalf("create authority request: %v", err)
+	}
+	storedRequest, err := rt.store.Append(requestEvent)
+	if err != nil {
+		t.Fatalf("append authority request: %v", err)
+	}
+	requestID := storedRequest.ID()
+	requestDetail := AuthorityRequestRecordedContent{
+		RequestID:         requestID,
+		RequestingActor:   writer.human,
+		RequestingRole:    "guardian",
+		ActionName:        string(safety.ActionRepoPullRequestCreate),
+		Target:            target.Repository + " " + target.HeadRef,
+		Environment:       string(AgentIdentityEnvironmentProduction),
+		RiskClass:         "high",
+		RequestedOutcome:  "create draft PR",
+		Justification:     "issue-scan ready PR test authority",
+		RiskSummary:       "creates one reversible draft PR; no branch push, merge, or deploy",
+		Scope:             target.Scope(),
+		ProposedOperation: "createDraftPR",
+		CausalEventIDs:    causes,
+	}
+	detailEvent, err := writer.factory.Create(EventTypeAuthorityRequestRecorded, writer.human, requestDetail, []types.EventID{requestID}, writer.conv, rt.store, writer.signer)
+	if err != nil {
+		t.Fatalf("create authority request detail: %v", err)
+	}
+	if _, err := rt.store.Append(detailEvent); err != nil {
+		t.Fatalf("append authority request detail: %v", err)
+	}
+	content := AuthorityDecisionRecordedContent{
+		DecisionID:     requestID.Value(),
+		RequestID:      requestID,
+		ApproverActor:  writer.human,
+		DeciderRole:    "human",
+		Outcome:        draftPRApprovedOutcome,
+		ApprovedTarget: target.Repository + " " + target.HeadRef,
+		ApprovedAction: string(safety.ActionRepoPullRequestCreate),
+		Scope:          target.Scope(),
+		Rationale:      "approved issue-scan ready PR test target",
+	}
+	decisionID, err := appendAuthorityDecisionRecorded(rt.store, writer.factory, writer.signer, writer.human, writer.conv, requestID, content)
+	if err != nil {
+		t.Fatalf("append authority decision: %v", err)
+	}
+	return requestID, decisionID
 }
 
 func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testing.T) {

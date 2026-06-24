@@ -63,7 +63,7 @@ func cmdFactoryRunIssueScanReadyPR(args []string) error {
 		return fmt.Errorf("record issue-scan ready PR evidence from ready PR runner: %w", err)
 	}
 	fmt.Printf("issue-scan ready PR runner recorded pr %s#%d at head %s with draft receipt %s and ready evidence %s (FactoryOrder %s)\n", readyResult.Repository, readyResult.PRNumber, readyResult.HeadSHA, draftResult.DraftPRReceiptArtifactID, readyResult.ReadyPREvidenceArtifactID, readyResult.FactoryOrderID)
-	progress, err := rt.ProgressIssueScanRunLifecycle(*runID)
+	progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, *runID)
 	if err != nil {
 		return fmt.Errorf("progress issue-scan lifecycle after ready PR runner: %w", err)
 	}
