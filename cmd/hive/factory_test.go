@@ -61,6 +61,13 @@ func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
 	}
 }
 
+func TestFactoryRunIssueScanStageRoleOutputRequiresHumanBeforeRunner(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "run-issue-scan-stage-role-output", "--run", "run_issue_001", "--runner", "/nonexistent"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
 func TestFactoryRecordIssueScanDraftPRRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-draft-pr", "--run", "run_issue_001", "--receipt-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
@@ -86,6 +93,13 @@ func TestFactoryDaemonRequiresReviewRunnerBeforeRunnerArg(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-review-runner-arg=--json"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-runner") {
 		t.Fatalf("expected missing review runner error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequiresStageRoleRunnerBeforeRunnerArg(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-stage-role-runner-arg=--json"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-stage-role-runner") {
+		t.Fatalf("expected missing stage role runner error, got %v", err)
 	}
 }
 
@@ -121,6 +135,54 @@ func TestFactoryDaemonIssueScanIntervalRequiresPositiveMaxNewRuns(t *testing.T) 
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-max-new-runs", "0"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-max-new-runs") {
 		t.Fatalf("expected max-new-runs guard error, got %v", err)
+	}
+}
+
+func TestRunIssueScanStageRoleOutputRunnerPassesContextAndParsesResult(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "context.json")
+	runner := filepath.Join(dir, "runner.sh")
+	script := `#!/bin/sh
+cat > "$1"
+printf '%s\n' '{"role_outputs":[{"role":"strategist","summary":"selected issue is high priority","evidence_refs":["artifact://stage-role/strategist"],"outputs":[{"key":"issue_priority_rationale","summary":"issue is in scope","evidence_refs":["artifact://stage-role/strategist/priority"]},{"key":"risk_and_scope_notes","summary":"bounded to planning","evidence_refs":["artifact://stage-role/strategist/scope"]}]}]}'
+`
+	if err := os.WriteFile(runner, []byte(script), 0o700); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	runnerContext := hive.IssueScanStageRoleOutputRunnerContext{
+		Kind:             "issue_scan_stage_role_output_runner_context",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.4",
+		RunID:            "run_issue_001",
+		FactoryOrderID:   "fo_run_issue_001",
+		Repository:       "transpara-ai/hive",
+		StageID:          "research_issue_and_repo_context",
+		StageTaskID:      "01911111-1111-7111-8111-111111111111",
+	}
+
+	result, err := runIssueScanStageRoleOutputRunner(context.Background(), runner, []string{contextPath}, runnerContext, time.Second)
+	if err != nil {
+		t.Fatalf("runIssueScanStageRoleOutputRunner: %v", err)
+	}
+	if len(result.RoleOutputs) != 1 || result.RoleOutputs[0].Role != "strategist" || len(result.RoleOutputs[0].Outputs) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	raw, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read runner context: %v", err)
+	}
+	var sent hive.IssueScanStageRoleOutputRunnerContext
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("decode runner context: %v", err)
+	}
+	if sent.RunID != runnerContext.RunID || sent.StageID != runnerContext.StageID || sent.Repository != runnerContext.Repository {
+		t.Fatalf("sent context = %+v, want run/stage/repo from %+v", sent, runnerContext)
+	}
+}
+
+func TestRequireIssueScanStageRoleOutputRunnerOutputsRejectsEmpty(t *testing.T) {
+	err := requireIssueScanStageRoleOutputRunnerOutputs("research_issue_and_repo_context", nil)
+	if err == nil || !strings.Contains(err.Error(), "no role outputs") {
+		t.Fatalf("expected empty role-output guard error, got %v", err)
 	}
 }
 

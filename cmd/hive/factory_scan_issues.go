@@ -141,6 +141,9 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 	if existing := countExistingIssueScanImplementationTasksForCLI(progress.ImplementationTasks); existing > 0 {
 		fmt.Printf("issue-scan implementation task already exists: %d\n", existing)
 	}
+	if recorded := countRecordedIssueScanStageRoleOutputRunsForCLI(progress.StageRoleOutputRuns); recorded > 0 {
+		fmt.Printf("issue-scan planning role-output runner records: %d\n", recorded)
+	}
 	printIssueScanRoleOutputCount("implementation", progress.ImplementationRoleOutputs)
 	if recorded := countRecordedIssueScanAdversarialReviewRunsForCLI(progress.ReviewRuns); recorded > 0 {
 		fmt.Printf("issue-scan adversarial reviews recorded: %d\n", recorded)
@@ -157,15 +160,32 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 }
 
 func printIssueScanRoleOutputCount(stage string, outputs []hive.IssueScanStageRoleOutputResult) {
+	recorded := countRecordedIssueScanRoleOutputsForCLI(outputs)
+	if recorded > 0 {
+		fmt.Printf("issue-scan %s role outputs recorded: %d\n", stage, recorded)
+	}
+}
+
+func countRecordedIssueScanRoleOutputsForCLI(outputs []hive.IssueScanStageRoleOutputResult) int {
 	recorded := 0
 	for _, output := range outputs {
 		if output.Recorded {
 			recorded++
 		}
 	}
-	if recorded > 0 {
-		fmt.Printf("issue-scan %s role outputs recorded: %d\n", stage, recorded)
+	return recorded
+}
+
+func countRecordedIssueScanStageRoleOutputRunsForCLI(runs []hive.IssueScanStageRoleOutputRunnerRecordResult) int {
+	count := 0
+	for _, run := range runs {
+		for _, output := range run.RoleOutputs {
+			if output.Recorded {
+				count++
+			}
+		}
 	}
+	return count
 }
 
 func countCreatedIssueScanImplementationTasksForCLI(tasks []hive.IssueScanImplementationTaskResult) int {
