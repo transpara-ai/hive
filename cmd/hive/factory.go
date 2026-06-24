@@ -426,16 +426,24 @@ func cmdFactoryRequestPR(args []string) error {
 	// BuildEpic11DocsDraftPROptions during `create-pr`; an exact-match here is
 	// not required (work's epic7Hash helper is unexported, so we reproduce its
 	// "sha256:"+hex(sha256(value)) format locally).
+	repoSlug := strings.ToLower(strings.TrimSpace(*repo))
+	policyBundleID := work.Epic11PolicyBundleID
+	policyBundleHash := work.Epic11DocsDraftPRPolicyBundleHash()
+	if repoSlug != "transpara-ai/docs" {
+		policyBundleID = hive.TransparaAIDraftPRPolicyBundleID
+		policyBundleHash = hive.TransparaAIDraftPRPolicyBundleHash()
+	}
+
 	target := hive.DraftPRTarget{
-		Repository:       *repo,
+		Repository:       repoSlug,
 		BaseRef:          *baseRef,
 		BaseSHA:          *baseSHA,
 		HeadRef:          *headRef,
 		HeadSHA:          *headSHA,
 		TitleHash:        sha256Hash(*title),
 		BodyHash:         sha256Hash(string(body)),
-		PolicyBundleID:   work.Epic11PolicyBundleID,
-		PolicyBundleHash: work.Epic11DocsDraftPRPolicyBundleHash(),
+		PolicyBundleID:   policyBundleID,
+		PolicyBundleHash: policyBundleHash,
 		SingleUseNonce:   *nonce,
 	}
 
@@ -532,9 +540,17 @@ func cmdFactoryCreatePR(args []string) error {
 	// fallback; an empty token will fail at the GitHub call, not here.
 	client := work.NewEpic11GitHubPullRequestCreator(os.Getenv("GITHUB_TOKEN"))
 
-	run, err := hive.CreateDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
+	if strings.EqualFold(strings.TrimSpace(target.Repository), "transpara-ai/docs") && strings.TrimSpace(target.PolicyBundleID) == work.Epic11PolicyBundleID {
+		run, err := hive.CreateDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
+		if err != nil {
+			return fmt.Errorf("create draft PR from approved decision %s: %w", *request, err)
+		}
+		fmt.Printf("created draft PR #%d for %s: %s\n", run.MutationResult.Number, run.MutationResult.Repository, run.MutationResult.URL)
+		return nil
+	}
+	run, err := hive.CreateTransparaAIDraftPRFromApprovedDecision(ctx, ts, fc.humanID, conv, client, art, causes...)
 	if err != nil {
-		return fmt.Errorf("create draft PR from approved decision %s: %w", *request, err)
+		return fmt.Errorf("create Transpara-AI draft PR from approved decision %s: %w", *request, err)
 	}
 	fmt.Printf("created draft PR #%d for %s: %s\n", run.MutationResult.Number, run.MutationResult.Repository, run.MutationResult.URL)
 	return nil

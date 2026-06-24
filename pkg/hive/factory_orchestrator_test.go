@@ -2,6 +2,8 @@ package hive
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,14 +13,38 @@ import (
 	"github.com/transpara-ai/work"
 )
 
-type fakePRClient struct{ calls int }
+type fakePRClient struct {
+	calls          int
+	preflightHead  string
+	preflightFiles []string
+	resultRepo     string
+	resultURL      string
+	resultDraft    *bool
+	resultState    string
+}
 
 func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11DraftPullRequestMutation) (work.Epic11DraftPullRequestResult, error) {
 	f.calls++
+	repo := m.Repository
+	if f.resultRepo != "" {
+		repo = f.resultRepo
+	}
+	url := "https://github.com/" + repo + "/pull/111"
+	if f.resultURL != "" {
+		url = f.resultURL
+	}
+	draft := true
+	if f.resultDraft != nil {
+		draft = *f.resultDraft
+	}
+	state := "open"
+	if f.resultState != "" {
+		state = f.resultState
+	}
 	return work.Epic11DraftPullRequestResult{
-		Repository: m.Repository, Number: 111, URL: "https://github.com/transpara-ai/docs/pull/111",
+		Repository: repo, Number: 111, URL: url,
 		GitHubResponseIDOrEquivalent: "node111", BaseRef: m.BaseRef, BaseSHA: m.BaseSHA,
-		HeadRef: m.HeadRef, HeadSHA: m.HeadSHA, Draft: true, State: "open",
+		HeadRef: m.HeadRef, HeadSHA: m.HeadSHA, Draft: draft, State: state,
 		CreatedAt: time.Now().UTC(),
 	}, nil
 }
@@ -28,7 +54,15 @@ func (f *fakePRClient) CreateDraftPullRequest(_ context.Context, m work.Epic11Dr
 // epic11ValidateRemoteHead passes. It is not a mutation, so it does not count
 // toward calls.
 func (f *fakePRClient) PreflightHead(_ context.Context, m work.Epic11DraftPullRequestMutation) (work.Epic11RemoteHeadState, error) {
-	return work.Epic11RemoteHeadState{HeadSHA: m.HeadSHA, ChangedFiles: []string{"dark-factory/civic-roles.md"}}, nil
+	head := m.HeadSHA
+	if f.preflightHead != "" {
+		head = f.preflightHead
+	}
+	files := f.preflightFiles
+	if len(files) == 0 {
+		files = []string{"dark-factory/civic-roles.md"}
+	}
+	return work.Epic11RemoteHeadState{HeadSHA: head, ChangedFiles: files}, nil
 }
 
 // newWorkTaskStore constructs a *work.TaskStore backed by an in-memory store
@@ -81,5 +115,92 @@ func TestCreateDraftPRFromApprovedDecision(t *testing.T) {
 	}
 	if client.calls != 1 || run.MutationResult.Number != 111 {
 		t.Fatalf("unexpected: calls=%d result=%+v", client.calls, run.MutationResult)
+	}
+}
+
+func TestCreateTransparaAIDraftPRFromApprovedDecision(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	client := &fakePRClient{preflightFiles: []string{"src/App.tsx", "package.json"}}
+	title := "[codex] Display Civilization runtime evidence"
+	body := "## Summary\nDisplay runtime evidence for Transpara-AI operators.\n"
+	target := DraftPRTarget{
+		Repository:       "transpara-ai/site",
+		BaseRef:          "main",
+		BaseSHA:          "basesha",
+		HeadRef:          "codex/site-civilization-runtime",
+		HeadSHA:          "headsha",
+		TitleHash:        sha256HexPrefixed([]byte(title)),
+		BodyHash:         sha256HexPrefixed([]byte(body)),
+		PolicyBundleID:   TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash: TransparaAIDraftPRPolicyBundleHash(),
+		SingleUseNonce:   "nonce-site",
+	}
+
+	run, err := CreateTransparaAIDraftPRFromApprovedDecision(context.Background(), ts, source, conv, client, DraftPRArtifact{
+		Target:         target,
+		Title:          title,
+		Body:           body,
+		ChangedFiles:   []string{"package.json", "src/App.tsx"},
+		ActorRole:      "implementer",
+		DeciderActorID: "act_human",
+		DeciderRole:    "human",
+	}, cause)
+	if err != nil {
+		t.Fatalf("CreateTransparaAIDraftPRFromApprovedDecision: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("client calls = %d, want 1", client.calls)
+	}
+	if run.MutationResult.Repository != "transpara-ai/site" || run.MutationResult.URL != "https://github.com/transpara-ai/site/pull/111" {
+		t.Fatalf("mutation result = %+v", run.MutationResult)
+	}
+	artifacts, err := ts.ListArtifacts(run.WorkTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Label != TransparaAIDraftPRReceiptArtifactLabel {
+		t.Fatalf("artifacts = %+v, want one draft PR receipt", artifacts)
+	}
+	var receipt TransparaAIDraftPRReceipt
+	if err := json.Unmarshal([]byte(artifacts[0].Body), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v", err)
+	}
+	if receipt.Repository != "transpara-ai/site" || receipt.PRURL != "https://github.com/transpara-ai/site/pull/111" || !receipt.HumanApprovalRequired || !receipt.NoMergeOrDeployClaim || !receipt.ReadyForReviewRequired {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	if strings.Join(receipt.ChangedFiles, ",") != "package.json,src/App.tsx" {
+		t.Fatalf("changed files = %+v, want sorted package/src files", receipt.ChangedFiles)
+	}
+}
+
+func TestCreateTransparaAIDraftPRRejectsUnsafeRemoteChangedFile(t *testing.T) {
+	ts, source, conv, cause := newWorkTaskStore(t)
+	client := &fakePRClient{preflightFiles: []string{"../secrets.env"}}
+	title := "[codex] Display Civilization runtime evidence"
+	body := "## Summary\nDisplay runtime evidence.\n"
+	target := DraftPRTarget{
+		Repository:       "transpara-ai/site",
+		BaseRef:          "main",
+		BaseSHA:          "basesha",
+		HeadRef:          "codex/site-civilization-runtime",
+		HeadSHA:          "headsha",
+		TitleHash:        sha256HexPrefixed([]byte(title)),
+		BodyHash:         sha256HexPrefixed([]byte(body)),
+		PolicyBundleID:   TransparaAIDraftPRPolicyBundleID,
+		PolicyBundleHash: TransparaAIDraftPRPolicyBundleHash(),
+		SingleUseNonce:   "nonce-site",
+	}
+
+	_, err := CreateTransparaAIDraftPRFromApprovedDecision(context.Background(), ts, source, conv, client, DraftPRArtifact{
+		Target:       target,
+		Title:        title,
+		Body:         body,
+		ChangedFiles: []string{"../secrets.env"},
+	}, cause)
+	if err == nil || !strings.Contains(err.Error(), "escapes repository root") {
+		t.Fatalf("error = %v, want repository-root refusal", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("client create calls = %d, want 0 before refused mutation", client.calls)
 	}
 }
