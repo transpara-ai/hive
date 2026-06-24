@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/transpara-ai/work"
@@ -27,6 +28,10 @@ func cmdFactoryCreateIssueScanDraftPR(args []string) error {
 	}); err != nil {
 		return err
 	}
+	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	if token == "" {
+		return fmt.Errorf("GITHUB_TOKEN is required to create the approved issue-scan draft PR")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -37,7 +42,7 @@ func cmdFactoryCreateIssueScanDraftPR(args []string) error {
 	}
 	defer fc.close()
 
-	client := work.NewEpic11GitHubPullRequestCreator(os.Getenv("GITHUB_TOKEN"))
+	client := work.NewEpic11GitHubPullRequestCreator(token)
 	result, err := rt.CreateIssueScanDraftPRFromApprovedRequest(ctx, *runID, *requestID, client)
 	if err != nil {
 		return fmt.Errorf("create issue-scan draft PR from approved request: %w", err)
@@ -45,9 +50,10 @@ func cmdFactoryCreateIssueScanDraftPR(args []string) error {
 	fmt.Printf("created issue-scan draft PR %s#%d at head %s with receipt %s (FactoryOrder %s)\n", result.Repository, result.PRNumber, result.HeadSHA, result.DraftPRReceipt.DraftPRReceiptArtifactID, result.FactoryOrderID)
 	progress, err := rt.ProgressIssueScanRunLifecycleContext(ctx, *runID)
 	if err != nil {
-		return fmt.Errorf("progress issue-scan lifecycle after draft PR creation: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: progress issue-scan lifecycle after draft PR creation failed: %v\n", err)
+	} else {
+		printIssueScanLifecycleProgress(progress)
 	}
-	printIssueScanLifecycleProgress(progress)
 	fmt.Println("boundary: this creates and records a draft PR receipt only; ready-for-review, ready-state review, Human approval, merge, and deploy remain separate governed steps")
 	return nil
 }
