@@ -13,7 +13,7 @@ import (
 
 const (
 	IssueScanParkBlockerStaleTarget     = "stale_target"
-	IssueScanParkBlockerHumanScope      = "human_scope"
+	IssueScanParkBlockerHumanScope      = "needs_human_scope"
 	IssueScanParkBlockerProtectedAction = "protected_action"
 	IssueScanParkBlockerDuplicateChain  = "duplicate_chain"
 )
