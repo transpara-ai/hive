@@ -321,6 +321,9 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	if !slices.Contains(doc.OperatorNotes, "Named configured progress resolves every supplied external runner executable before opening the runtime or invoking runners.") {
 		t.Fatalf("operator notes missing named progress executable preflight: %+v", doc.OperatorNotes)
 	}
+	if !slices.Contains(doc.OperatorNotes, "Standalone run-issue-scan-* commands resolve --runner before opening the runtime or building runner context.") {
+		t.Fatalf("operator notes missing standalone runner executable preflight: %+v", doc.OperatorNotes)
+	}
 }
 
 func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
@@ -715,6 +718,43 @@ func TestFactoryRunIssueScanReadyPRRequiresHumanBeforeRunner(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "run-issue-scan-ready-pr", "--run", "run_issue_001", "--runner", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
 		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryRunIssueScanStandaloneRunnersRejectMissingExecutableBeforeRuntime(t *testing.T) {
+	tests := []struct {
+		name       string
+		subcommand string
+	}{
+		{name: "stage role output", subcommand: "run-issue-scan-stage-role-output"},
+		{name: "implementation", subcommand: "run-issue-scan-implementation"},
+		{name: "review", subcommand: "run-issue-scan-review"},
+		{name: "blocker repair", subcommand: "run-issue-scan-blocker-repair"},
+		{name: "ready PR", subcommand: "run-issue-scan-ready-pr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			missingRunner := filepath.Join(t.TempDir(), "missing-runner")
+			err := routeAndDispatch([]string{
+				"factory", tt.subcommand,
+				"--human", "Michael",
+				"--run", "run_issue_001",
+				"--runner", missingRunner,
+			})
+			if err == nil {
+				t.Fatal("expected missing runner executable error")
+			}
+			for _, want := range []string{"--runner", missingRunner} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("missing runner executable error missing %q: %v", want, err)
+				}
+			}
+			for _, notWant := range []string{"build issue-scan", "progress issue-scan lifecycle", "queued run"} {
+				if strings.Contains(err.Error(), notWant) {
+					t.Fatalf("runner executable preflight should run before runtime/context work; got %v", err)
+				}
+			}
+		})
 	}
 }
 

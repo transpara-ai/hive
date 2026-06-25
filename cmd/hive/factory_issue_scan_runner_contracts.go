@@ -399,6 +399,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			"Named configured progress resolves every supplied external runner executable before opening the runtime or invoking runners.",
 			"Use hive factory progress-issue-scan --run-configured-runners --run <id> for a bounded named-run rehearsal before daemonizing the same runner chain.",
 			"Use hive factory issue-scan-runner-contexts --run <id> to build/check which runner context is ready for a stored issue-scan run before invoking an external command; context building may dispatch/scaffold the queued run.",
+			"Standalone run-issue-scan-* commands resolve --runner before opening the runtime or building runner context.",
 			"Use the standalone run-issue-scan-* commands to debug a single runner against a stored run without bypassing runtime validation.",
 			"The full_chain_daemon_flags and named_progress_flags arrays show the managed ready-PR finalizer posture; terminal_stage_paths lists the mutually-exclusive generic ready-PR evidence runner alternative.",
 		},
