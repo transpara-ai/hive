@@ -310,6 +310,8 @@ func (r *Runtime) probeIssueScanReadyPRRunnerContext(runID string, includePayloa
 	probe.NotReadyReason = ""
 	probe.FactoryOrderID = readyContext.FactoryOrderID
 	probe.Repository = readyContext.Repository
+	// Ready-PR evidence is GitHub-side; IssueScanReadyPRRunnerContext does not
+	// carry a local repository path.
 	probe.StageID = issueScanReadyForHumanPRStageID
 	probe.StageTaskID = readyContext.ReadyStageTaskID
 	probe.TaskID = readyContext.ImplementationTaskID

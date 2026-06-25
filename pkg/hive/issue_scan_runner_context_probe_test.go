@@ -142,6 +142,33 @@ func TestProbeIssueScanRunnerContextsMaterializesOnlyScaffoldingAndIsIdempotent(
 	}
 }
 
+func TestProbeIssueScanRunnerContextsDoesNotRecordRunnerOutputsForDeepContexts(t *testing.T) {
+	rt, _, queued, _, _ := issueScanReadyImplementationTaskFixtureForTest(t)
+	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "implementation_runner", issueScanImplementationStageID)
+
+	rt, _, queued, _, _ = issueScanCompletedImplementationFixtureForTest(t)
+	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "adversarial_review_runner", issueScanAdversarialReviewStageID)
+
+	rt, writer, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
+	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "request_changes", "exact-head review found blockers", []string{"missing regression test"}); err != nil {
+		t.Fatalf("append request_changes review: %v", err)
+	}
+	if err := rt.tasks.Reopen(writer.human, implementationTask.ID, "request_changes (review 1 of 3): exact-head review found blockers", []string{"missing regression test"}, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("Reopen implementation task: %v", err)
+	}
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle after request_changes: %v", err)
+	}
+	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "blocker_repair_runner", issueScanBlockerRepairStageID)
+
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "ready_pr_evidence_runner", issueScanReadyForHumanPRStageID)
+}
+
 func TestProbeIssueScanRunnerContextsOmitsPayloadWhenNotRequested(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
@@ -180,7 +207,7 @@ func TestProbeIssueScanRunnerContextsMissingRunFails(t *testing.T) {
 	}
 }
 
-func TestProbeIssueScanRunnerContextsHonorsCanceledContext(t *testing.T) {
+func TestProbeIssueScanRunnerContextsHonorsCanceledContextBeforeBuilders(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
 		OperatorID: IssueScanOperatorID("Michael"),
@@ -267,6 +294,36 @@ func issueScanProbeTaskArtifactLabelCountForTest(t *testing.T, rt *Runtime, labe
 		}
 	}
 	return count
+}
+
+func assertIssueScanProbeReadyWithoutForbiddenOutputs(t *testing.T, rt *Runtime, runID, probeID, stageID string) {
+	t.Helper()
+	before := issueScanProbeStoreCountsForTest(t, rt)
+	doc, err := rt.ProbeIssueScanRunnerContexts(runID, false)
+	if err != nil {
+		t.Fatalf("ProbeIssueScanRunnerContexts(%s): %v", runID, err)
+	}
+	after := issueScanProbeStoreCountsForTest(t, rt)
+	assertIssueScanProbeForbiddenCountsUnchanged(t, before, after)
+	probe := requireIssueScanProbe(t, doc, probeID)
+	if !probe.Ready || probe.StageID != stageID {
+		t.Fatalf("probe %q = %+v, want ready stage %q", probeID, probe, stageID)
+	}
+	if len(probe.ContextPayload) != 0 {
+		t.Fatalf("probe %q emitted payload without includePayload: %s", probeID, string(probe.ContextPayload))
+	}
+}
+
+func assertIssueScanProbeForbiddenCountsUnchanged(t *testing.T, before, after issueScanProbeStoreCounts) {
+	t.Helper()
+	if after.RunnerOutputArtifacts != before.RunnerOutputArtifacts ||
+		after.Reviews != before.Reviews ||
+		after.AuthorityRequests != before.AuthorityRequests ||
+		after.AuthorityDecisions != before.AuthorityDecisions ||
+		after.DraftPRReceipts != before.DraftPRReceipts ||
+		after.ReadyPREvidence != before.ReadyPREvidence {
+		t.Fatalf("probe recorded forbidden outputs: before=%+v after=%+v", before, after)
+	}
 }
 
 func issueScanProbeContextTypeName(t *testing.T, typ reflect.Type) string {

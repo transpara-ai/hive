@@ -12,6 +12,8 @@ import (
 	"github.com/transpara-ai/hive/pkg/hive"
 )
 
+var openFactoryRuntimeForIssueScanRunnerContexts = openFactoryRuntime
+
 func cmdFactoryIssueScanRunnerContexts(args []string) error {
 	fs := flag.NewFlagSet("factory issue-scan-runner-contexts", flag.ContinueOnError)
 	human := fs.String("human", "", "Operator name (required)")
@@ -37,7 +39,7 @@ func cmdFactoryIssueScanRunnerContexts(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rt, fc, err := openFactoryRuntime(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
+	rt, fc, err := openFactoryRuntimeForIssueScanRunnerContexts(ctx, *storeDSN, *human, *repoPath, *repoWorkspaceRoot)
 	if err != nil {
 		return err
 	}
