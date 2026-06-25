@@ -152,6 +152,8 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 		"--issue-scan-implementation-runner",
 		"--issue-scan-review-runner",
 		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
 		"--issue-scan-ready-pr-mark-ready",
 		"--issue-scan-ready-pr-review-runner",
 	} {
@@ -189,6 +191,37 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 		}
 		if !slices.Contains(contract.StdoutRequiredFields, tt.required) {
 			t.Fatalf("%s required fields missing %q: %+v", tt.id, tt.required, contract.StdoutRequiredFields)
+		}
+	}
+	managedContracts := map[string]issueScanRunnerContract{}
+	for _, contract := range doc.ManagedBoundaryContracts {
+		managedContracts[contract.ID] = contract
+	}
+	for _, tt := range []struct {
+		id          string
+		contextKind string
+		stdoutType  string
+		required    string
+		command     string
+	}{
+		{"draft_pr_authority_requester", "issue_scan_draft_pr_authority_request_runner_context", "hive.IssueScanDraftPRAuthorityRequestRunnerResult", "base_sha", "hive factory request-issue-scan-pr"},
+		{"draft_pr_creation_runner", "issue_scan_draft_pr_creation_runner_context", "hive.IssueScanDraftPRCreationResult", "draft_pr_receipt", "hive factory create-issue-scan-draft-pr"},
+	} {
+		contract, ok := managedContracts[tt.id]
+		if !ok {
+			t.Fatalf("managed contract %q missing from %+v", tt.id, managedContracts)
+		}
+		if contract.StandaloneCommand != tt.command {
+			t.Fatalf("%s managed command = %q, want %q", tt.id, contract.StandaloneCommand, tt.command)
+		}
+		if contract.StdinContextKind != tt.contextKind {
+			t.Fatalf("%s managed context kind = %q, want %q", tt.id, contract.StdinContextKind, tt.contextKind)
+		}
+		if contract.StdoutContractType != tt.stdoutType {
+			t.Fatalf("%s managed stdout type = %q, want %q", tt.id, contract.StdoutContractType, tt.stdoutType)
+		}
+		if !slices.Contains(contract.StdoutRequiredFields, tt.required) {
+			t.Fatalf("%s managed required fields missing %q: %+v", tt.id, tt.required, contract.StdoutRequiredFields)
 		}
 	}
 	if doc.InternalFinalizerContract == nil || doc.InternalFinalizerContract.ID != "ready_pr_finalizer" {

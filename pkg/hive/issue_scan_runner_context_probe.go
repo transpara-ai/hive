@@ -100,6 +100,12 @@ func (r *Runtime) ProbeIssueScanRunnerContextsContext(ctx context.Context, runID
 		func() IssueScanRunnerContextProbe {
 			return r.probeIssueScanBlockerRepairRunnerContext(runID, includePayload)
 		},
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanDraftPRAuthorityRequestRunnerContext(runID, includePayload)
+		},
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanDraftPRCreationRunnerContext(runID, includePayload)
+		},
 		func() IssueScanRunnerContextProbe { return r.probeIssueScanReadyPRRunnerContext(runID, includePayload) },
 		issueScanReadyStateReviewContextProbe,
 	} {
@@ -286,6 +292,79 @@ func (r *Runtime) probeIssueScanBlockerRepairRunnerContext(runID string, include
 	probe.StageTaskID = runnerContext.BlockerStageTaskID
 	probe.TaskID = runnerContext.ImplementationTaskID
 	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, runnerContext, &probe)
+	return probe
+}
+
+func (r *Runtime) probeIssueScanDraftPRAuthorityRequestRunnerContext(runID string, includePayload bool) IssueScanRunnerContextProbe {
+	probe := IssueScanRunnerContextProbe{
+		ID:                "draft_pr_authority_requester",
+		Stage:             "draft_pr_authority_request",
+		StandaloneCommand: "hive factory progress-issue-scan --run-configured-runners --issue-scan-draft-pr-request",
+		ContextKind:       issueScanDraftPRAuthorityRequestRunnerContextKind,
+		ContextType:       "hive.IssueScanDraftPRAuthorityRequestRunnerContext",
+		NotReadyReason:    "zero-blocker evidence is not complete or a draft PR receipt already exists",
+	}
+	requestContext, ready, err := r.issueScanDraftPRAuthorityRequestRunnerContext(runID)
+	if err != nil {
+		return issueScanRunnerContextProbeWithError(probe, err)
+	}
+	if !ready {
+		return probe
+	}
+	if _, found, err := r.existingIssueScanDraftPRAuthorityRequestForRunnerContext(runID, requestContext); err != nil {
+		return issueScanRunnerContextProbeWithError(probe, err)
+	} else if found {
+		probe.FactoryOrderID = requestContext.FactoryOrderID
+		probe.Repository = requestContext.Repository
+		probe.RepoPath = requestContext.RepoPath
+		probe.StageID = issueScanReadyForHumanPRStageID
+		probe.StageTaskID = requestContext.ReadyStageTaskID
+		probe.TaskID = requestContext.ImplementationTaskID
+		if _, approved, err := r.approvedIssueScanDraftPRAuthorityRequestForRun(runID); err != nil {
+			return issueScanRunnerContextProbeWithError(probe, err)
+		} else if approved {
+			probe.NotReadyReason = "matching draft PR authority request is approved; draft PR creation is the next PR-boundary context"
+		} else {
+			probe.NotReadyReason = "matching draft PR authority request is already recorded; waiting for recorded Human approval before draft PR creation"
+		}
+		return probe
+	}
+	probe.Ready = true
+	probe.NotReadyReason = ""
+	probe.FactoryOrderID = requestContext.FactoryOrderID
+	probe.Repository = requestContext.Repository
+	probe.RepoPath = requestContext.RepoPath
+	probe.StageID = issueScanReadyForHumanPRStageID
+	probe.StageTaskID = requestContext.ReadyStageTaskID
+	probe.TaskID = requestContext.ImplementationTaskID
+	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, requestContext, &probe)
+	return probe
+}
+
+func (r *Runtime) probeIssueScanDraftPRCreationRunnerContext(runID string, includePayload bool) IssueScanRunnerContextProbe {
+	probe := IssueScanRunnerContextProbe{
+		ID:                "draft_pr_creation_runner",
+		Stage:             "draft_pr_creation",
+		StandaloneCommand: "hive factory progress-issue-scan --run-configured-runners --issue-scan-draft-pr-create",
+		ContextKind:       issueScanDraftPRCreationRunnerContextKind,
+		ContextType:       "hive.IssueScanDraftPRCreationRunnerContext",
+		NotReadyReason:    "no approved draft PR authority request is recorded for this run, or a draft PR receipt already exists",
+	}
+	creationContext, ready, err := r.issueScanDraftPRCreationRunnerContext(runID)
+	if err != nil {
+		return issueScanRunnerContextProbeWithError(probe, err)
+	}
+	if !ready {
+		return probe
+	}
+	probe.Ready = true
+	probe.NotReadyReason = ""
+	probe.FactoryOrderID = creationContext.FactoryOrderID
+	probe.Repository = creationContext.Repository
+	probe.StageID = issueScanReadyForHumanPRStageID
+	probe.StageTaskID = creationContext.ReadyStageTaskID
+	probe.TaskID = creationContext.ImplementationTaskID
+	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, creationContext, &probe)
 	return probe
 }
 
