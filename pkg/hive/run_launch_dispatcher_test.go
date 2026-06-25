@@ -555,6 +555,7 @@ func TestLogIssueScanLifecycleProgressReportsAllProgressCategories(t *testing.T)
 	output := log.String()
 	for _, want := range []string{
 		"Test issue-scan progress: seeded 1 queued FactoryOrder task(s)",
+		"Test issue-scan progress: parked 1 issue-scan run(s)",
 		"Test issue-scan progress: released 1 stage task(s)",
 		"Test issue-scan progress: completed 1 stage task(s)",
 		"Test issue-scan progress: recorded 1 planning role output(s)",
@@ -590,6 +591,9 @@ func TestLogIssueScanLifecycleProgressReportsAllProgressCategories(t *testing.T)
 func fullIssueScanLifecycleProgressForTest() IssueScanLifecycleProgress {
 	return IssueScanLifecycleProgress{
 		Dispatch: RunLaunchDispatchResult{Dispatched: 1},
+		ParkedRuns: []IssueScanRunParkResult{
+			{Parked: true},
+		},
 		Advances: []IssueScanStageAdvanceResult{
 			{Released: true},
 		},

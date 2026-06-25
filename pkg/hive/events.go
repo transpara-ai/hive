@@ -22,6 +22,7 @@ var (
 	EventTypeBriefDerived            = types.MustEventType("brief.derived")
 	EventTypeFactoryRunRequested     = types.MustEventType("factory.run.requested")
 	EventTypeFactoryArtifactCreated  = types.MustEventType("factory.artifact.created")
+	EventTypeIssueScanRunParked      = types.MustEventType("hive.issuescan.run.parked")
 	EventTypeModelRolePolicyUpdated  = types.MustEventType("hive.model.role.policy.updated")
 )
 
@@ -32,7 +33,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeProgress, EventTypeRoleDefinition,
 		EventTypeAgentIdentityRegistered,
 		EventTypeSourceIngested, EventTypeBriefDerived,
-		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated,
+		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated, EventTypeIssueScanRunParked,
 		EventTypeModelRolePolicyUpdated,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
@@ -208,6 +209,28 @@ type FactoryArtifactCreatedContent struct {
 
 func (c FactoryArtifactCreatedContent) EventTypeName() string { return "factory.artifact.created" }
 
+// IssueScanRunParkedContent records a fail-closed stop condition for one
+// autonomous issue-scan run. A parked run must not invoke external runners or
+// spawn/cycle executor agents until a later human action explicitly changes
+// the run state through a separate audited path.
+type IssueScanRunParkedContent struct {
+	hiveContent
+	RunID             string        `json:"run_id"`
+	FactoryOrderID    string        `json:"factory_order_id,omitempty"`
+	Repository        string        `json:"repository,omitempty"`
+	IssueNumber       int           `json:"issue_number,omitempty"`
+	StageID           string        `json:"stage_id,omitempty"`
+	BlockerType       string        `json:"blocker_type"`
+	Detail            string        `json:"detail,omitempty"`
+	RequiredAction    string        `json:"required_action"`
+	SourceRefs        []string      `json:"source_refs,omitempty"`
+	ParkedBy          types.ActorID `json:"parked_by"`
+	TargetIssueState  string        `json:"target_issue_state,omitempty"`
+	TargetIssueLabels []string      `json:"target_issue_labels,omitempty"`
+}
+
+func (c IssueScanRunParkedContent) EventTypeName() string { return "hive.issuescan.run.parked" }
+
 // ModelRolePolicyUpdatedContent records Hive-owned durable model policy for one
 // civic role. Site may request this write through Hive's ops API, but Hive
 // validates, resolves, records, and later projects the policy.
@@ -281,6 +304,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("brief.derived", event.Unmarshal[BriefDerivedContent])
 	event.RegisterContentUnmarshaler("factory.run.requested", event.Unmarshal[FactoryRunRequestedContent])
 	event.RegisterContentUnmarshaler("factory.artifact.created", event.Unmarshal[FactoryArtifactCreatedContent])
+	event.RegisterContentUnmarshaler("hive.issuescan.run.parked", event.Unmarshal[IssueScanRunParkedContent])
 	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])

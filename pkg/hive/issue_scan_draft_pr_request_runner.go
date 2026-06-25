@@ -179,6 +179,11 @@ func (r *Runtime) issueScanDraftPRAuthorityRequestRunnerContext(runID string) (I
 	if runID == "" {
 		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
+	} else if parked {
+		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, nil
+	}
 	content, orderID, _, readyStage, err := r.issueScanReadyStageTarget(runID)
 	if err != nil {
 		return IssueScanDraftPRAuthorityRequestRunnerContext{}, false, err
