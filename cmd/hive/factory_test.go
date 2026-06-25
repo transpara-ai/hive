@@ -18,6 +18,17 @@ import (
 	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
 )
 
+var testIssueScanOpenTargetStateResolverOption factoryRuntimeOption = func(cfg *hive.Config) {
+	cfg.IssueScanTargetStateResolver = func(_ context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+		return hive.IssueScanTargetState{
+			Repository: repo,
+			Number:     number,
+			State:      "open",
+			Labels:     []string{hive.IssueScanPRReadyLabel},
+		}, nil
+	}
+}
+
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
 // when invoked with no subcommand, returns a usage error that names it.
 func TestFactoryVerbIsRegistered(t *testing.T) {
@@ -1556,7 +1567,7 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 
 func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) {
 	ctx := context.Background()
-	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "", testIssueScanOpenTargetStateResolverOption)
 	if err != nil {
 		t.Fatalf("openFactoryRuntime: %v", err)
 	}
@@ -1611,7 +1622,7 @@ func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) 
 
 func TestRunIssueScanScannerCycleQueuedRunCanBeRedrivenByRuntimeProgress(t *testing.T) {
 	ctx := context.Background()
-	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "", testIssueScanOpenTargetStateResolverOption)
 	if err != nil {
 		t.Fatalf("openFactoryRuntime: %v", err)
 	}
