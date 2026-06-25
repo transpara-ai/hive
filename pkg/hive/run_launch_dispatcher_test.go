@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -545,6 +546,92 @@ func TestDispatchQueuedRunLaunchFindsRequestedRunBeyondDefaultWindow(t *testing.
 	}
 	if causes := storedTask.Causes(); len(causes) != 1 || causes[0] != target.ID() {
 		t.Fatalf("task causes = %+v, want old selected run request %s", causes, target.ID())
+	}
+}
+
+func TestLogIssueScanLifecycleProgressReportsAllProgressCategories(t *testing.T) {
+	var log bytes.Buffer
+	logIssueScanLifecycleProgressTo(&log, "Test issue-scan progress:", fullIssueScanLifecycleProgressForTest())
+	output := log.String()
+	for _, want := range []string{
+		"Test issue-scan progress: seeded 1 queued FactoryOrder task(s)",
+		"Test issue-scan progress: released 1 stage task(s)",
+		"Test issue-scan progress: completed 1 stage task(s)",
+		"Test issue-scan progress: recorded 1 planning role output(s)",
+		"Test issue-scan progress: created 1 implementation task(s)",
+		"Test issue-scan progress: recorded 1 implementation result(s)",
+		"Test issue-scan progress: recorded 1 implementation role output(s)",
+		"Test issue-scan progress: recorded 1 exact-head review(s)",
+		"Test issue-scan progress: recorded 1 review role output(s)",
+		"Test issue-scan progress: recorded 1 blocker role output(s)",
+		"Test issue-scan progress: recorded 1 blocker repair result(s)",
+		"Test issue-scan progress: raised 1 draft PR Human approval request(s)",
+		"Test issue-scan progress: created 1 approved draft PR(s)",
+		"Test issue-scan progress: recorded 1 ready PR evidence packet(s)",
+		"Test issue-scan progress: recorded 1 ready-PR role output(s)",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("progress log missing %q:\n%s", want, output)
+		}
+	}
+
+	log.Reset()
+	logIssueScanLifecycleProgressTo(&log, ":", IssueScanLifecycleProgress{
+		Dispatch: RunLaunchDispatchResult{Dispatched: 1},
+	})
+	if want := "Issue-scan progress: seeded 1 queued FactoryOrder task(s)"; !strings.Contains(log.String(), want) {
+		t.Fatalf("default prefix log missing %q:\n%s", want, log.String())
+	}
+	if unwanted := "released"; strings.Contains(log.String(), unwanted) {
+		t.Fatalf("default prefix log contained inactive category %q:\n%s", unwanted, log.String())
+	}
+}
+
+func fullIssueScanLifecycleProgressForTest() IssueScanLifecycleProgress {
+	return IssueScanLifecycleProgress{
+		Dispatch: RunLaunchDispatchResult{Dispatched: 1},
+		Advances: []IssueScanStageAdvanceResult{
+			{Released: true},
+		},
+		Completions: []IssueScanStageCompletionResult{
+			{},
+		},
+		StageRoleOutputRuns: []IssueScanStageRoleOutputRunnerRecordResult{
+			{RoleOutputs: []IssueScanStageRoleOutputResult{{Recorded: true}}},
+		},
+		ImplementationTasks: []IssueScanImplementationTaskResult{
+			{Created: true},
+		},
+		ImplementationRuns: []IssueScanImplementationRunnerRecordResult{
+			{Recorded: true},
+		},
+		ImplementationRoleOutputs: []IssueScanStageRoleOutputResult{
+			{Recorded: true},
+		},
+		ReviewRuns: []IssueScanAdversarialReviewRecordResult{
+			{Recorded: true},
+		},
+		ReviewRoleOutputs: []IssueScanStageRoleOutputResult{
+			{Recorded: true},
+		},
+		BlockerRoleOutputs: []IssueScanStageRoleOutputResult{
+			{Recorded: true},
+		},
+		BlockerRepairRuns: []IssueScanBlockerRepairRunnerRecordResult{
+			{Recorded: true},
+		},
+		DraftPRRequests: []IssueScanDraftPRAuthorityRequestRunnerRecordResult{
+			{Raised: true},
+		},
+		DraftPRCreations: []IssueScanDraftPRCreationResult{
+			{Created: true},
+		},
+		ReadyPRRuns: []IssueScanReadyPRRunnerRecordResult{
+			{Recorded: true},
+		},
+		ReadyRoleOutputs: []IssueScanStageRoleOutputResult{
+			{Recorded: true},
+		},
 	}
 }
 

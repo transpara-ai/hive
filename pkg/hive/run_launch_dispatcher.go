@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -946,51 +947,7 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: run-launch dispatch failed closed: %v\n", err)
 			}
-			if progress.Dispatch.Dispatched > 0 {
-				fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
-			}
-			if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle starter: released %d stage task(s)\n", released)
-			}
-			if len(progress.Completions) > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
-			}
-			if recorded := countRecordedIssueScanStageRoleOutputRuns(progress.StageRoleOutputRuns); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan planning role-output runner: recorded %d role output(s)\n", recorded)
-			}
-			if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan implementation task seeder: created %d implementation task(s)\n", created)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan implementation evidence bridge: recorded %d role output(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanImplementationRuns(progress.ImplementationRuns); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan implementation runner: recorded %d implementation result(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan adversarial review runner: recorded %d exact-head review(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan review evidence bridge: recorded %d role output(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan blocker evidence bridge: recorded %d role output(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanBlockerRepairRuns(progress.BlockerRepairRuns); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan blocker repair runner: recorded %d repair result(s)\n", recorded)
-			}
-			if raised := countRaisedIssueScanDraftPRRequests(progress.DraftPRRequests); raised > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan draft PR authority requester: raised %d Human approval request(s)\n", raised)
-			}
-			if created := countCreatedIssueScanDraftPRs(progress.DraftPRCreations); created > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan draft PR creation runner: created %d approved draft PR(s)\n", created)
-			}
-			if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan ready PR evidence runner: recorded %d ready PR evidence packet(s)\n", recorded)
-			}
-			if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
-				fmt.Fprintf(os.Stderr, "Issue-scan ready-PR evidence bridge: recorded %d role output(s)\n", recorded)
-			}
+			logIssueScanLifecycleProgress("Issue-scan daemon progress", progress)
 		}
 	}
 }
@@ -1379,36 +1336,7 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-task issue-scan lifecycle progress failed closed: %v\n", err)
 	}
-	if progress.Dispatch.Dispatched > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: seeded %d queued FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
-	}
-	if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: released %d stage task(s)\n", released)
-	}
-	if len(progress.Completions) > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
-	}
-	if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: created %d implementation task(s)\n", created)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d implementation role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d exact-head review(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d review role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d blocker role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-task issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
-	}
+	logIssueScanLifecycleProgress("Post-task issue-scan progress", progress)
 }
 
 func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summary string) {
@@ -1422,27 +1350,7 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-completion issue-scan lifecycle progress failed closed for task %s: %v\n", task.ID.Value(), err)
 	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d implementation role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d exact-head review(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d review role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d blocker role output(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
-	}
-	if len(progress.Completions) > 0 {
-		fmt.Fprintf(os.Stderr, "Post-completion issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
-	}
+	logIssueScanLifecycleProgress("Post-completion issue-scan progress", progress)
 }
 
 func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, taskID, verdict string) {
@@ -1455,23 +1363,65 @@ func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, tas
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: post-review issue-scan lifecycle progress failed closed for task %s verdict %s: %v\n", taskID, verdict, err)
 	}
-	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d exact-head review(s)\n", recorded)
+	logIssueScanLifecycleProgress("Post-review issue-scan progress", progress)
+}
+
+func logIssueScanLifecycleProgress(prefix string, progress IssueScanLifecycleProgress) {
+	logIssueScanLifecycleProgressTo(os.Stderr, prefix, progress)
+}
+
+func logIssueScanLifecycleProgressTo(w io.Writer, prefix string, progress IssueScanLifecycleProgress) {
+	if w == nil {
+		return
 	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d review role output(s)\n", recorded)
+	prefix = strings.TrimRight(strings.TrimSpace(prefix), ":")
+	if prefix == "" {
+		prefix = "Issue-scan progress"
 	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d blocker role output(s)\n", recorded)
+	if progress.Dispatch.Dispatched > 0 {
+		fmt.Fprintf(w, "%s: seeded %d queued FactoryOrder task(s)\n", prefix, progress.Dispatch.Dispatched)
 	}
-	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d ready PR evidence packet(s)\n", recorded)
-	}
-	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: recorded %d ready-PR role output(s)\n", recorded)
+	if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
+		fmt.Fprintf(w, "%s: released %d stage task(s)\n", prefix, released)
 	}
 	if len(progress.Completions) > 0 {
-		fmt.Fprintf(os.Stderr, "Post-review issue-scan progress: completed %d stage task(s)\n", len(progress.Completions))
+		fmt.Fprintf(w, "%s: completed %d stage task(s)\n", prefix, len(progress.Completions))
+	}
+	if recorded := countRecordedIssueScanStageRoleOutputRuns(progress.StageRoleOutputRuns); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d planning role output(s)\n", prefix, recorded)
+	}
+	if created := countCreatedIssueScanImplementationTasks(progress.ImplementationTasks); created > 0 {
+		fmt.Fprintf(w, "%s: created %d implementation task(s)\n", prefix, created)
+	}
+	if recorded := countRecordedIssueScanImplementationRuns(progress.ImplementationRuns); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d implementation result(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ImplementationRoleOutputs); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d implementation role output(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d exact-head review(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReviewRoleOutputs); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d review role output(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.BlockerRoleOutputs); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d blocker role output(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanBlockerRepairRuns(progress.BlockerRepairRuns); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d blocker repair result(s)\n", prefix, recorded)
+	}
+	if raised := countRaisedIssueScanDraftPRRequests(progress.DraftPRRequests); raised > 0 {
+		fmt.Fprintf(w, "%s: raised %d draft PR Human approval request(s)\n", prefix, raised)
+	}
+	if created := countCreatedIssueScanDraftPRs(progress.DraftPRCreations); created > 0 {
+		fmt.Fprintf(w, "%s: created %d approved draft PR(s)\n", prefix, created)
+	}
+	if recorded := countRecordedIssueScanReadyPRRuns(progress.ReadyPRRuns); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d ready PR evidence packet(s)\n", prefix, recorded)
+	}
+	if recorded := countRecordedIssueScanRoleOutputs(progress.ReadyRoleOutputs); recorded > 0 {
+		fmt.Fprintf(w, "%s: recorded %d ready-PR role output(s)\n", prefix, recorded)
 	}
 }
 
