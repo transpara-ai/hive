@@ -122,6 +122,11 @@ func (r *Runtime) IssueScanAdversarialReviewRunContext(runID string) (IssueScanA
 	if runID == "" {
 		return IssueScanAdversarialReviewContext{}, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return IssueScanAdversarialReviewContext{}, err
+	} else if parked {
+		return IssueScanAdversarialReviewContext{}, fmt.Errorf("issue-scan run %q is parked", runID)
+	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {
 		return IssueScanAdversarialReviewContext{}, err
@@ -280,6 +285,11 @@ func (r *Runtime) issueScanAdversarialReviewRunnerShouldRun(runID string) (bool,
 	}
 	if runID == "" {
 		return false, fmt.Errorf("run_id is required")
+	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return false, err
+	} else if parked {
+		return false, nil
 	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {

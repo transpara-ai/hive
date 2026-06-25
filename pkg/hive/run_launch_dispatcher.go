@@ -957,6 +957,7 @@ func (r *Runtime) runRunLaunchDispatchLoop(ctx context.Context, interval time.Du
 // imply merge, deploy, Human approval, or production-readiness authority.
 type IssueScanLifecycleProgress struct {
 	Dispatch                  RunLaunchDispatchResult
+	ParkedRuns                []IssueScanRunParkResult
 	Advances                  []IssueScanStageAdvanceResult
 	Completions               []IssueScanStageCompletionResult
 	StageRoleOutputRuns       []IssueScanStageRoleOutputRunnerRecordResult
@@ -1037,10 +1038,10 @@ func (r *Runtime) ProgressIssueScanRunLifecycleWithConfiguredRunners(ctx context
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	activeDispatch := r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	r.issueScanLifecycleMu.Unlock()
 
-	r.progressConfiguredIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	r.progressConfiguredIssueScanLifecycle(ctx, &progress, activeDispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
@@ -1061,10 +1062,10 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 	if err != nil {
 		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
 	}
-	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	activeDispatch := r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	r.issueScanLifecycleMu.Unlock()
 
-	r.progressConfiguredIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	r.progressConfiguredIssueScanLifecycle(ctx, &progress, activeDispatch, &errs)
 	return progress, errors.Join(errs...)
 }
 
@@ -1234,79 +1235,88 @@ func (r *Runtime) progressDispatchedIssueScanLifecycleReconcile(ctx context.Cont
 	return progress, errors.Join(errs...)
 }
 
-func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
+func (r *Runtime) progressDispatchedIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) RunLaunchDispatchResult {
 	if r == nil || progress == nil || errs == nil {
-		return
+		return dispatch
 	}
-	advances, err := r.StartDispatchedIssueScanLifecycleStages(dispatch)
+	activeDispatch := dispatch
+	parked, filteredDispatch, err := r.parkBlockedIssueScanRuns(ctx, dispatch)
+	progress.ParkedRuns = append(progress.ParkedRuns, parked...)
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("issue-scan run parking: %w", err))
+	}
+	activeDispatch = filteredDispatch
+	advances, err := r.StartDispatchedIssueScanLifecycleStages(activeDispatch)
 	progress.Advances = advances
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan lifecycle start: %w", err))
 	}
-	completions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+	completions, err := r.CompleteReadyIssueScanLifecycleStages(activeDispatch)
 	progress.Completions = completions
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan lifecycle auto-completion: %w", err))
 	}
-	implementationTasks, err := r.EnsureIssueScanImplementationTasks(dispatch)
+	implementationTasks, err := r.EnsureIssueScanImplementationTasks(activeDispatch)
 	progress.ImplementationTasks = implementationTasks
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan implementation task seeding: %w", err))
 	}
-	roleOutputs, err := r.RecordCompletedIssueScanImplementationRoleOutputs(dispatch)
+	roleOutputs, err := r.RecordCompletedIssueScanImplementationRoleOutputs(activeDispatch)
 	progress.ImplementationRoleOutputs = roleOutputs
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan implementation role-output recording: %w", err))
 	}
 	if len(roleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(activeDispatch)
 		progress.Completions = append(progress.Completions, moreCompletions...)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-implementation auto-completion: %w", err))
 		}
 	}
-	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(dispatch)
+	reviewRoleOutputs, err := r.RecordCompletedIssueScanReviewRoleOutputs(activeDispatch)
 	progress.ReviewRoleOutputs = reviewRoleOutputs
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan review role-output recording: %w", err))
 	}
 	if len(reviewRoleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(activeDispatch)
 		progress.Completions = append(progress.Completions, moreCompletions...)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-review auto-completion: %w", err))
 		}
 	}
-	blockerRoleOutputs, err := r.RecordCompletedIssueScanBlockerRoleOutputs(dispatch)
+	blockerRoleOutputs, err := r.RecordCompletedIssueScanBlockerRoleOutputs(activeDispatch)
 	progress.BlockerRoleOutputs = blockerRoleOutputs
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan blocker role-output recording: %w", err))
 	}
 	if len(blockerRoleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(activeDispatch)
 		progress.Completions = append(progress.Completions, moreCompletions...)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-blocker auto-completion: %w", err))
 		}
 	}
-	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(dispatch)
+	readyRoleOutputs, err := r.RecordCompletedIssueScanReadyRoleOutputs(activeDispatch)
 	progress.ReadyRoleOutputs = readyRoleOutputs
 	if err != nil {
 		*errs = append(*errs, fmt.Errorf("issue-scan ready role-output recording: %w", err))
 	}
 	if len(readyRoleOutputs) > 0 {
-		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(dispatch)
+		moreCompletions, err := r.CompleteReadyIssueScanLifecycleStages(activeDispatch)
 		progress.Completions = append(progress.Completions, moreCompletions...)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("issue-scan lifecycle post-ready auto-completion: %w", err))
 		}
 	}
+	return activeDispatch
 }
 
 func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueScanLifecycleProgress) {
 	if dst == nil {
 		return
 	}
+	dst.ParkedRuns = append(dst.ParkedRuns, src.ParkedRuns...)
 	dst.Advances = append(dst.Advances, src.Advances...)
 	dst.Completions = append(dst.Completions, src.Completions...)
 	dst.StageRoleOutputRuns = append(dst.StageRoleOutputRuns, src.StageRoleOutputRuns...)
@@ -1381,6 +1391,9 @@ func logIssueScanLifecycleProgressTo(w io.Writer, prefix string, progress IssueS
 	if progress.Dispatch.Dispatched > 0 {
 		fmt.Fprintf(w, "%s: seeded %d queued FactoryOrder task(s)\n", prefix, progress.Dispatch.Dispatched)
 	}
+	if parked := countParkedIssueScanRuns(progress.ParkedRuns); parked > 0 {
+		fmt.Fprintf(w, "%s: parked %d issue-scan run(s)\n", prefix, parked)
+	}
 	if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
 		fmt.Fprintf(w, "%s: released %d stage task(s)\n", prefix, released)
 	}
@@ -1434,6 +1447,12 @@ func (r *Runtime) StartDispatchedIssueScanLifecycleStages(result RunLaunchDispat
 	advances := make([]IssueScanStageAdvanceResult, 0, len(runIDs))
 	var errs []error
 	for _, runID := range runIDs {
+		if parked, err := r.issueScanRunIsParked(runID); err != nil {
+			errs = append(errs, fmt.Errorf("run %q: %w", runID, err))
+			continue
+		} else if parked {
+			continue
+		}
 		advance, err := r.AdvanceIssueScanLifecycleStage(runID, "")
 		if err != nil {
 			if strings.Contains(err.Error(), "issue-scan lifecycle has no incomplete stages") {
@@ -1451,6 +1470,16 @@ func countReleasedIssueScanStageAdvances(values []IssueScanStageAdvanceResult) i
 	count := 0
 	for _, value := range values {
 		if value.Released {
+			count++
+		}
+	}
+	return count
+}
+
+func countParkedIssueScanRuns(values []IssueScanRunParkResult) int {
+	count := 0
+	for _, value := range values {
+		if value.Parked || value.AlreadyParked {
 			count++
 		}
 	}

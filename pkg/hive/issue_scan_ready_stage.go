@@ -359,6 +359,11 @@ func (r *Runtime) RecordCompletedIssueScanReadyRoleOutput(runID string) ([]Issue
 	if runID == "" {
 		return nil, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return nil, false, err
+	} else if parked {
+		return nil, false, nil
+	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {
 		return nil, false, err
@@ -508,6 +513,18 @@ func (r *Runtime) issueScanReadyStageTarget(runID string) (FactoryRunRequestedCo
 }
 
 func (r *Runtime) issueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRRunnerContext, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if r == nil || r.store == nil || r.tasks == nil {
+		return IssueScanReadyPRRunnerContext{}, false, fmt.Errorf("runtime store and task store are required")
+	}
+	if runID == "" {
+		return IssueScanReadyPRRunnerContext{}, false, fmt.Errorf("run_id is required")
+	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	} else if parked {
+		return IssueScanReadyPRRunnerContext{}, false, nil
+	}
 	content, orderID, _, readyStage, err := r.issueScanReadyStageTarget(runID)
 	if err != nil {
 		return IssueScanReadyPRRunnerContext{}, false, err

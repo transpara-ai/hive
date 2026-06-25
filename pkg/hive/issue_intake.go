@@ -18,6 +18,7 @@ const (
 	IssueScanPRReadyLabel         = "cc:pr-ready"
 	IssueScanPRDeferredLabel      = "cc:pr-deferred"
 	IssueScanNeedsHumanScopeLabel = "cc:needs-human-scope"
+	IssueScanProtectedActionLabel = "cc:protected-action"
 	issueScanBriefKind            = "transpara_ai_github_issue_scan"
 	issueScanLifecycleVersionV02  = "civilization_issue_to_human_ready_pr_v0.2"
 	issueScanLifecycleVersionV03  = "civilization_issue_to_human_ready_pr_v0.3"
@@ -28,13 +29,15 @@ const (
 )
 
 type issueScanBriefIssuePayload struct {
-	Rank   int      `json:"rank,omitempty"`
-	Repo   string   `json:"repo"`
-	Number int      `json:"number"`
-	Title  string   `json:"title"`
-	URL    string   `json:"url"`
-	Labels []string `json:"labels,omitempty"`
-	Body   string   `json:"body_excerpt,omitempty"`
+	Rank        int      `json:"rank,omitempty"`
+	Repo        string   `json:"repo"`
+	Number      int      `json:"number"`
+	Title       string   `json:"title"`
+	URL         string   `json:"url"`
+	State       string   `json:"state,omitempty"`
+	StateReason string   `json:"state_reason,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	Body        string   `json:"body_excerpt,omitempty"`
 }
 
 type issueScanSelectionPolicyPayload struct {
@@ -71,12 +74,14 @@ type issueScanAgentPlanStep struct {
 // candidate after validating the whole batch, so a deterministic scanner policy
 // can rank candidates before this package records the run request.
 type GitHubIssueCandidate struct {
-	Repo   string
-	Number int
-	Title  string
-	URL    string
-	Body   string
-	Labels []string
+	Repo        string
+	Number      int
+	Title       string
+	URL         string
+	Body        string
+	State       string
+	StateReason string
+	Labels      []string
 }
 
 // IssueScanRunLaunchRequest records a scan result as a normal Hive run launch.
@@ -193,12 +198,17 @@ func normalizeIssueScanCandidates(candidates []GitHubIssueCandidate) ([]GitHubIs
 	// data fails closed even when mixed with a PR-ready issue.
 	for i, candidate := range candidates {
 		normalized := GitHubIssueCandidate{
-			Repo:   strings.ToLower(strings.TrimSpace(candidate.Repo)),
-			Number: candidate.Number,
-			Title:  strings.TrimSpace(candidate.Title),
-			URL:    strings.TrimSpace(candidate.URL),
-			Body:   normalizeIssueBody(candidate.Body),
-			Labels: trimRunLaunchStrings(candidate.Labels),
+			Repo:        strings.ToLower(strings.TrimSpace(candidate.Repo)),
+			Number:      candidate.Number,
+			Title:       strings.TrimSpace(candidate.Title),
+			URL:         strings.TrimSpace(candidate.URL),
+			Body:        normalizeIssueBody(candidate.Body),
+			State:       strings.ToLower(strings.TrimSpace(candidate.State)),
+			StateReason: strings.ToLower(strings.TrimSpace(candidate.StateReason)),
+			Labels:      trimRunLaunchStrings(candidate.Labels),
+		}
+		if normalized.State == "" {
+			normalized.State = "open"
 		}
 		switch {
 		case !ValidTransparaAIRepo(normalized.Repo):
@@ -660,13 +670,15 @@ func issueScanSelectionPolicy(candidates []GitHubIssueCandidate) issueScanSelect
 
 func issueScanBriefIssue(issue GitHubIssueCandidate, rank int) issueScanBriefIssuePayload {
 	return issueScanBriefIssuePayload{
-		Rank:   rank,
-		Repo:   issue.Repo,
-		Number: issue.Number,
-		Title:  issue.Title,
-		URL:    issue.URL,
-		Labels: append([]string(nil), issue.Labels...),
-		Body:   truncateRunLaunchText(issue.Body, 1200),
+		Rank:        rank,
+		Repo:        issue.Repo,
+		Number:      issue.Number,
+		Title:       issue.Title,
+		URL:         issue.URL,
+		State:       issue.State,
+		StateReason: issue.StateReason,
+		Labels:      append([]string(nil), issue.Labels...),
+		Body:        truncateRunLaunchText(issue.Body, 1200),
 	}
 }
 

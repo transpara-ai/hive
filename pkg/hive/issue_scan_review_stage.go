@@ -61,6 +61,11 @@ func (r *Runtime) RecordCompletedIssueScanReviewRoleOutput(runID string) ([]Issu
 	if runID == "" {
 		return nil, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return nil, false, err
+	} else if parked {
+		return nil, false, nil
+	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {
 		return nil, false, err

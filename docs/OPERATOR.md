@@ -122,6 +122,27 @@ Every resource is on the chain. Watch for:
 
 The Guardian should catch these, but verify early on.
 
+### Read-Only Monitors
+
+Observer and dashboard services must remain read-only. A monitor may read
+EventGraph, telemetry, or Work state, but it must not start or order the Hive
+runtime.
+
+Before installing or changing monitor units, validate that the unit does not
+declare `Wants=`, `Requires=`, `BindsTo=`, `PartOf=`, `Upholds=`, `After=`,
+`OnFailure=`, or `OnSuccess=`
+against `hive.service`, `hive@*.service`, or another Hive runtime unit. The
+runtime exposes `ValidateReadOnlyObserverUnit` so local service templates can
+be checked in tests before deployment.
+
+When restarting a monitor, verify the runtime state stays unchanged:
+
+```bash
+systemctl --user show hive.service -p ActiveState -p SubState -p MainPID
+systemctl --user restart civilization-live-monitor.service
+systemctl --user show hive.service -p ActiveState -p SubState -p MainPID
+```
+
 ## When Things Go Wrong
 
 ### Guardian HALT

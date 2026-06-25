@@ -39,6 +39,11 @@ func (r *Runtime) AdvanceIssueScanLifecycleStage(runID, stageID string) (IssueSc
 	if runID == "" {
 		return result, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return result, err
+	} else if parked {
+		return result, fmt.Errorf("issue-scan run %q is parked", runID)
+	}
 
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {

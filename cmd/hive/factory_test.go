@@ -18,6 +18,17 @@ import (
 	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
 )
 
+var testIssueScanOpenTargetStateResolverOption factoryRuntimeOption = func(cfg *hive.Config) {
+	cfg.IssueScanTargetStateResolver = func(_ context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+		return hive.IssueScanTargetState{
+			Repository: repo,
+			Number:     number,
+			State:      "open",
+			Labels:     []string{hive.IssueScanPRReadyLabel},
+		}, nil
+	}
+}
+
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
 // when invoked with no subcommand, returns a usage error that names it.
 func TestFactoryVerbIsRegistered(t *testing.T) {
@@ -1556,7 +1567,7 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 
 func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) {
 	ctx := context.Background()
-	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "", testIssueScanOpenTargetStateResolverOption)
 	if err != nil {
 		t.Fatalf("openFactoryRuntime: %v", err)
 	}
@@ -1611,7 +1622,7 @@ func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) 
 
 func TestRunIssueScanScannerCycleQueuedRunCanBeRedrivenByRuntimeProgress(t *testing.T) {
 	ctx := context.Background()
-	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "", testIssueScanOpenTargetStateResolverOption)
 	if err != nil {
 		t.Fatalf("openFactoryRuntime: %v", err)
 	}
@@ -1856,6 +1867,33 @@ func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
 	}
 	if !hive.IssueScanCandidatePRReady(issues[0]) {
 		t.Fatalf("parsed issue should be PR-ready: %+v", issues[0])
+	}
+}
+
+func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
+	raw := []byte(`{
+		"number": 225,
+		"url": "https://github.com/transpara-ai/hive/issues/225",
+		"state": "CLOSED",
+		"stateReason": "COMPLETED",
+		"labels": [
+			{"name": "cc:pr-ready"},
+			{"name": "cc:needs-human-scope"}
+		]
+	}`)
+
+	state, err := parseGitHubIssueTargetState("transpara-ai/hive", raw)
+	if err != nil {
+		t.Fatalf("parseGitHubIssueTargetState: %v", err)
+	}
+	if state.Repository != "transpara-ai/hive" || state.Number != 225 || state.URL == "" {
+		t.Fatalf("state identity = %+v", state)
+	}
+	if state.State != "closed" || state.StateReason != "completed" {
+		t.Fatalf("state = %q reason = %q; want closed/completed", state.State, state.StateReason)
+	}
+	if got := strings.Join(state.Labels, ","); got != "cc:pr-ready,cc:needs-human-scope" {
+		t.Fatalf("labels = %q", got)
 	}
 }
 

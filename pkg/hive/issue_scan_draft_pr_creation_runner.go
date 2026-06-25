@@ -80,6 +80,11 @@ func (r *Runtime) approvedIssueScanDraftPRAuthorityRequestForRun(runID string) (
 	if runID == "" {
 		return types.EventID{}, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return types.EventID{}, false, err
+	} else if parked {
+		return types.EventID{}, false, nil
+	}
 	events, err := eventsByTypePaginated(r.store, EventTypeAuthorityDecisionRecorded, defaultOperatorProjectionLimit)
 	if err != nil {
 		return types.EventID{}, false, fmt.Errorf("load authority decisions for issue-scan draft PR creation: %w", err)

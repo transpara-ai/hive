@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -132,6 +133,13 @@ func printIssueScanLifecycleProgress(progress hive.IssueScanLifecycleProgress) {
 	}
 	if len(dispatch.AlreadyDispatchedIDs) > 0 {
 		fmt.Printf("already-dispatched task(s): %s\n", strings.Join(dispatch.AlreadyDispatchedIDs, ", "))
+	}
+	for _, parked := range progress.ParkedRuns {
+		state := "parked"
+		if parked.AlreadyParked {
+			state = "already parked"
+		}
+		fmt.Printf("issue-scan run %s: %s blocker=%s action=%s\n", state, parked.RunID, parked.BlockerType, parked.RequiredAction)
 	}
 	for _, advance := range progress.Advances {
 		if advance.Released {
@@ -400,7 +408,7 @@ func scanGitHubIssues(ctx context.Context, repos []string, limit int, labels []s
 }
 
 func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []string) ([]hive.GitHubIssueCandidate, error) {
-	args := []string{"issue", "list", "--repo", repo, "--state", "open", "--limit", fmt.Sprintf("%d", limit), "--json", "number,title,url,body,labels"}
+	args := []string{"issue", "list", "--repo", repo, "--state", "open", "--limit", fmt.Sprintf("%d", limit), "--json", "number,title,url,body,state,stateReason,labels"}
 	for _, label := range labels {
 		if trimmed := strings.TrimSpace(label); trimmed != "" {
 			args = append(args, "--label", trimmed)
@@ -421,13 +429,79 @@ func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []
 	return issues, nil
 }
 
+func ghIssueTargetStateResolver(ctx context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+	return scanGitHubIssueTargetState(ctx, repo, number)
+}
+
+func scanGitHubIssueTargetState(ctx context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" {
+		return hive.IssueScanTargetState{}, fmt.Errorf("repo is required")
+	}
+	if number <= 0 {
+		return hive.IssueScanTargetState{}, fmt.Errorf("issue number must be greater than zero")
+	}
+	args := []string{"issue", "view", strconv.Itoa(number), "--repo", repo, "--json", "number,url,state,stateReason,labels"}
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return hive.IssueScanTargetState{}, fmt.Errorf("gh issue view %s#%d: %v: %s", repo, number, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return hive.IssueScanTargetState{}, fmt.Errorf("gh issue view %s#%d: %w", repo, number, err)
+	}
+	state, err := parseGitHubIssueTargetState(repo, output)
+	if err != nil {
+		return hive.IssueScanTargetState{}, fmt.Errorf("decode gh issue view %s#%d: %w", repo, number, err)
+	}
+	if state.Number == 0 {
+		state.Number = number
+	}
+	return state, nil
+}
+
+func parseGitHubIssueTargetState(repo string, output []byte) (hive.IssueScanTargetState, error) {
+	var raw struct {
+		Number      int    `json:"number"`
+		URL         string `json:"url"`
+		State       string `json:"state"`
+		StateReason string `json:"stateReason"`
+		Labels      []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return hive.IssueScanTargetState{}, err
+	}
+	labels := make([]string, 0, len(raw.Labels))
+	for _, label := range raw.Labels {
+		if name := strings.TrimSpace(label.Name); name != "" {
+			labels = append(labels, name)
+		}
+	}
+	state := strings.ToLower(strings.TrimSpace(raw.State))
+	if state == "" {
+		state = "open"
+	}
+	return hive.IssueScanTargetState{
+		Repository:  strings.ToLower(strings.TrimSpace(repo)),
+		Number:      raw.Number,
+		State:       state,
+		StateReason: strings.ToLower(strings.TrimSpace(raw.StateReason)),
+		URL:         strings.TrimSpace(raw.URL),
+		Labels:      labels,
+	}, nil
+}
+
 func parseGitHubIssueCandidates(repo string, output []byte) ([]hive.GitHubIssueCandidate, error) {
 	var raw []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		URL    string `json:"url"`
-		Body   string `json:"body"`
-		Labels []struct {
+		Number      int    `json:"number"`
+		Title       string `json:"title"`
+		URL         string `json:"url"`
+		Body        string `json:"body"`
+		State       string `json:"state"`
+		StateReason string `json:"stateReason"`
+		Labels      []struct {
 			Name string `json:"name"`
 		} `json:"labels"`
 	}
@@ -441,12 +515,14 @@ func parseGitHubIssueCandidates(repo string, output []byte) ([]hive.GitHubIssueC
 			labels = append(labels, label.Name)
 		}
 		issues = append(issues, hive.GitHubIssueCandidate{
-			Repo:   repo,
-			Number: issue.Number,
-			Title:  issue.Title,
-			URL:    issue.URL,
-			Body:   issue.Body,
-			Labels: labels,
+			Repo:        repo,
+			Number:      issue.Number,
+			Title:       issue.Title,
+			URL:         issue.URL,
+			Body:        issue.Body,
+			State:       issue.State,
+			StateReason: issue.StateReason,
+			Labels:      labels,
 		})
 	}
 	return issues, nil

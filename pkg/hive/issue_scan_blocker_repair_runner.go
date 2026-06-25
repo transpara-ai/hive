@@ -138,6 +138,11 @@ func (r *Runtime) issueScanBlockerRepairRunnerContext(runID string) (IssueScanBl
 	if runID == "" {
 		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return IssueScanBlockerRepairRunnerContext{}, false, err
+	} else if parked {
+		return IssueScanBlockerRepairRunnerContext{}, false, nil
+	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {
 		return IssueScanBlockerRepairRunnerContext{}, false, err
