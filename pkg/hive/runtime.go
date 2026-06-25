@@ -349,18 +349,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	if progress, err := r.progressIssueScanLifecycleContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: initial issue-scan lifecycle progress failed closed: %v\n", err)
 	} else {
-		if progress.Dispatch.Dispatched > 0 {
-			fmt.Fprintf(os.Stderr, "Run-launch dispatcher: seeded %d queued FactoryOrder task(s)\n", progress.Dispatch.Dispatched)
-		}
-		if released := countReleasedIssueScanStageAdvances(progress.Advances); released > 0 {
-			fmt.Fprintf(os.Stderr, "Issue-scan lifecycle starter: released %d stage task(s)\n", released)
-		}
-		if len(progress.Completions) > 0 {
-			fmt.Fprintf(os.Stderr, "Issue-scan lifecycle auto-completer: completed %d stage task(s)\n", len(progress.Completions))
-		}
-		if recorded := countRecordedIssueScanAdversarialReviewRuns(progress.ReviewRuns); recorded > 0 {
-			fmt.Fprintf(os.Stderr, "Issue-scan adversarial review runner: recorded %d exact-head review(s)\n", recorded)
-		}
+		logIssueScanLifecycleProgress("Initial issue-scan progress", progress)
 	}
 	go r.runRunLaunchDispatchLoop(ctx, effectiveRunLaunchDispatchInterval(r.runLaunchDispatchInterval))
 
