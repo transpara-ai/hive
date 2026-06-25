@@ -295,7 +295,7 @@ func TestFactoryIssueScanRunnerContextsRouteEmitsJSON(t *testing.T) {
 
 	original := openFactoryRuntimeForIssueScanRunnerContexts
 	openFactoryRuntimeForIssueScanRunnerContexts = func(context.Context, string, string, string, string, ...factoryRuntimeOption) (*hive.Runtime, *factoryContext, error) {
-		return rt, nil, nil
+		return rt, &factoryContext{}, nil
 	}
 	t.Cleanup(func() { openFactoryRuntimeForIssueScanRunnerContexts = original })
 

@@ -180,8 +180,7 @@ func (r *Runtime) probeIssueScanStageRoleOutputRunnerContext(runID string, inclu
 	}
 	runnerContext, ready, err := r.issueScanStageRoleOutputRunnerContext(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	if !ready {
 		return probe
@@ -208,8 +207,7 @@ func (r *Runtime) probeIssueScanImplementationRunnerContext(runID string, includ
 	}
 	runnerContext, ready, err := r.issueScanImplementationRunnerContext(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	if !ready {
 		return probe
@@ -237,16 +235,14 @@ func (r *Runtime) probeIssueScanAdversarialReviewRunnerContext(runID string, inc
 	}
 	ready, err := r.issueScanAdversarialReviewRunnerShouldRun(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	if !ready {
 		return probe
 	}
 	reviewContext, err := r.IssueScanAdversarialReviewRunContext(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	probe.Ready = true
 	probe.NotReadyReason = ""
@@ -271,8 +267,7 @@ func (r *Runtime) probeIssueScanBlockerRepairRunnerContext(runID string, include
 	}
 	runnerContext, ready, err := r.issueScanBlockerRepairRunnerContext(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	if !ready {
 		return probe
@@ -300,8 +295,7 @@ func (r *Runtime) probeIssueScanReadyPRRunnerContext(runID string, includePayloa
 	}
 	readyContext, ready, err := r.issueScanReadyPRRunnerContext(runID)
 	if err != nil {
-		probe.Error = err.Error()
-		return probe
+		return issueScanRunnerContextProbeWithError(probe, err)
 	}
 	if !ready {
 		return probe
@@ -341,4 +335,10 @@ func issueScanRunnerContextProbePayload(include bool, value any, probe *IssueSca
 		return nil
 	}
 	return body
+}
+
+func issueScanRunnerContextProbeWithError(probe IssueScanRunnerContextProbe, err error) IssueScanRunnerContextProbe {
+	probe.Error = err.Error()
+	probe.NotReadyReason = ""
+	return probe
 }
