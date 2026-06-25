@@ -36,6 +36,9 @@ func cmdFactoryRunIssueScanReview(args []string) error {
 	if *timeout <= 0 {
 		return fmt.Errorf("--timeout must be greater than zero")
 	}
+	if err := requireIssueScanRunnerExecutable("--runner", *runner); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
