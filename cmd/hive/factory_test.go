@@ -141,6 +141,8 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	}
 	for _, want := range []string{
 		"--issue-scan-require-full-chain",
+		"--issue-scan-repo",
+		"--issue-scan-registry",
 		"--issue-scan-stage-role-runner",
 		"--issue-scan-implementation-runner",
 		"--issue-scan-review-runner",
@@ -195,6 +197,16 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	}
 }
 
+func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
+	err := routeAndDispatch([]string{"factory"})
+	if err == nil || !strings.Contains(err.Error(), "issue-scan-runner-contracts") {
+		t.Fatalf("factory usage should mention issue-scan-runner-contracts, got %v", err)
+	}
+	if !strings.Contains(helpText(), "issue-scan-runner-contracts") {
+		t.Fatalf("top-level help should mention issue-scan-runner-contracts")
+	}
+}
+
 func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 	stdout, err := captureFactoryStdout(t, func() error {
 		return routeAndDispatch([]string{"factory", "issue-scan-runner-contracts"})
@@ -212,6 +224,22 @@ func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 }
 
 func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *testing.T) {
+	doc := issueScanRunnerContracts()
+	var canonicalReadyEvidence hive.IssueScanReadyPREvidence
+	readyBody, err := hive.IssueScanReadyPREvidenceArtifactBody(hive.IssueScanReadyPREvidence{})
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := json.Unmarshal([]byte(readyBody), &canonicalReadyEvidence); err != nil {
+		t.Fatalf("decode canonical ready PR evidence body: %v", err)
+	}
+	if canonicalReadyEvidence.LifecycleVersion != doc.LifecycleVersion {
+		t.Fatalf("contract lifecycle_version = %q, want canonical ready evidence version %q", doc.LifecycleVersion, canonicalReadyEvidence.LifecycleVersion)
+	}
+	if !contractFieldContains(doc.ExternalRunnerContracts, "ready_pr_evidence_runner", "ready_pr_evidence.kind="+canonicalReadyEvidence.Kind) {
+		t.Fatalf("ready PR evidence runner contract does not document canonical kind %q", canonicalReadyEvidence.Kind)
+	}
+
 	assertTypeName(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerContext{}), "hive.IssueScanStageRoleOutputRunnerContext")
 	assertTypeName(t, reflect.TypeOf(hive.IssueScanImplementationRunnerContext{}), "hive.IssueScanImplementationRunnerContext")
 	assertTypeName(t, reflect.TypeOf(hive.IssueScanAdversarialReviewContext{}), "hive.IssueScanAdversarialReviewContext")
@@ -229,6 +257,14 @@ func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *t
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "ready_pr_evidence")
 	assertJSONField(t, reflect.TypeOf(hive.TransparaAIDraftPRReceipt{}), "kind")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPREvidence{}), "kind")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "role")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "outputs")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "verdict")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "confidence")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "review_ref")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "reviewed_head_sha")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "status")
 }
 
@@ -307,6 +343,15 @@ func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 func documentedTerminalPathIncludes(paths []issueScanTerminalPath, id, flag string) bool {
 	for _, path := range paths {
 		if path.ID == id && slices.Contains(path.Flags, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func contractFieldContains(contracts []issueScanRunnerContract, id, field string) bool {
+	for _, contract := range contracts {
+		if contract.ID == id && slices.Contains(contract.StdoutRequiredFields, field) {
 			return true
 		}
 	}
