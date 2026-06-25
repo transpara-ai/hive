@@ -101,6 +101,11 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 			want: "GITHUB_TOKEN",
 		},
 		{
+			name: "mark ready requires ready-state review runner",
+			args: []string{"--issue-scan-ready-pr-mark-ready"},
+			want: "--issue-scan-ready-pr-review-runner",
+		},
+		{
 			name: "mark ready conflicts with generic ready runner",
 			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-runner", "/bin/true"},
 			want: "--issue-scan-ready-pr-runner",
@@ -269,58 +274,25 @@ func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *t
 }
 
 func TestFactoryIssueScanRunnerContractsFlagsAreRegistered(t *testing.T) {
-	daemonFlags := []struct {
-		flag  string
-		value string
-	}{
-		{"--issue-scan-require-full-chain", ""},
-		{"--issue-scan-interval", "1m"},
-		{"--issue-scan-repo", "transpara-ai/hive"},
-		{"--issue-scan-registry", ""},
-		{"--repo-workspace-root", "/tmp"},
-		{"--issue-scan-stage-role-runner", "/bin/true"},
-		{"--issue-scan-implementation-runner", "/bin/true"},
-		{"--issue-scan-review-runner", "/bin/true"},
-		{"--issue-scan-blocker-repair-runner", "/bin/true"},
-		{"--issue-scan-draft-pr-request", ""},
-		{"--issue-scan-draft-pr-create", ""},
-		{"--issue-scan-ready-pr-mark-ready", ""},
-		{"--issue-scan-ready-pr-review-runner", "/bin/true"},
-		{"--issue-scan-ready-pr-runner", "/bin/true"},
-	}
-	for _, tt := range daemonFlags {
-		t.Run("daemon "+tt.flag, func(t *testing.T) {
-			args := appendFlagValue([]string{"factory", "daemon"}, tt.flag, tt.value)
+	doc := issueScanRunnerContracts()
+	daemonFlags := documentedIssueScanFlags(doc.FullChainDaemonFlags, doc.TerminalStagePaths)
+	for _, flag := range daemonFlags {
+		t.Run("daemon "+flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "daemon"}, flag, issueScanFlagTestValue(flag))
 			err := routeAndDispatch(args)
 			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
-				t.Fatalf("daemon flag %s is not registered: %v", tt.flag, err)
+				t.Fatalf("daemon flag %s is not registered: %v", flag, err)
 			}
 		})
 	}
 
-	progressFlags := []struct {
-		flag  string
-		value string
-	}{
-		{"--run-configured-runners", ""},
-		{"--run", "run_issue_001"},
-		{"--repo-workspace-root", "/tmp"},
-		{"--issue-scan-stage-role-runner", "/bin/true"},
-		{"--issue-scan-implementation-runner", "/bin/true"},
-		{"--issue-scan-review-runner", "/bin/true"},
-		{"--issue-scan-blocker-repair-runner", "/bin/true"},
-		{"--issue-scan-draft-pr-request", ""},
-		{"--issue-scan-draft-pr-create", ""},
-		{"--issue-scan-ready-pr-mark-ready", ""},
-		{"--issue-scan-ready-pr-review-runner", "/bin/true"},
-		{"--issue-scan-ready-pr-runner", "/bin/true"},
-	}
-	for _, tt := range progressFlags {
-		t.Run("progress "+tt.flag, func(t *testing.T) {
-			args := appendFlagValue([]string{"factory", "progress-issue-scan"}, tt.flag, tt.value)
+	progressFlags := documentedIssueScanFlags(doc.NamedProgressFlags, doc.TerminalStagePaths)
+	for _, flag := range progressFlags {
+		t.Run("progress "+flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "progress-issue-scan"}, flag, issueScanFlagTestValue(flag))
 			err := routeAndDispatch(args)
 			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
-				t.Fatalf("progress flag %s is not registered: %v", tt.flag, err)
+				t.Fatalf("progress flag %s is not registered: %v", flag, err)
 			}
 		})
 	}
@@ -390,6 +362,51 @@ func appendFlagValue(args []string, flag, value string) []string {
 		args = append(args, value)
 	}
 	return args
+}
+
+func documentedIssueScanFlags(values []string, terminalPaths []issueScanTerminalPath) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(flag string) {
+		if strings.HasPrefix(flag, "--") && !seen[flag] {
+			seen[flag] = true
+			out = append(out, flag)
+		}
+	}
+	for _, flag := range values {
+		add(flag)
+	}
+	for _, path := range terminalPaths {
+		for _, flag := range path.Flags {
+			add(flag)
+		}
+		for _, flag := range path.MutuallyExclusiveWith {
+			add(flag)
+		}
+	}
+	return out
+}
+
+func issueScanFlagTestValue(flag string) string {
+	switch flag {
+	case "--issue-scan-interval":
+		return "1m"
+	case "--issue-scan-repo":
+		return "transpara-ai/hive"
+	case "--repo-workspace-root":
+		return "/tmp"
+	case "--issue-scan-stage-role-runner",
+		"--issue-scan-implementation-runner",
+		"--issue-scan-review-runner",
+		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-ready-pr-review-runner",
+		"--issue-scan-ready-pr-runner":
+		return "/bin/true"
+	case "--run":
+		return "run_issue_001"
+	default:
+		return ""
+	}
 }
 
 func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
