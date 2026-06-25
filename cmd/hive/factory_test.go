@@ -233,6 +233,9 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	if !documentedTerminalPathIncludes(doc.TerminalStagePaths, "external_ready_pr_evidence_runner", "--issue-scan-ready-pr-runner") {
 		t.Fatalf("external ready PR runner path missing generic runner flag: %+v", doc.TerminalStagePaths)
 	}
+	if !slices.Contains(doc.OperatorNotes, "Full-chain daemon startup resolves every configured external runner executable before entering the daemon loop.") {
+		t.Fatalf("operator notes missing full-chain executable preflight: %+v", doc.OperatorNotes)
+	}
 }
 
 func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
@@ -539,6 +542,15 @@ func issueScanFlagTestValue(flag string) string {
 	}
 }
 
+func issueScanExecutableForTest(t *testing.T) string {
+	t.Helper()
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	return path
+}
+
 func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	original := os.Stdout
@@ -735,8 +747,56 @@ func TestFactoryDaemonRequireFullChainRequiresScannerActivation(t *testing.T) {
 	}
 }
 
-func TestFactoryDaemonRequireFullChainReachesGitHubTokenGateWhenConfigured(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
+func TestRequireIssueScanRunnerExecutableAcceptsBarePathCommand(t *testing.T) {
+	dir := t.TempDir()
+	runnerName := "issue-scan-runner-for-path-test"
+	runnerPath := filepath.Join(dir, runnerName)
+	if err := os.WriteFile(runnerPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write test runner: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	if err := requireIssueScanRunnerExecutable("--issue-scan-implementation-runner", runnerName); err != nil {
+		t.Fatalf("expected PATH runner to resolve, got %v", err)
+	}
+}
+
+func TestRequireIssueScanRunnerExecutableRejectsEmbeddedArgs(t *testing.T) {
+	dir := t.TempDir()
+	runnerName := "issue-scan-runner-with-args-test"
+	runnerPath := filepath.Join(dir, runnerName)
+	if err := os.WriteFile(runnerPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write test runner: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	err := requireIssueScanRunnerExecutable("--issue-scan-implementation-runner", runnerName+" --json")
+	if err == nil {
+		t.Fatal("expected embedded-args runner string to be rejected")
+	}
+	if !strings.Contains(err.Error(), "--issue-scan-implementation-runner") || !strings.Contains(err.Error(), runnerName+" --json") {
+		t.Fatalf("embedded-args error should name flag and command, got %v", err)
+	}
+}
+
+func TestRequireIssueScanRunnerExecutableRejectsNonExecutableFile(t *testing.T) {
+	runnerPath := filepath.Join(t.TempDir(), "issue-scan-runner-not-executable")
+	if err := os.WriteFile(runnerPath, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatalf("write non-executable runner: %v", err)
+	}
+
+	err := requireIssueScanRunnerExecutable("--issue-scan-review-runner", runnerPath)
+	if err == nil {
+		t.Fatal("expected non-executable runner file to be rejected")
+	}
+	if !strings.Contains(err.Error(), "--issue-scan-review-runner") || !strings.Contains(err.Error(), runnerPath) {
+		t.Fatalf("non-executable error should name flag and path, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequireFullChainRejectsMissingRunnerExecutable(t *testing.T) {
+	missingRunner := filepath.Join(t.TempDir(), "missing-runner")
+	okRunner := issueScanExecutableForTest(t)
 	err := routeAndDispatch([]string{
 		"factory", "daemon",
 		"--human", "Michael",
@@ -744,14 +804,51 @@ func TestFactoryDaemonRequireFullChainReachesGitHubTokenGateWhenConfigured(t *te
 		"--issue-scan-interval", "1m",
 		"--issue-scan-repo", "transpara-ai/hive",
 		"--repo-workspace-root", "/Transpara/transpara-ai/repos",
-		"--issue-scan-stage-role-runner", "/bin/true",
-		"--issue-scan-implementation-runner", "/bin/true",
-		"--issue-scan-review-runner", "/bin/true",
-		"--issue-scan-blocker-repair-runner", "/bin/true",
+		"--issue-scan-stage-role-runner", okRunner,
+		"--issue-scan-implementation-runner", missingRunner,
+		"--issue-scan-review-runner", okRunner,
+		"--issue-scan-blocker-repair-runner", okRunner,
 		"--issue-scan-draft-pr-request",
 		"--issue-scan-draft-pr-create",
 		"--issue-scan-ready-pr-mark-ready",
-		"--issue-scan-ready-pr-review-runner", "/bin/true",
+		"--issue-scan-ready-pr-review-runner", okRunner,
+	})
+	if err == nil {
+		t.Fatal("expected missing runner executable error")
+	}
+	for _, want := range []string{
+		"--issue-scan-require-full-chain",
+		"cannot find executable",
+		"--issue-scan-implementation-runner",
+		missingRunner,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("full-chain executable error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("runner executable preflight should run before GitHub token gate, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequireFullChainReachesGitHubTokenGateWhenConfigured(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	okRunner := issueScanExecutableForTest(t)
+	err := routeAndDispatch([]string{
+		"factory", "daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--issue-scan-interval", "1m",
+		"--issue-scan-repo", "transpara-ai/hive",
+		"--repo-workspace-root", "/Transpara/transpara-ai/repos",
+		"--issue-scan-stage-role-runner", okRunner,
+		"--issue-scan-implementation-runner", okRunner,
+		"--issue-scan-review-runner", okRunner,
+		"--issue-scan-blocker-repair-runner", okRunner,
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner", okRunner,
 	})
 	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
 		t.Fatalf("expected configured full chain to reach GitHub token gate, got %v", err)

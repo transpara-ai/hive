@@ -434,6 +434,7 @@ type issueScanFullChainConfig struct {
 func requireIssueScanFullChainConfig(cfg issueScanFullChainConfig) error {
 	var missing []string
 	var conflicts []string
+	var unavailable []string
 	if cfg.IssueScanInterval <= 0 {
 		missing = append(missing, "--issue-scan-interval")
 	}
@@ -470,7 +471,23 @@ func requireIssueScanFullChainConfig(cfg issueScanFullChainConfig) error {
 	if strings.TrimSpace(cfg.GenericReadyPRRunner) != "" || cfg.GenericReadyPRRunArgs {
 		conflicts = append(conflicts, "--issue-scan-ready-pr-runner")
 	}
-	if len(missing) > 0 || len(conflicts) > 0 {
+	if len(missing) == 0 && len(conflicts) == 0 {
+		for _, runner := range []struct {
+			flag    string
+			command string
+		}{
+			{flag: "--issue-scan-stage-role-runner", command: cfg.StageRoleRunner},
+			{flag: "--issue-scan-implementation-runner", command: cfg.ImplementationRunner},
+			{flag: "--issue-scan-review-runner", command: cfg.ReviewRunner},
+			{flag: "--issue-scan-blocker-repair-runner", command: cfg.BlockerRepairRunner},
+			{flag: "--issue-scan-ready-pr-review-runner", command: cfg.ReadyPRReviewRunner},
+		} {
+			if err := requireIssueScanRunnerExecutable(runner.flag, runner.command); err != nil {
+				unavailable = append(unavailable, err.Error())
+			}
+		}
+	}
+	if len(missing) > 0 || len(conflicts) > 0 || len(unavailable) > 0 {
 		var parts []string
 		if len(missing) > 0 {
 			parts = append(parts, "requires "+strings.Join(missing, ", "))
@@ -478,7 +495,21 @@ func requireIssueScanFullChainConfig(cfg issueScanFullChainConfig) error {
 		if len(conflicts) > 0 {
 			parts = append(parts, "cannot be combined with "+strings.Join(conflicts, ", "))
 		}
+		if len(unavailable) > 0 {
+			parts = append(parts, "cannot find executable "+strings.Join(unavailable, ", "))
+		}
 		return fmt.Errorf("--issue-scan-require-full-chain %s", strings.Join(parts, "; "))
+	}
+	return nil
+}
+
+func requireIssueScanRunnerExecutable(flagName, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+	if _, err := exec.LookPath(command); err != nil {
+		return fmt.Errorf("%s %q: %w", flagName, command, err)
 	}
 	return nil
 }
