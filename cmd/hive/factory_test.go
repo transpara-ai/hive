@@ -48,6 +48,86 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	}
 }
 
+func TestFactoryProgressIssueScanRequiresHumanBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "progress-issue-scan", "--run", "run_issue_001"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryProgressIssueScanRequiresRunBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "progress-issue-scan", "--human", "Michael"})
+	if err == nil || !strings.Contains(err.Error(), "--run") {
+		t.Fatalf("expected missing --run error, got %v", err)
+	}
+}
+
+func TestFactoryProgressIssueScanRequiresConfiguredRunnersSwitch(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "progress-issue-scan",
+		"--human", "Michael",
+		"--run", "run_issue_001",
+		"--issue-scan-stage-role-runner", "/bin/true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--run-configured-runners") {
+		t.Fatalf("expected configured runners switch error, got %v", err)
+	}
+}
+
+func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	base := []string{
+		"factory", "progress-issue-scan",
+		"--human", "Michael",
+		"--run", "run_issue_001",
+		"--run-configured-runners",
+	}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "draft PR create requires token",
+			args: []string{"--issue-scan-draft-pr-create"},
+			want: "GITHUB_TOKEN",
+		},
+		{
+			name: "mark ready requires token",
+			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true"},
+			want: "GITHUB_TOKEN",
+		},
+		{
+			name: "mark ready conflicts with generic ready runner",
+			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-runner", "/bin/true"},
+			want: "--issue-scan-ready-pr-runner",
+		},
+		{
+			name: "ready review runner requires mark ready",
+			args: []string{"--issue-scan-ready-pr-review-runner", "/bin/true"},
+			want: "--issue-scan-ready-pr-mark-ready",
+		},
+		{
+			name: "runner arg requires runner",
+			args: []string{"--issue-scan-review-runner-arg", "--json"},
+			want: "--issue-scan-review-runner",
+		},
+		{
+			name: "timeout must be positive",
+			args: []string{"--issue-scan-review-runner", "/bin/true", "--issue-scan-review-timeout", "0s"},
+			want: "--issue-scan-review-timeout",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := routeAndDispatch(append(append([]string(nil), base...), tt.args...))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("routeAndDispatch error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {

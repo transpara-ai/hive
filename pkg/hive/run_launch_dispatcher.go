@@ -1020,8 +1020,9 @@ type issueScanLifecycleProgress = IssueScanLifecycleProgress
 
 // ProgressIssueScanLifecycle advances all queued/dispatched issue-scan runs
 // through the evidence bridge. Daemon paths may run explicitly configured
-// external runners, including the approved draft-PR creator. It never marks a
-// PR ready, merges, deploys, or approves a PR by itself.
+// external runners, including the approved draft-PR creator and the configured
+// ready-for-review finalizer. It never merges, deploys, or approves a PR by
+// itself.
 func (r *Runtime) ProgressIssueScanLifecycle() (IssueScanLifecycleProgress, error) {
 	return r.progressIssueScanLifecycle()
 }
@@ -1059,6 +1060,33 @@ func (r *Runtime) ProgressIssueScanRunLifecycleContext(ctx context.Context, runI
 	return progress, errors.Join(errs...)
 }
 
+// ProgressIssueScanRunLifecycleWithConfiguredRunners advances only the named
+// issue-scan run, then invokes any configured external issue-scan runners for
+// that run. Use this for explicit operator-driven continuation of one run; the
+// post-event callback path intentionally stays local-only.
+func (r *Runtime) ProgressIssueScanRunLifecycleWithConfiguredRunners(ctx context.Context, runID string) (IssueScanLifecycleProgress, error) {
+	runID = strings.TrimSpace(runID)
+	var progress IssueScanLifecycleProgress
+	if r == nil {
+		return progress, nil
+	}
+	if runID == "" {
+		return progress, fmt.Errorf("run_id is required")
+	}
+	r.issueScanLifecycleMu.Lock()
+	var errs []error
+	dispatch, err := r.DispatchQueuedRunLaunch(runID)
+	progress.Dispatch = dispatch
+	if err != nil {
+		errs = append(errs, fmt.Errorf("run-launch dispatch: %w", err))
+	}
+	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	r.issueScanLifecycleMu.Unlock()
+
+	r.progressConfiguredIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	return progress, errors.Join(errs...)
+}
+
 func (r *Runtime) progressIssueScanLifecycle() (IssueScanLifecycleProgress, error) {
 	return r.progressIssueScanLifecycleContext(context.Background())
 }
@@ -1079,142 +1107,147 @@ func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueS
 	r.progressDispatchedIssueScanLifecycle(ctx, &progress, dispatch, &errs)
 	r.issueScanLifecycleMu.Unlock()
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	r.progressConfiguredIssueScanLifecycle(ctx, &progress, dispatch, &errs)
+	return progress, errors.Join(errs...)
+}
+
+func (r *Runtime) progressConfiguredIssueScanLifecycle(ctx context.Context, progress *IssueScanLifecycleProgress, dispatch RunLaunchDispatchResult, errs *[]error) {
+	if r == nil || progress == nil || errs == nil {
+		return
 	}
+	if issueScanContextDone(ctx, errs) {
+		return
+	}
+	// The local dispatch pass above does not populate runner-result fields; the
+	// configured runner steps append only their own records between reconciles.
 	stageRoleOutputRuns, err := r.RunConfiguredIssueScanStageRoleOutputRunners(ctx, dispatch)
-	progress.StageRoleOutputRuns = stageRoleOutputRuns
+	progress.StageRoleOutputRuns = append(progress.StageRoleOutputRuns, stageRoleOutputRuns...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan stage role-output runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan stage role-output runner: %w", err))
 	}
 	if len(stageRoleOutputRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	implementationRuns, err := r.RunConfiguredIssueScanImplementationRunners(ctx, dispatch)
-	progress.ImplementationRuns = implementationRuns
+	progress.ImplementationRuns = append(progress.ImplementationRuns, implementationRuns...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan implementation runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan implementation runner: %w", err))
 	}
 	if len(implementationRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	reviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
-	progress.ReviewRuns = reviewRuns
+	progress.ReviewRuns = append(progress.ReviewRuns, reviewRuns...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner: %w", err))
 	}
 	if len(reviewRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	blockerRepairRuns, err := r.RunConfiguredIssueScanBlockerRepairRunners(ctx, dispatch)
-	progress.BlockerRepairRuns = blockerRepairRuns
+	progress.BlockerRepairRuns = append(progress.BlockerRepairRuns, blockerRepairRuns...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan blocker repair runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan blocker repair runner: %w", err))
 	}
 	if len(blockerRepairRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
-		select {
-		case <-ctx.Done():
-			return progress, errors.Join(append(errs, ctx.Err())...)
-		default:
+		if issueScanContextDone(ctx, errs) {
+			return
 		}
 		rerunReviewRuns, err := r.RunConfiguredIssueScanAdversarialReviews(ctx, dispatch)
 		progress.ReviewRuns = append(progress.ReviewRuns, rerunReviewRuns...)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("issue-scan adversarial review runner after blocker repair: %w", err))
+			*errs = append(*errs, fmt.Errorf("issue-scan adversarial review runner after blocker repair: %w", err))
 		}
 		if len(rerunReviewRuns) > 0 {
 			after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-			mergeIssueScanLifecycleProgress(&progress, after)
+			mergeIssueScanLifecycleProgress(progress, after)
 			if err != nil {
-				errs = append(errs, err)
+				*errs = append(*errs, err)
 			}
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	draftPRRequests, err := r.RunConfiguredIssueScanDraftPRAuthorityRequests(ctx, dispatch)
-	progress.DraftPRRequests = draftPRRequests
+	progress.DraftPRRequests = append(progress.DraftPRRequests, draftPRRequests...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan draft PR authority requester: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan draft PR authority requester: %w", err))
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	draftPRCreations, err := r.RunConfiguredIssueScanDraftPRCreations(ctx, dispatch)
-	progress.DraftPRCreations = draftPRCreations
+	progress.DraftPRCreations = append(progress.DraftPRCreations, draftPRCreations...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan draft PR creation runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan draft PR creation runner: %w", err))
 	}
 	if len(draftPRCreations) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return progress, errors.Join(append(errs, ctx.Err())...)
-	default:
+	if issueScanContextDone(ctx, errs) {
+		return
 	}
 	readyPRRuns, err := r.RunConfiguredIssueScanReadyPRRunners(ctx, dispatch)
-	progress.ReadyPRRuns = readyPRRuns
+	progress.ReadyPRRuns = append(progress.ReadyPRRuns, readyPRRuns...)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
+		*errs = append(*errs, fmt.Errorf("issue-scan ready PR evidence runner: %w", err))
 	}
 	if len(readyPRRuns) > 0 {
 		after, err := r.progressDispatchedIssueScanLifecycleReconcile(ctx, dispatch)
-		mergeIssueScanLifecycleProgress(&progress, after)
+		mergeIssueScanLifecycleProgress(progress, after)
 		if err != nil {
-			errs = append(errs, err)
+			*errs = append(*errs, err)
 		}
 	}
-	return progress, errors.Join(errs...)
+}
+
+func issueScanContextDone(ctx context.Context, errs *[]error) bool {
+	select {
+	case <-ctx.Done():
+		if errs != nil {
+			*errs = append(*errs, ctx.Err())
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Runtime) progressIssueScanLifecycleInlineContext(ctx context.Context) (IssueScanLifecycleProgress, error) {

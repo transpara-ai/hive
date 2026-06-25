@@ -39,6 +39,9 @@ import (
 //   order        → work.SeedFactoryOrder (W1): one Order → one Work task.
 //   scan-issues  → scan Transpara-AI GitHub issues, then queue one governed
 //                  run request for the existing FactoryOrder dispatcher.
+//   progress-issue-scan
+//               → progress one named issue-scan run; optionally invoke
+//                  explicitly configured external runners for that run only.
 //   advance-issue-scan
 //               → release the next issue-scan stage dependency barrier after
 //                  its lifecycle contracts are present.
@@ -89,7 +92,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -100,6 +103,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryOrder(rest)
 	case "scan-issues":
 		return cmdFactoryScanIssues(rest)
+	case "progress-issue-scan":
+		return cmdFactoryProgressIssueScan(rest)
 	case "advance-issue-scan":
 		return cmdFactoryAdvanceIssueScan(rest)
 	case "record-issue-scan-role-output":
@@ -131,11 +136,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
@@ -1024,9 +1029,11 @@ func (fc *factoryContext) headCauses() []types.EventID {
 	return []types.EventID{head.Unwrap().ID()}
 }
 
+type factoryRuntimeOption func(*hive.Config)
+
 // openFactoryRuntime builds a full hive.Runtime over the factory store context,
 // for the request-pr authority seam. repoPath defaults to current dir.
-func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorkspaceRoot string) (*hive.Runtime, *factoryContext, error) {
+func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorkspaceRoot string, opts ...factoryRuntimeOption) (*hive.Runtime, *factoryContext, error) {
 	fc, err := openFactoryContext(ctx, dsn, humanName)
 	if err != nil {
 		return nil, nil, err
@@ -1034,13 +1041,19 @@ func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorks
 	if repoPath == "" {
 		repoPath = "."
 	}
-	rt, err := hive.New(ctx, hive.Config{
+	cfg := hive.Config{
 		Store:             fc.store,
 		Actors:            fc.actors, // hive.New verifies the human and registers the system actor.
 		HumanID:           fc.humanID,
 		RepoPath:          repoPath,
 		RepoWorkspaceRoot: repoWorkspaceRoot,
-	})
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	rt, err := hive.New(ctx, cfg)
 	if err != nil {
 		fc.close()
 		return nil, nil, fmt.Errorf("runtime: %w", err)

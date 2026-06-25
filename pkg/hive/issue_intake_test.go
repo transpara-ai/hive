@@ -3008,6 +3008,126 @@ func TestPostEventIssueScanProgressDoesNotRunConfiguredExternalRunners(t *testin
 	}
 }
 
+func TestProgressIssueScanRunLifecycleContextDoesNotRunConfiguredExternalRunners(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Keep named run progress local-only",
+			URL:    "https://github.com/transpara-ai/hive/issues/321",
+			Body:   "The Civilization should scan Transpara-AI repos and surface a ready-for-Human PR.",
+			Labels: []string{"civilization", "cc:pr-ready"},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	stageRoleCalls := 0
+	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		stageRoleCalls++
+		return IssueScanStageRoleOutputRunnerResult{}, fmt.Errorf("named local progress must not invoke configured stage role-output runner")
+	}
+
+	progress, err := rt.ProgressIssueScanRunLifecycleContext(context.Background(), queued.RunID)
+	if err != nil {
+		t.Fatalf("ProgressIssueScanRunLifecycleContext: %v", err)
+	}
+	if progress.Dispatch.Dispatched != 1 {
+		t.Fatalf("dispatch = %+v, want one dispatched issue-scan run", progress.Dispatch)
+	}
+	if stageRoleCalls != 0 || len(progress.StageRoleOutputRuns) != 0 {
+		t.Fatalf("stage role runner calls/progress = %d/%+v, want none", stageRoleCalls, progress.StageRoleOutputRuns)
+	}
+}
+
+func TestProgressIssueScanRunLifecycleWithConfiguredRunnersRunsOnlyNamedRun(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queue := func(number int) IssueScanRunLaunchResult {
+		t.Helper()
+		queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+			OperatorID: IssueScanOperatorID("Michael Saucier"),
+			Issues: []GitHubIssueCandidate{{
+				Repo:   "transpara-ai/hive",
+				Number: number,
+				Title:  fmt.Sprintf("Named configured progress issue %d", number),
+				URL:    fmt.Sprintf("https://github.com/transpara-ai/hive/issues/%d", number),
+				Body:   "The Civilization should scan Transpara-AI repos, research, debate, design, implement, review, and surface a ready-for-Human PR.",
+				Labels: []string{"civilization", "issue-scan", "cc:pr-ready"},
+			}},
+			Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		}, nil)
+		if err != nil {
+			t.Fatalf("QueueIssueScanRunLaunch(%d): %v", number, err)
+		}
+		return queued
+	}
+	first := queue(321)
+	second := queue(322)
+	firstOrderID, err := factoryOrderIDForRunLaunch(first.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch first: %v", err)
+	}
+	secondOrderID, err := factoryOrderIDForRunLaunch(second.RunID)
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch second: %v", err)
+	}
+	for _, queued := range []IssueScanRunLaunchResult{first, second} {
+		progress, err := rt.ProgressIssueScanRunLifecycleContext(context.Background(), queued.RunID)
+		if err != nil {
+			t.Fatalf("pre-dispatch %s: %v", queued.RunID, err)
+		}
+		if progress.Dispatch.Dispatched != 1 {
+			t.Fatalf("pre-dispatch %s result = %+v, want one dispatched run", queued.RunID, progress.Dispatch)
+		}
+	}
+
+	callsByRun := map[string]int{}
+	callsByStage := map[string]int{}
+	rt.issueScanStageRoleOutputRunner = func(ctx context.Context, runnerContext IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		callsByRun[runnerContext.RunID]++
+		callsByStage[runnerContext.StageID]++
+		if runnerContext.RunID != first.RunID {
+			t.Fatalf("configured runner called for run %q, want only %q", runnerContext.RunID, first.RunID)
+		}
+		outputs := make([]IssueScanStageRoleOutputEvidence, 0, len(runnerContext.RequestedRoleSteps))
+		for _, step := range runnerContext.RequestedRoleSteps {
+			outputs = append(outputs, issueScanStageRoleOutputWithStageEvidenceForTest(t, runnerContext.StageID, step.Role))
+		}
+		return IssueScanStageRoleOutputRunnerResult{RoleOutputs: outputs}, nil
+	}
+
+	for i := 0; i < 3; i++ {
+		progress, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), first.RunID)
+		if err != nil {
+			t.Fatalf("ProgressIssueScanRunLifecycleWithConfiguredRunners pass %d: %v", i+1, err)
+		}
+		if len(progress.StageRoleOutputRuns) != 1 || !progress.StageRoleOutputRuns[0].Recorded {
+			t.Fatalf("pass %d stage role-output runs = %+v, want one recorded planning-stage run", i+1, progress.StageRoleOutputRuns)
+		}
+	}
+	if callsByRun[first.RunID] != 3 || callsByRun[second.RunID] != 0 {
+		t.Fatalf("runner calls by run = %+v, want first=3 second=0", callsByRun)
+	}
+	for _, stageID := range []string{"research_issue_and_repo_context", "debate_with_correct_civic_roles", "select_and_design_approach"} {
+		if callsByStage[stageID] != 1 {
+			t.Fatalf("runner calls for stage %s = %d, want 1 (all calls %+v)", stageID, callsByStage[stageID], callsByStage)
+		}
+	}
+	if _, _, exists, err := workTaskByCanonicalTaskID(rt.store, issueScanImplementationTaskCanonicalID(firstOrderID)); err != nil {
+		t.Fatalf("find first implementation task: %v", err)
+	} else if !exists {
+		t.Fatalf("first implementation task was not created after named configured planning progress")
+	}
+	if _, _, exists, err := workTaskByCanonicalTaskID(rt.store, issueScanImplementationTaskCanonicalID(secondOrderID)); err != nil {
+		t.Fatalf("find second implementation task: %v", err)
+	} else if exists {
+		t.Fatalf("second implementation task was created even though only %s was progressed", first.RunID)
+	}
+}
+
 func TestProgressIssueScanLifecycleRunsConfiguredStageRoleOutputRunnerThroughPlanningStages(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
