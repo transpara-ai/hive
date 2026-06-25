@@ -14,10 +14,13 @@ import (
 )
 
 const (
-	IssueScanDefaultPolicyRef    = "civilization/repo-issue-scan-to-factory-order-v0.1"
-	issueScanBriefKind           = "transpara_ai_github_issue_scan"
-	issueScanLifecycleVersionV02 = "civilization_issue_to_human_ready_pr_v0.2"
-	issueScanLifecycleVersionV03 = "civilization_issue_to_human_ready_pr_v0.3"
+	IssueScanDefaultPolicyRef     = "civilization/repo-issue-scan-to-factory-order-v0.1"
+	IssueScanPRReadyLabel         = "cc:pr-ready"
+	IssueScanPRDeferredLabel      = "cc:pr-deferred"
+	IssueScanNeedsHumanScopeLabel = "cc:needs-human-scope"
+	issueScanBriefKind            = "transpara_ai_github_issue_scan"
+	issueScanLifecycleVersionV02  = "civilization_issue_to_human_ready_pr_v0.2"
+	issueScanLifecycleVersionV03  = "civilization_issue_to_human_ready_pr_v0.3"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, evidence, roles, boundaries, gates, or step order change.
 	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.4"
@@ -186,6 +189,8 @@ func normalizeIssueScanCandidates(candidates []GitHubIssueCandidate) ([]GitHubIs
 		return nil, fmt.Errorf("issues is required")
 	}
 	out := make([]GitHubIssueCandidate, 0, len(candidates))
+	// Validate every supplied candidate before filtering so malformed scanner
+	// data fails closed even when mixed with a PR-ready issue.
 	for i, candidate := range candidates {
 		normalized := GitHubIssueCandidate{
 			Repo:   strings.ToLower(strings.TrimSpace(candidate.Repo)),
@@ -215,8 +220,50 @@ func normalizeIssueScanCandidates(candidates []GitHubIssueCandidate) ([]GitHubIs
 		}
 		out = append(out, normalized)
 	}
+	var skippedNotPRReady int
+	out, skippedNotPRReady = FilterIssueScanPRReadyCandidates(out)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("issues has no PR-ready candidates; skipped %d non-PR-ready issue(s); require %s without %s or %s", skippedNotPRReady, IssueScanPRReadyLabel, IssueScanPRDeferredLabel, IssueScanNeedsHumanScopeLabel)
+	}
 	rankIssueScanCandidates(out)
 	return out, nil
+}
+
+// FilterIssueScanPRReadyCandidates keeps only issues that the change-control
+// labels mark as ready for PR work.
+func FilterIssueScanPRReadyCandidates(issues []GitHubIssueCandidate) ([]GitHubIssueCandidate, int) {
+	out := make([]GitHubIssueCandidate, 0, len(issues))
+	skipped := 0
+	for _, issue := range issues {
+		if IssueScanCandidatePRReady(issue) {
+			out = append(out, issue)
+			continue
+		}
+		skipped++
+	}
+	return out, skipped
+}
+
+// IssueScanCandidatePRReady reports whether a GitHub issue carries the
+// change-control labels required before the issue-scan path may queue work.
+func IssueScanCandidatePRReady(issue GitHubIssueCandidate) bool {
+	labels := map[string]struct{}{}
+	for _, label := range issue.Labels {
+		normalized := strings.ToLower(strings.TrimSpace(label))
+		if normalized != "" {
+			labels[normalized] = struct{}{}
+		}
+	}
+	if _, ok := labels[IssueScanPRReadyLabel]; !ok {
+		return false
+	}
+	if _, ok := labels[IssueScanPRDeferredLabel]; ok {
+		return false
+	}
+	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
+		return false
+	}
+	return true
 }
 
 func rankIssueScanCandidates(candidates []GitHubIssueCandidate) {

@@ -128,7 +128,7 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	if len(issues) == 0 {
 		return result, nil
 	}
-	issues, result.SkippedNotPRReady = filterIssueScanPRReadyCandidates(issues)
+	issues, result.SkippedNotPRReady = hive.FilterIssueScanPRReadyCandidates(issues)
 	if len(issues) == 0 {
 		return result, nil
 	}
@@ -170,39 +170,6 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	result.QueuedRunID = queued.RunID
 	result.QueuedIssue = queued.Selected
 	return result, nil
-}
-
-func filterIssueScanPRReadyCandidates(issues []hive.GitHubIssueCandidate) ([]hive.GitHubIssueCandidate, int) {
-	out := make([]hive.GitHubIssueCandidate, 0, len(issues))
-	skipped := 0
-	for _, issue := range issues {
-		if issueScanCandidatePRReady(issue) {
-			out = append(out, issue)
-			continue
-		}
-		skipped++
-	}
-	return out, skipped
-}
-
-func issueScanCandidatePRReady(issue hive.GitHubIssueCandidate) bool {
-	labels := map[string]struct{}{}
-	for _, label := range issue.Labels {
-		normalized := strings.ToLower(strings.TrimSpace(label))
-		if normalized != "" {
-			labels[normalized] = struct{}{}
-		}
-	}
-	if _, ok := labels["cc:pr-ready"]; !ok {
-		return false
-	}
-	if _, ok := labels["cc:pr-deferred"]; ok {
-		return false
-	}
-	if _, ok := labels["cc:needs-human-scope"]; ok {
-		return false
-	}
-	return true
 }
 
 func issueScanCandidateAlreadyRequested(issue hive.GitHubIssueCandidate, existing map[string]struct{}) bool {

@@ -34,7 +34,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 				Title:  "Teach the Civilization to scan issues",
 				URL:    "https://github.com/transpara-ai/hive/issues/321",
 				Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
-				Labels: []string{"civilization", "autonomy"},
+				Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 			},
 		},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
@@ -696,7 +696,7 @@ func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testin
 				Number: 12,
 				Title:  "General discussion cleanup",
 				URL:    "https://github.com/transpara-ai/site/issues/12",
-				Labels: []string{"discussion"},
+				Labels: []string{"discussion", "cc:pr-ready"},
 			},
 			{
 				Repo:   "transpara-ai/hive",
@@ -704,7 +704,7 @@ func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testin
 				Title:  "Teach the Civilization to scan Transpara-AI repos",
 				URL:    "https://github.com/transpara-ai/hive/issues/321",
 				Body:   "Create a FactoryOrder, run adversarial review, drive zero blockers, and surface a ready-for-Human PR.",
-				Labels: []string{"civilization", "autonomy"},
+				Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 			},
 		},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
@@ -764,7 +764,7 @@ func TestProgressIssueScanLifecycleCreatesStageContractsWithoutFabricatingRoleOu
 				Title:  "Teach the Civilization to scan Transpara-AI repos",
 				URL:    "https://github.com/transpara-ai/hive/issues/321",
 				Body:   "The Civilization should scan Transpara-AI repos, create a FactoryOrder, debate, implement, review, and surface a ready-for-Human PR.",
-				Labels: []string{"civilization", "autonomy"},
+				Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 			},
 		},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
@@ -912,7 +912,7 @@ func TestAdvanceIssueScanLifecycleStageReleasesNextRunnableStage(t *testing.T) {
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
-			Labels: []string{"civilization", "autonomy"},
+			Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1042,7 +1042,7 @@ func TestStartDispatchedIssueScanLifecycleStagesReleasesFirstStage(t *testing.T)
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
-			Labels: []string{"civilization", "autonomy"},
+			Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1123,6 +1123,7 @@ func TestCompleteReadyIssueScanLifecycleStagesSkipsUntilStageEvidenceCovered(t *
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1180,6 +1181,7 @@ func TestCompleteReadyIssueScanLifecycleStagesCompletesFromRecordedRoleOutputs(t
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1238,6 +1240,7 @@ func TestPostTaskCommandProgressCompletesIssueScanStageFromDirectRoleOutputArtif
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1328,6 +1331,7 @@ func TestAgentTaskArtifactCommandsCompleteIssueScanStageRoleOutputs(t *testing.T
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1456,6 +1460,7 @@ func TestAgentTaskArtifactCommandsRejectSpoofedIssueScanStageRoleOutput(t *testi
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1740,6 +1745,7 @@ func TestProgressIssueScanLifecycleCreatesConcreteImplementationTaskAfterDesign(
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -1875,6 +1881,7 @@ func TestProgressIssueScanLifecycleRejectsWrongRepoImplementationTask(t *testing
 			Title:  "Display Civilization runtime evidence",
 			URL:    "https://github.com/transpara-ai/site/issues/109",
 			Body:   "Site should show the runtime Civilization evidence for Transpara-AI operators.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -2195,6 +2202,7 @@ func TestProgressIssueScanLifecycleCreatesImplementationTaskForWorkspaceTargetRe
 			Title:  "Display Civilization runtime evidence",
 			URL:    "https://github.com/transpara-ai/site/issues/109",
 			Body:   "Site should show the runtime Civilization evidence for Transpara-AI operators.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -2279,6 +2287,7 @@ func TestProgressIssueScanLifecycleRecordsImplementationRoleOutputAndCompletesSt
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -2619,6 +2628,7 @@ func TestProgressIssueScanLifecycleDoesNotRunImplementationRunnerBeforeDesign(t 
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -2681,6 +2691,7 @@ func TestProgressIssueScanLifecycleRecordsReviewRoleOutputsAndCompletesStage(t *
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -3007,7 +3018,7 @@ func TestProgressIssueScanLifecycleRunsConfiguredStageRoleOutputRunnerThroughPla
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos, research, debate, implement, review, and surface a ready PR.",
-			Labels: []string{"civilization", "autonomy"},
+			Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -3395,6 +3406,7 @@ func TestProgressIssueScanLifecycleRecordsBlockerRoleOutputsAndCompletesStage(t 
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -3629,6 +3641,7 @@ func TestIssueScanLifecycleEndToEndSurfacesReadyForHumanPR(t *testing.T) {
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -3906,7 +3919,7 @@ func TestProgressIssueScanLifecycleConfiguredRunnersSurfaceReadyForHumanPR(t *te
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos, create a FactoryOrder, research, debate, design, implement, run adversarial review, drive blockers to zero, and surface a ready-for-Human PR.",
-			Labels: []string{"civilization", "autonomy"},
+			Labels: []string{"civilization", "autonomy", "cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -5554,6 +5567,7 @@ func issueScanReadyImplementationTaskFixtureForTest(t *testing.T) (*Runtime, *op
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -5853,6 +5867,7 @@ func TestCompleteIssueScanLifecycleStageRejectsMissingRequiredEvidence(t *testin
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -5914,6 +5929,7 @@ func TestCompleteIssueScanLifecycleStageRejectsMissingRoleOutput(t *testing.T) {
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -5975,6 +5991,7 @@ func TestRecordIssueScanStageRoleOutputProjectsRoleRuntimeEvidence(t *testing.T)
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6030,6 +6047,7 @@ func TestCivilizationAssemblyProjectionProjectsDirectRoleOutputArtifact(t *testi
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6090,6 +6108,7 @@ func TestCompleteIssueScanLifecycleStageUsesRecordedRoleOutputs(t *testing.T) {
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6178,6 +6197,7 @@ func TestCompleteIssueScanLifecycleStageRejectsIdentitySpoofing(t *testing.T) {
 					Title:  "Teach the Civilization to scan issues",
 					URL:    "https://github.com/transpara-ai/hive/issues/321",
 					Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+					Labels: []string{"cc:pr-ready"},
 				}},
 				Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 			}, nil)
@@ -6241,6 +6261,7 @@ func TestCivilizationAssemblyProjectionDoesNotCompleteStageWithoutRuntimeEvidenc
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6291,6 +6312,7 @@ func TestCivilizationAssemblyProjectionDoesNotCompleteStageWithThinRuntimeEviden
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6357,6 +6379,7 @@ func TestCompleteIssueScanLifecycleStageRejectsLaterStageBeforePredecessor(t *te
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6416,6 +6439,7 @@ func TestCompleteIssueScanLifecycleStageCompletesLifecycleWithoutCompletingFacto
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6489,6 +6513,7 @@ func TestCivilizationAssemblyProjectionMarksRuntimeEvidenceRecordedBeforeTaskCom
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6552,6 +6577,7 @@ func TestAdvanceIssueScanLifecycleStageReportsAlreadyReadyWithIncompletePredeces
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6608,6 +6634,7 @@ func TestAdvanceIssueScanLifecycleStageRejectsUnexpectedDependencies(t *testing.
 			Title:  "Teach the Civilization to scan issues",
 			URL:    "https://github.com/transpara-ai/hive/issues/321",
 			Body:   "The Civilization should scan Transpara-AI repos.\nThen create a ready-for-Human PR.",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
 	}, nil)
@@ -6911,11 +6938,77 @@ func TestQueueIssueScanRunLaunchRejectsNonTransparaAIRepo(t *testing.T) {
 			Repo:   "example/hive",
 			Number: 1,
 			Title:  "wrong org",
+			Labels: []string{"cc:pr-ready"},
 		}},
 		Budget: RunLaunchBudget{MaxIterations: 1, MaxCostUSD: 0},
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "transpara-ai") {
 		t.Fatalf("error = %v, want transpara-ai repo rejection", err)
+	}
+}
+
+func TestQueueIssueScanRunLaunchRejectsNonPRReadyIssue(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	_, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 204,
+			Title:  "Human-required value-allocation surface candidate",
+			URL:    "https://github.com/transpara-ai/hive/issues/204",
+			Labels: []string{"cc:intake", "cc:needs-human-scope", "cc:protected-action"},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 1, MaxCostUSD: 0},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "no PR-ready candidates") {
+		t.Fatalf("error = %v, want no PR-ready candidate rejection", err)
+	}
+	requireRunLaunchEvents(t, rt.store, EventTypeFactoryRunRequested, 0)
+}
+
+func TestQueueIssueScanRunLaunchFiltersNonPRReadyCandidatesBeforeSelection(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 204,
+				Title:  "Human-required value-allocation surface candidate",
+				URL:    "https://github.com/transpara-ai/hive/issues/204",
+				Labels: []string{"cc:intake", "cc:needs-human-scope", "cc:protected-action"},
+			},
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 205,
+				Title:  "PR-ready issue-scan hardening",
+				URL:    "https://github.com/transpara-ai/hive/issues/205",
+				Labels: []string{"cc:intake", "cc:pr-ready"},
+			},
+		},
+		Budget: RunLaunchBudget{MaxIterations: 1, MaxCostUSD: 0},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	if queued.Selected.Number != 205 {
+		t.Fatalf("selected = %+v, want PR-ready issue 205", queued.Selected)
+	}
+	requestEvents := requireRunLaunchEvents(t, rt.store, EventTypeFactoryRunRequested, 1)
+	content := requestEvents[0].Content().(FactoryRunRequestedContent)
+	if len(content.Sources) != 1 || !strings.Contains(content.Sources[0].Ref, "/issues/205") {
+		t.Fatalf("sources = %+v, want only PR-ready issue source", content.Sources)
+	}
+	var brief struct {
+		CandidateIssues []struct {
+			Number int `json:"number"`
+		} `json:"candidate_issues"`
+	}
+	if err := json.Unmarshal(content.Brief, &brief); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	if len(brief.CandidateIssues) != 1 || brief.CandidateIssues[0].Number != 205 {
+		t.Fatalf("brief candidate issues = %+v, want only issue 205", brief.CandidateIssues)
 	}
 }
 
@@ -6927,6 +7020,7 @@ func issueScanStageContractTargetForTest(t *testing.T, rt *Runtime, writer *oper
 		Title:  "Teach the Civilization to scan issues",
 		URL:    "https://github.com/transpara-ai/hive/issues/321",
 		Body:   "The Civilization should scan Transpara-AI repos and surface a ready-for-Human PR.",
+		Labels: []string{"cc:pr-ready"},
 	}
 	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
 	if err != nil {
