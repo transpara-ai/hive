@@ -212,6 +212,16 @@ func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
 	}
 }
 
+func TestFactoryIssueScanRunnerContextsIsDiscoverable(t *testing.T) {
+	err := routeAndDispatch([]string{"factory"})
+	if err == nil || !strings.Contains(err.Error(), "issue-scan-runner-contexts") {
+		t.Fatalf("factory usage should mention issue-scan-runner-contexts, got %v", err)
+	}
+	if !strings.Contains(helpText(), "issue-scan-runner-contexts") {
+		t.Fatalf("top-level help should mention issue-scan-runner-contexts")
+	}
+}
+
 func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 	stdout, err := captureFactoryStdout(t, func() error {
 		return routeAndDispatch([]string{"factory", "issue-scan-runner-contracts"})
@@ -225,6 +235,92 @@ func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 	}
 	if doc.Kind != "issue_scan_runner_contracts" {
 		t.Fatalf("stdout contract kind = %q", doc.Kind)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRequiresHumanBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--run", "run_issue_001"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRequiresRunBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--human", "Michael"})
+	if err == nil || !strings.Contains(err.Error(), "--run") {
+		t.Fatalf("expected missing --run error, got %v", err)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRejectsUnknownFormat(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--human", "Michael", "--run", "run_issue_001", "--format", "yaml"})
+	if err == nil || !strings.Contains(err.Error(), "--format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRouteEmitsJSON(t *testing.T) {
+	ctx := context.Background()
+	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	t.Cleanup(fc.close)
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 214,
+				Title:  "Probe issue-scan runner contexts",
+				URL:    "https://github.com/transpara-ai/hive/issues/214",
+				Labels: []string{"cc:pr-ready"},
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+	queued, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("runIssueScanScannerCycle: %v", err)
+	}
+	if !queued.Queued || queued.QueuedRunID == "" {
+		t.Fatalf("queued = %+v, want run id", queued)
+	}
+
+	original := openFactoryRuntimeForIssueScanRunnerContexts
+	openFactoryRuntimeForIssueScanRunnerContexts = func(context.Context, string, string, string, string, ...factoryRuntimeOption) (*hive.Runtime, *factoryContext, error) {
+		return rt, &factoryContext{}, nil
+	}
+	t.Cleanup(func() { openFactoryRuntimeForIssueScanRunnerContexts = original })
+
+	stdout, err := captureFactoryStdout(t, func() error {
+		return routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--human", "Michael", "--run", queued.QueuedRunID, "--include-payload"})
+	})
+	if err != nil {
+		t.Fatalf("issue-scan-runner-contexts route: %v", err)
+	}
+	var doc hive.IssueScanRunnerContextProbeDocument
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("issue-scan-runner-contexts stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if doc.Kind != "issue_scan_runner_context_probe" || doc.RunID != queued.QueuedRunID || doc.ReadyCount != 1 {
+		t.Fatalf("stdout probe = %+v, queued=%+v", doc, queued)
+	}
+	stage := hive.IssueScanRunnerContextProbe{}
+	for _, probe := range doc.Contexts {
+		if probe.ID == "stage_role_output_runner" {
+			stage = probe
+			break
+		}
+	}
+	if !stage.Ready || len(stage.ContextPayload) == 0 {
+		t.Fatalf("stage role probe = %+v, want ready payload", stage)
 	}
 }
 
