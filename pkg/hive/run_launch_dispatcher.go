@@ -488,6 +488,7 @@ func workTaskByCanonicalTaskID(s store.Store, canonicalTaskID string) (types.Eve
 }
 
 type issueScanLifecycleStageTaskDraft struct {
+	RunID              string
 	StageID            string
 	Stage              OperatorQueuedRunLifecycleStage
 	AgentExecutionPlan []OperatorQueuedRunAgentPlanStep
@@ -555,6 +556,7 @@ func issueScanLifecycleStageTaskDraftsFromLifecycle(content FactoryRunRequestedC
 		steps := append([]OperatorQueuedRunAgentPlanStep(nil), planByStage[stage.ID]...)
 		riskClass := valueOr(order.RiskClass, "high")
 		out = append(out, issueScanLifecycleStageTaskDraft{
+			RunID:              strings.TrimSpace(content.RunID),
 			StageID:            stageID,
 			Stage:              stage,
 			AgentExecutionPlan: steps,
