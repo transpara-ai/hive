@@ -212,6 +212,16 @@ func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
 	}
 }
 
+func TestFactoryIssueScanRunnerContextsIsDiscoverable(t *testing.T) {
+	err := routeAndDispatch([]string{"factory"})
+	if err == nil || !strings.Contains(err.Error(), "issue-scan-runner-contexts") {
+		t.Fatalf("factory usage should mention issue-scan-runner-contexts, got %v", err)
+	}
+	if !strings.Contains(helpText(), "issue-scan-runner-contexts") {
+		t.Fatalf("top-level help should mention issue-scan-runner-contexts")
+	}
+}
+
 func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 	stdout, err := captureFactoryStdout(t, func() error {
 		return routeAndDispatch([]string{"factory", "issue-scan-runner-contracts"})
@@ -225,6 +235,27 @@ func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 	}
 	if doc.Kind != "issue_scan_runner_contracts" {
 		t.Fatalf("stdout contract kind = %q", doc.Kind)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRequiresHumanBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--run", "run_issue_001"})
+	if err == nil || !strings.Contains(err.Error(), "human") {
+		t.Fatalf("expected missing --human error, got %v", err)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRequiresRunBeforeStore(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--human", "Michael"})
+	if err == nil || !strings.Contains(err.Error(), "--run") {
+		t.Fatalf("expected missing --run error, got %v", err)
+	}
+}
+
+func TestFactoryIssueScanRunnerContextsRejectsUnknownFormat(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contexts", "--human", "Michael", "--run", "run_issue_001", "--format", "yaml"})
+	if err == nil || !strings.Contains(err.Error(), "--format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
 	}
 }
 

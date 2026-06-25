@@ -76,6 +76,9 @@ import (
 //   issue-scan-runner-contracts
 //               → print the external runner chain's JSON contract and operator
 //                  wiring boundaries.
+//   issue-scan-runner-contexts
+//               → print ready/not-ready context probes for one stored
+//                  issue-scan run without executing external runners.
 //   request-issue-scan-pr
 //               → derive the issue-scan draft-PR title/body/target and raise
 //                  the governed draft-PR authority request; the gate holds.
@@ -95,7 +98,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -130,6 +133,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryRunIssueScanReadyPR(rest)
 	case "issue-scan-runner-contracts":
 		return cmdFactoryIssueScanRunnerContracts(rest)
+	case "issue-scan-runner-contexts":
+		return cmdFactoryIssueScanRunnerContexts(rest)
 	case "request-issue-scan-pr":
 		return cmdFactoryRequestIssueScanPR(rest)
 	case "create-issue-scan-draft-pr":
@@ -141,11 +146,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
 	}
 }
 
