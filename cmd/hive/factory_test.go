@@ -146,6 +146,104 @@ func TestFactoryDaemonRequiresDraftPRRequestBeforeBase(t *testing.T) {
 	}
 }
 
+func TestFactoryDaemonRequireFullChainRejectsMissingPieces(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--issue-scan-stage-role-runner", "/bin/true",
+	})
+	if err == nil {
+		t.Fatal("expected full-chain preflight error")
+	}
+	for _, want := range []string{
+		"--issue-scan-require-full-chain",
+		"--issue-scan-interval",
+		"--issue-scan-repo or --issue-scan-registry",
+		"--repo-workspace-root",
+		"--issue-scan-implementation-runner",
+		"--issue-scan-review-runner",
+		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("full-chain error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestFactoryDaemonRequireFullChainRejectsGenericReadyRunner(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--issue-scan-interval", "1m",
+		"--issue-scan-repo", "transpara-ai/hive",
+		"--repo-workspace-root", "/Transpara/transpara-ai/repos",
+		"--issue-scan-stage-role-runner", "/bin/true",
+		"--issue-scan-implementation-runner", "/bin/true",
+		"--issue-scan-review-runner", "/bin/true",
+		"--issue-scan-blocker-repair-runner", "/bin/true",
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner", "/bin/true",
+		"--issue-scan-ready-pr-runner", "/bin/true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-runner") {
+		t.Fatalf("expected generic ready runner rejection, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequireFullChainRequiresScannerActivation(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--repo-workspace-root", "/Transpara/transpara-ai/repos",
+		"--issue-scan-stage-role-runner", "/bin/true",
+		"--issue-scan-implementation-runner", "/bin/true",
+		"--issue-scan-review-runner", "/bin/true",
+		"--issue-scan-blocker-repair-runner", "/bin/true",
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner", "/bin/true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-interval") || !strings.Contains(err.Error(), "--issue-scan-repo or --issue-scan-registry") {
+		t.Fatalf("expected scanner activation preflight error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonRequireFullChainReachesGitHubTokenGateWhenConfigured(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	err := routeAndDispatch([]string{
+		"factory", "daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--issue-scan-interval", "1m",
+		"--issue-scan-repo", "transpara-ai/hive",
+		"--repo-workspace-root", "/Transpara/transpara-ai/repos",
+		"--issue-scan-stage-role-runner", "/bin/true",
+		"--issue-scan-implementation-runner", "/bin/true",
+		"--issue-scan-review-runner", "/bin/true",
+		"--issue-scan-blocker-repair-runner", "/bin/true",
+		"--issue-scan-draft-pr-request",
+		"--issue-scan-draft-pr-create",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner", "/bin/true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("expected configured full chain to reach GitHub token gate, got %v", err)
+	}
+	if strings.Contains(err.Error(), "--issue-scan-require-full-chain requires") {
+		t.Fatalf("full-chain preflight should pass when all flags are present, got %v", err)
+	}
+}
+
 func TestFactoryDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-ready-pr-mark-ready"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-ready-pr-review-runner") {

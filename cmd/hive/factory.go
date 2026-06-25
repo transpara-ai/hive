@@ -166,6 +166,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 	issueScanMaxCostUSD := fs.Float64("issue-scan-max-cost-usd", 25, "Queued issue-scan run cost budget in USD")
 	issueScanMaxNewRuns := fs.Int("issue-scan-max-new-runs", 1, "Maximum new issue-scan runs this daemon instance may queue; bounds unattended scan cost")
 	issueScanRegistry := fs.Bool("issue-scan-registry", false, "Scan every Transpara-AI GitHub repo in repos.json when no --issue-scan-repo is supplied")
+	issueScanRequireFullChain := fs.Bool("issue-scan-require-full-chain", false, "Fail startup unless the issue-scan daemon is configured through ready-for-Human PR evidence")
 	issueScanRepos := repeatedStringFlag{}
 	issueScanLabels := repeatedStringFlag{}
 	fs.Var(&issueScanRepos, "issue-scan-repo", "Transpara-AI repo slug to scan from daemon, e.g. transpara-ai/hive (repeatable; required with --issue-scan-interval unless --issue-scan-registry is set)")
@@ -239,6 +240,26 @@ func cmdGovernedDaemon(name string, args []string) error {
 	}
 	if *readyPRMarkReady && *approveRoles {
 		return fmt.Errorf("--issue-scan-ready-pr-mark-ready cannot be combined with --approve-roles")
+	}
+	if *issueScanRequireFullChain {
+		if err := requireIssueScanFullChainConfig(issueScanFullChainConfig{
+			IssueScanInterval:     *issueScanInterval,
+			HasIssueScanRepos:     len(issueScanRepos) > 0,
+			IssueScanRegistry:     *issueScanRegistry,
+			RepoWorkspaceRoot:     *repoWorkspaceRoot,
+			StageRoleRunner:       *stageRoleRunner,
+			ImplementationRunner:  *implementationRunner,
+			ReviewRunner:          *reviewRunner,
+			BlockerRepairRunner:   *blockerRepairRunner,
+			DraftPRRequest:        *issueScanDraftPRRequest,
+			DraftPRCreate:         *issueScanDraftPRCreate,
+			ReadyPRMarkReady:      *readyPRMarkReady,
+			ReadyPRReviewRunner:   *readyPRReviewRunner,
+			GenericReadyPRRunner:  *readyPRRunner,
+			GenericReadyPRRunArgs: len(readyPRRunnerArgs) > 0,
+		}); err != nil {
+			return err
+		}
 	}
 	var issueScanScanner *issueScanScannerConfig
 	if *issueScanInterval > 0 {
@@ -375,6 +396,75 @@ func cmdGovernedDaemon(name string, args []string) error {
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
 	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+}
+
+type issueScanFullChainConfig struct {
+	IssueScanInterval     time.Duration
+	HasIssueScanRepos     bool
+	IssueScanRegistry     bool
+	RepoWorkspaceRoot     string
+	StageRoleRunner       string
+	ImplementationRunner  string
+	ReviewRunner          string
+	BlockerRepairRunner   string
+	DraftPRRequest        bool
+	DraftPRCreate         bool
+	ReadyPRMarkReady      bool
+	ReadyPRReviewRunner   string
+	GenericReadyPRRunner  string
+	GenericReadyPRRunArgs bool
+}
+
+func requireIssueScanFullChainConfig(cfg issueScanFullChainConfig) error {
+	var missing []string
+	var conflicts []string
+	if cfg.IssueScanInterval <= 0 {
+		missing = append(missing, "--issue-scan-interval")
+	}
+	if !cfg.HasIssueScanRepos && !cfg.IssueScanRegistry {
+		missing = append(missing, "--issue-scan-repo or --issue-scan-registry")
+	}
+	if strings.TrimSpace(cfg.RepoWorkspaceRoot) == "" {
+		missing = append(missing, "--repo-workspace-root")
+	}
+	if strings.TrimSpace(cfg.StageRoleRunner) == "" {
+		missing = append(missing, "--issue-scan-stage-role-runner")
+	}
+	if strings.TrimSpace(cfg.ImplementationRunner) == "" {
+		missing = append(missing, "--issue-scan-implementation-runner")
+	}
+	if strings.TrimSpace(cfg.ReviewRunner) == "" {
+		missing = append(missing, "--issue-scan-review-runner")
+	}
+	if strings.TrimSpace(cfg.BlockerRepairRunner) == "" {
+		missing = append(missing, "--issue-scan-blocker-repair-runner")
+	}
+	if !cfg.DraftPRRequest {
+		missing = append(missing, "--issue-scan-draft-pr-request")
+	}
+	if !cfg.DraftPRCreate {
+		missing = append(missing, "--issue-scan-draft-pr-create")
+	}
+	if !cfg.ReadyPRMarkReady {
+		missing = append(missing, "--issue-scan-ready-pr-mark-ready")
+	}
+	if strings.TrimSpace(cfg.ReadyPRReviewRunner) == "" {
+		missing = append(missing, "--issue-scan-ready-pr-review-runner")
+	}
+	if strings.TrimSpace(cfg.GenericReadyPRRunner) != "" || cfg.GenericReadyPRRunArgs {
+		conflicts = append(conflicts, "--issue-scan-ready-pr-runner")
+	}
+	if len(missing) > 0 || len(conflicts) > 0 {
+		var parts []string
+		if len(missing) > 0 {
+			parts = append(parts, "requires "+strings.Join(missing, ", "))
+		}
+		if len(conflicts) > 0 {
+			parts = append(parts, "cannot be combined with "+strings.Join(conflicts, ", "))
+		}
+		return fmt.Errorf("--issue-scan-require-full-chain %s", strings.Join(parts, "; "))
+	}
+	return nil
 }
 
 // cmdFactoryOrder submits one Order into the (separately running) daemon by

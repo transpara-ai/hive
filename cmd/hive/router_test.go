@@ -79,6 +79,21 @@ func TestCmdCivilizationDaemonReadyPRMarkReadyRequiresReviewRunner(t *testing.T)
 	}
 }
 
+func TestCmdCivilizationDaemonRequireFullChainRejectsBeforeSeedSpec(t *testing.T) {
+	err := cmdCivilization([]string{
+		"daemon",
+		"--human", "Michael",
+		"--issue-scan-require-full-chain",
+		"--seed-spec", "/nonexistent/spec.md",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-require-full-chain") || !strings.Contains(err.Error(), "--issue-scan-stage-role-runner") {
+		t.Fatalf("expected full-chain preflight error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "ingest seed-spec") || strings.Contains(err.Error(), "read spec") {
+		t.Fatalf("full-chain preflight must fire before seed-spec ingest, got: %v", err)
+	}
+}
+
 func TestCmdCivilizationDaemonSeedSpecStillIngestsBeforeLoop(t *testing.T) {
 	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--seed-spec", "/nonexistent/spec.md"})
 	if err == nil || !strings.Contains(err.Error(), "ingest seed-spec") || !strings.Contains(err.Error(), "read spec") {
