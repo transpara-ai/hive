@@ -51,6 +51,20 @@ OnFailure=hive.service
 	}
 }
 
+func TestValidateReadOnlyObserverUnitRejectsHiveRuntimeOnSuccessWake(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+OnSuccess=hive.service
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want OnSuccess hive runtime rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "onsuccess") {
+		t.Fatalf("error = %v, want OnSuccess called out", err)
+	}
+}
+
 func TestValidateReadOnlyObserverUnitRejectsContinuedHiveRuntimeDependencies(t *testing.T) {
 	unit := `[Unit]
 Description=Civilization live monitor
@@ -60,6 +74,21 @@ After=network-online.target \
 	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
 	if err == nil {
 		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want continued hive runtime dependency rejection")
+	}
+	if !strings.Contains(err.Error(), "hive.service") {
+		t.Fatalf("error = %v, want hive.service target called out", err)
+	}
+}
+
+func TestValidateReadOnlyObserverUnitRejectsCommentContinuationHiveRuntimeDependencies(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+# disabled \
+Wants=hive.service
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want hidden hive runtime dependency rejection")
 	}
 	if !strings.Contains(err.Error(), "hive.service") {
 		t.Fatalf("error = %v, want hive.service target called out", err)

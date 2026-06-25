@@ -1084,11 +1084,12 @@ func openFactoryRuntime(ctx context.Context, dsn, humanName, repoPath, repoWorks
 		repoPath = "."
 	}
 	cfg := hive.Config{
-		Store:             fc.store,
-		Actors:            fc.actors, // hive.New verifies the human and registers the system actor.
-		HumanID:           fc.humanID,
-		RepoPath:          repoPath,
-		RepoWorkspaceRoot: repoWorkspaceRoot,
+		Store:                        fc.store,
+		Actors:                       fc.actors, // hive.New verifies the human and registers the system actor.
+		HumanID:                      fc.humanID,
+		RepoPath:                     repoPath,
+		RepoWorkspaceRoot:            repoWorkspaceRoot,
+		IssueScanTargetStateResolver: ghIssueTargetStateResolver,
 	}
 	for _, opt := range opts {
 		if opt != nil {

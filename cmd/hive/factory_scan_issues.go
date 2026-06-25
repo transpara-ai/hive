@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -426,6 +427,70 @@ func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []
 		return nil, fmt.Errorf("decode gh issue list %s: %w", repo, err)
 	}
 	return issues, nil
+}
+
+func ghIssueTargetStateResolver(ctx context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+	return scanGitHubIssueTargetState(ctx, repo, number)
+}
+
+func scanGitHubIssueTargetState(ctx context.Context, repo string, number int) (hive.IssueScanTargetState, error) {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" {
+		return hive.IssueScanTargetState{}, fmt.Errorf("repo is required")
+	}
+	if number <= 0 {
+		return hive.IssueScanTargetState{}, fmt.Errorf("issue number must be greater than zero")
+	}
+	args := []string{"issue", "view", strconv.Itoa(number), "--repo", repo, "--json", "number,url,state,stateReason,labels"}
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return hive.IssueScanTargetState{}, fmt.Errorf("gh issue view %s#%d: %v: %s", repo, number, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return hive.IssueScanTargetState{}, fmt.Errorf("gh issue view %s#%d: %w", repo, number, err)
+	}
+	state, err := parseGitHubIssueTargetState(repo, output)
+	if err != nil {
+		return hive.IssueScanTargetState{}, fmt.Errorf("decode gh issue view %s#%d: %w", repo, number, err)
+	}
+	if state.Number == 0 {
+		state.Number = number
+	}
+	return state, nil
+}
+
+func parseGitHubIssueTargetState(repo string, output []byte) (hive.IssueScanTargetState, error) {
+	var raw struct {
+		Number      int    `json:"number"`
+		URL         string `json:"url"`
+		State       string `json:"state"`
+		StateReason string `json:"stateReason"`
+		Labels      []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return hive.IssueScanTargetState{}, err
+	}
+	labels := make([]string, 0, len(raw.Labels))
+	for _, label := range raw.Labels {
+		if name := strings.TrimSpace(label.Name); name != "" {
+			labels = append(labels, name)
+		}
+	}
+	state := strings.ToLower(strings.TrimSpace(raw.State))
+	if state == "" {
+		state = "open"
+	}
+	return hive.IssueScanTargetState{
+		Repository:  strings.ToLower(strings.TrimSpace(repo)),
+		Number:      raw.Number,
+		State:       state,
+		StateReason: strings.ToLower(strings.TrimSpace(raw.StateReason)),
+		URL:         strings.TrimSpace(raw.URL),
+		Labels:      labels,
+	}, nil
 }
 
 func parseGitHubIssueCandidates(repo string, output []byte) ([]hive.GitHubIssueCandidate, error) {

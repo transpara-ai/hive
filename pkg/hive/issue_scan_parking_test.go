@@ -113,9 +113,10 @@ func TestParkedIssueScanRunStopsDirectLifecycleHelpers(t *testing.T) {
 func TestIssueScanRunParkedScansBeyondProjectionPage(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	requestEvent := appendValidatedRunLaunch(t, rt.store, writer, nil)
-	targetRunID := "run_parked_000"
+	runIDs := make([]string, 0, defaultOperatorProjectionLimit+5)
 	for i := 0; i < defaultOperatorProjectionLimit+5; i++ {
 		runID := fmt.Sprintf("run_parked_%03d", i)
+		runIDs = append(runIDs, runID)
 		if _, err := rt.recordIssueScanRunParked(runID, issueScanRunParkingDecision{
 			FactoryOrderID:   fmt.Sprintf("fo_issue_scan_parked_%03d", i),
 			Repository:       "transpara-ai/hive",
@@ -128,6 +129,28 @@ func TestIssueScanRunParkedScansBeyondProjectionPage(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("recordIssueScanRunParked %d: %v", i, err)
 		}
+	}
+
+	firstPage, err := rt.store.ByType(EventTypeIssueScanRunParked, defaultOperatorProjectionLimit, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("ByType first page: %v", err)
+	}
+	firstPageRunIDs := map[string]struct{}{}
+	for _, ev := range firstPage.Items() {
+		content, ok := ev.Content().(IssueScanRunParkedContent)
+		if ok {
+			firstPageRunIDs[content.RunID] = struct{}{}
+		}
+	}
+	targetRunID := ""
+	for _, runID := range runIDs {
+		if _, seen := firstPageRunIDs[runID]; !seen {
+			targetRunID = runID
+			break
+		}
+	}
+	if targetRunID == "" {
+		t.Fatalf("expected at least one parked run beyond first page of %d", defaultOperatorProjectionLimit)
 	}
 
 	content, eventID, ok, err := rt.issueScanRunParked(targetRunID)

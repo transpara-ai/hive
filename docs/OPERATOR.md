@@ -129,7 +129,8 @@ EventGraph, telemetry, or Work state, but it must not start or order the Hive
 runtime.
 
 Before installing or changing monitor units, validate that the unit does not
-declare `Wants=`, `Requires=`, `BindsTo=`, `PartOf=`, `Upholds=`, or `After=`
+declare `Wants=`, `Requires=`, `BindsTo=`, `PartOf=`, `Upholds=`, `After=`,
+`OnFailure=`, or `OnSuccess=`
 against `hive.service`, `hive@*.service`, or another Hive runtime unit. The
 runtime exposes `ValidateReadOnlyObserverUnit` so local service templates can
 be checked in tests before deployment.

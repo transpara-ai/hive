@@ -1859,6 +1859,33 @@ func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
 	}
 }
 
+func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
+	raw := []byte(`{
+		"number": 225,
+		"url": "https://github.com/transpara-ai/hive/issues/225",
+		"state": "CLOSED",
+		"stateReason": "COMPLETED",
+		"labels": [
+			{"name": "cc:pr-ready"},
+			{"name": "cc:needs-human-scope"}
+		]
+	}`)
+
+	state, err := parseGitHubIssueTargetState("transpara-ai/hive", raw)
+	if err != nil {
+		t.Fatalf("parseGitHubIssueTargetState: %v", err)
+	}
+	if state.Repository != "transpara-ai/hive" || state.Number != 225 || state.URL == "" {
+		t.Fatalf("state identity = %+v", state)
+	}
+	if state.State != "closed" || state.StateReason != "completed" {
+		t.Fatalf("state = %q reason = %q; want closed/completed", state.State, state.StateReason)
+	}
+	if got := strings.Join(state.Labels, ","); got != "cc:pr-ready,cc:needs-human-scope" {
+		t.Fatalf("labels = %q", got)
+	}
+}
+
 func TestFactoryScanIssuesRejectsNonPRReadyGitHubIssueBeforeFactoryOpen(t *testing.T) {
 	dir := t.TempDir()
 	ghPath := filepath.Join(dir, "gh")
