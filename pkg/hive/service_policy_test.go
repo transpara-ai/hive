@@ -37,6 +37,35 @@ Requires=hive@transpara-ai.service
 	}
 }
 
+func TestValidateReadOnlyObserverUnitRejectsHiveRuntimeOnFailureWake(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+OnFailure=hive.service
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want OnFailure hive runtime rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "onfailure") {
+		t.Fatalf("error = %v, want OnFailure called out", err)
+	}
+}
+
+func TestValidateReadOnlyObserverUnitRejectsContinuedHiveRuntimeDependencies(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+After=network-online.target \
+  hive.service
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want continued hive runtime dependency rejection")
+	}
+	if !strings.Contains(err.Error(), "hive.service") {
+		t.Fatalf("error = %v, want hive.service target called out", err)
+	}
+}
+
 func TestValidateReadOnlyObserverUnitAllowsReadOnlyMonitorDependencies(t *testing.T) {
 	unit := `[Unit]
 Description=Civilization live monitor

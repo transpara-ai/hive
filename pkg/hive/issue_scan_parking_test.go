@@ -110,6 +110,41 @@ func TestParkedIssueScanRunStopsDirectLifecycleHelpers(t *testing.T) {
 	}
 }
 
+func TestIssueScanRunParkedScansBeyondProjectionPage(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	requestEvent := appendValidatedRunLaunch(t, rt.store, writer, nil)
+	targetRunID := "run_parked_000"
+	for i := 0; i < defaultOperatorProjectionLimit+5; i++ {
+		runID := fmt.Sprintf("run_parked_%03d", i)
+		if _, err := rt.recordIssueScanRunParked(runID, issueScanRunParkingDecision{
+			FactoryOrderID:   fmt.Sprintf("fo_issue_scan_parked_%03d", i),
+			Repository:       "transpara-ai/hive",
+			IssueNumber:      225 + i,
+			BlockerType:      IssueScanParkBlockerStaleTarget,
+			Detail:           "target is closed",
+			RequiredAction:   "queue a fresh run against a live target",
+			TargetIssueState: "closed",
+			SourceRefs:       []string{requestEvent.ID().Value()},
+		}); err != nil {
+			t.Fatalf("recordIssueScanRunParked %d: %v", i, err)
+		}
+	}
+
+	content, eventID, ok, err := rt.issueScanRunParked(targetRunID)
+	if err != nil {
+		t.Fatalf("issueScanRunParked: %v", err)
+	}
+	if !ok {
+		t.Fatalf("issueScanRunParked did not find %s after more than one projection page", targetRunID)
+	}
+	if eventID.IsZero() {
+		t.Fatal("issueScanRunParked returned zero event id")
+	}
+	if content.RunID != targetRunID {
+		t.Fatalf("parked run = %q; want %q", content.RunID, targetRunID)
+	}
+}
+
 func TestProgressIssueScanLifecycleParksHumanScopeAndProtectedLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

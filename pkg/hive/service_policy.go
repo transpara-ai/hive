@@ -6,12 +6,19 @@ import (
 )
 
 var readOnlyObserverForbiddenUnitKeys = map[string]struct{}{
-	"after":    {},
-	"bindsto":  {},
-	"partof":   {},
-	"requires": {},
-	"upholds":  {},
-	"wants":    {},
+	"after":     {},
+	"bindsto":   {},
+	"onfailure": {},
+	"onsuccess": {},
+	"partof":    {},
+	"requires":  {},
+	"upholds":   {},
+	"wants":     {},
+}
+
+type systemdLogicalLine struct {
+	number int
+	text   string
 }
 
 // ValidateReadOnlyObserverUnit rejects systemd unit text that lets a monitor,
@@ -21,8 +28,8 @@ func ValidateReadOnlyObserverUnit(name, unitText string) error {
 	if unitName == "" {
 		unitName = "read-only observer unit"
 	}
-	for lineNumber, rawLine := range strings.Split(unitText, "\n") {
-		line := strings.TrimSpace(rawLine)
+	for _, logical := range systemdLogicalLines(unitText) {
+		line := strings.TrimSpace(logical.text)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
 			continue
 		}
@@ -36,11 +43,43 @@ func ValidateReadOnlyObserverUnit(name, unitText string) error {
 		}
 		for _, target := range systemdUnitValues(rawValue) {
 			if hiveRuntimeUnitTarget(target) {
-				return fmt.Errorf("%s line %d: read-only observers must not declare %s=%s", unitName, lineNumber+1, key, target)
+				return fmt.Errorf("%s line %d: read-only observers must not declare %s=%s", unitName, logical.number, key, target)
 			}
 		}
 	}
 	return nil
+}
+
+func systemdLogicalLines(unitText string) []systemdLogicalLine {
+	rawLines := strings.Split(unitText, "\n")
+	out := make([]systemdLogicalLine, 0, len(rawLines))
+	var current strings.Builder
+	startLine := 0
+	for i, rawLine := range rawLines {
+		lineNumber := i + 1
+		line := strings.TrimRight(rawLine, " \t\r")
+		continued := strings.HasSuffix(line, `\`)
+		if continued {
+			line = strings.TrimRight(strings.TrimSuffix(line, `\`), " \t")
+		}
+		if startLine == 0 {
+			startLine = lineNumber
+		}
+		if current.Len() > 0 {
+			current.WriteByte(' ')
+		}
+		current.WriteString(line)
+		if continued {
+			continue
+		}
+		out = append(out, systemdLogicalLine{number: startLine, text: current.String()})
+		current.Reset()
+		startLine = 0
+	}
+	if current.Len() > 0 {
+		out = append(out, systemdLogicalLine{number: startLine, text: current.String()})
+	}
+	return out
 }
 
 func systemdUnitValues(raw string) []string {
