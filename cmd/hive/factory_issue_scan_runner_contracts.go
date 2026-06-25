@@ -16,6 +16,7 @@ type issueScanRunnerContractsDocument struct {
 	TerminalStagePaths        []issueScanTerminalPath   `json:"terminal_stage_paths"`
 	GovernanceBoundaries      []string                  `json:"governance_boundaries"`
 	ExternalRunnerContracts   []issueScanRunnerContract `json:"external_runner_contracts"`
+	ManagedBoundaryContracts  []issueScanRunnerContract `json:"managed_boundary_contracts,omitempty"`
 	InternalFinalizerContract *issueScanRunnerContract  `json:"internal_finalizer_contract,omitempty"`
 	OperatorNotes             []string                  `json:"operator_notes"`
 }
@@ -292,6 +293,73 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				AuthorityBoundaries: []string{
 					"used only with --issue-scan-ready-pr-mark-ready",
 					"does not approve, merge, deploy, or perform production migrations",
+				},
+			},
+		},
+		ManagedBoundaryContracts: []issueScanRunnerContract{
+			{
+				ID:                 "draft_pr_authority_requester",
+				Stage:              "draft_pr_authority_request",
+				DaemonFlag:         "--issue-scan-draft-pr-request",
+				ProgressFlag:       "--issue-scan-draft-pr-request",
+				StandaloneCommand:  "hive factory request-issue-scan-pr",
+				StdinContextKind:   "issue_scan_draft_pr_authority_request_runner_context",
+				StdinContextType:   "hive.IssueScanDraftPRAuthorityRequestRunnerContext",
+				StdoutContractType: "hive.IssueScanDraftPRAuthorityRequestRunnerResult",
+				StdoutRequiredFields: []string{
+					"base_ref",
+					"base_sha",
+					"nonce",
+				},
+				Preconditions: []string{
+					"zero-blocker evidence is complete",
+					"ready-for-Human stage has no draft PR receipt yet",
+					"matching authority request is not already recorded",
+				},
+				RecordedArtifacts: []string{
+					"authority.request.recorded for pull_request.create",
+				},
+				ValidationBoundaries: []string{
+					"base_sha is resolved from the configured repository base ref",
+					"head_sha is pinned to the implementation Operate commit",
+					"request is held for Human approval by default",
+				},
+				AuthorityBoundaries: []string{
+					"raises an approval request only",
+					"does not create, mark ready, approve, merge, or deploy a PR",
+				},
+			},
+			{
+				ID:                 "draft_pr_creation_runner",
+				Stage:              "draft_pr_creation",
+				DaemonFlag:         "--issue-scan-draft-pr-create",
+				ProgressFlag:       "--issue-scan-draft-pr-create",
+				StandaloneCommand:  "hive factory create-issue-scan-draft-pr",
+				StdinContextKind:   "issue_scan_draft_pr_creation_runner_context",
+				StdinContextType:   "hive.IssueScanDraftPRCreationRunnerContext",
+				StdoutContractType: "hive.IssueScanDraftPRCreationResult",
+				StdoutRequiredFields: []string{
+					"request_id",
+					"draft_pr_receipt",
+					"head_sha",
+				},
+				Preconditions: []string{
+					"recorded Human approval exists for the draft PR authority request",
+					"approved scope matches the run-derived repo/base/head/title/body/policy/nonce target",
+					"ready-for-Human stage has no draft PR receipt yet",
+				},
+				RecordedArtifacts: []string{
+					"issue_scan_draft_pr_creation_reservation",
+					"transpara_ai_draft_pr_receipt",
+				},
+				ValidationBoundaries: []string{
+					"requires GITHUB_TOKEN",
+					"verifies title/body hashes against the recorded Human-approved scope",
+					"refuses duplicate creation after reservation without receipt",
+				},
+				AuthorityBoundaries: []string{
+					"creates a draft PR only after Human approval",
+					"does not mark ready, approve, merge, deploy, or perform production migrations",
 				},
 			},
 		},

@@ -84,6 +84,14 @@ func TestProbeIssueScanRunnerContextsReportsPlanningContext(t *testing.T) {
 	if blocker.ContextType != issueScanProbeContextTypeName(t, reflect.TypeOf(IssueScanBlockerRepairRunnerContext{})) || blocker.ContextKind != issueScanBlockerRepairRunnerContextKind {
 		t.Fatalf("blocker context metadata = %+v", blocker)
 	}
+	draftRequest := requireIssueScanProbe(t, doc, "draft_pr_authority_requester")
+	if draftRequest.ContextType != issueScanProbeContextTypeName(t, reflect.TypeOf(IssueScanDraftPRAuthorityRequestRunnerContext{})) || draftRequest.ContextKind != issueScanDraftPRAuthorityRequestRunnerContextKind {
+		t.Fatalf("draft PR authority request metadata = %+v", draftRequest)
+	}
+	draftCreate := requireIssueScanProbe(t, doc, "draft_pr_creation_runner")
+	if draftCreate.ContextType != issueScanProbeContextTypeName(t, reflect.TypeOf(IssueScanDraftPRCreationRunnerContext{})) || draftCreate.ContextKind != issueScanDraftPRCreationRunnerContextKind {
+		t.Fatalf("draft PR creation metadata = %+v", draftCreate)
+	}
 	readyPR := requireIssueScanProbe(t, doc, "ready_pr_evidence_runner")
 	if readyPR.ContextType != issueScanProbeContextTypeName(t, reflect.TypeOf(IssueScanReadyPRRunnerContext{})) || readyPR.ContextKind != issueScanReadyPRRunnerContextKind {
 		t.Fatalf("ready PR context metadata = %+v", readyPR)
@@ -164,12 +172,105 @@ func TestProbeIssueScanRunnerContextsDoesNotRecordRunnerOutputsForDeepContexts(t
 	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "blocker_repair_runner", issueScanBlockerRepairStageID))
 
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "draft_pr_authority_requester", issueScanReadyForHumanPRStageID))
+
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "draft_pr_creation_runner", issueScanReadyForHumanPRStageID))
+
 	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
 	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "ready_pr_evidence_runner", issueScanReadyForHumanPRStageID))
 	assertIssueScanProbeObservedStateTransitionBaseline(t, baselines)
+}
+
+func TestProbeIssueScanRunnerContextsReportsDraftPRBoundaryContexts(t *testing.T) {
+	rt, writer, runID, orderID, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
+
+	doc, err := rt.ProbeIssueScanRunnerContexts(runID, true)
+	if err != nil {
+		t.Fatalf("ProbeIssueScanRunnerContexts before request: %v", err)
+	}
+	requestProbe := requireIssueScanProbe(t, doc, "draft_pr_authority_requester")
+	if !requestProbe.Ready || requestProbe.StageID != issueScanReadyForHumanPRStageID || requestProbe.StageTaskID != readyStage.ID.Value() || requestProbe.TaskID != implementationTask.ID.Value() {
+		t.Fatalf("draft request probe = %+v, want ready terminal-stage context", requestProbe)
+	}
+	var requestContext IssueScanDraftPRAuthorityRequestRunnerContext
+	if err := json.Unmarshal(requestProbe.ContextPayload, &requestContext); err != nil {
+		t.Fatalf("decode draft request context: %v", err)
+	}
+	if requestContext.Kind != issueScanDraftPRAuthorityRequestRunnerContextKind || requestContext.RunID != runID || requestContext.FactoryOrderID != orderID || requestContext.OperateCommit != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("draft request context = %+v", requestContext)
+	}
+	createProbe := requireIssueScanProbe(t, doc, "draft_pr_creation_runner")
+	if createProbe.Ready || createProbe.NotReadyReason == "" {
+		t.Fatalf("draft creation probe before approval = %+v, want not-ready reason", createProbe)
+	}
+
+	attachIssueScanAuthorityGraphForTest(t, rt)
+	requestResult, err := rt.RaiseIssueScanDraftPRAuthorityRequest(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr")
+	if err != nil {
+		t.Fatalf("RaiseIssueScanDraftPRAuthorityRequest: %v", err)
+	}
+	doc, err = rt.ProbeIssueScanRunnerContexts(runID, true)
+	if err != nil {
+		t.Fatalf("ProbeIssueScanRunnerContexts after request: %v", err)
+	}
+	requestProbe = requireIssueScanProbe(t, doc, "draft_pr_authority_requester")
+	if requestProbe.Ready || !strings.Contains(requestProbe.NotReadyReason, "waiting for recorded Human approval") {
+		t.Fatalf("draft request probe after recorded request = %+v, want pending approval handoff", requestProbe)
+	}
+	createProbe = requireIssueScanProbe(t, doc, "draft_pr_creation_runner")
+	if createProbe.Ready || !strings.Contains(createProbe.NotReadyReason, "approved draft PR authority request") {
+		t.Fatalf("draft creation probe before decision = %+v, want approval wait", createProbe)
+	}
+
+	seedApprovedIssueScanDraftPRAuthorityDecisionForTest(t, rt, writer, requestResult)
+	doc, err = rt.ProbeIssueScanRunnerContexts(runID, true)
+	if err != nil {
+		t.Fatalf("ProbeIssueScanRunnerContexts after approval: %v", err)
+	}
+	requestProbe = requireIssueScanProbe(t, doc, "draft_pr_authority_requester")
+	if requestProbe.Ready || !strings.Contains(requestProbe.NotReadyReason, "is approved") {
+		t.Fatalf("draft request probe after approval = %+v, want approved handoff", requestProbe)
+	}
+	createProbe = requireIssueScanProbe(t, doc, "draft_pr_creation_runner")
+	if !createProbe.Ready || createProbe.StageID != issueScanReadyForHumanPRStageID || createProbe.StageTaskID != readyStage.ID.Value() || createProbe.TaskID != implementationTask.ID.Value() {
+		t.Fatalf("draft creation probe after approval = %+v, want ready context", createProbe)
+	}
+	var creationContext IssueScanDraftPRCreationRunnerContext
+	if err := json.Unmarshal(createProbe.ContextPayload, &creationContext); err != nil {
+		t.Fatalf("decode draft creation context: %v", err)
+	}
+	if creationContext.Kind != issueScanDraftPRCreationRunnerContextKind || creationContext.RequestID != requestResult.RequestID.Value() || creationContext.ApprovedHeadSHA != "cccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("draft creation context = %+v, request=%+v", creationContext, requestResult)
+	}
+	if creationContext.DraftPRTarget.HeadSHA != requestContext.OperateCommit || creationContext.DraftPRTarget.BaseSHA != "dddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("draft creation target = %+v, request context = %+v", creationContext.DraftPRTarget, requestContext)
+	}
+
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	doc, err = rt.ProbeIssueScanRunnerContexts(runID, true)
+	if err != nil {
+		t.Fatalf("ProbeIssueScanRunnerContexts after draft receipt: %v", err)
+	}
+	requestProbe = requireIssueScanProbe(t, doc, "draft_pr_authority_requester")
+	if requestProbe.Ready || !strings.Contains(requestProbe.NotReadyReason, "draft PR receipt") || len(requestProbe.ContextPayload) != 0 {
+		t.Fatalf("draft request probe after receipt = %+v, want not-ready without payload", requestProbe)
+	}
+	createProbe = requireIssueScanProbe(t, doc, "draft_pr_creation_runner")
+	if createProbe.Ready || !strings.Contains(createProbe.NotReadyReason, "draft PR receipt") || len(createProbe.ContextPayload) != 0 {
+		t.Fatalf("draft creation probe after receipt = %+v, want not-ready without payload", createProbe)
+	}
 }
 
 func TestProbeIssueScanRunnerContextsOmitsPayloadWhenNotRequested(t *testing.T) {

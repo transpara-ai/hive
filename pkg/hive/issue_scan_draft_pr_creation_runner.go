@@ -10,6 +10,30 @@ import (
 	"github.com/transpara-ai/hive/pkg/safety"
 )
 
+const issueScanDraftPRCreationRunnerContextKind = "issue_scan_draft_pr_creation_runner_context"
+
+// IssueScanDraftPRCreationRunnerContext summarizes the approved draft-PR
+// creation gate for probes and operators. It is read-only context; creation
+// still requires RunConfiguredIssueScanDraftPRCreation with a configured
+// creator, and it never marks a PR ready, approves, merges, or deploys.
+type IssueScanDraftPRCreationRunnerContext struct {
+	Kind                 string                        `json:"kind"`
+	LifecycleVersion     string                        `json:"lifecycle_version"`
+	RunID                string                        `json:"run_id"`
+	FactoryOrderID       string                        `json:"factory_order_id"`
+	Repository           string                        `json:"repository"`
+	RequestID            string                        `json:"request_id"`
+	ReadyStageTaskID     string                        `json:"ready_stage_task_id"`
+	BlockerStageTaskID   string                        `json:"blocker_stage_task_id"`
+	ImplementationTaskID string                        `json:"implementation_task_id"`
+	SelectedIssue        IssueScanStageRoleOutputIssue `json:"selected_issue"`
+	DraftPRTitle         string                        `json:"draft_pr_title"`
+	DraftPRTarget        DraftPRTarget                 `json:"draft_pr_target"`
+	ApprovedHeadSHA      string                        `json:"approved_head_sha"`
+	ChangedFilesSummary  string                        `json:"changed_files_summary,omitempty"`
+	BoundaryDisclaimers  []string                      `json:"boundary_disclaimers,omitempty"`
+}
+
 // RunConfiguredIssueScanDraftPRCreations creates approved issue-scan draft PRs
 // for dispatched runs when the daemon is explicitly configured with a creator.
 // It consumes only recorded approved authority decisions; without an approval it
@@ -85,4 +109,50 @@ func (r *Runtime) approvedIssueScanDraftPRAuthorityRequestForRun(runID string) (
 		return content.RequestID, true, nil
 	}
 	return types.EventID{}, false, nil
+}
+
+func (r *Runtime) issueScanDraftPRCreationRunnerContext(runID string) (IssueScanDraftPRCreationRunnerContext, bool, error) {
+	runID = strings.TrimSpace(runID)
+	if r == nil || r.store == nil {
+		return IssueScanDraftPRCreationRunnerContext{}, false, fmt.Errorf("runtime store is required")
+	}
+	requestID, ready, err := r.approvedIssueScanDraftPRAuthorityRequestForRun(runID)
+	if err != nil || !ready {
+		return IssueScanDraftPRCreationRunnerContext{}, ready, err
+	}
+	target, err := LoadApprovedDraftPRTarget(r.store, requestID.Value())
+	if err != nil {
+		return IssueScanDraftPRCreationRunnerContext{}, false, err
+	}
+	requestContext, ready, err := r.issueScanDraftPRAuthorityRequestContext(runID, target.BaseRef, target.BaseSHA, target.SingleUseNonce)
+	if err != nil || !ready {
+		return IssueScanDraftPRCreationRunnerContext{}, ready, err
+	}
+	if err := validateIssueScanApprovedDraftPRTarget(target, requestContext.DraftPRTarget); err != nil {
+		return IssueScanDraftPRCreationRunnerContext{}, false, err
+	}
+	return IssueScanDraftPRCreationRunnerContext{
+		Kind:                 issueScanDraftPRCreationRunnerContextKind,
+		LifecycleVersion:     issueScanLifecycleVersion,
+		RunID:                requestContext.RunID,
+		FactoryOrderID:       requestContext.FactoryOrderID,
+		Repository:           requestContext.Repository,
+		RequestID:            requestID.Value(),
+		ReadyStageTaskID:     requestContext.ReadyStageTaskID,
+		BlockerStageTaskID:   requestContext.BlockerStageTaskID,
+		ImplementationTaskID: requestContext.ImplementationTaskID,
+		SelectedIssue:        requestContext.SelectedIssue,
+		DraftPRTitle:         requestContext.DraftPRTitle,
+		DraftPRTarget:        target,
+		ApprovedHeadSHA:      strings.TrimSpace(target.HeadSHA),
+		ChangedFilesSummary:  requestContext.ChangedFilesSummary,
+		BoundaryDisclaimers: compactStrings([]string{
+			"draft PR creation requires recorded Human approval for this exact target",
+			"draft PR creation records a draft PR receipt only",
+			"draft PR creation is not ready-for-review state",
+			"draft PR creation is not Human merge approval",
+			"draft PR creation is not merge or deploy authorization",
+			"approved head_sha must match operate_commit before PR creation",
+		}),
+	}, true, nil
 }
