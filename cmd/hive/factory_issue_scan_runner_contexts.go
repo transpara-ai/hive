@@ -15,7 +15,7 @@ import (
 func cmdFactoryIssueScanRunnerContexts(args []string) error {
 	fs := flag.NewFlagSet("factory issue-scan-runner-contexts", flag.ContinueOnError)
 	human := fs.String("human", "", "Operator name (required)")
-	runID := fs.String("run", "", "Issue-scan queued run id (required)")
+	runID := fs.String("run", "", "Issue-scan queued run id (required; may dispatch/scaffold the queued run before reporting contexts)")
 	includePayload := fs.Bool("include-payload", false, "Include ready runner JSON context payloads")
 	format := fs.String("format", "json", "Output format (json)")
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
@@ -43,7 +43,7 @@ func cmdFactoryIssueScanRunnerContexts(args []string) error {
 	}
 	defer fc.close()
 
-	doc, err := rt.ProbeIssueScanRunnerContexts(*runID, *includePayload)
+	doc, err := rt.ProbeIssueScanRunnerContextsContext(ctx, *runID, *includePayload)
 	if err != nil {
 		return err
 	}

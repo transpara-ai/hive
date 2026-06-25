@@ -1,12 +1,20 @@
 package hive
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-const issueScanRunnerContextProbeKind = "issue_scan_runner_context_probe"
+const (
+	issueScanRunnerContextProbeKind   = "issue_scan_runner_context_probe"
+	issueScanResearchStageID          = "research_issue_and_repo_context"
+	issueScanImplementationStageID    = "implement_on_branch"
+	issueScanAdversarialReviewStageID = "run_adversarial_review"
+	issueScanBlockerRepairStageID     = "drive_blockers_to_zero"
+	issueScanReadyForHumanPRStageID   = "surface_ready_for_Human_result_PR"
+)
 
 // IssueScanRunnerContextProbeDocument summarizes the current stored context
 // packets available to issue-scan external runners for one queued run.
@@ -43,11 +51,20 @@ type IssueScanRunnerContextProbe struct {
 }
 
 // ProbeIssueScanRunnerContexts returns ready/not-ready status for the concrete
-// JSON contexts that can be passed to the issue-scan runner chain. It does not
-// invoke runners or record runner results; context construction follows the same
-// runtime path as the runner commands and may materialize missing queued-run
-// FactoryOrder/stage-task scaffolding.
+// JSON contexts that can be passed to the issue-scan runner chain. This is a
+// live context-builder probe: it may dispatch the queued run and materialize
+// missing FactoryOrder/stage-task scaffolding, but it does not invoke runners or
+// record runner results.
 func (r *Runtime) ProbeIssueScanRunnerContexts(runID string, includePayload bool) (IssueScanRunnerContextProbeDocument, error) {
+	return r.ProbeIssueScanRunnerContextsContext(context.Background(), runID, includePayload)
+}
+
+// ProbeIssueScanRunnerContextsContext is the cancellable form of
+// ProbeIssueScanRunnerContexts.
+func (r *Runtime) ProbeIssueScanRunnerContextsContext(ctx context.Context, runID string, includePayload bool) (IssueScanRunnerContextProbeDocument, error) {
+	if err := issueScanRunnerContextProbeCheckContext(ctx); err != nil {
+		return IssueScanRunnerContextProbeDocument{}, err
+	}
 	content, orderID, err := r.issueScanRunnerProbeBase(runID)
 	if err != nil {
 		return IssueScanRunnerContextProbeDocument{}, err
@@ -70,13 +87,26 @@ func (r *Runtime) ProbeIssueScanRunnerContexts(runID string, includePayload bool
 			"ready-for-Human PR evidence remains separate from Human approval, merge, deploy, or production migration authority",
 		},
 	}
-	doc.Contexts = []IssueScanRunnerContextProbe{
-		r.probeIssueScanStageRoleOutputRunnerContext(runID, includePayload),
-		r.probeIssueScanImplementationRunnerContext(runID, includePayload),
-		r.probeIssueScanAdversarialReviewRunnerContext(runID, includePayload),
-		r.probeIssueScanBlockerRepairRunnerContext(runID, includePayload),
-		r.probeIssueScanReadyPRRunnerContext(runID, includePayload),
-		issueScanReadyStateReviewContextProbe(),
+	for _, build := range []func() IssueScanRunnerContextProbe{
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanStageRoleOutputRunnerContext(runID, includePayload)
+		},
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanImplementationRunnerContext(runID, includePayload)
+		},
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanAdversarialReviewRunnerContext(runID, includePayload)
+		},
+		func() IssueScanRunnerContextProbe {
+			return r.probeIssueScanBlockerRepairRunnerContext(runID, includePayload)
+		},
+		func() IssueScanRunnerContextProbe { return r.probeIssueScanReadyPRRunnerContext(runID, includePayload) },
+		issueScanReadyStateReviewContextProbe,
+	} {
+		if err := issueScanRunnerContextProbeCheckContext(ctx); err != nil {
+			return IssueScanRunnerContextProbeDocument{}, err
+		}
+		doc.Contexts = append(doc.Contexts, build())
 	}
 	for _, probe := range doc.Contexts {
 		if probe.Ready {
@@ -87,6 +117,13 @@ func (r *Runtime) ProbeIssueScanRunnerContexts(runID string, includePayload bool
 		}
 	}
 	return doc, nil
+}
+
+func issueScanRunnerContextProbeCheckContext(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func (r *Runtime) issueScanRunnerProbeBase(runID string) (FactoryRunRequestedContent, string, error) {
@@ -182,7 +219,7 @@ func (r *Runtime) probeIssueScanImplementationRunnerContext(runID string, includ
 	probe.FactoryOrderID = runnerContext.FactoryOrderID
 	probe.Repository = runnerContext.Repository
 	probe.RepoPath = runnerContext.RepoPath
-	probe.StageID = "implement_on_branch"
+	probe.StageID = issueScanImplementationStageID
 	probe.StageTaskID = runnerContext.ImplementationStageTaskID
 	probe.TaskID = runnerContext.ImplementationTaskID
 	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, runnerContext, &probe)
@@ -192,7 +229,7 @@ func (r *Runtime) probeIssueScanImplementationRunnerContext(runID string, includ
 func (r *Runtime) probeIssueScanAdversarialReviewRunnerContext(runID string, includePayload bool) IssueScanRunnerContextProbe {
 	probe := IssueScanRunnerContextProbe{
 		ID:                "adversarial_review_runner",
-		Stage:             "run_adversarial_review",
+		Stage:             issueScanAdversarialReviewStageID,
 		StandaloneCommand: "hive factory run-issue-scan-review",
 		ContextKind:       issueScanAdversarialReviewContextKind,
 		ContextType:       "hive.IssueScanAdversarialReviewContext",
@@ -216,7 +253,7 @@ func (r *Runtime) probeIssueScanAdversarialReviewRunnerContext(runID string, inc
 	probe.FactoryOrderID = reviewContext.FactoryOrderID
 	probe.Repository = reviewContext.Repository
 	probe.RepoPath = reviewContext.RepoPath
-	probe.StageID = "run_adversarial_review"
+	probe.StageID = issueScanAdversarialReviewStageID
 	probe.StageTaskID = reviewContext.ReviewStageTaskID
 	probe.TaskID = reviewContext.ImplementationTaskID
 	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, reviewContext, &probe)
@@ -245,7 +282,7 @@ func (r *Runtime) probeIssueScanBlockerRepairRunnerContext(runID string, include
 	probe.FactoryOrderID = runnerContext.FactoryOrderID
 	probe.Repository = runnerContext.Repository
 	probe.RepoPath = runnerContext.RepoPath
-	probe.StageID = "drive_blockers_to_zero"
+	probe.StageID = issueScanBlockerRepairStageID
 	probe.StageTaskID = runnerContext.BlockerStageTaskID
 	probe.TaskID = runnerContext.ImplementationTaskID
 	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, runnerContext, &probe)
@@ -273,7 +310,7 @@ func (r *Runtime) probeIssueScanReadyPRRunnerContext(runID string, includePayloa
 	probe.NotReadyReason = ""
 	probe.FactoryOrderID = readyContext.FactoryOrderID
 	probe.Repository = readyContext.Repository
-	probe.StageID = "surface_ready_for_Human_result_PR"
+	probe.StageID = issueScanReadyForHumanPRStageID
 	probe.StageTaskID = readyContext.ReadyStageTaskID
 	probe.TaskID = readyContext.ImplementationTaskID
 	probe.ContextPayload = issueScanRunnerContextProbePayload(includePayload, readyContext, &probe)

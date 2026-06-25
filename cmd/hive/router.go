@@ -78,7 +78,7 @@ func helpText() string {
 	b.WriteString("  factory issue-scan-runner-contracts\n")
 	b.WriteString("                           Print issue-scan external runner JSON contracts\n")
 	b.WriteString("  factory issue-scan-runner-contexts\n")
-	b.WriteString("                           Probe ready runner contexts for one issue-scan run\n")
+	b.WriteString("                           Build ready runner contexts; may dispatch/scaffold\n")
 	b.WriteString("  factory request-issue-scan-pr\n")
 	b.WriteString("                           Raise issue-scan draft-PR authority request\n")
 	b.WriteString("  factory create-issue-scan-draft-pr\n")

@@ -77,8 +77,9 @@ import (
 //               → print the external runner chain's JSON contract and operator
 //                  wiring boundaries.
 //   issue-scan-runner-contexts
-//               → print ready/not-ready context probes for one stored
-//                  issue-scan run without executing external runners.
+//               → build ready/not-ready context probes for one stored
+//                  issue-scan run; may dispatch/scaffold, but never runs
+//                  external runners.
 //   request-issue-scan-pr
 //               → derive the issue-scan draft-PR title/body/target and raise
 //                  the governed draft-PR authority request; the gate holds.
