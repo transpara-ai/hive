@@ -57,7 +57,7 @@ func systemdLogicalLines(unitText string) []systemdLogicalLine {
 	startLine := 0
 	for i, rawLine := range rawLines {
 		lineNumber := i + 1
-		line := strings.TrimRight(rawLine, " \t\r")
+		line := strings.TrimRight(rawLine, "\r")
 		if current.Len() == 0 {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
@@ -65,15 +65,13 @@ func systemdLogicalLines(unitText string) []systemdLogicalLine {
 				continue
 			}
 		}
-		continued := strings.HasSuffix(line, `\`)
+		lineWithoutTrailingSpace := strings.TrimRight(line, " \t")
+		continued := strings.HasSuffix(lineWithoutTrailingSpace, `\`)
 		if continued {
-			line = strings.TrimRight(strings.TrimSuffix(line, `\`), " \t")
+			line = strings.TrimSuffix(lineWithoutTrailingSpace, `\`)
 		}
 		if startLine == 0 {
 			startLine = lineNumber
-		}
-		if current.Len() > 0 {
-			current.WriteByte(' ')
 		}
 		current.WriteString(line)
 		if continued {

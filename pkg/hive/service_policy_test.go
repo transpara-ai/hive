@@ -80,6 +80,36 @@ After=network-online.target \
 	}
 }
 
+func TestValidateReadOnlyObserverUnitRejectsSplitHiveRuntimeTargetContinuation(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+Wants=hive.serv\
+ice
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want split hive runtime target rejection")
+	}
+	if !strings.Contains(err.Error(), "hive.service") {
+		t.Fatalf("error = %v, want reconstructed hive.service target called out", err)
+	}
+}
+
+func TestValidateReadOnlyObserverUnitRejectsSplitForbiddenKeyContinuation(t *testing.T) {
+	unit := `[Unit]
+Description=Civilization live monitor
+Wan\
+ts=hive.service
+`
+	err := ValidateReadOnlyObserverUnit("civilization-live-monitor.service", unit)
+	if err == nil {
+		t.Fatal("ValidateReadOnlyObserverUnit succeeded, want split forbidden key rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "wants") {
+		t.Fatalf("error = %v, want reconstructed Wants key called out", err)
+	}
+}
+
 func TestValidateReadOnlyObserverUnitRejectsCommentContinuationHiveRuntimeDependencies(t *testing.T) {
 	unit := `[Unit]
 Description=Civilization live monitor
