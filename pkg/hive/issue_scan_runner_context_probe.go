@@ -103,6 +103,11 @@ func (r *Runtime) ProbeIssueScanRunnerContextsContext(ctx context.Context, runID
 		func() IssueScanRunnerContextProbe { return r.probeIssueScanReadyPRRunnerContext(runID, includePayload) },
 		issueScanReadyStateReviewContextProbe,
 	} {
+		// These are shared runner-context builders. Keep them probe-safe: they may
+		// materialize cold queued-run dispatch/stage scaffolding, while ready
+		// deep-context probes must not change Work scaffolding/state-transition
+		// counts. They must not execute runners, record outputs, create/mark PRs,
+		// approve, merge, deploy, or migrate.
 		if err := issueScanRunnerContextProbeCheckContext(ctx); err != nil {
 			return IssueScanRunnerContextProbeDocument{}, err
 		}
