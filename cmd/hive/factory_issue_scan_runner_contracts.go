@@ -30,6 +30,7 @@ type issueScanRunnerContract struct {
 	StdinContextType     string   `json:"stdin_context_type"`
 	StdoutContractType   string   `json:"stdout_contract_type"`
 	StdoutRequiredFields []string `json:"stdout_required_fields"`
+	Preconditions        []string `json:"preconditions,omitempty"`
 	RecordedArtifacts    []string `json:"recorded_artifacts,omitempty"`
 	ValidationBoundaries []string `json:"validation_boundaries"`
 	AuthorityBoundaries  []string `json:"authority_boundaries"`
@@ -302,6 +303,10 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			StdinContextType:   "hive.IssueScanReadyPRRunnerContext",
 			StdoutContractType: "hive.IssueScanReadyPRRunnerResult",
 			StdoutRequiredFields: []string{
+				"draft_pr_receipt",
+				"ready_pr_evidence",
+			},
+			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
 				"ready_state_review_runner returns passing exact-head receipt",
 			},
@@ -322,6 +327,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			"Use --issue-scan-require-full-chain on daemon startup when the intended posture is autonomous issue-scan to ready-for-Human PR.",
 			"Use hive factory progress-issue-scan --run-configured-runners --run <id> for a bounded named-run rehearsal before daemonizing the same runner chain.",
 			"Use the standalone run-issue-scan-* commands to debug a single runner against a stored run without bypassing runtime validation.",
+			"The full_chain_daemon_flags and named_progress_flags arrays show the managed ready-PR finalizer posture; terminal_stage_paths lists the mutually-exclusive generic ready-PR evidence runner alternative.",
 		},
 	}
 }

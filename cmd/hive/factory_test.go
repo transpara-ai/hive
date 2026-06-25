@@ -212,6 +212,13 @@ func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
 }
 
 func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *testing.T) {
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerContext{}), "hive.IssueScanStageRoleOutputRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanImplementationRunnerContext{}), "hive.IssueScanImplementationRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanAdversarialReviewContext{}), "hive.IssueScanAdversarialReviewContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerContext{}), "hive.IssueScanBlockerRepairRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerContext{}), "hive.IssueScanReadyPRRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanReadyStateReviewContext{}), "hive.IssueScanReadyStateReviewContext")
+
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerResult{}), "role_outputs")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "operate_result_body")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "completion_summary")
@@ -223,6 +230,64 @@ func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *t
 	assertJSONField(t, reflect.TypeOf(hive.TransparaAIDraftPRReceipt{}), "kind")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPREvidence{}), "kind")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "status")
+}
+
+func TestFactoryIssueScanRunnerContractsFlagsAreRegistered(t *testing.T) {
+	daemonFlags := []struct {
+		flag  string
+		value string
+	}{
+		{"--issue-scan-require-full-chain", ""},
+		{"--issue-scan-interval", "1m"},
+		{"--issue-scan-repo", "transpara-ai/hive"},
+		{"--issue-scan-registry", ""},
+		{"--repo-workspace-root", "/tmp"},
+		{"--issue-scan-stage-role-runner", "/bin/true"},
+		{"--issue-scan-implementation-runner", "/bin/true"},
+		{"--issue-scan-review-runner", "/bin/true"},
+		{"--issue-scan-blocker-repair-runner", "/bin/true"},
+		{"--issue-scan-draft-pr-request", ""},
+		{"--issue-scan-draft-pr-create", ""},
+		{"--issue-scan-ready-pr-mark-ready", ""},
+		{"--issue-scan-ready-pr-review-runner", "/bin/true"},
+		{"--issue-scan-ready-pr-runner", "/bin/true"},
+	}
+	for _, tt := range daemonFlags {
+		t.Run("daemon "+tt.flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "daemon"}, tt.flag, tt.value)
+			err := routeAndDispatch(args)
+			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("daemon flag %s is not registered: %v", tt.flag, err)
+			}
+		})
+	}
+
+	progressFlags := []struct {
+		flag  string
+		value string
+	}{
+		{"--run-configured-runners", ""},
+		{"--run", "run_issue_001"},
+		{"--repo-workspace-root", "/tmp"},
+		{"--issue-scan-stage-role-runner", "/bin/true"},
+		{"--issue-scan-implementation-runner", "/bin/true"},
+		{"--issue-scan-review-runner", "/bin/true"},
+		{"--issue-scan-blocker-repair-runner", "/bin/true"},
+		{"--issue-scan-draft-pr-request", ""},
+		{"--issue-scan-draft-pr-create", ""},
+		{"--issue-scan-ready-pr-mark-ready", ""},
+		{"--issue-scan-ready-pr-review-runner", "/bin/true"},
+		{"--issue-scan-ready-pr-runner", "/bin/true"},
+	}
+	for _, tt := range progressFlags {
+		t.Run("progress "+tt.flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "progress-issue-scan"}, tt.flag, tt.value)
+			err := routeAndDispatch(args)
+			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("progress flag %s is not registered: %v", tt.flag, err)
+			}
+		})
+	}
 }
 
 func TestFactoryIssueScanRunnerContractsRejectsUnknownFormat(t *testing.T) {
@@ -263,6 +328,25 @@ func assertJSONField(t *testing.T, typ reflect.Type, field string) {
 	t.Fatalf("%s has no json field %q", typ, field)
 }
 
+func assertTypeName(t *testing.T, typ reflect.Type, want string) {
+	t.Helper()
+	if typ.PkgPath() == "" {
+		t.Fatalf("type %s has no package path", typ)
+	}
+	got := typ.PkgPath() + "." + typ.Name()
+	if got != "github.com/transpara-ai/hive/pkg/"+want {
+		t.Fatalf("type name = %q, want package type %q", got, want)
+	}
+}
+
+func appendFlagValue(args []string, flag, value string) []string {
+	args = append(args, flag)
+	if value != "" {
+		args = append(args, value)
+	}
+	return args
+}
+
 func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	original := os.Stdout
@@ -270,20 +354,30 @@ func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	type readResult struct {
+		body []byte
+		err  error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		body, err := io.ReadAll(read)
+		readDone <- readResult{body: body, err: err}
+	}()
 	os.Stdout = write
+	defer func() {
+		os.Stdout = original
+		_ = write.Close()
+		_ = read.Close()
+	}()
 	callErr := fn()
 	if err := write.Close(); err != nil && callErr == nil {
 		callErr = err
 	}
-	os.Stdout = original
-	body, readErr := io.ReadAll(read)
-	if err := read.Close(); err != nil && readErr == nil {
-		readErr = err
+	result := <-readDone
+	if result.err != nil && callErr == nil {
+		callErr = result.err
 	}
-	if readErr != nil && callErr == nil {
-		callErr = readErr
-	}
-	return string(body), callErr
+	return string(result.body), callErr
 }
 
 func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
