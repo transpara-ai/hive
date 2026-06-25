@@ -2,7 +2,6 @@ package hive
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,12 +14,6 @@ import (
 type issueScanWorkspaceResolution struct {
 	RepoPath              string
 	ContainmentWatchRoots []string
-}
-
-type issueScanImplementationWorkspaceContext struct {
-	Kind          string                     `json:"kind"`
-	SelectedIssue issueScanBriefIssuePayload `json:"selected_issue"`
-	TargetRepos   []string                   `json:"target_repos"`
 }
 
 func (r *Runtime) taskWorkspaceProviderFor(def AgentDef) loop.TaskWorkspaceProviderFunc {
@@ -55,29 +48,60 @@ func (r *Runtime) issueScanImplementationTaskTargetRepo(task work.Task) (string,
 	if err != nil {
 		return "", true, fmt.Errorf("list issue-scan implementation task artifacts: %w", err)
 	}
-	for i := len(artifacts) - 1; i >= 0; i-- {
-		artifact := artifacts[i]
-		if strings.TrimSpace(artifact.Label) != IssueScanImplementationTaskContextArtifactLabel {
-			continue
-		}
-		var payload issueScanImplementationWorkspaceContext
-		if err := json.Unmarshal([]byte(strings.TrimSpace(artifact.Body)), &payload); err != nil {
-			return "", true, fmt.Errorf("decode issue-scan implementation context artifact %s: %w", artifact.ID.Value(), err)
-		}
-		if strings.TrimSpace(payload.Kind) != issueScanImplementationTaskContextArtifactKind {
-			return "", true, fmt.Errorf("issue-scan implementation context artifact %s has kind %q, want %q", artifact.ID.Value(), payload.Kind, issueScanImplementationTaskContextArtifactKind)
-		}
-		targetRepo := strings.TrimSpace(payload.SelectedIssue.Repo)
-		if targetRepo == "" && len(payload.TargetRepos) > 0 {
-			targetRepo = strings.TrimSpace(payload.TargetRepos[0])
-		}
-		targetRepo = strings.ToLower(strings.TrimSpace(targetRepo))
-		if !ValidTransparaAIRepo(targetRepo) {
-			return "", true, fmt.Errorf("issue-scan implementation task %s targets invalid Transpara-AI repo %q", task.ID.Value(), targetRepo)
-		}
-		return targetRepo, true, nil
+	artifact, ok := latestIssueScanImplementationTaskContextArtifact(artifacts)
+	if !ok {
+		return "", true, fmt.Errorf("issue-scan implementation task %s has no %q artifact; refusing to infer workspace from task text", task.ID.Value(), IssueScanImplementationTaskContextArtifactLabel)
 	}
-	return "", true, fmt.Errorf("issue-scan implementation task %s has no %q artifact; refusing to infer workspace from task text", task.ID.Value(), IssueScanImplementationTaskContextArtifactLabel)
+	payload, err := parseIssueScanImplementationTaskContext(artifact.Body)
+	if err != nil {
+		runID, hasRunID, runIDErr := issueScanImplementationTaskContextRunID(artifact.Body)
+		if runIDErr != nil {
+			return "", true, fmt.Errorf("issue-scan implementation context artifact %s run_id: %w", artifact.ID.Value(), runIDErr)
+		}
+		if !hasRunID {
+			return "", true, fmt.Errorf("issue-scan implementation context artifact %s: %w", artifact.ID.Value(), err)
+		}
+		orderID, orderErr := factoryOrderIDForRunLaunch(runID)
+		if orderErr != nil {
+			return "", true, fmt.Errorf("issue-scan implementation context artifact %s run_id %q: %w", artifact.ID.Value(), runID, orderErr)
+		}
+		if strings.TrimSpace(task.FactoryOrderID) != orderID {
+			return "", true, fmt.Errorf("issue-scan implementation context artifact %s run_id %q maps to factory order %q, not task factory order %q", artifact.ID.Value(), runID, orderID, task.FactoryOrderID)
+		}
+		// Legacy pre-contract context artifacts can only be repaired after the
+		// embedded run_id is proven to belong to this implementation task.
+		_, ready, ensureErr := r.EnsureIssueScanImplementationTask(runID)
+		if ensureErr != nil {
+			return "", true, fmt.Errorf("repair issue-scan implementation context for run %q: %w", runID, ensureErr)
+		}
+		if !ready {
+			return "", true, fmt.Errorf("issue-scan implementation context artifact %s is invalid and run %q is not ready for repair: %w", artifact.ID.Value(), runID, err)
+		}
+		artifacts, err = r.tasks.ListArtifacts(task.ID)
+		if err != nil {
+			return "", true, fmt.Errorf("list repaired issue-scan implementation task artifacts: %w", err)
+		}
+		artifact, ok = latestIssueScanImplementationTaskContextArtifact(artifacts)
+		if !ok {
+			return "", true, fmt.Errorf("issue-scan implementation task %s has no repaired %q artifact", task.ID.Value(), IssueScanImplementationTaskContextArtifactLabel)
+		}
+		payload, err = parseIssueScanImplementationTaskContext(artifact.Body)
+		if err != nil {
+			return "", true, fmt.Errorf("repaired issue-scan implementation context artifact %s: %w", artifact.ID.Value(), err)
+		}
+	}
+	targetRepo := strings.TrimSpace(payload.FactoryTaskContract.Repo)
+	if targetRepo == "" {
+		targetRepo = strings.TrimSpace(payload.SelectedIssue.Repo)
+	}
+	if targetRepo == "" && len(payload.TargetRepos) > 0 {
+		targetRepo = strings.TrimSpace(payload.TargetRepos[0])
+	}
+	targetRepo = strings.ToLower(strings.TrimSpace(targetRepo))
+	if !ValidTransparaAIRepo(targetRepo) {
+		return "", true, fmt.Errorf("issue-scan implementation task %s targets invalid Transpara-AI repo %q", task.ID.Value(), targetRepo)
+	}
+	return targetRepo, true, nil
 }
 
 func isIssueScanImplementationWorkTask(task work.Task) bool {

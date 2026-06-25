@@ -1827,6 +1827,30 @@ func TestProgressIssueScanLifecycleCreatesConcreteImplementationTaskAfterDesign(
 		!strings.Contains(contextArtifact.Body, `"target_repos":`) {
 		t.Fatalf("implementation context artifact missing selected issue/target repos:\n%s", contextArtifact.Body)
 	}
+	contextPayload, err := parseIssueScanImplementationTaskContext(contextArtifact.Body)
+	if err != nil {
+		t.Fatalf("parse implementation task context: %v\n%s", err, contextArtifact.Body)
+	}
+	contract := contextPayload.FactoryTaskContract
+	if contract.Mission == "" ||
+		contract.Repo != "transpara-ai/hive" ||
+		contract.Worktree == "" ||
+		contract.Branch == "" ||
+		contract.OwnerRole != "implementer" ||
+		len(contract.ExitCriteria) == 0 ||
+		contract.VerificationCommand == "" ||
+		contract.DocsImpact == "" ||
+		len(contract.ArtifactContract) == 0 ||
+		contract.RiskLevel == "" ||
+		contract.ApprovalPolicy == "" ||
+		contract.RollbackNote == "" {
+		t.Fatalf("implementation factory task contract incomplete: %+v", contract)
+	}
+	if !strings.Contains(contract.ApprovalPolicy, "no merge or deploy") ||
+		!strings.Contains(contract.ApprovalPolicy, "remain separate governed gates") ||
+		!strings.Contains(contract.RollbackNote, "must not merge") {
+		t.Fatalf("implementation factory task contract does not preserve authority boundaries: %+v", contract)
+	}
 	if issueScanArtifactByLabel(artifacts, IssueScanStageRoleContractArtifactLabel) != nil || issueScanArtifactByLabel(artifacts, IssueScanStageOutputContractArtifactLabel) != nil {
 		t.Fatalf("implementation task carried issue-scan stage contract labels: %+v", artifacts)
 	}
@@ -1888,6 +1912,268 @@ func TestProgressIssueScanLifecycleRejectsWrongRepoImplementationTask(t *testing
 	}
 	if task, ok := findTaskByCanonicalTaskIDForTest(tasks, issueScanImplementationTaskCanonicalID(orderID)); ok {
 		t.Fatalf("wrong-repo implementation task was created: %+v", task)
+	}
+}
+
+func TestIssueScanImplementationTaskContextRejectsInvalidFactoryContracts(t *testing.T) {
+	base := issueScanImplementationTaskContextPayload{
+		Kind:             issueScanImplementationTaskContextArtifactKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            "run_issue_scan_contract",
+		FactoryOrderID:   "fo_issue_scan_contract",
+		SelectedIssue: issueScanBriefIssuePayload{
+			Repo:   "transpara-ai/hive",
+			Number: 321,
+			Title:  "Factory contract",
+		},
+		TargetRepos: []string{"transpara-ai/hive"},
+		FactoryTaskContract: issueScanImplementationFactoryTaskContract{
+			Mission:             "Resolve selected issue",
+			Repo:                "transpara-ai/hive",
+			Worktree:            "runtime-resolved checkout",
+			Branch:              "feature branch only",
+			OwnerRole:           "implementer",
+			ExitCriteria:        []string{"done"},
+			VerificationCommand: "make verify",
+			DocsImpact:          "record not-applicable if no docs impact",
+			ArtifactContract:    []string{"Operate result"},
+			RiskLevel:           "high",
+			ApprovalPolicy:      "operate-on-branch only; no merge or deploy; ready state remains separate governed gates",
+			RollbackNote:        "must not merge; abandon branch if needed",
+			AuthorityScope:      "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+		},
+	}
+	marshal := func(t *testing.T, payload issueScanImplementationTaskContextPayload) string {
+		t.Helper()
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		return string(body)
+	}
+	validBody := marshal(t, base)
+	if _, err := parseIssueScanImplementationTaskContext(validBody); err != nil {
+		t.Fatalf("valid context rejected: %v", err)
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty body", body: ""},
+		{name: "wrong kind", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.Kind = "wrong"
+			return payload
+		}())},
+		{name: "wrong lifecycle", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.LifecycleVersion = "v0"
+			return payload
+		}())},
+		{name: "missing mission", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.Mission = ""
+			return payload
+		}())},
+		{name: "missing worktree", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.Worktree = ""
+			return payload
+		}())},
+		{name: "missing branch", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.Branch = ""
+			return payload
+		}())},
+		{name: "wrong owner role", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.OwnerRole = "planner"
+			return payload
+		}())},
+		{name: "empty exit criteria", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.ExitCriteria = nil
+			return payload
+		}())},
+		{name: "missing verification command", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.VerificationCommand = ""
+			return payload
+		}())},
+		{name: "missing docs impact", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.DocsImpact = ""
+			return payload
+		}())},
+		{name: "empty artifact contract", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.ArtifactContract = nil
+			return payload
+		}())},
+		{name: "invalid risk level", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.RiskLevel = "p0"
+			return payload
+		}())},
+		{name: "missing approval policy", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.ApprovalPolicy = ""
+			return payload
+		}())},
+		{name: "approval policy missing no-merge boundary", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.ApprovalPolicy = "operate-on-branch only; implementation may merge when complete"
+			return payload
+		}())},
+		{name: "missing rollback note", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.RollbackNote = ""
+			return payload
+		}())},
+		{name: "rollback note missing no-merge boundary", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.RollbackNote = "rollback by reverting after merge"
+			return payload
+		}())},
+		{name: "missing authority scope", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.AuthorityScope = ""
+			return payload
+		}())},
+		{name: "repo mismatch", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.FactoryTaskContract.Repo = "transpara-ai/site"
+			return payload
+		}())},
+		{name: "target repos mismatch", body: marshal(t, func() issueScanImplementationTaskContextPayload {
+			payload := base
+			payload.SelectedIssue.Repo = ""
+			payload.TargetRepos = []string{"transpara-ai/site"}
+			return payload
+		}())},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseIssueScanImplementationTaskContext(tc.body); err == nil {
+				t.Fatalf("parseIssueScanImplementationTaskContext succeeded for invalid context")
+			}
+		})
+	}
+}
+
+func TestLatestIssueScanImplementationTaskContextArtifactUsesTimestampAndID(t *testing.T) {
+	bodyFor := func(t *testing.T, runID, mission string) string {
+		t.Helper()
+		body, err := json.Marshal(issueScanImplementationTaskContextPayload{
+			Kind:             issueScanImplementationTaskContextArtifactKind,
+			LifecycleVersion: issueScanLifecycleVersion,
+			RunID:            runID,
+			FactoryOrderID:   "fo_" + runID,
+			SelectedIssue: issueScanBriefIssuePayload{
+				Repo:   "transpara-ai/hive",
+				Number: 321,
+				Title:  "Factory contract",
+			},
+			TargetRepos: []string{"transpara-ai/hive"},
+			FactoryTaskContract: issueScanImplementationFactoryTaskContract{
+				Mission:             mission,
+				Repo:                "transpara-ai/hive",
+				Worktree:            "runtime-resolved checkout",
+				Branch:              "feature branch only",
+				OwnerRole:           "implementer",
+				ExitCriteria:        []string{"done"},
+				VerificationCommand: "make verify",
+				DocsImpact:          "record not-applicable if no docs impact",
+				ArtifactContract:    []string{"Operate result"},
+				RiskLevel:           "high",
+				ApprovalPolicy:      "operate-on-branch only; no merge or deploy; ready state, Human approval, merge, and deploy remain separate governed gates",
+				RollbackNote:        "must not merge; abandon branch if needed",
+				AuthorityScope:      "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Marshal context body: %v", err)
+		}
+		if _, err := parseIssueScanImplementationTaskContext(string(body)); err != nil {
+			t.Fatalf("generated context body is invalid: %v", err)
+		}
+		return string(body)
+	}
+	newEventID := func(t *testing.T) types.EventID {
+		t.Helper()
+		id, err := types.NewEventIDFromNew()
+		if err != nil {
+			t.Fatalf("NewEventIDFromNew: %v", err)
+		}
+		return id
+	}
+
+	baseTime := time.Date(2026, 6, 24, 22, 30, 0, 0, time.UTC)
+	older := work.ArtifactEvent{
+		ID:        newEventID(t),
+		Label:     IssueScanImplementationTaskContextArtifactLabel,
+		Body:      bodyFor(t, "run_latest_older", "older context"),
+		Timestamp: baseTime,
+	}
+	newer := work.ArtifactEvent{
+		ID:        newEventID(t),
+		Label:     IssueScanImplementationTaskContextArtifactLabel,
+		Body:      bodyFor(t, "run_latest_newer", "newer context"),
+		Timestamp: baseTime.Add(time.Second),
+	}
+	got, ok := latestIssueScanImplementationTaskContextArtifact([]work.ArtifactEvent{
+		newer,
+		{ID: newEventID(t), Label: "other", Body: "ignored", Timestamp: baseTime.Add(2 * time.Second)},
+		older,
+	})
+	if !ok || got.ID != newer.ID {
+		t.Fatalf("latest artifact = %+v ok=%v, want newer timestamp artifact %s", got, ok, newer.ID)
+	}
+
+	earlierID := newEventID(t)
+	laterID := newEventID(t)
+	if laterID.Value() <= earlierID.Value() {
+		t.Fatalf("later generated EventID %s did not sort after earlier EventID %s", laterID, earlierID)
+	}
+	lowerTie := work.ArtifactEvent{
+		ID:        earlierID,
+		Label:     IssueScanImplementationTaskContextArtifactLabel,
+		Body:      bodyFor(t, "run_latest_tie_low", "earlier tie context"),
+		Timestamp: baseTime,
+	}
+	higherTie := work.ArtifactEvent{
+		ID:        laterID,
+		Label:     IssueScanImplementationTaskContextArtifactLabel,
+		Body:      bodyFor(t, "run_latest_tie_high", "later tie context"),
+		Timestamp: baseTime,
+	}
+	got, ok = latestIssueScanImplementationTaskContextArtifact([]work.ArtifactEvent{higherTie, lowerTie})
+	if !ok || got.ID != higherTie.ID {
+		t.Fatalf("latest equal-timestamp artifact = %+v ok=%v, want later generated event ID %s", got, ok, higherTie.ID)
+	}
+}
+
+func TestBuildIssueScanImplementationFactoryTaskContractNormalizesUnknownRisk(t *testing.T) {
+	contract, err := buildIssueScanImplementationFactoryTaskContract(
+		FactoryRunRequestedContent{
+			Title:       "Resolve transpara-ai/hive#321",
+			TargetRepos: []string{"transpara-ai/hive"},
+			Authority: RunLaunchAuthority{
+				Scope: "custom issue-scan scope",
+			},
+		},
+		work.FactoryOrder{ID: "fo_issue_scan_contract", RiskClass: "p0"},
+		IssueScanStageRuntimeEvidence{},
+		issueScanBriefIssuePayload{Repo: "transpara-ai/hive", Number: 321, Title: "Factory contract"},
+	)
+	if err != nil {
+		t.Fatalf("buildIssueScanImplementationFactoryTaskContract: %v", err)
+	}
+	if contract.RiskLevel != "critical" {
+		t.Fatalf("risk level = %q, want critical", contract.RiskLevel)
+	}
+	if !strings.Contains(contract.ApprovalPolicy, "no merge or deploy") {
+		t.Fatalf("approval policy lost no-merge/no-deploy boundary: %q", contract.ApprovalPolicy)
 	}
 }
 
@@ -2178,6 +2464,147 @@ func TestProgressIssueScanLifecycleRunsConfiguredImplementationRunnerAndComplete
 	}
 	if len(again.ImplementationRuns) != 0 {
 		t.Fatalf("second implementation runs = %+v, want none after task completed", again.ImplementationRuns)
+	}
+}
+
+func TestConfiguredImplementationRunnerRepairsLegacyImplementationContext(t *testing.T) {
+	rt, writer, queued, _, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	legacyBody := fmt.Sprintf(`{
+  "kind": %q,
+  "lifecycle_version": %q,
+  "run_id": %q,
+  "selected_issue": {"repo": "transpara-ai/hive", "number": 321, "title": "Teach the Civilization to scan issues"},
+  "target_repos": ["transpara-ai/hive"]
+}`, issueScanImplementationTaskContextArtifactKind, issueScanLifecycleVersion, queued.RunID)
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, IssueScanImplementationTaskContextArtifactLabel, issueScanExecutionPlanArtifactMediaType, legacyBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact legacy implementation context: %v", err)
+	}
+	calls := 0
+	rt.issueScanImplementationRunner = func(ctx context.Context, runnerContext IssueScanImplementationRunnerContext) (IssueScanImplementationRunnerResult, error) {
+		calls++
+		var payload issueScanImplementationTaskContextPayload
+		if err := json.Unmarshal(runnerContext.ImplementationTaskContext, &payload); err != nil {
+			t.Fatalf("runner implementation context json: %v", err)
+		}
+		if payload.FactoryTaskContract.Repo != "transpara-ai/hive" || payload.FactoryTaskContract.OwnerRole != "implementer" {
+			t.Fatalf("runner received unrepaired implementation context: %+v", payload.FactoryTaskContract)
+		}
+		return IssueScanImplementationRunnerResult{
+			OperateResultBody: issueScanOperateResultBodyForTest(),
+			CompletionSummary: "validation output: go test ./pkg/hive passed from repaired implementation runner context",
+		}, nil
+	}
+
+	if _, err := rt.progressIssueScanLifecycle(); err != nil {
+		t.Fatalf("progressIssueScanLifecycle with legacy implementation context: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("implementation runner calls = %d, want 1", calls)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts implementation task: %v", err)
+	}
+	latest, ok := latestIssueScanImplementationTaskContextArtifact(artifacts)
+	if !ok {
+		t.Fatalf("missing implementation context artifact after repair: %+v", artifacts)
+	}
+	if _, err := parseIssueScanImplementationTaskContext(latest.Body); err != nil {
+		t.Fatalf("latest implementation context was not repaired: %v\n%s", err, latest.Body)
+	}
+}
+
+func TestTaskWorkspaceProviderRepairsLegacyIssueScanImplementationContext(t *testing.T) {
+	rt, writer, queued, _, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	legacyBody := fmt.Sprintf(`{
+  "kind": %q,
+  "lifecycle_version": %q,
+  "run_id": %q,
+  "selected_issue": {"repo": "transpara-ai/hive", "number": 321, "title": "Teach the Civilization to scan issues"},
+  "target_repos": ["transpara-ai/hive"]
+}`, issueScanImplementationTaskContextArtifactKind, issueScanLifecycleVersion, queued.RunID)
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, IssueScanImplementationTaskContextArtifactLabel, issueScanExecutionPlanArtifactMediaType, legacyBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact legacy implementation context: %v", err)
+	}
+
+	selected, err := rt.taskWorkspaceProviderFor(AgentDef{CanOperate: true})(context.Background(), implementationTask, "implementer")
+	if err != nil {
+		t.Fatalf("taskWorkspaceProviderFor legacy implementation context: %v", err)
+	}
+	wantRepoPath, err := filepath.Abs(currentHiveRepoPathForTest(t))
+	if err != nil {
+		t.Fatalf("Abs current hive repo path: %v", err)
+	}
+	if !selected.Applied || selected.RepoPath != wantRepoPath {
+		t.Fatalf("selected workspace = %+v, want applied Hive path %s", selected, wantRepoPath)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts implementation task: %v", err)
+	}
+	latest, ok := latestIssueScanImplementationTaskContextArtifact(artifacts)
+	if !ok {
+		t.Fatalf("missing implementation context artifact after workspace provider repair: %+v", artifacts)
+	}
+	payload, err := parseIssueScanImplementationTaskContext(latest.Body)
+	if err != nil {
+		t.Fatalf("latest implementation context was not repaired by workspace provider: %v\n%s", err, latest.Body)
+	}
+	if payload.FactoryTaskContract.Repo != "transpara-ai/hive" || payload.FactoryTaskContract.OwnerRole != "implementer" {
+		t.Fatalf("workspace provider repaired unexpected factory task contract: %+v", payload.FactoryTaskContract)
+	}
+}
+
+func TestIssueScanImplementationTaskTargetRepoPrefersFactoryTaskContract(t *testing.T) {
+	rt, writer, _, _, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	artifacts, err := rt.tasks.ListArtifacts(implementationTask.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts implementation task: %v", err)
+	}
+	latest, ok := latestIssueScanImplementationTaskContextArtifact(artifacts)
+	if !ok {
+		t.Fatalf("missing implementation context artifact: %+v", artifacts)
+	}
+	payload, err := parseIssueScanImplementationTaskContext(latest.Body)
+	if err != nil {
+		t.Fatalf("parse seed implementation context: %v", err)
+	}
+	payload.SelectedIssue.Repo = ""
+	payload.TargetRepos = []string{"transpara-ai/site", "transpara-ai/hive"}
+	payload.FactoryTaskContract.Repo = "transpara-ai/hive"
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal mutated implementation context: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, IssueScanImplementationTaskContextArtifactLabel, issueScanExecutionPlanArtifactMediaType, string(body), []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact implementation context with contract repo: %v", err)
+	}
+
+	targetRepo, ok, err := rt.issueScanImplementationTaskTargetRepo(implementationTask)
+	if err != nil {
+		t.Fatalf("issueScanImplementationTaskTargetRepo: %v", err)
+	}
+	if !ok || targetRepo != "transpara-ai/hive" {
+		t.Fatalf("targetRepo = %q ok=%v, want contract repo transpara-ai/hive", targetRepo, ok)
+	}
+}
+
+func TestTaskWorkspaceProviderRejectsMismatchedLegacyIssueScanContextRunID(t *testing.T) {
+	rt, writer, queued, _, implementationTask := issueScanReadyImplementationTaskFixtureForTest(t)
+	legacyBody := fmt.Sprintf(`{
+  "kind": %q,
+  "lifecycle_version": %q,
+  "run_id": %q,
+  "selected_issue": {"repo": "transpara-ai/hive", "number": 321, "title": "Teach the Civilization to scan issues"},
+  "target_repos": ["transpara-ai/hive"]
+}`, issueScanImplementationTaskContextArtifactKind, issueScanLifecycleVersion, queued.RunID+"_other")
+	if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, IssueScanImplementationTaskContextArtifactLabel, issueScanExecutionPlanArtifactMediaType, legacyBody, []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+		t.Fatalf("AddArtifact mismatched legacy implementation context: %v", err)
+	}
+
+	_, err := rt.taskWorkspaceProviderFor(AgentDef{CanOperate: true})(context.Background(), implementationTask, "implementer")
+	if err == nil || !strings.Contains(err.Error(), "not task factory order") {
+		t.Fatalf("taskWorkspaceProviderFor error = %v, want mismatched factory order rejection", err)
 	}
 }
 
@@ -6642,7 +7069,10 @@ func issueScanArtifactLabels(artifacts []work.ArtifactEvent) []string {
 }
 
 func issueScanArtifactByLabel(artifacts []work.ArtifactEvent, label string) *work.ArtifactEvent {
-	for i := range artifacts {
+	// Several issue-scan artifacts can be repaired by appending a replacement
+	// with the same label, so tests using this helper assert against the latest
+	// matching artifact in the store-provided order.
+	for i := len(artifacts) - 1; i >= 0; i-- {
 		if artifacts[i].Label == label {
 			return &artifacts[i]
 		}

@@ -193,16 +193,17 @@ func (r *Runtime) issueScanBlockerRepairRunnerContext(runID string) (IssueScanBl
 	if err := r.verifyIssueScanStageTaskContracts(blockerStage); err != nil {
 		return IssueScanBlockerRepairRunnerContext{}, false, err
 	}
-	implementationTaskID, factoryOrderID, exists, err := workTaskByCanonicalTaskID(r.store, issueScanImplementationTaskCanonicalID(order.ID))
+	implementation, implementationReady, err := r.EnsureIssueScanImplementationTask(runID)
 	if err != nil {
-		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("find concrete implementation task: %w", err)
+		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("ensure issue-scan implementation task before blocker repair context: %w", err)
 	}
-	if !exists {
+	if !implementationReady || implementation.ImplementationTaskID == (types.EventID{}) {
 		return IssueScanBlockerRepairRunnerContext{}, false, nil
 	}
-	if strings.TrimSpace(factoryOrderID) != orderID {
-		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("implementation task belongs to factory order %q, want %q", factoryOrderID, orderID)
+	if strings.TrimSpace(implementation.FactoryOrderID) != orderID {
+		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("implementation task belongs to factory order %q, want %q", implementation.FactoryOrderID, orderID)
 	}
+	implementationTaskID := implementation.ImplementationTaskID
 	status, err := r.tasks.GetCompatibilityStatus(implementationTaskID)
 	if err != nil {
 		return IssueScanBlockerRepairRunnerContext{}, false, fmt.Errorf("read implementation task status: %w", err)

@@ -317,26 +317,15 @@ func (r *Runtime) recordIssueScanImplementationRunnerResult(runnerContext IssueS
 }
 
 func issueScanImplementationTaskContextArtifactRaw(artifacts []work.ArtifactEvent) (json.RawMessage, bool, error) {
-	for _, artifact := range artifacts {
-		if strings.TrimSpace(artifact.Label) != IssueScanImplementationTaskContextArtifactLabel {
-			continue
-		}
-		raw := strings.TrimSpace(artifact.Body)
-		if raw == "" {
-			return nil, false, fmt.Errorf("%s artifact is empty", IssueScanImplementationTaskContextArtifactLabel)
-		}
-		var probe struct {
-			Kind string `json:"kind"`
-		}
-		if err := json.Unmarshal([]byte(raw), &probe); err != nil {
-			return nil, false, fmt.Errorf("decode %s artifact: %w", IssueScanImplementationTaskContextArtifactLabel, err)
-		}
-		if strings.TrimSpace(probe.Kind) != issueScanImplementationTaskContextArtifactKind {
-			return nil, false, fmt.Errorf("%s kind %q does not match %q", IssueScanImplementationTaskContextArtifactLabel, probe.Kind, issueScanImplementationTaskContextArtifactKind)
-		}
-		return json.RawMessage(raw), true, nil
+	artifact, ok := latestIssueScanImplementationTaskContextArtifact(artifacts)
+	if !ok {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	raw := strings.TrimSpace(artifact.Body)
+	if _, err := parseIssueScanImplementationTaskContext(raw); err != nil {
+		return nil, false, err
+	}
+	return json.RawMessage(raw), true, nil
 }
 
 func issueScanImplementationReadinessGateArtifacts(artifacts []work.ArtifactEvent) []IssueScanImplementationRunnerArtifact {
