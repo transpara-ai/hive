@@ -115,7 +115,7 @@ func TestProbeIssueScanRunnerContextsMaterializesOnlyScaffoldingAndIsIdempotent(
 	}
 
 	before := issueScanProbeStoreCountsForTest(t, rt)
-	if before.WorkTasks != 0 || before.WorkArtifacts != 0 || before.WorkDependencies != 0 || before.WorkLifecycleTransitions != 0 {
+	if before.WorkTasks != 0 || before.WorkArtifacts != 0 || before.WorkDependencies != 0 || before.WorkStateTransitions != 0 {
 		t.Fatalf("queued run should not have Work scaffolding before probe: %+v", before)
 	}
 	if before.RunnerOutputArtifacts != 0 || before.Reviews != 0 || before.DraftPRReceipts != 0 || before.ReadyPREvidence != 0 {
@@ -143,11 +143,13 @@ func TestProbeIssueScanRunnerContextsMaterializesOnlyScaffoldingAndIsIdempotent(
 }
 
 func TestProbeIssueScanRunnerContextsDoesNotRecordRunnerOutputsForDeepContexts(t *testing.T) {
+	var baselines []issueScanProbeStoreCounts
+
 	rt, _, queued, _, _ := issueScanReadyImplementationTaskFixtureForTest(t)
-	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "implementation_runner", issueScanImplementationStageID)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "implementation_runner", issueScanImplementationStageID))
 
 	rt, _, queued, _, _ = issueScanCompletedImplementationFixtureForTest(t)
-	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "adversarial_review_runner", issueScanAdversarialReviewStageID)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "adversarial_review_runner", issueScanAdversarialReviewStageID))
 
 	rt, writer, queued, _, implementationTask := issueScanCompletedImplementationFixtureForTest(t)
 	if err := appendIssueScanCodeReviewForTest(rt, writer, implementationTask.ID, "request_changes", "exact-head review found blockers", []string{"missing regression test"}); err != nil {
@@ -159,14 +161,15 @@ func TestProbeIssueScanRunnerContextsDoesNotRecordRunnerOutputsForDeepContexts(t
 	if _, err := rt.progressIssueScanLifecycle(); err != nil {
 		t.Fatalf("progressIssueScanLifecycle after request_changes: %v", err)
 	}
-	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "blocker_repair_runner", issueScanBlockerRepairStageID)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, queued.RunID, "blocker_repair_runner", issueScanBlockerRepairStageID))
 
 	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
 	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
-	assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "ready_pr_evidence_runner", issueScanReadyForHumanPRStageID)
+	baselines = append(baselines, assertIssueScanProbeReadyWithoutForbiddenOutputs(t, rt, runID, "ready_pr_evidence_runner", issueScanReadyForHumanPRStageID))
+	assertIssueScanProbeObservedStateTransitionBaseline(t, baselines)
 }
 
 func TestProbeIssueScanRunnerContextsOmitsPayloadWhenNotRequested(t *testing.T) {
@@ -243,31 +246,35 @@ func requireIssueScanProbe(t *testing.T, doc IssueScanRunnerContextProbeDocument
 }
 
 type issueScanProbeStoreCounts struct {
-	WorkTasks                int
-	WorkArtifacts            int
-	WorkDependencies         int
-	WorkLifecycleTransitions int
-	RunnerOutputArtifacts    int
-	Reviews                  int
-	AuthorityRequests        int
-	AuthorityDecisions       int
-	DraftPRReceipts          int
-	ReadyPREvidence          int
+	WorkTasks             int
+	WorkArtifacts         int
+	WorkDependencies      int
+	WorkStateTransitions  int
+	RunnerOutputArtifacts int
+	Reviews               int
+	AuthorityRequests     int
+	AuthorityDecisions    int
+	DraftPRReceipts       int
+	ReadyPREvidence       int
 }
 
 func issueScanProbeStoreCountsForTest(t *testing.T, rt *Runtime) issueScanProbeStoreCounts {
 	t.Helper()
 	return issueScanProbeStoreCounts{
-		WorkTasks:                issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskCreated),
-		WorkArtifacts:            issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskArtifact),
-		WorkDependencies:         issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskDependencyAdded),
-		WorkLifecycleTransitions: issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskLifecycleTransitioned),
-		RunnerOutputArtifacts:    issueScanProbeTaskArtifactLabelCountForTest(t, rt, IssueScanStageRoleOutputArtifactLabel),
-		Reviews:                  issueScanProbeEventCountForTest(t, rt, event.EventTypeCodeReviewSubmitted),
-		AuthorityRequests:        issueScanProbeEventCountForTest(t, rt, EventTypeAuthorityRequestRecorded),
-		AuthorityDecisions:       issueScanProbeEventCountForTest(t, rt, EventTypeAuthorityDecisionRecorded),
-		DraftPRReceipts:          issueScanProbeTaskArtifactLabelCountForTest(t, rt, TransparaAIDraftPRReceiptArtifactLabel),
-		ReadyPREvidence:          issueScanProbeTaskArtifactLabelCountForTest(t, rt, IssueScanReadyPREvidenceArtifactLabel),
+		WorkTasks:        issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskCreated),
+		WorkArtifacts:    issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskArtifact),
+		WorkDependencies: issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskDependencyAdded),
+		WorkStateTransitions: issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskLifecycleTransitioned) +
+			issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskAssigned) +
+			issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskCompleted) +
+			issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskReopened) +
+			issueScanProbeEventCountForTest(t, rt, work.EventTypeTaskUnblocked),
+		RunnerOutputArtifacts: issueScanProbeTaskArtifactLabelCountForTest(t, rt, IssueScanStageRoleOutputArtifactLabel),
+		Reviews:               issueScanProbeEventCountForTest(t, rt, event.EventTypeCodeReviewSubmitted),
+		AuthorityRequests:     issueScanProbeEventCountForTest(t, rt, EventTypeAuthorityRequestRecorded),
+		AuthorityDecisions:    issueScanProbeEventCountForTest(t, rt, EventTypeAuthorityDecisionRecorded),
+		DraftPRReceipts:       issueScanProbeTaskArtifactLabelCountForTest(t, rt, TransparaAIDraftPRReceiptArtifactLabel),
+		ReadyPREvidence:       issueScanProbeTaskArtifactLabelCountForTest(t, rt, IssueScanReadyPREvidenceArtifactLabel),
 	}
 }
 
@@ -296,7 +303,7 @@ func issueScanProbeTaskArtifactLabelCountForTest(t *testing.T, rt *Runtime, labe
 	return count
 }
 
-func assertIssueScanProbeReadyWithoutForbiddenOutputs(t *testing.T, rt *Runtime, runID, probeID, stageID string) {
+func assertIssueScanProbeReadyWithoutForbiddenOutputs(t *testing.T, rt *Runtime, runID, probeID, stageID string) issueScanProbeStoreCounts {
 	t.Helper()
 	before := issueScanProbeStoreCountsForTest(t, rt)
 	doc, err := rt.ProbeIssueScanRunnerContexts(runID, false)
@@ -304,6 +311,8 @@ func assertIssueScanProbeReadyWithoutForbiddenOutputs(t *testing.T, rt *Runtime,
 		t.Fatalf("ProbeIssueScanRunnerContexts(%s): %v", runID, err)
 	}
 	after := issueScanProbeStoreCountsForTest(t, rt)
+	assertIssueScanProbeDeepWorkCountsActive(t, before, probeID)
+	assertIssueScanProbeDeepWorkCountsUnchanged(t, before, after)
 	assertIssueScanProbeForbiddenCountsUnchanged(t, before, after)
 	probe := requireIssueScanProbe(t, doc, probeID)
 	if !probe.Ready || probe.StageID != stageID {
@@ -311,6 +320,36 @@ func assertIssueScanProbeReadyWithoutForbiddenOutputs(t *testing.T, rt *Runtime,
 	}
 	if len(probe.ContextPayload) != 0 {
 		t.Fatalf("probe %q emitted payload without includePayload: %s", probeID, string(probe.ContextPayload))
+	}
+	return before
+}
+
+func assertIssueScanProbeDeepWorkCountsActive(t *testing.T, before issueScanProbeStoreCounts, probeID string) {
+	t.Helper()
+	if before.WorkTasks == 0 ||
+		before.WorkArtifacts == 0 ||
+		before.WorkDependencies == 0 {
+		t.Fatalf("deep probe %q baseline does not exercise Work counts: %+v", probeID, before)
+	}
+}
+
+func assertIssueScanProbeObservedStateTransitionBaseline(t *testing.T, baselines []issueScanProbeStoreCounts) {
+	t.Helper()
+	for _, baseline := range baselines {
+		if baseline.WorkStateTransitions > 0 {
+			return
+		}
+	}
+	t.Fatalf("deep probe fixtures never exercised a non-zero Work state-transition baseline: %+v", baselines)
+}
+
+func assertIssueScanProbeDeepWorkCountsUnchanged(t *testing.T, before, after issueScanProbeStoreCounts) {
+	t.Helper()
+	if after.WorkTasks != before.WorkTasks ||
+		after.WorkArtifacts != before.WorkArtifacts ||
+		after.WorkDependencies != before.WorkDependencies ||
+		after.WorkStateTransitions != before.WorkStateTransitions {
+		t.Fatalf("deep probe changed Work lifecycle/scaffolding counts: before=%+v after=%+v", before, after)
 	}
 }
 
