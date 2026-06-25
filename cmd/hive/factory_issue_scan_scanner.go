@@ -37,11 +37,12 @@ type issueScanScannerConfig struct {
 }
 
 type issueScanScannerCycleResult struct {
-	ScannedIssues   int
-	SkippedExisting int
-	Queued          bool
-	QueuedRunID     string
-	QueuedIssue     hive.GitHubIssueCandidate
+	ScannedIssues     int
+	SkippedExisting   int
+	SkippedNotPRReady int
+	Queued            bool
+	QueuedRunID       string
+	QueuedIssue       hive.GitHubIssueCandidate
 }
 
 func scanGitHubIssuesWith(ctx context.Context, repos []string, limit int, labels []string, lister issueScanIssueLister) ([]hive.GitHubIssueCandidate, error) {
@@ -76,10 +77,10 @@ func runIssueScanScannerLoop(ctx context.Context, fc *factoryContext, config iss
 		}
 		if result.Queued {
 			queuedRuns++
-			fmt.Fprintf(os.Stderr, "Issue-scan scanner: queued %s for %s#%d and skipped %d existing issue(s)\n", result.QueuedRunID, result.QueuedIssue.Repo, result.QueuedIssue.Number, result.SkippedExisting)
+			fmt.Fprintf(os.Stderr, "Issue-scan scanner: queued %s for %s#%d, skipped %d existing issue(s), and skipped %d non-PR-ready issue(s)\n", result.QueuedRunID, result.QueuedIssue.Repo, result.QueuedIssue.Number, result.SkippedExisting, result.SkippedNotPRReady)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Issue-scan scanner: scanned %d issue(s); no new issue-scan FactoryOrder queued\n", result.ScannedIssues)
+		fmt.Fprintf(os.Stderr, "Issue-scan scanner: scanned %d issue(s); skipped %d non-PR-ready issue(s); no new issue-scan FactoryOrder queued\n", result.ScannedIssues, result.SkippedNotPRReady)
 	}
 
 	run()
@@ -127,6 +128,10 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	if len(issues) == 0 {
 		return result, nil
 	}
+	issues, result.SkippedNotPRReady = filterIssueScanPRReadyCandidates(issues)
+	if len(issues) == 0 {
+		return result, nil
+	}
 	existing, err := issueScanRequestedDedupeKeys(fc.store)
 	if err != nil {
 		return result, err
@@ -165,6 +170,39 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	result.QueuedRunID = queued.RunID
 	result.QueuedIssue = queued.Selected
 	return result, nil
+}
+
+func filterIssueScanPRReadyCandidates(issues []hive.GitHubIssueCandidate) ([]hive.GitHubIssueCandidate, int) {
+	out := make([]hive.GitHubIssueCandidate, 0, len(issues))
+	skipped := 0
+	for _, issue := range issues {
+		if issueScanCandidatePRReady(issue) {
+			out = append(out, issue)
+			continue
+		}
+		skipped++
+	}
+	return out, skipped
+}
+
+func issueScanCandidatePRReady(issue hive.GitHubIssueCandidate) bool {
+	labels := map[string]struct{}{}
+	for _, label := range issue.Labels {
+		normalized := strings.ToLower(strings.TrimSpace(label))
+		if normalized != "" {
+			labels[normalized] = struct{}{}
+		}
+	}
+	if _, ok := labels["cc:pr-ready"]; !ok {
+		return false
+	}
+	if _, ok := labels["cc:pr-deferred"]; ok {
+		return false
+	}
+	if _, ok := labels["cc:needs-human-scope"]; ok {
+		return false
+	}
+	return true
 }
 
 func issueScanCandidateAlreadyRequested(issue hive.GitHubIssueCandidate, existing map[string]struct{}) bool {

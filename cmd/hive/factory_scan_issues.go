@@ -77,6 +77,11 @@ func cmdFactoryScanIssues(args []string) error {
 	if len(issues) == 0 {
 		return fmt.Errorf("no open GitHub issues found for %s", strings.Join(normalizedRepos, ", "))
 	}
+	var skippedNotPRReady int
+	issues, skippedNotPRReady = filterIssueScanPRReadyCandidates(issues)
+	if len(issues) == 0 {
+		return fmt.Errorf("no PR-ready GitHub issues found for %s; skipped %d non-PR-ready issue(s); require cc:pr-ready without cc:pr-deferred or cc:needs-human-scope", strings.Join(normalizedRepos, ", "), skippedNotPRReady)
+	}
 
 	var (
 		rt *hive.Runtime
@@ -409,6 +414,14 @@ func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []
 		}
 		return nil, fmt.Errorf("gh issue list %s: %w", repo, err)
 	}
+	issues, err := parseGitHubIssueCandidates(repo, output)
+	if err != nil {
+		return nil, fmt.Errorf("decode gh issue list %s: %w", repo, err)
+	}
+	return issues, nil
+}
+
+func parseGitHubIssueCandidates(repo string, output []byte) ([]hive.GitHubIssueCandidate, error) {
 	var raw []struct {
 		Number int    `json:"number"`
 		Title  string `json:"title"`
@@ -419,7 +432,7 @@ func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []
 		} `json:"labels"`
 	}
 	if err := json.Unmarshal(output, &raw); err != nil {
-		return nil, fmt.Errorf("decode gh issue list %s: %w", repo, err)
+		return nil, err
 	}
 	issues := make([]hive.GitHubIssueCandidate, 0, len(raw))
 	for _, issue := range raw {
