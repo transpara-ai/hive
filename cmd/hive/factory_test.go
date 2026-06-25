@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +101,11 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 			want: "GITHUB_TOKEN",
 		},
 		{
+			name: "mark ready requires ready-state review runner",
+			args: []string{"--issue-scan-ready-pr-mark-ready"},
+			want: "--issue-scan-ready-pr-review-runner",
+		},
+		{
 			name: "mark ready conflicts with generic ready runner",
 			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-runner", "/bin/true"},
 			want: "--issue-scan-ready-pr-runner",
@@ -128,11 +136,311 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 	}
 }
 
+func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
+	doc := issueScanRunnerContracts()
+	if doc.Kind != "issue_scan_runner_contracts" {
+		t.Fatalf("contract kind = %q", doc.Kind)
+	}
+	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.4" {
+		t.Fatalf("contract lifecycle version = %q", doc.LifecycleVersion)
+	}
+	for _, want := range []string{
+		"--issue-scan-require-full-chain",
+		"--issue-scan-repo",
+		"--issue-scan-registry",
+		"--issue-scan-stage-role-runner",
+		"--issue-scan-implementation-runner",
+		"--issue-scan-review-runner",
+		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner",
+	} {
+		if !slices.Contains(doc.FullChainDaemonFlags, want) {
+			t.Fatalf("full-chain flags missing %q: %+v", want, doc.FullChainDaemonFlags)
+		}
+	}
+	contracts := map[string]issueScanRunnerContract{}
+	for _, contract := range doc.ExternalRunnerContracts {
+		contracts[contract.ID] = contract
+	}
+	tests := []struct {
+		id          string
+		contextKind string
+		stdoutType  string
+		required    string
+	}{
+		{"stage_role_output_runner", "issue_scan_stage_role_output_runner_context", "hive.IssueScanStageRoleOutputRunnerResult", "role_outputs[]"},
+		{"implementation_runner", "issue_scan_implementation_runner_context", "hive.IssueScanImplementationRunnerResult", "operate_result_body"},
+		{"adversarial_review_runner", "issue_scan_adversarial_review_context", "hive.IssueScanAdversarialReviewReceipt", "reviewed_head_sha"},
+		{"blocker_repair_runner", "issue_scan_blocker_repair_runner_context", "hive.IssueScanBlockerRepairRunnerResult", "operate_result_body"},
+		{"ready_pr_evidence_runner", "issue_scan_ready_pr_runner_context", "hive.IssueScanReadyPRRunnerResult", "ready_pr_evidence.kind=issue_scan_ready_pr_evidence"},
+		{"ready_state_review_runner", "issue_scan_ready_state_review_context", "hive.IssueScanReadyStateReviewReceipt", "status"},
+	}
+	for _, tt := range tests {
+		contract, ok := contracts[tt.id]
+		if !ok {
+			t.Fatalf("contract %q missing from %+v", tt.id, contracts)
+		}
+		if contract.StdinContextKind != tt.contextKind {
+			t.Fatalf("%s context kind = %q, want %q", tt.id, contract.StdinContextKind, tt.contextKind)
+		}
+		if contract.StdoutContractType != tt.stdoutType {
+			t.Fatalf("%s stdout type = %q, want %q", tt.id, contract.StdoutContractType, tt.stdoutType)
+		}
+		if !slices.Contains(contract.StdoutRequiredFields, tt.required) {
+			t.Fatalf("%s required fields missing %q: %+v", tt.id, tt.required, contract.StdoutRequiredFields)
+		}
+	}
+	if doc.InternalFinalizerContract == nil || doc.InternalFinalizerContract.ID != "ready_pr_finalizer" {
+		t.Fatalf("missing ready PR finalizer contract: %+v", doc.InternalFinalizerContract)
+	}
+	if !documentedTerminalPathIncludes(doc.TerminalStagePaths, "managed_ready_pr_finalizer", "--issue-scan-ready-pr-mark-ready") {
+		t.Fatalf("managed ready PR finalizer path missing mark-ready flag: %+v", doc.TerminalStagePaths)
+	}
+	if !documentedTerminalPathIncludes(doc.TerminalStagePaths, "external_ready_pr_evidence_runner", "--issue-scan-ready-pr-runner") {
+		t.Fatalf("external ready PR runner path missing generic runner flag: %+v", doc.TerminalStagePaths)
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsIsDiscoverable(t *testing.T) {
+	err := routeAndDispatch([]string{"factory"})
+	if err == nil || !strings.Contains(err.Error(), "issue-scan-runner-contracts") {
+		t.Fatalf("factory usage should mention issue-scan-runner-contracts, got %v", err)
+	}
+	if !strings.Contains(helpText(), "issue-scan-runner-contracts") {
+		t.Fatalf("top-level help should mention issue-scan-runner-contracts")
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
+	stdout, err := captureFactoryStdout(t, func() error {
+		return routeAndDispatch([]string{"factory", "issue-scan-runner-contracts"})
+	})
+	if err != nil {
+		t.Fatalf("issue-scan-runner-contracts route: %v", err)
+	}
+	var doc issueScanRunnerContractsDocument
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("issue-scan-runner-contracts stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if doc.Kind != "issue_scan_runner_contracts" {
+		t.Fatalf("stdout contract kind = %q", doc.Kind)
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *testing.T) {
+	doc := issueScanRunnerContracts()
+	var canonicalReadyEvidence hive.IssueScanReadyPREvidence
+	readyBody, err := hive.IssueScanReadyPREvidenceArtifactBody(hive.IssueScanReadyPREvidence{})
+	if err != nil {
+		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
+	}
+	if err := json.Unmarshal([]byte(readyBody), &canonicalReadyEvidence); err != nil {
+		t.Fatalf("decode canonical ready PR evidence body: %v", err)
+	}
+	if canonicalReadyEvidence.LifecycleVersion != doc.LifecycleVersion {
+		t.Fatalf("contract lifecycle_version = %q, want canonical ready evidence version %q", doc.LifecycleVersion, canonicalReadyEvidence.LifecycleVersion)
+	}
+	if !contractFieldContains(doc.ExternalRunnerContracts, "ready_pr_evidence_runner", "ready_pr_evidence.kind="+canonicalReadyEvidence.Kind) {
+		t.Fatalf("ready PR evidence runner contract does not document canonical kind %q", canonicalReadyEvidence.Kind)
+	}
+
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerContext{}), "hive.IssueScanStageRoleOutputRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanImplementationRunnerContext{}), "hive.IssueScanImplementationRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanAdversarialReviewContext{}), "hive.IssueScanAdversarialReviewContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerContext{}), "hive.IssueScanBlockerRepairRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerContext{}), "hive.IssueScanReadyPRRunnerContext")
+	assertTypeName(t, reflect.TypeOf(hive.IssueScanReadyStateReviewContext{}), "hive.IssueScanReadyStateReviewContext")
+
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerResult{}), "role_outputs")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "operate_result_body")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "completion_summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "reviewed_head_sha")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "review_ref")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerResult{}), "operate_result_body")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerResult{}), "completion_summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "draft_pr_receipt")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "ready_pr_evidence")
+	assertJSONField(t, reflect.TypeOf(hive.TransparaAIDraftPRReceipt{}), "kind")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPREvidence{}), "kind")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "role")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputEvidence{}), "outputs")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "verdict")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "confidence")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "review_ref")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "reviewed_head_sha")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "status")
+}
+
+func TestFactoryIssueScanRunnerContractsFlagsAreRegistered(t *testing.T) {
+	doc := issueScanRunnerContracts()
+	daemonFlags := documentedIssueScanFlags(doc.FullChainDaemonFlags, doc.TerminalStagePaths)
+	for _, flag := range daemonFlags {
+		t.Run("daemon "+flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "daemon"}, flag, issueScanFlagTestValue(flag))
+			err := routeAndDispatch(args)
+			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("daemon flag %s is not registered: %v", flag, err)
+			}
+		})
+	}
+
+	progressFlags := documentedIssueScanFlags(doc.NamedProgressFlags, doc.TerminalStagePaths)
+	for _, flag := range progressFlags {
+		t.Run("progress "+flag, func(t *testing.T) {
+			args := appendFlagValue([]string{"factory", "progress-issue-scan"}, flag, issueScanFlagTestValue(flag))
+			err := routeAndDispatch(args)
+			if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("progress flag %s is not registered: %v", flag, err)
+			}
+		})
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRejectsUnknownFormat(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contracts", "--format", "yaml"})
+	if err == nil || !strings.Contains(err.Error(), "--format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
 func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
 		t.Fatalf("expected missing --human error, got %v", err)
 	}
+}
+
+func documentedTerminalPathIncludes(paths []issueScanTerminalPath, id, flag string) bool {
+	for _, path := range paths {
+		if path.ID == id && slices.Contains(path.Flags, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func contractFieldContains(contracts []issueScanRunnerContract, id, field string) bool {
+	for _, contract := range contracts {
+		if contract.ID == id && slices.Contains(contract.StdoutRequiredFields, field) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertJSONField(t *testing.T, typ reflect.Type, field string) {
+	t.Helper()
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == field {
+			return
+		}
+	}
+	t.Fatalf("%s has no json field %q", typ, field)
+}
+
+func assertTypeName(t *testing.T, typ reflect.Type, want string) {
+	t.Helper()
+	if typ.PkgPath() == "" {
+		t.Fatalf("type %s has no package path", typ)
+	}
+	got := typ.PkgPath() + "." + typ.Name()
+	if got != "github.com/transpara-ai/hive/pkg/"+want {
+		t.Fatalf("type name = %q, want package type %q", got, want)
+	}
+}
+
+func appendFlagValue(args []string, flag, value string) []string {
+	args = append(args, flag)
+	if value != "" {
+		args = append(args, value)
+	}
+	return args
+}
+
+func documentedIssueScanFlags(values []string, terminalPaths []issueScanTerminalPath) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(flag string) {
+		if strings.HasPrefix(flag, "--") && !seen[flag] {
+			seen[flag] = true
+			out = append(out, flag)
+		}
+	}
+	for _, flag := range values {
+		add(flag)
+	}
+	for _, path := range terminalPaths {
+		for _, flag := range path.Flags {
+			add(flag)
+		}
+		for _, flag := range path.MutuallyExclusiveWith {
+			add(flag)
+		}
+	}
+	return out
+}
+
+func issueScanFlagTestValue(flag string) string {
+	switch flag {
+	case "--issue-scan-interval":
+		return "1m"
+	case "--issue-scan-repo":
+		return "transpara-ai/hive"
+	case "--repo-workspace-root":
+		return "/tmp"
+	case "--issue-scan-stage-role-runner",
+		"--issue-scan-implementation-runner",
+		"--issue-scan-review-runner",
+		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-ready-pr-review-runner",
+		"--issue-scan-ready-pr-runner":
+		return "/bin/true"
+	case "--run":
+		return "run_issue_001"
+	default:
+		return ""
+	}
+}
+
+func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	original := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type readResult struct {
+		body []byte
+		err  error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		body, err := io.ReadAll(read)
+		readDone <- readResult{body: body, err: err}
+	}()
+	os.Stdout = write
+	defer func() {
+		os.Stdout = original
+		_ = write.Close()
+		_ = read.Close()
+	}()
+	callErr := fn()
+	if err := write.Close(); err != nil && callErr == nil {
+		callErr = err
+	}
+	result := <-readDone
+	if result.err != nil && callErr == nil {
+		callErr = result.err
+	}
+	return string(result.body), callErr
 }
 
 func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
