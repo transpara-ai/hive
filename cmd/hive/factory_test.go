@@ -258,6 +258,7 @@ func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *t
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "reviewed_head_sha")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "review_ref")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerResult{}), "operate_result_body")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerResult{}), "completion_summary")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "draft_pr_receipt")
 	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "ready_pr_evidence")
 	assertJSONField(t, reflect.TypeOf(hive.TransparaAIDraftPRReceipt{}), "kind")
