@@ -128,11 +128,85 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 	}
 }
 
+func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
+	doc := issueScanRunnerContracts()
+	if doc.Kind != "issue_scan_runner_contracts" {
+		t.Fatalf("contract kind = %q", doc.Kind)
+	}
+	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.4" {
+		t.Fatalf("contract lifecycle version = %q", doc.LifecycleVersion)
+	}
+	for _, want := range []string{
+		"--issue-scan-require-full-chain",
+		"--issue-scan-stage-role-runner",
+		"--issue-scan-implementation-runner",
+		"--issue-scan-review-runner",
+		"--issue-scan-blocker-repair-runner",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner",
+	} {
+		if !slicesContainString(doc.FullChainDaemonFlags, want) {
+			t.Fatalf("full-chain flags missing %q: %+v", want, doc.FullChainDaemonFlags)
+		}
+	}
+	contracts := map[string]issueScanRunnerContract{}
+	for _, contract := range doc.ExternalRunnerContracts {
+		contracts[contract.ID] = contract
+	}
+	tests := []struct {
+		id          string
+		contextKind string
+		stdoutType  string
+		required    string
+	}{
+		{"stage_role_output_runner", "issue_scan_stage_role_output_runner_context", "hive.IssueScanStageRoleOutputRunnerResult", "role_outputs[]"},
+		{"implementation_runner", "issue_scan_implementation_runner_context", "hive.IssueScanImplementationRunnerResult", "operate_result_body"},
+		{"adversarial_review_runner", "issue_scan_adversarial_review_context", "hive.IssueScanAdversarialReviewReceipt", "reviewed_head_sha"},
+		{"blocker_repair_runner", "issue_scan_blocker_repair_runner_context", "hive.IssueScanBlockerRepairRunnerResult", "operate_result_body"},
+		{"ready_pr_evidence_runner", "issue_scan_ready_pr_runner_context", "hive.IssueScanReadyPRRunnerResult", "ready_pr_evidence.kind=issue_scan_ready_pr_evidence"},
+		{"ready_state_review_runner", "issue_scan_ready_state_review_context", "hive.IssueScanReadyStateReviewReceipt", "status"},
+	}
+	for _, tt := range tests {
+		contract, ok := contracts[tt.id]
+		if !ok {
+			t.Fatalf("contract %q missing from %+v", tt.id, contracts)
+		}
+		if contract.StdinContextKind != tt.contextKind {
+			t.Fatalf("%s context kind = %q, want %q", tt.id, contract.StdinContextKind, tt.contextKind)
+		}
+		if contract.StdoutContractType != tt.stdoutType {
+			t.Fatalf("%s stdout type = %q, want %q", tt.id, contract.StdoutContractType, tt.stdoutType)
+		}
+		if !slicesContainString(contract.StdoutRequiredFields, tt.required) {
+			t.Fatalf("%s required fields missing %q: %+v", tt.id, tt.required, contract.StdoutRequiredFields)
+		}
+	}
+	if doc.InternalFinalizerContract == nil || doc.InternalFinalizerContract.ID != "ready_pr_finalizer" {
+		t.Fatalf("missing ready PR finalizer contract: %+v", doc.InternalFinalizerContract)
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRejectsUnknownFormat(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "issue-scan-runner-contracts", "--format", "yaml"})
+	if err == nil || !strings.Contains(err.Error(), "--format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
 func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "record-issue-scan-review", "--run", "run_issue_001", "--review-file", "/nonexistent"})
 	if err == nil || !strings.Contains(err.Error(), "human") {
 		t.Fatalf("expected missing --human error, got %v", err)
 	}
+}
+
+func slicesContainString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {

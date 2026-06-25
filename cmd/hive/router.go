@@ -75,6 +75,8 @@ func helpText() string {
 	b.WriteString("                           Record ready-for-Human PR evidence for issue-scan run\n")
 	b.WriteString("  factory run-issue-scan-ready-pr\n")
 	b.WriteString("                           Run configured terminal ready-PR evidence command\n")
+	b.WriteString("  factory issue-scan-runner-contracts\n")
+	b.WriteString("                           Print issue-scan external runner JSON contracts\n")
 	b.WriteString("  factory request-issue-scan-pr\n")
 	b.WriteString("                           Raise issue-scan draft-PR authority request\n")
 	b.WriteString("  factory create-issue-scan-draft-pr\n")
