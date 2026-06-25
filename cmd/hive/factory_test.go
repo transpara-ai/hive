@@ -79,6 +79,7 @@ func TestFactoryProgressIssueScanRequiresConfiguredRunnersSwitch(t *testing.T) {
 
 func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
+	okRunner := issueScanExecutableForTest(t)
 	base := []string{
 		"factory", "progress-issue-scan",
 		"--human", "Michael",
@@ -97,7 +98,7 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 		},
 		{
 			name: "mark ready requires token",
-			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", "/bin/true"},
+			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner", okRunner},
 			want: "GITHUB_TOKEN",
 		},
 		{
@@ -107,12 +108,12 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 		},
 		{
 			name: "mark ready conflicts with generic ready runner",
-			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-runner", "/bin/true"},
+			args: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-runner", okRunner},
 			want: "--issue-scan-ready-pr-runner",
 		},
 		{
 			name: "ready review runner requires mark ready",
-			args: []string{"--issue-scan-ready-pr-review-runner", "/bin/true"},
+			args: []string{"--issue-scan-ready-pr-review-runner", okRunner},
 			want: "--issue-scan-ready-pr-mark-ready",
 		},
 		{
@@ -122,7 +123,7 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 		},
 		{
 			name: "timeout must be positive",
-			args: []string{"--issue-scan-review-runner", "/bin/true", "--issue-scan-review-timeout", "0s"},
+			args: []string{"--issue-scan-review-runner", okRunner, "--issue-scan-review-timeout", "0s"},
 			want: "--issue-scan-review-timeout",
 		},
 	}
@@ -133,6 +134,87 @@ func TestFactoryProgressIssueScanConfiguredRunnerGuards(t *testing.T) {
 				t.Fatalf("routeAndDispatch error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestFactoryProgressIssueScanConfiguredRunnerRejectsMissingExecutableBeforeRuntime(t *testing.T) {
+	tests := []struct {
+		name string
+		flag string
+	}{
+		{name: "stage role runner", flag: "--issue-scan-stage-role-runner"},
+		{name: "implementation runner", flag: "--issue-scan-implementation-runner"},
+		{name: "review runner", flag: "--issue-scan-review-runner"},
+		{name: "blocker repair runner", flag: "--issue-scan-blocker-repair-runner"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			missingRunner := filepath.Join(t.TempDir(), "missing-runner")
+			err := routeAndDispatch([]string{
+				"factory", "progress-issue-scan",
+				"--human", "Michael",
+				"--run", "run_issue_001",
+				"--run-configured-runners",
+				tt.flag, missingRunner,
+			})
+			if err == nil {
+				t.Fatal("expected missing runner executable error")
+			}
+			for _, want := range []string{tt.flag, missingRunner} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("missing executable error missing %q: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "progress issue-scan lifecycle") || strings.Contains(err.Error(), "queued run") {
+				t.Fatalf("runner executable preflight should run before runtime progress, got %v", err)
+			}
+		})
+	}
+}
+
+func TestFactoryProgressIssueScanReadyReviewRunnerRejectsMissingExecutableBeforeGitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	missingRunner := filepath.Join(t.TempDir(), "missing-ready-review-runner")
+	err := routeAndDispatch([]string{
+		"factory", "progress-issue-scan",
+		"--human", "Michael",
+		"--run", "run_issue_001",
+		"--run-configured-runners",
+		"--issue-scan-ready-pr-mark-ready",
+		"--issue-scan-ready-pr-review-runner", missingRunner,
+	})
+	if err == nil {
+		t.Fatal("expected missing ready-state review runner executable error")
+	}
+	for _, want := range []string{"--issue-scan-ready-pr-review-runner", missingRunner} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing ready review executable error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("ready-state review executable preflight should run before GitHub token gate, got %v", err)
+	}
+}
+
+func TestFactoryProgressIssueScanGenericReadyRunnerRejectsMissingExecutableBeforeRuntime(t *testing.T) {
+	missingRunner := filepath.Join(t.TempDir(), "missing-ready-pr-runner")
+	err := routeAndDispatch([]string{
+		"factory", "progress-issue-scan",
+		"--human", "Michael",
+		"--run", "run_issue_001",
+		"--run-configured-runners",
+		"--issue-scan-ready-pr-runner", missingRunner,
+	})
+	if err == nil {
+		t.Fatal("expected missing generic ready PR runner executable error")
+	}
+	for _, want := range []string{"--issue-scan-ready-pr-runner", missingRunner} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing generic ready runner executable error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "progress issue-scan lifecycle") || strings.Contains(err.Error(), "queued run") {
+		t.Fatalf("generic ready runner executable preflight should run before runtime progress, got %v", err)
 	}
 }
 
@@ -235,6 +317,9 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	}
 	if !slices.Contains(doc.OperatorNotes, "Full-chain daemon startup resolves every configured external runner executable before entering the daemon loop.") {
 		t.Fatalf("operator notes missing full-chain executable preflight: %+v", doc.OperatorNotes)
+	}
+	if !slices.Contains(doc.OperatorNotes, "Named configured progress resolves every supplied external runner executable before opening the runtime or invoking runners.") {
+		t.Fatalf("operator notes missing named progress executable preflight: %+v", doc.OperatorNotes)
 	}
 }
 

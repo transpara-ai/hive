@@ -396,6 +396,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			"Use --issue-scan-require-full-chain on daemon startup when the intended posture is autonomous issue-scan to ready-for-Human PR.",
 			"Full-chain daemon startup requires either --issue-scan-repo or --issue-scan-registry as the issue source.",
 			"Full-chain daemon startup resolves every configured external runner executable before entering the daemon loop.",
+			"Named configured progress resolves every supplied external runner executable before opening the runtime or invoking runners.",
 			"Use hive factory progress-issue-scan --run-configured-runners --run <id> for a bounded named-run rehearsal before daemonizing the same runner chain.",
 			"Use hive factory issue-scan-runner-contexts --run <id> to build/check which runner context is ready for a stored issue-scan run before invoking an external command; context building may dispatch/scaffold the queued run.",
 			"Use the standalone run-issue-scan-* commands to debug a single runner against a stored run without bypassing runtime validation.",

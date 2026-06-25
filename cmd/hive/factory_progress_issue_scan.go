@@ -88,6 +88,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 			if *stageRoleTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-stage-role-timeout must be greater than zero")
 			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-stage-role-runner", *stageRoleRunner); err != nil {
+				return err
+			}
 			runner := issueScanStageRoleOutputCommandRunner(*stageRoleRunner, stageRoleRunnerArgs, *stageRoleTimeout)
 			opts = append(opts, func(cfg *hive.Config) { cfg.IssueScanStageRoleOutputRunner = runner })
 		}
@@ -98,6 +101,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 		} else {
 			if *implementationTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-implementation-timeout must be greater than zero")
+			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-implementation-runner", *implementationRunner); err != nil {
+				return err
 			}
 			runner := issueScanImplementationCommandRunner(*implementationRunner, implementationRunnerArgs, *implementationTimeout)
 			opts = append(opts, func(cfg *hive.Config) { cfg.IssueScanImplementationRunner = runner })
@@ -110,6 +116,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 			if *reviewTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-review-timeout must be greater than zero")
 			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-review-runner", *reviewRunner); err != nil {
+				return err
+			}
 			runner := issueScanReviewCommandRunner(*reviewRunner, reviewRunnerArgs, *reviewTimeout)
 			opts = append(opts, func(cfg *hive.Config) { cfg.IssueScanAdversarialReviewRunner = runner })
 		}
@@ -120,6 +129,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 		} else {
 			if *blockerRepairTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-blocker-repair-timeout must be greater than zero")
+			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-blocker-repair-runner", *blockerRepairRunner); err != nil {
+				return err
 			}
 			runner := issueScanBlockerRepairCommandRunner(*blockerRepairRunner, blockerRepairRunnerArgs, *blockerRepairTimeout)
 			opts = append(opts, func(cfg *hive.Config) { cfg.IssueScanBlockerRepairRunner = runner })
@@ -159,6 +171,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 			if *readyPRTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-ready-pr-timeout must be greater than zero")
 			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-ready-pr-review-runner", *readyPRReviewRunner); err != nil {
+				return err
+			}
 			token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 			if token == "" {
 				return fmt.Errorf("GITHUB_TOKEN is required when --issue-scan-ready-pr-mark-ready is enabled")
@@ -176,6 +191,9 @@ func cmdFactoryProgressIssueScan(args []string) error {
 		} else {
 			if *readyPRTimeout <= 0 {
 				return fmt.Errorf("--issue-scan-ready-pr-timeout must be greater than zero")
+			}
+			if err := requireIssueScanRunnerExecutable("--issue-scan-ready-pr-runner", *readyPRRunner); err != nil {
+				return err
 			}
 			readyRunner = issueScanReadyPRCommandRunner(*readyPRRunner, readyPRRunnerArgs, *readyPRTimeout)
 		}
