@@ -6947,6 +6947,50 @@ func TestQueueIssueScanRunLaunchRejectsNonTransparaAIRepo(t *testing.T) {
 	}
 }
 
+func TestIssueScanPRReadyLabelsMatchChangeControlVocabulary(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "IssueScanPRReadyLabel", got: IssueScanPRReadyLabel, want: "cc:pr-ready"},
+		{name: "IssueScanPRDeferredLabel", got: IssueScanPRDeferredLabel, want: "cc:pr-deferred"},
+		{name: "IssueScanNeedsHumanScopeLabel", got: IssueScanNeedsHumanScopeLabel, want: "cc:needs-human-scope"},
+	} {
+		if tt.got != tt.want {
+			t.Fatalf("%s = %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestQueueIssueScanRunLaunchRejectsMalformedCandidateBeforePRReadyFilter(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	_, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 205,
+				Title:  "PR-ready issue-scan hardening",
+				URL:    "https://github.com/transpara-ai/hive/issues/205",
+				Labels: []string{IssueScanPRReadyLabel},
+			},
+			{
+				Repo:   "example/hive",
+				Number: 204,
+				Title:  "Malformed non-ready scanner candidate",
+				URL:    "https://github.com/example/hive/issues/204",
+				Labels: []string{IssueScanNeedsHumanScopeLabel},
+			},
+		},
+		Budget: RunLaunchBudget{MaxIterations: 1, MaxCostUSD: 0},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "issues[1].repo") || !strings.Contains(err.Error(), "transpara-ai") {
+		t.Fatalf("error = %v, want validation-before-filter malformed candidate rejection", err)
+	}
+	requireRunLaunchEvents(t, rt.store, EventTypeFactoryRunRequested, 0)
+}
+
 func TestQueueIssueScanRunLaunchRejectsNonPRReadyIssue(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	_, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
