@@ -1447,6 +1447,12 @@ func (r *Runtime) StartDispatchedIssueScanLifecycleStages(result RunLaunchDispat
 	advances := make([]IssueScanStageAdvanceResult, 0, len(runIDs))
 	var errs []error
 	for _, runID := range runIDs {
+		if parked, err := r.issueScanRunIsParked(runID); err != nil {
+			errs = append(errs, fmt.Errorf("run %q: %w", runID, err))
+			continue
+		} else if parked {
+			continue
+		}
 		advance, err := r.AdvanceIssueScanLifecycleStage(runID, "")
 		if err != nil {
 			if strings.Contains(err.Error(), "issue-scan lifecycle has no incomplete stages") {

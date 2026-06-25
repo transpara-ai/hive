@@ -134,6 +134,11 @@ func (r *Runtime) RecordCompletedIssueScanImplementationRoleOutput(runID string)
 	if runID == "" {
 		return IssueScanStageRoleOutputResult{}, false, fmt.Errorf("run_id is required")
 	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return IssueScanStageRoleOutputResult{RunID: runID}, false, err
+	} else if parked {
+		return IssueScanStageRoleOutputResult{RunID: runID}, false, nil
+	}
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
 	if err != nil {
 		return IssueScanStageRoleOutputResult{RunID: runID}, false, err
@@ -218,6 +223,11 @@ func (r *Runtime) EnsureIssueScanImplementationTask(runID string) (IssueScanImpl
 	}
 	if runID == "" {
 		return result, false, fmt.Errorf("run_id is required")
+	}
+	if parked, err := r.issueScanRunIsParked(runID); err != nil {
+		return result, false, err
+	} else if parked {
+		return result, false, nil
 	}
 
 	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)

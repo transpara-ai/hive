@@ -62,6 +62,54 @@ func TestProgressIssueScanLifecycleParksClosedTargetBeforeConfiguredRunners(t *t
 	}
 }
 
+func TestParkedIssueScanRunStopsDirectLifecycleHelpers(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued := queueIssueScanParkingRun(t, rt, writer, 225)
+	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
+		return IssueScanTargetState{
+			Repository:  "transpara-ai/hive",
+			Number:      225,
+			State:       "closed",
+			StateReason: "completed",
+			Labels:      []string{IssueScanPRReadyLabel},
+		}, nil
+	}
+
+	progress, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
+	if err != nil {
+		t.Fatalf("ProgressIssueScanRunLifecycleWithConfiguredRunners: %v", err)
+	}
+	assertIssueScanParked(t, progress, IssueScanParkBlockerStaleTarget)
+	dispatch := RunLaunchDispatchResult{AlreadyDispatchedIssueScanRunIDs: []string{queued.RunID}}
+	if advances, err := rt.StartDispatchedIssueScanLifecycleStages(dispatch); err != nil || len(advances) != 0 {
+		t.Fatalf("StartDispatchedIssueScanLifecycleStages parked = %+v, %v; want no advances and no error", advances, err)
+	}
+	if completions, err := rt.CompleteReadyIssueScanLifecycleStages(dispatch); err != nil || len(completions) != 0 {
+		t.Fatalf("CompleteReadyIssueScanLifecycleStages parked = %+v, %v; want no completions and no error", completions, err)
+	}
+	if task, ready, err := rt.EnsureIssueScanImplementationTask(queued.RunID); err != nil || ready {
+		t.Fatalf("EnsureIssueScanImplementationTask parked = %+v ready=%v err=%v; want no-op", task, ready, err)
+	}
+	if recorded, ready, err := rt.RecordCompletedIssueScanImplementationRoleOutput(queued.RunID); err != nil || ready {
+		t.Fatalf("RecordCompletedIssueScanImplementationRoleOutput parked = %+v ready=%v err=%v; want no-op", recorded, ready, err)
+	}
+	if recorded, ready, err := rt.RecordCompletedIssueScanReviewRoleOutput(queued.RunID); err != nil || ready || len(recorded) != 0 {
+		t.Fatalf("RecordCompletedIssueScanReviewRoleOutput parked = %+v ready=%v err=%v; want no-op", recorded, ready, err)
+	}
+	if recorded, ready, err := rt.RecordCompletedIssueScanBlockerRoleOutput(queued.RunID); err != nil || ready || len(recorded) != 0 {
+		t.Fatalf("RecordCompletedIssueScanBlockerRoleOutput parked = %+v ready=%v err=%v; want no-op", recorded, ready, err)
+	}
+	if recorded, ready, err := rt.RecordCompletedIssueScanReadyRoleOutput(queued.RunID); err != nil || ready || len(recorded) != 0 {
+		t.Fatalf("RecordCompletedIssueScanReadyRoleOutput parked = %+v ready=%v err=%v; want no-op", recorded, ready, err)
+	}
+	if _, err := rt.AdvanceIssueScanLifecycleStage(queued.RunID, ""); err == nil || !strings.Contains(err.Error(), "is parked") {
+		t.Fatalf("AdvanceIssueScanLifecycleStage parked error = %v, want parked refusal", err)
+	}
+	if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, "research_issue_and_repo_context", IssueScanStageRuntimeEvidence{}, false); err == nil || !strings.Contains(err.Error(), "is parked") {
+		t.Fatalf("CompleteIssueScanLifecycleStage parked error = %v, want parked refusal", err)
+	}
+}
+
 func TestProgressIssueScanLifecycleParksHumanScopeAndProtectedLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
