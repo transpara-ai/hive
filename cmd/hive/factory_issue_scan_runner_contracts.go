@@ -13,6 +13,7 @@ type issueScanRunnerContractsDocument struct {
 	Purpose                   string                    `json:"purpose"`
 	FullChainDaemonFlags      []string                  `json:"full_chain_daemon_flags"`
 	NamedProgressFlags        []string                  `json:"named_progress_flags"`
+	TerminalStagePaths        []issueScanTerminalPath   `json:"terminal_stage_paths"`
 	GovernanceBoundaries      []string                  `json:"governance_boundaries"`
 	ExternalRunnerContracts   []issueScanRunnerContract `json:"external_runner_contracts"`
 	InternalFinalizerContract *issueScanRunnerContract  `json:"internal_finalizer_contract,omitempty"`
@@ -32,6 +33,13 @@ type issueScanRunnerContract struct {
 	RecordedArtifacts    []string `json:"recorded_artifacts,omitempty"`
 	ValidationBoundaries []string `json:"validation_boundaries"`
 	AuthorityBoundaries  []string `json:"authority_boundaries"`
+}
+
+type issueScanTerminalPath struct {
+	ID                    string   `json:"id"`
+	Description           string   `json:"description"`
+	Flags                 []string `json:"flags"`
+	MutuallyExclusiveWith []string `json:"mutually_exclusive_with,omitempty"`
 }
 
 func cmdFactoryIssueScanRunnerContracts(args []string) error {
@@ -89,6 +97,27 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			"--issue-scan-draft-pr-create",
 			"--issue-scan-ready-pr-mark-ready",
 			"--issue-scan-ready-pr-review-runner",
+		},
+		TerminalStagePaths: []issueScanTerminalPath{
+			{
+				ID:          "managed_ready_pr_finalizer",
+				Description: "Hive marks the already approved draft PR ready, runs the configured exact-head ready-state review, and records ready-for-Human evidence.",
+				Flags: []string{
+					"--issue-scan-draft-pr-request",
+					"--issue-scan-draft-pr-create",
+					"--issue-scan-ready-pr-mark-ready",
+					"--issue-scan-ready-pr-review-runner",
+				},
+				MutuallyExclusiveWith: []string{"--issue-scan-ready-pr-runner"},
+			},
+			{
+				ID:          "external_ready_pr_evidence_runner",
+				Description: "An external runner supplies both the draft PR receipt and ready-for-Human PR evidence for runtime validation and recording.",
+				Flags: []string{
+					"--issue-scan-ready-pr-runner",
+				},
+				MutuallyExclusiveWith: []string{"--issue-scan-ready-pr-mark-ready", "--issue-scan-ready-pr-review-runner"},
+			},
 		},
 		GovernanceBoundaries: []string{
 			"Runners receive JSON on stdin and must return exactly one JSON object on stdout.",

@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -145,7 +148,7 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 		"--issue-scan-ready-pr-mark-ready",
 		"--issue-scan-ready-pr-review-runner",
 	} {
-		if !slicesContainString(doc.FullChainDaemonFlags, want) {
+		if !slices.Contains(doc.FullChainDaemonFlags, want) {
 			t.Fatalf("full-chain flags missing %q: %+v", want, doc.FullChainDaemonFlags)
 		}
 	}
@@ -177,13 +180,49 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 		if contract.StdoutContractType != tt.stdoutType {
 			t.Fatalf("%s stdout type = %q, want %q", tt.id, contract.StdoutContractType, tt.stdoutType)
 		}
-		if !slicesContainString(contract.StdoutRequiredFields, tt.required) {
+		if !slices.Contains(contract.StdoutRequiredFields, tt.required) {
 			t.Fatalf("%s required fields missing %q: %+v", tt.id, tt.required, contract.StdoutRequiredFields)
 		}
 	}
 	if doc.InternalFinalizerContract == nil || doc.InternalFinalizerContract.ID != "ready_pr_finalizer" {
 		t.Fatalf("missing ready PR finalizer contract: %+v", doc.InternalFinalizerContract)
 	}
+	if !documentedTerminalPathIncludes(doc.TerminalStagePaths, "managed_ready_pr_finalizer", "--issue-scan-ready-pr-mark-ready") {
+		t.Fatalf("managed ready PR finalizer path missing mark-ready flag: %+v", doc.TerminalStagePaths)
+	}
+	if !documentedTerminalPathIncludes(doc.TerminalStagePaths, "external_ready_pr_evidence_runner", "--issue-scan-ready-pr-runner") {
+		t.Fatalf("external ready PR runner path missing generic runner flag: %+v", doc.TerminalStagePaths)
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRouteEmitsJSON(t *testing.T) {
+	stdout, err := captureFactoryStdout(t, func() error {
+		return routeAndDispatch([]string{"factory", "issue-scan-runner-contracts"})
+	})
+	if err != nil {
+		t.Fatalf("issue-scan-runner-contracts route: %v", err)
+	}
+	var doc issueScanRunnerContractsDocument
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("issue-scan-runner-contracts stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if doc.Kind != "issue_scan_runner_contracts" {
+		t.Fatalf("stdout contract kind = %q", doc.Kind)
+	}
+}
+
+func TestFactoryIssueScanRunnerContractsRequiredFieldsMatchExportedJSONTags(t *testing.T) {
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanStageRoleOutputRunnerResult{}), "role_outputs")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "operate_result_body")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanImplementationRunnerResult{}), "completion_summary")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "reviewed_head_sha")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanAdversarialReviewReceipt{}), "review_ref")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanBlockerRepairRunnerResult{}), "operate_result_body")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "draft_pr_receipt")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPRRunnerResult{}), "ready_pr_evidence")
+	assertJSONField(t, reflect.TypeOf(hive.TransparaAIDraftPRReceipt{}), "kind")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyPREvidence{}), "kind")
+	assertJSONField(t, reflect.TypeOf(hive.IssueScanReadyStateReviewReceipt{}), "status")
 }
 
 func TestFactoryIssueScanRunnerContractsRejectsUnknownFormat(t *testing.T) {
@@ -200,13 +239,51 @@ func TestFactoryRecordIssueScanReviewRequiresHumanBeforeFileRead(t *testing.T) {
 	}
 }
 
-func slicesContainString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
+func documentedTerminalPathIncludes(paths []issueScanTerminalPath, id, flag string) bool {
+	for _, path := range paths {
+		if path.ID == id && slices.Contains(path.Flags, flag) {
 			return true
 		}
 	}
 	return false
+}
+
+func assertJSONField(t *testing.T, typ reflect.Type, field string) {
+	t.Helper()
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == field {
+			return
+		}
+	}
+	t.Fatalf("%s has no json field %q", typ, field)
+}
+
+func captureFactoryStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	original := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = write
+	callErr := fn()
+	if err := write.Close(); err != nil && callErr == nil {
+		callErr = err
+	}
+	os.Stdout = original
+	body, readErr := io.ReadAll(read)
+	if err := read.Close(); err != nil && readErr == nil {
+		readErr = err
+	}
+	if readErr != nil && callErr == nil {
+		callErr = readErr
+	}
+	return string(body), callErr
 }
 
 func TestFactoryRunIssueScanReviewRequiresHumanBeforeRunner(t *testing.T) {
