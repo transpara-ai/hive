@@ -1089,6 +1089,24 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.SelectionPolicy.RankingInputs, "actionability_keyword_score") || !strings.Contains(queued.SelectionPolicy.Rationale, "actionability signals") {
 		t.Fatalf("queued selection policy details = %+v", queued.SelectionPolicy)
 	}
+	if queued.RoleSeparationPolicy == nil || queued.RoleSeparationPolicy.PolicyID != "civilization_issue_scan_role_separation_v0.1" {
+		t.Fatalf("queued role separation policy = %+v", queued.RoleSeparationPolicy)
+	}
+	implementerPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "implementer")
+	if implementerPolicy == nil || !implementerPolicy.CanOperateBranch || implementerPolicy.CanMutateGitHub || implementerPolicy.CanOpenPullRequest || implementerPolicy.CanApproveOrMerge {
+		t.Fatalf("implementer role separation policy = %+v", implementerPolicy)
+	}
+	reviewerPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "reviewer")
+	if reviewerPolicy == nil || reviewerPolicy.CanOperateBranch || reviewerPolicy.CanApproveOrMerge || !containsModelProjectionString(reviewerPolicy.MapsToStageRoles, "reviewer") {
+		t.Fatalf("reviewer role separation policy = %+v", reviewerPolicy)
+	}
+	humanPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "human_authority")
+	if humanPolicy == nil || !humanPolicy.CanApproveOrMerge || !humanPolicy.CanMutateGitHub || !containsModelProjectionString(humanPolicy.ForbiddenWithoutHuman, "hive_self_authorized_merge") {
+		t.Fatalf("human authority role separation policy = %+v", humanPolicy)
+	}
+	if !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "github_issue_is_not_authority") || !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "no_autonomy_increase") {
+		t.Fatalf("role separation non-claims = %+v", queued.RoleSeparationPolicy.GlobalNonClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1944,6 +1962,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	}
 	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("queued brief metadata = %+v", queued)
+	}
+	if queued.RoleSeparationPolicy == nil || queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "scanner") == nil {
+		t.Fatalf("queued role separation policy missing scanner boundary: %+v", queued.RoleSeparationPolicy)
 	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
@@ -3371,6 +3392,15 @@ func queuedRunAgentPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, stageI
 	for i := range steps {
 		if steps[i].StageID == stageID && steps[i].Role == role {
 			return &steps[i]
+		}
+	}
+	return nil
+}
+
+func queuedRunRolePolicyByActor(policies []OperatorQueuedRunRoleSeparationActorPolicy, actor string) *OperatorQueuedRunRoleSeparationActorPolicy {
+	for i := range policies {
+		if policies[i].ActorClass == actor {
+			return &policies[i]
 		}
 	}
 	return nil

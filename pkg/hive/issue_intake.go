@@ -22,9 +22,10 @@ const (
 	issueScanBriefKind            = "transpara_ai_github_issue_scan"
 	issueScanLifecycleVersionV02  = "civilization_issue_to_human_ready_pr_v0.2"
 	issueScanLifecycleVersionV03  = "civilization_issue_to_human_ready_pr_v0.3"
+	issueScanLifecycleVersionV04  = "civilization_issue_to_human_ready_pr_v0.4"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, evidence, roles, boundaries, gates, or step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.4"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.5"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -46,6 +47,25 @@ type issueScanSelectionPolicyPayload struct {
 	CandidateCount int      `json:"candidate_count"`
 	RankingInputs  []string `json:"ranking_inputs"`
 	Rationale      string   `json:"rationale"`
+}
+
+type issueScanRoleSeparationPolicyPayload struct {
+	PolicyID        string                               `json:"policy_id"`
+	PolicyVersion   string                               `json:"policy_version"`
+	ActorPolicies   []issueScanRoleSeparationActorPolicy `json:"actor_policies"`
+	GlobalNonClaims []string                             `json:"global_non_claims"`
+}
+
+type issueScanRoleSeparationActorPolicy struct {
+	ActorClass            string   `json:"actor_class"`
+	MapsToStageRoles      []string `json:"maps_to_stage_roles,omitempty"`
+	CanOperateBranch      bool     `json:"can_operate_branch"`
+	CanMutateGitHub       bool     `json:"can_mutate_github"`
+	CanOpenPullRequest    bool     `json:"can_open_pull_request"`
+	CanApproveOrMerge     bool     `json:"can_approve_or_merge"`
+	AuthorityBoundary     string   `json:"authority_boundary"`
+	RequiredEvidence      []string `json:"required_evidence,omitempty"`
+	ForbiddenWithoutHuman []string `json:"forbidden_without_human,omitempty"`
 }
 
 type issueScanLifecycleStage struct {
@@ -386,22 +406,24 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		return nil, err
 	}
 	brief := struct {
-		Kind                 string                          `json:"kind"`
-		LifecycleVersion     string                          `json:"lifecycle_version"`
-		SelectedIssue        issueScanBriefIssuePayload      `json:"selected_issue"`
-		SelectionPolicy      issueScanSelectionPolicyPayload `json:"selection_policy"`
-		ScannedRepos         []string                        `json:"scanned_repos"`
-		ScannedIssueCount    int                             `json:"scanned_issue_count"`
-		CandidateIssues      []issueScanBriefIssuePayload    `json:"candidate_issues"`
-		RequiredAgentFlow    []string                        `json:"required_agent_flow"`
-		DevelopmentLifecycle []issueScanLifecycleStage       `json:"development_lifecycle"`
-		AgentExecutionPlan   []issueScanAgentPlanStep        `json:"agent_execution_plan"`
-		AuthorityBoundaries  []string                        `json:"authority_boundaries"`
+		Kind                 string                               `json:"kind"`
+		LifecycleVersion     string                               `json:"lifecycle_version"`
+		SelectedIssue        issueScanBriefIssuePayload           `json:"selected_issue"`
+		SelectionPolicy      issueScanSelectionPolicyPayload      `json:"selection_policy"`
+		RoleSeparationPolicy issueScanRoleSeparationPolicyPayload `json:"role_separation_policy"`
+		ScannedRepos         []string                             `json:"scanned_repos"`
+		ScannedIssueCount    int                                  `json:"scanned_issue_count"`
+		CandidateIssues      []issueScanBriefIssuePayload         `json:"candidate_issues"`
+		RequiredAgentFlow    []string                             `json:"required_agent_flow"`
+		DevelopmentLifecycle []issueScanLifecycleStage            `json:"development_lifecycle"`
+		AgentExecutionPlan   []issueScanAgentPlanStep             `json:"agent_execution_plan"`
+		AuthorityBoundaries  []string                             `json:"authority_boundaries"`
 	}{
 		Kind:                 issueScanBriefKind,
 		LifecycleVersion:     issueScanLifecycleVersion,
 		SelectedIssue:        issueScanBriefIssue(selected, 1),
 		SelectionPolicy:      issueScanSelectionPolicy(candidates),
+		RoleSeparationPolicy: issueScanRoleSeparationPolicy(),
 		ScannedRepos:         issueScanRepos(candidates),
 		ScannedIssueCount:    len(candidates),
 		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
@@ -665,6 +687,136 @@ func issueScanSelectionPolicy(candidates []GitHubIssueCandidate) issueScanSelect
 			"repo_scan_order",
 		},
 		Rationale: "Rank validated open Transpara-AI issues by explicit actionability signals before selecting rank 1; preserve all candidates and ranks for later civic debate.",
+	}
+}
+
+func issueScanRoleSeparationPolicy() issueScanRoleSeparationPolicyPayload {
+	return issueScanRoleSeparationPolicyPayload{
+		PolicyID:      "civilization_issue_scan_role_separation_v0.1",
+		PolicyVersion: "v0.1",
+		ActorPolicies: []issueScanRoleSeparationActorPolicy{
+			{
+				ActorClass:         "scanner",
+				CanOperateBranch:   false,
+				CanMutateGitHub:    false,
+				CanOpenPullRequest: false,
+				CanApproveOrMerge:  false,
+				AuthorityBoundary:  "read_only_issue_state",
+				RequiredEvidence: []string{
+					"validated_transpara_ai_repo_scope",
+					"issue_snapshot",
+					"cc_pr_ready_label_without_deferred_or_human_scope",
+				},
+				ForbiddenWithoutHuman: []string{
+					"github_mutation",
+					"branch_creation",
+					"pull_request_creation",
+					"runtime_execution",
+				},
+			},
+			{
+				ActorClass:         "recommender",
+				MapsToStageRoles:   []string{"strategist", "planner"},
+				CanOperateBranch:   false,
+				CanMutateGitHub:    false,
+				CanOpenPullRequest: false,
+				CanApproveOrMerge:  false,
+				AuthorityBoundary:  "recommendation_is_not_authority",
+				RequiredEvidence: []string{
+					"selection_policy",
+					"issue_priority_rationale",
+					"repo_context_packet",
+				},
+				ForbiddenWithoutHuman: []string{
+					"implementation_start",
+					"protected_action",
+					"autonomy_increase",
+				},
+			},
+			{
+				ActorClass:         "implementer",
+				MapsToStageRoles:   []string{"implementer"},
+				CanOperateBranch:   true,
+				CanMutateGitHub:    false,
+				CanOpenPullRequest: false,
+				CanApproveOrMerge:  false,
+				AuthorityBoundary:  "branch_only_no_merge_no_deploy",
+				RequiredEvidence: []string{
+					"implementation_task_plan",
+					"branch_name",
+					"commit_sha",
+					"validation_output",
+				},
+				ForbiddenWithoutHuman: []string{
+					"default_branch_push",
+					"merge",
+					"deploy",
+					"protected_action",
+				},
+			},
+			{
+				ActorClass:         "reviewer",
+				MapsToStageRoles:   []string{"reviewer"},
+				CanOperateBranch:   false,
+				CanMutateGitHub:    false,
+				CanOpenPullRequest: false,
+				CanApproveOrMerge:  false,
+				AuthorityBoundary:  "blocking_exact_head_review_only",
+				RequiredEvidence: []string{
+					"exact_head_review_artifact",
+					"ready_state_review",
+				},
+				ForbiddenWithoutHuman: []string{
+					"self_approval",
+					"merge",
+					"deploy",
+				},
+			},
+			{
+				ActorClass:         "guardian",
+				MapsToStageRoles:   []string{"guardian"},
+				CanOperateBranch:   false,
+				CanMutateGitHub:    false,
+				CanOpenPullRequest: false,
+				CanApproveOrMerge:  false,
+				AuthorityBoundary:  "authority_boundary_disposition_only",
+				RequiredEvidence: []string{
+					"authority_boundary_disposition",
+					"finding_disposition",
+					"human_approval_boundary_check",
+				},
+				ForbiddenWithoutHuman: []string{
+					"protected_action_approval",
+					"merge",
+					"deploy",
+				},
+			},
+			{
+				ActorClass:         "human_authority",
+				CanOperateBranch:   false,
+				CanMutateGitHub:    true,
+				CanOpenPullRequest: true,
+				CanApproveOrMerge:  true,
+				AuthorityBoundary:  "external_committee_or_current_human_delegation_required",
+				RequiredEvidence: []string{
+					"current_authority_record",
+					"exact_head_cfar_pass",
+					"green_validation",
+				},
+				ForbiddenWithoutHuman: []string{
+					"hive_self_authorized_merge",
+					"hive_self_authorized_deploy",
+					"hive_self_authorized_autonomy_increase",
+				},
+			},
+		},
+		GlobalNonClaims: []string{
+			"github_issue_is_not_authority",
+			"recommendation_is_not_implementation_permission",
+			"pull_request_is_not_merge_permission",
+			"no_autonomy_increase",
+			"no_test_001_green",
+		},
 	}
 }
 
