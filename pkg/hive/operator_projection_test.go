@@ -2077,6 +2077,129 @@ func TestQueuedRunLifecycleFromBriefSupportsLegacyV03LifecycleWithAgentPlan(t *t
 	}
 }
 
+func TestQueuedRunRoleSeparationPolicyFromBriefSupportsLegacyV04WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV04
+	delete(doc, "role_separation_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.4 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV04 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.4 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	policy, err := queuedRunRoleSeparationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief: %v", err)
+	}
+	if policy != nil {
+		t.Fatalf("legacy v0.4 role separation policy = %+v, want nil", policy)
+	}
+}
+
+func TestQueuedRunRoleSeparationPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "role_separation_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing policy brief: %v", err)
+	}
+
+	policy, err := queuedRunRoleSeparationPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "role_separation_policy is required") {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsRoleSeparationPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["role_separation_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("role_separation_policy = %#v, want object", doc["role_separation_policy"])
+	}
+	actorPolicies, ok := policy["actor_policies"].([]any)
+	if !ok || len(actorPolicies) == 0 {
+		t.Fatalf("actor_policies = %#v, want actor policy array", policy["actor_policies"])
+	}
+	firstActor, ok := actorPolicies[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first actor policy = %#v, want object", actorPolicies[0])
+	}
+	firstActor["can_approve_or_merge"] = true
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated role policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_role_policy",
+		IntakeID:     "intake_bad_role_policy",
+		OperatorID:   "operator_001",
+		Title:        "Bad role policy still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil after validation error", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) == 0 || !strings.Contains(projection.Errors[0], "role separation policy projection") || !strings.Contains(projection.Errors[0], "can_approve_or_merge") {
+		t.Fatalf("projection errors = %+v, want role separation policy validation error", projection.Errors)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",
