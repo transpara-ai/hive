@@ -98,6 +98,15 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			HumanScopeTriggers       []string `json:"human_scope_triggers"`
 			ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
 		} `json:"autonomy_guard_policy"`
+		HumanRequiredClassificationPolicy struct {
+			PolicyID              string   `json:"policy_id"`
+			PolicyVersion         string   `json:"policy_version"`
+			ClassificationPosture string   `json:"classification_posture"`
+			HumanRequiredTriggers []string `json:"human_required_triggers"`
+			EscalationOutputs     []string `json:"escalation_outputs"`
+			ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
+			NonAuthorityClaims    []string `json:"non_authority_claims"`
+		} `json:"human_required_classification_policy"`
 		AuthorityBoundaries []string `json:"authority_boundaries"`
 		SelectionPolicy     struct {
 			PolicyID       string   `json:"policy_id"`
@@ -183,6 +192,24 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_authorizes_autonomy_increase") || !containsIssueScanValue(brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_marks_test_001_green") {
 		t.Fatalf("autonomy guard forbidden claims = %+v", brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims)
+	}
+	if brief.HumanRequiredClassificationPolicy.PolicyID != "civilization_issue_scan_human_required_classification_v0.1" || brief.HumanRequiredClassificationPolicy.PolicyVersion != "v0.1" {
+		t.Fatalf("human-required classification policy = %+v", brief.HumanRequiredClassificationPolicy)
+	}
+	if brief.HumanRequiredClassificationPolicy.ClassificationPosture != "human_required_for_protected_or_authority_sensitive_work" {
+		t.Fatalf("human-required classification posture = %+v", brief.HumanRequiredClassificationPolicy)
+	}
+	if !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.HumanRequiredTriggers, "protected_action") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.HumanRequiredTriggers, "repo_settings_change") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.HumanRequiredTriggers, "authority_decision_required") {
+		t.Fatalf("human-required triggers = %+v", brief.HumanRequiredClassificationPolicy.HumanRequiredTriggers)
+	}
+	if !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.EscalationOutputs, "issue_parking_required") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.EscalationOutputs, "no_token_burn") {
+		t.Fatalf("human-required escalation outputs = %+v", brief.HumanRequiredClassificationPolicy.EscalationOutputs)
+	}
+	if !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman, "write_eventgraph_truth") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman, "create_or_merge_pr") {
+		t.Fatalf("human-required forbidden actions = %+v", brief.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman)
+	}
+	if !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.NonAuthorityClaims, "classification_is_not_authority_decision") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.NonAuthorityClaims, "no_protected_action_execution") {
+		t.Fatalf("human-required non-authority claims = %+v", brief.HumanRequiredClassificationPolicy.NonAuthorityClaims)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)

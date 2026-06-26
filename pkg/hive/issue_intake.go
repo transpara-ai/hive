@@ -24,10 +24,11 @@ const (
 	issueScanLifecycleVersionV03  = "civilization_issue_to_human_ready_pr_v0.3"
 	issueScanLifecycleVersionV04  = "civilization_issue_to_human_ready_pr_v0.4"
 	issueScanLifecycleVersionV05  = "civilization_issue_to_human_ready_pr_v0.5"
+	issueScanLifecycleVersionV06  = "civilization_issue_to_human_ready_pr_v0.6"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, policy metadata, evidence, roles, boundaries, gates, or
 	// step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.6"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.7"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -79,6 +80,16 @@ type issueScanAutonomyGuardPolicyPayload struct {
 	FailClosedOutputs        []string `json:"fail_closed_outputs"`
 	HumanScopeTriggers       []string `json:"human_scope_triggers"`
 	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+}
+
+type issueScanHumanRequiredClassificationPolicyPayload struct {
+	PolicyID              string   `json:"policy_id"`
+	PolicyVersion         string   `json:"policy_version"`
+	ClassificationPosture string   `json:"classification_posture"`
+	HumanRequiredTriggers []string `json:"human_required_triggers"`
+	EscalationOutputs     []string `json:"escalation_outputs"`
+	ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
+	NonAuthorityClaims    []string `json:"non_authority_claims"`
 }
 
 type issueScanLifecycleStage struct {
@@ -419,31 +430,33 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		return nil, err
 	}
 	brief := struct {
-		Kind                 string                               `json:"kind"`
-		LifecycleVersion     string                               `json:"lifecycle_version"`
-		SelectedIssue        issueScanBriefIssuePayload           `json:"selected_issue"`
-		SelectionPolicy      issueScanSelectionPolicyPayload      `json:"selection_policy"`
-		RoleSeparationPolicy issueScanRoleSeparationPolicyPayload `json:"role_separation_policy"`
-		AutonomyGuardPolicy  issueScanAutonomyGuardPolicyPayload  `json:"autonomy_guard_policy"`
-		ScannedRepos         []string                             `json:"scanned_repos"`
-		ScannedIssueCount    int                                  `json:"scanned_issue_count"`
-		CandidateIssues      []issueScanBriefIssuePayload         `json:"candidate_issues"`
-		RequiredAgentFlow    []string                             `json:"required_agent_flow"`
-		DevelopmentLifecycle []issueScanLifecycleStage            `json:"development_lifecycle"`
-		AgentExecutionPlan   []issueScanAgentPlanStep             `json:"agent_execution_plan"`
-		AuthorityBoundaries  []string                             `json:"authority_boundaries"`
+		Kind                              string                                            `json:"kind"`
+		LifecycleVersion                  string                                            `json:"lifecycle_version"`
+		SelectedIssue                     issueScanBriefIssuePayload                        `json:"selected_issue"`
+		SelectionPolicy                   issueScanSelectionPolicyPayload                   `json:"selection_policy"`
+		RoleSeparationPolicy              issueScanRoleSeparationPolicyPayload              `json:"role_separation_policy"`
+		AutonomyGuardPolicy               issueScanAutonomyGuardPolicyPayload               `json:"autonomy_guard_policy"`
+		HumanRequiredClassificationPolicy issueScanHumanRequiredClassificationPolicyPayload `json:"human_required_classification_policy"`
+		ScannedRepos                      []string                                          `json:"scanned_repos"`
+		ScannedIssueCount                 int                                               `json:"scanned_issue_count"`
+		CandidateIssues                   []issueScanBriefIssuePayload                      `json:"candidate_issues"`
+		RequiredAgentFlow                 []string                                          `json:"required_agent_flow"`
+		DevelopmentLifecycle              []issueScanLifecycleStage                         `json:"development_lifecycle"`
+		AgentExecutionPlan                []issueScanAgentPlanStep                          `json:"agent_execution_plan"`
+		AuthorityBoundaries               []string                                          `json:"authority_boundaries"`
 	}{
-		Kind:                 issueScanBriefKind,
-		LifecycleVersion:     issueScanLifecycleVersion,
-		SelectedIssue:        issueScanBriefIssue(selected, 1),
-		SelectionPolicy:      issueScanSelectionPolicy(candidates),
-		RoleSeparationPolicy: issueScanRoleSeparationPolicy(),
-		AutonomyGuardPolicy:  issueScanAutonomyGuardPolicy(),
-		ScannedRepos:         issueScanRepos(candidates),
-		ScannedIssueCount:    len(candidates),
-		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
-		DevelopmentLifecycle: lifecycle,
-		AgentExecutionPlan:   agentPlan,
+		Kind:                              issueScanBriefKind,
+		LifecycleVersion:                  issueScanLifecycleVersion,
+		SelectedIssue:                     issueScanBriefIssue(selected, 1),
+		SelectionPolicy:                   issueScanSelectionPolicy(candidates),
+		RoleSeparationPolicy:              issueScanRoleSeparationPolicy(),
+		AutonomyGuardPolicy:               issueScanAutonomyGuardPolicy(),
+		HumanRequiredClassificationPolicy: issueScanHumanRequiredClassificationPolicy(),
+		ScannedRepos:                      issueScanRepos(candidates),
+		ScannedIssueCount:                 len(candidates),
+		RequiredAgentFlow:                 issueScanLifecycleFlow(lifecycle),
+		DevelopmentLifecycle:              lifecycle,
+		AgentExecutionPlan:                agentPlan,
 		AuthorityBoundaries: []string{
 			"no_merge",
 			"no_deploy",
@@ -876,6 +889,55 @@ func issueScanAutonomyGuardPolicy() issueScanAutonomyGuardPolicyPayload {
 			"recommendation_authorizes_merge",
 			"recommendation_closes_residual_risk",
 			"recommendation_marks_test_001_green",
+		},
+	}
+}
+
+func issueScanHumanRequiredClassificationPolicy() issueScanHumanRequiredClassificationPolicyPayload {
+	return issueScanHumanRequiredClassificationPolicyPayload{
+		PolicyID:              "civilization_issue_scan_human_required_classification_v0.1",
+		PolicyVersion:         "v0.1",
+		ClassificationPosture: "human_required_for_protected_or_authority_sensitive_work",
+		HumanRequiredTriggers: []string{
+			"protected_action",
+			"repo_settings_change",
+			"runtime_execution",
+			"deployment",
+			"value_allocation",
+			"authority_decision_required",
+			"eventgraph_write",
+			"secret_access",
+			"test_001_green_claim",
+			"docs_172_closure",
+			"autonomy_increase",
+			"residual_risk_closure",
+		},
+		EscalationOutputs: []string{
+			"human_scope_required",
+			"authority_decision_required",
+			"issue_parking_required",
+			"no_token_burn",
+			"no_action_taken",
+		},
+		ForbiddenWithoutHuman: []string{
+			"mutate_github",
+			"create_or_merge_pr",
+			"execute_runtime",
+			"write_eventgraph_truth",
+			"deploy",
+			"allocate_value",
+			"mark_test_001_green",
+			"close_docs_172",
+			"increase_autonomy",
+			"close_residual_risk",
+		},
+		NonAuthorityClaims: []string{
+			"classification_is_not_authority_decision",
+			"issue_text_is_not_authority",
+			"no_protected_action_execution",
+			"no_github_mutation_authority",
+			"no_runtime_execution_authority",
+			"no_eventgraph_truth_write_authority",
 		},
 	}
 }

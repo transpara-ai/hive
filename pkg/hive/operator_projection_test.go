@@ -1125,6 +1125,24 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_authorizes_autonomy_increase") || !containsModelProjectionString(queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_marks_test_001_green") {
 		t.Fatalf("queued autonomy guard forbidden authority claims = %+v", queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims)
 	}
+	if queued.HumanRequiredClassificationPolicy == nil || queued.HumanRequiredClassificationPolicy.PolicyID != "civilization_issue_scan_human_required_classification_v0.1" {
+		t.Fatalf("queued human-required classification policy = %+v", queued.HumanRequiredClassificationPolicy)
+	}
+	if queued.HumanRequiredClassificationPolicy.ClassificationPosture != "human_required_for_protected_or_authority_sensitive_work" {
+		t.Fatalf("queued human-required classification posture = %+v", queued.HumanRequiredClassificationPolicy)
+	}
+	if !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.HumanRequiredTriggers, "protected_action") || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.HumanRequiredTriggers, "authority_decision_required") {
+		t.Fatalf("queued human-required triggers = %+v", queued.HumanRequiredClassificationPolicy.HumanRequiredTriggers)
+	}
+	if !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.EscalationOutputs, "issue_parking_required") || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.EscalationOutputs, "no_token_burn") {
+		t.Fatalf("queued human-required escalation outputs = %+v", queued.HumanRequiredClassificationPolicy.EscalationOutputs)
+	}
+	if !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman, "write_eventgraph_truth") || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman, "create_or_merge_pr") {
+		t.Fatalf("queued human-required forbidden actions = %+v", queued.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman)
+	}
+	if !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.NonAuthorityClaims, "classification_is_not_authority_decision") || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.NonAuthorityClaims, "no_protected_action_execution") {
+		t.Fatalf("queued human-required non-authority claims = %+v", queued.HumanRequiredClassificationPolicy.NonAuthorityClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1308,6 +1326,13 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 			HumanScopeTriggers:       []string{"autonomy_increase"},
 			ForbiddenAuthorityClaims: []string{"recommendation_authorizes_autonomy_increase"},
 		},
+		HumanRequiredClassificationPolicy: &OperatorQueuedRunHumanRequiredClassificationPolicy{
+			PolicyID:              "civilization_issue_scan_human_required_classification_v0.1",
+			HumanRequiredTriggers: []string{"protected_action"},
+			EscalationOutputs:     []string{"issue_parking_required"},
+			ForbiddenWithoutHuman: []string{"write_eventgraph_truth"},
+			NonAuthorityClaims:    []string{"classification_is_not_authority_decision"},
+		},
 		DevelopmentLifecycle: []OperatorQueuedRunLifecycleStage{
 			{ID: "runtime_completed_stage", EvidenceStatus: "runtime_completed"},
 			{ID: "declared_stage", EvidenceStatus: "expected_not_observed"},
@@ -1332,6 +1357,13 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 	out.AutonomyGuardPolicy.FailClosedOutputs[0] = "mutated"
 	if queued.AutonomyGuardPolicy.FailClosedOutputs[0] != "human_scope_required" {
 		t.Fatalf("source autonomy guard policy mutated: %+v", queued.AutonomyGuardPolicy)
+	}
+	if out.HumanRequiredClassificationPolicy == nil || !containsModelProjectionString(out.HumanRequiredClassificationPolicy.EscalationOutputs, "issue_parking_required") {
+		t.Fatalf("human-required classification policy = %+v", out.HumanRequiredClassificationPolicy)
+	}
+	out.HumanRequiredClassificationPolicy.EscalationOutputs[0] = "mutated"
+	if queued.HumanRequiredClassificationPolicy.EscalationOutputs[0] != "issue_parking_required" {
+		t.Fatalf("source human-required classification policy mutated: %+v", queued.HumanRequiredClassificationPolicy)
 	}
 	runtimeStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "runtime_completed_stage")
 	if runtimeStage == nil || runtimeStage.EvidenceStatus != "runtime_completed" {
@@ -2001,6 +2033,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.AutonomyGuardPolicy == nil || !containsModelProjectionString(queued.AutonomyGuardPolicy.FailClosedOutputs, "protected_action_blocked") {
 		t.Fatalf("queued autonomy guard policy missing fail-closed boundary: %+v", queued.AutonomyGuardPolicy)
 	}
+	if queued.HumanRequiredClassificationPolicy == nil || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.EscalationOutputs, "issue_parking_required") {
+		t.Fatalf("queued human-required classification policy missing escalation boundary: %+v", queued.HumanRequiredClassificationPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -2364,6 +2399,142 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsAutonomyGuardPolicyError(t
 	}
 }
 
+func TestQueuedRunHumanRequiredClassificationPolicyFromBriefSupportsLegacyV06WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV06
+	delete(doc, "human_required_classification_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.6 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV06 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.6 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	rolePolicy, err := queuedRunRoleSeparationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief: %v", err)
+	}
+	if rolePolicy == nil || queuedRunRolePolicyByActor(rolePolicy.ActorPolicies, "scanner") == nil {
+		t.Fatalf("legacy v0.6 role separation policy = %+v, want parsed policy", rolePolicy)
+	}
+	autonomyPolicy, err := queuedRunAutonomyGuardPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunAutonomyGuardPolicyFromBrief: %v", err)
+	}
+	if autonomyPolicy == nil || !containsModelProjectionString(autonomyPolicy.FailClosedOutputs, "protected_action_blocked") {
+		t.Fatalf("legacy v0.6 autonomy guard policy = %+v, want parsed policy", autonomyPolicy)
+	}
+	classificationPolicy, err := queuedRunHumanRequiredClassificationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunHumanRequiredClassificationPolicyFromBrief: %v", err)
+	}
+	if classificationPolicy != nil {
+		t.Fatalf("legacy v0.6 human-required classification policy = %+v, want nil", classificationPolicy)
+	}
+}
+
+func TestQueuedRunHumanRequiredClassificationPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "human_required_classification_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing human-required classification policy brief: %v", err)
+	}
+
+	policy, err := queuedRunHumanRequiredClassificationPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "human_required_classification_policy is required") {
+		t.Fatalf("queuedRunHumanRequiredClassificationPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsHumanRequiredClassificationPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["human_required_classification_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("human_required_classification_policy = %#v, want object", doc["human_required_classification_policy"])
+	}
+	policy["classification_posture"] = "classification_authorizes_action"
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated human-required classification policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_human_required_classification",
+		IntakeID:     "intake_bad_human_required_classification",
+		OperatorID:   "operator_001",
+		Title:        "Bad human-required classification policy still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.HumanRequiredClassificationPolicy != nil {
+		t.Fatalf("queued human-required classification policy = %+v, want nil after validation error", queued.HumanRequiredClassificationPolicy)
+	}
+	found := false
+	for _, projectionErr := range projection.Errors {
+		if strings.Contains(projectionErr, "human-required classification policy projection") && strings.Contains(projectionErr, "classification_posture") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("projection errors = %+v, want human-required classification policy validation error", projection.Errors)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
@@ -2387,6 +2558,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSepa
 	}
 	if queued.AutonomyGuardPolicy != nil {
 		t.Fatalf("queued autonomy guard policy = %+v, want nil for legacy kind-only brief", queued.AutonomyGuardPolicy)
+	}
+	if queued.HumanRequiredClassificationPolicy != nil {
+		t.Fatalf("queued human-required classification policy = %+v, want nil for legacy kind-only brief", queued.HumanRequiredClassificationPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
@@ -2416,6 +2590,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparation
 	}
 	if queued.AutonomyGuardPolicy != nil {
 		t.Fatalf("queued autonomy guard policy = %+v, want nil for foreign brief", queued.AutonomyGuardPolicy)
+	}
+	if queued.HumanRequiredClassificationPolicy != nil {
+		t.Fatalf("queued human-required classification policy = %+v, want nil for foreign brief", queued.HumanRequiredClassificationPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)
