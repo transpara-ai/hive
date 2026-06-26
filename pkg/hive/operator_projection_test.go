@@ -1089,6 +1089,24 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.SelectionPolicy.RankingInputs, "actionability_keyword_score") || !strings.Contains(queued.SelectionPolicy.Rationale, "actionability signals") {
 		t.Fatalf("queued selection policy details = %+v", queued.SelectionPolicy)
 	}
+	if queued.RoleSeparationPolicy == nil || queued.RoleSeparationPolicy.PolicyID != "civilization_issue_scan_role_separation_v0.1" {
+		t.Fatalf("queued role separation policy = %+v", queued.RoleSeparationPolicy)
+	}
+	implementerPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "implementer")
+	if implementerPolicy == nil || !implementerPolicy.CanOperateBranch || implementerPolicy.CanMutateGitHub || implementerPolicy.CanOpenPullRequest || implementerPolicy.CanApproveOrMerge {
+		t.Fatalf("implementer role separation policy = %+v", implementerPolicy)
+	}
+	reviewerPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "reviewer")
+	if reviewerPolicy == nil || reviewerPolicy.CanOperateBranch || reviewerPolicy.CanApproveOrMerge || !containsModelProjectionString(reviewerPolicy.MapsToStageRoles, "reviewer") {
+		t.Fatalf("reviewer role separation policy = %+v", reviewerPolicy)
+	}
+	humanPolicy := queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "human_authority")
+	if humanPolicy == nil || !humanPolicy.CanApproveOrMerge || !humanPolicy.CanMutateGitHub || !containsModelProjectionString(humanPolicy.ForbiddenWithoutHuman, "hive_self_authorized_merge") {
+		t.Fatalf("human authority role separation policy = %+v", humanPolicy)
+	}
+	if !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "github_issue_is_not_authority") || !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "no_autonomy_increase") {
+		t.Fatalf("role separation non-claims = %+v", queued.RoleSeparationPolicy.GlobalNonClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1945,6 +1963,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.BriefKind != issueScanBriefKind || queued.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("queued brief metadata = %+v", queued)
 	}
+	if queued.RoleSeparationPolicy == nil || queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "scanner") == nil {
+		t.Fatalf("queued role separation policy missing scanner boundary: %+v", queued.RoleSeparationPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -2053,6 +2074,181 @@ func TestQueuedRunLifecycleFromBriefSupportsLegacyV03LifecycleWithAgentPlan(t *t
 	}
 	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV03 || len(lifecycle) != 7 || len(agentPlan) != 18 {
 		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.3 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+}
+
+func TestQueuedRunRoleSeparationPolicyFromBriefSupportsLegacyV04WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV04
+	delete(doc, "role_separation_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.4 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV04 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.4 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	policy, err := queuedRunRoleSeparationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief: %v", err)
+	}
+	if policy != nil {
+		t.Fatalf("legacy v0.4 role separation policy = %+v, want nil", policy)
+	}
+}
+
+func TestQueuedRunRoleSeparationPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "role_separation_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing policy brief: %v", err)
+	}
+
+	policy, err := queuedRunRoleSeparationPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "role_separation_policy is required") {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsRoleSeparationPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["role_separation_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("role_separation_policy = %#v, want object", doc["role_separation_policy"])
+	}
+	actorPolicies, ok := policy["actor_policies"].([]any)
+	if !ok || len(actorPolicies) == 0 {
+		t.Fatalf("actor_policies = %#v, want actor policy array", policy["actor_policies"])
+	}
+	firstActor, ok := actorPolicies[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first actor policy = %#v, want object", actorPolicies[0])
+	}
+	firstActor["can_approve_or_merge"] = true
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated role policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_role_policy",
+		IntakeID:     "intake_bad_role_policy",
+		OperatorID:   "operator_001",
+		Title:        "Bad role policy still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil after validation error", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) == 0 || !strings.Contains(projection.Errors[0], "role separation policy projection") || !strings.Contains(projection.Errors[0], "can_approve_or_merge") {
+		t.Fatalf("projection errors = %+v, want role separation policy validation error", projection.Errors)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_kind_only_legacy",
+		IntakeID:     "intake_kind_only_legacy",
+		OperatorID:   "operator_001",
+		Title:        "Legacy kind-only issue scan brief",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        []byte(`{"kind":"transpara_ai_github_issue_scan","required_agent_flow":["research_issue_and_repo_context"]}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil for legacy kind-only brief", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparationPolicy(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_foreign_brief",
+		IntakeID:     "intake_foreign_brief",
+		OperatorID:   "operator_001",
+		Title:        "Foreign queued brief",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        []byte(`{"kind":"foreign_run_request","goal":"generic queued launch"}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil for foreign brief", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)
 	}
 }
 
@@ -3371,6 +3567,15 @@ func queuedRunAgentPlanStepByRole(steps []OperatorQueuedRunAgentPlanStep, stageI
 	for i := range steps {
 		if steps[i].StageID == stageID && steps[i].Role == role {
 			return &steps[i]
+		}
+	}
+	return nil
+}
+
+func queuedRunRolePolicyByActor(policies []OperatorQueuedRunRoleSeparationActorPolicy, actor string) *OperatorQueuedRunRoleSeparationActorPolicy {
+	for i := range policies {
+		if policies[i].ActorClass == actor {
+			return &policies[i]
 		}
 	}
 	return nil

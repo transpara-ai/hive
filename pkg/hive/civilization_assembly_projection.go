@@ -1569,6 +1569,17 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 	}
 	out := *queued
 	out.TargetRepos = append([]string(nil), queued.TargetRepos...)
+	if queued.RoleSeparationPolicy != nil {
+		policy := *queued.RoleSeparationPolicy
+		policy.GlobalNonClaims = append([]string(nil), queued.RoleSeparationPolicy.GlobalNonClaims...)
+		policy.ActorPolicies = append([]OperatorQueuedRunRoleSeparationActorPolicy(nil), queued.RoleSeparationPolicy.ActorPolicies...)
+		for i := range policy.ActorPolicies {
+			policy.ActorPolicies[i].MapsToStageRoles = append([]string(nil), policy.ActorPolicies[i].MapsToStageRoles...)
+			policy.ActorPolicies[i].RequiredEvidence = append([]string(nil), policy.ActorPolicies[i].RequiredEvidence...)
+			policy.ActorPolicies[i].ForbiddenWithoutHuman = append([]string(nil), policy.ActorPolicies[i].ForbiddenWithoutHuman...)
+		}
+		out.RoleSeparationPolicy = &policy
+	}
 	out.DevelopmentLifecycle = append([]OperatorQueuedRunLifecycleStage(nil), queued.DevelopmentLifecycle...)
 	for i := range out.DevelopmentLifecycle {
 		out.DevelopmentLifecycle[i].RequiredRoles = append([]string(nil), out.DevelopmentLifecycle[i].RequiredRoles...)

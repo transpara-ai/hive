@@ -145,27 +145,28 @@ type OperatorRuntimeAgentEvidence struct {
 }
 
 type OperatorQueuedRunRequestEvidence struct {
-	EventID               string                            `json:"event_id"`
-	ConversationID        string                            `json:"conversation_id"`
-	RunID                 string                            `json:"run_id"`
-	Title                 string                            `json:"title"`
-	OperatorID            string                            `json:"operator_id,omitempty"`
-	Status                string                            `json:"status"`
-	TargetRepos           []string                          `json:"target_repos,omitempty"`
-	AuthorityInitialLevel string                            `json:"authority_initial_level,omitempty"`
-	AuthorityScope        string                            `json:"authority_scope,omitempty"`
-	BudgetMaxIterations   *int                              `json:"budget_max_iterations,omitempty"`
-	BudgetMaxCostUSD      *float64                          `json:"budget_max_cost_usd,omitempty"`
-	SourceEventID         string                            `json:"source_event_id,omitempty"`
-	BriefEventID          string                            `json:"brief_event_id,omitempty"`
-	BriefKind             string                            `json:"brief_kind,omitempty"`
-	LifecycleVersion      string                            `json:"lifecycle_version,omitempty"`
-	SelectionPolicy       *OperatorQueuedRunSelectionPolicy `json:"selection_policy,omitempty"`
-	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage `json:"development_lifecycle,omitempty"`
-	AgentExecutionPlan    []OperatorQueuedRunAgentPlanStep  `json:"agent_execution_plan,omitempty"`
-	LifecycleEvidenceKind string                            `json:"lifecycle_evidence_kind,omitempty"`
-	EvidenceKind          string                            `json:"evidence_kind"`
-	CreatedAt             time.Time                         `json:"created_at"`
+	EventID               string                                 `json:"event_id"`
+	ConversationID        string                                 `json:"conversation_id"`
+	RunID                 string                                 `json:"run_id"`
+	Title                 string                                 `json:"title"`
+	OperatorID            string                                 `json:"operator_id,omitempty"`
+	Status                string                                 `json:"status"`
+	TargetRepos           []string                               `json:"target_repos,omitempty"`
+	AuthorityInitialLevel string                                 `json:"authority_initial_level,omitempty"`
+	AuthorityScope        string                                 `json:"authority_scope,omitempty"`
+	BudgetMaxIterations   *int                                   `json:"budget_max_iterations,omitempty"`
+	BudgetMaxCostUSD      *float64                               `json:"budget_max_cost_usd,omitempty"`
+	SourceEventID         string                                 `json:"source_event_id,omitempty"`
+	BriefEventID          string                                 `json:"brief_event_id,omitempty"`
+	BriefKind             string                                 `json:"brief_kind,omitempty"`
+	LifecycleVersion      string                                 `json:"lifecycle_version,omitempty"`
+	SelectionPolicy       *OperatorQueuedRunSelectionPolicy      `json:"selection_policy,omitempty"`
+	RoleSeparationPolicy  *OperatorQueuedRunRoleSeparationPolicy `json:"role_separation_policy,omitempty"`
+	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage      `json:"development_lifecycle,omitempty"`
+	AgentExecutionPlan    []OperatorQueuedRunAgentPlanStep       `json:"agent_execution_plan,omitempty"`
+	LifecycleEvidenceKind string                                 `json:"lifecycle_evidence_kind,omitempty"`
+	EvidenceKind          string                                 `json:"evidence_kind"`
+	CreatedAt             time.Time                              `json:"created_at"`
 }
 
 type OperatorQueuedRunSelectionPolicy struct {
@@ -174,6 +175,25 @@ type OperatorQueuedRunSelectionPolicy struct {
 	CandidateCount int      `json:"candidate_count"`
 	RankingInputs  []string `json:"ranking_inputs,omitempty"`
 	Rationale      string   `json:"rationale,omitempty"`
+}
+
+type OperatorQueuedRunRoleSeparationPolicy struct {
+	PolicyID        string                                       `json:"policy_id"`
+	PolicyVersion   string                                       `json:"policy_version"`
+	ActorPolicies   []OperatorQueuedRunRoleSeparationActorPolicy `json:"actor_policies,omitempty"`
+	GlobalNonClaims []string                                     `json:"global_non_claims,omitempty"`
+}
+
+type OperatorQueuedRunRoleSeparationActorPolicy struct {
+	ActorClass            string   `json:"actor_class"`
+	MapsToStageRoles      []string `json:"maps_to_stage_roles,omitempty"`
+	CanOperateBranch      bool     `json:"can_operate_branch"`
+	CanMutateGitHub       bool     `json:"can_mutate_github"`
+	CanOpenPullRequest    bool     `json:"can_open_pull_request"`
+	CanApproveOrMerge     bool     `json:"can_approve_or_merge"`
+	AuthorityBoundary     string   `json:"authority_boundary"`
+	RequiredEvidence      []string `json:"required_evidence,omitempty"`
+	ForbiddenWithoutHuman []string `json:"forbidden_without_human,omitempty"`
 }
 
 type OperatorQueuedRunLifecycleStage struct {
@@ -628,6 +648,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			if err != nil {
 				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s selection policy projection: %v", content.RunID, err))
 			}
+			roleSeparationPolicy, err := queuedRunRoleSeparationPolicyFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s role separation policy projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -645,6 +669,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				BriefKind:             briefKind,
 				LifecycleVersion:      lifecycleVersion,
 				SelectionPolicy:       selectionPolicy,
+				RoleSeparationPolicy:  roleSeparationPolicy,
 				DevelopmentLifecycle:  lifecycle,
 				AgentExecutionPlan:    agentPlan,
 				EvidenceKind:          "queued_request_not_runtime_start",
@@ -791,7 +816,7 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if brief.Kind != issueScanBriefKind {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
 	}
-	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV04 && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
 	}
 	expected := issueScanDevelopmentLifecycle()
@@ -897,6 +922,98 @@ func queuedRunSelectionPolicyFromBrief(raw json.RawMessage) (*OperatorQueuedRunS
 		return nil, fmt.Errorf("selection_policy.rationale is required")
 	}
 	return &policy, nil
+}
+
+func queuedRunRoleSeparationPolicyFromBrief(raw json.RawMessage) (*OperatorQueuedRunRoleSeparationPolicy, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var brief struct {
+		Kind                 string                               `json:"kind"`
+		LifecycleVersion     string                               `json:"lifecycle_version"`
+		RoleSeparationPolicy issueScanRoleSeparationPolicyPayload `json:"role_separation_policy"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return nil, fmt.Errorf("decode role separation policy: %w", err)
+	}
+	if brief.Kind != issueScanBriefKind {
+		return nil, nil
+	}
+	if brief.LifecycleVersion == "" {
+		return nil, nil
+	}
+	switch brief.LifecycleVersion {
+	case issueScanLifecycleVersion:
+	case issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported role separation lifecycle version %q", brief.LifecycleVersion)
+	}
+	expected := issueScanRoleSeparationPolicy()
+	policy := brief.RoleSeparationPolicy
+	if strings.TrimSpace(policy.PolicyID) == "" && len(policy.ActorPolicies) == 0 && len(policy.GlobalNonClaims) == 0 {
+		return nil, fmt.Errorf("role_separation_policy is required for lifecycle version %q", brief.LifecycleVersion)
+	}
+	if err := validateQueuedRunRoleSeparationPolicy(policy, expected); err != nil {
+		return nil, err
+	}
+	out := &OperatorQueuedRunRoleSeparationPolicy{
+		PolicyID:        strings.TrimSpace(policy.PolicyID),
+		PolicyVersion:   strings.TrimSpace(policy.PolicyVersion),
+		GlobalNonClaims: trimRunLaunchStrings(policy.GlobalNonClaims),
+	}
+	for _, actor := range policy.ActorPolicies {
+		out.ActorPolicies = append(out.ActorPolicies, OperatorQueuedRunRoleSeparationActorPolicy{
+			ActorClass:            strings.TrimSpace(actor.ActorClass),
+			MapsToStageRoles:      trimRunLaunchStrings(actor.MapsToStageRoles),
+			CanOperateBranch:      actor.CanOperateBranch,
+			CanMutateGitHub:       actor.CanMutateGitHub,
+			CanOpenPullRequest:    actor.CanOpenPullRequest,
+			CanApproveOrMerge:     actor.CanApproveOrMerge,
+			AuthorityBoundary:     strings.TrimSpace(actor.AuthorityBoundary),
+			RequiredEvidence:      trimRunLaunchStrings(actor.RequiredEvidence),
+			ForbiddenWithoutHuman: trimRunLaunchStrings(actor.ForbiddenWithoutHuman),
+		})
+	}
+	return out, nil
+}
+
+func validateQueuedRunRoleSeparationPolicy(got, expected issueScanRoleSeparationPolicyPayload) error {
+	switch {
+	case strings.TrimSpace(got.PolicyID) != expected.PolicyID:
+		return fmt.Errorf("role_separation_policy.policy_id %q does not match expected %q", got.PolicyID, expected.PolicyID)
+	case strings.TrimSpace(got.PolicyVersion) != expected.PolicyVersion:
+		return fmt.Errorf("role_separation_policy.policy_version %q does not match expected %q", got.PolicyVersion, expected.PolicyVersion)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.GlobalNonClaims), expected.GlobalNonClaims):
+		return fmt.Errorf("role_separation_policy.global_non_claims %v do not match expected %v", got.GlobalNonClaims, expected.GlobalNonClaims)
+	case len(got.ActorPolicies) != len(expected.ActorPolicies):
+		return fmt.Errorf("role_separation_policy actor count %d does not match expected %d", len(got.ActorPolicies), len(expected.ActorPolicies))
+	}
+	for i := range expected.ActorPolicies {
+		gotActor := got.ActorPolicies[i]
+		expectedActor := expected.ActorPolicies[i]
+		switch {
+		case strings.TrimSpace(gotActor.ActorClass) != expectedActor.ActorClass:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].actor_class %q does not match expected %q", i, gotActor.ActorClass, expectedActor.ActorClass)
+		case !sameOperatorProjectionStrings(trimRunLaunchStrings(gotActor.MapsToStageRoles), expectedActor.MapsToStageRoles):
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].maps_to_stage_roles %v do not match expected %v", i, gotActor.MapsToStageRoles, expectedActor.MapsToStageRoles)
+		case gotActor.CanOperateBranch != expectedActor.CanOperateBranch:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].can_operate_branch %v does not match expected %v", i, gotActor.CanOperateBranch, expectedActor.CanOperateBranch)
+		case gotActor.CanMutateGitHub != expectedActor.CanMutateGitHub:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].can_mutate_github %v does not match expected %v", i, gotActor.CanMutateGitHub, expectedActor.CanMutateGitHub)
+		case gotActor.CanOpenPullRequest != expectedActor.CanOpenPullRequest:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].can_open_pull_request %v does not match expected %v", i, gotActor.CanOpenPullRequest, expectedActor.CanOpenPullRequest)
+		case gotActor.CanApproveOrMerge != expectedActor.CanApproveOrMerge:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].can_approve_or_merge %v does not match expected %v", i, gotActor.CanApproveOrMerge, expectedActor.CanApproveOrMerge)
+		case strings.TrimSpace(gotActor.AuthorityBoundary) != expectedActor.AuthorityBoundary:
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].authority_boundary %q does not match expected %q", i, gotActor.AuthorityBoundary, expectedActor.AuthorityBoundary)
+		case !sameOperatorProjectionStrings(trimRunLaunchStrings(gotActor.RequiredEvidence), expectedActor.RequiredEvidence):
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].required_evidence %v does not match expected %v", i, gotActor.RequiredEvidence, expectedActor.RequiredEvidence)
+		case !sameOperatorProjectionStrings(trimRunLaunchStrings(gotActor.ForbiddenWithoutHuman), expectedActor.ForbiddenWithoutHuman):
+			return fmt.Errorf("role_separation_policy.actor_policies[%d].forbidden_without_human %v do not match expected %v", i, gotActor.ForbiddenWithoutHuman, expectedActor.ForbiddenWithoutHuman)
+		}
+	}
+	return nil
 }
 
 func validateQueuedRunLifecycleStage(id, name string, roles, evidence []string, authorityBoundary, completionGate string, expected issueScanLifecycleStage, starterRoles map[string]*modelconfig.RoleDefinition) error {

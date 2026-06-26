@@ -73,8 +73,23 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 		RequiredAgentFlow    []string                     `json:"required_agent_flow"`
 		DevelopmentLifecycle []issueScanBriefStageForTest `json:"development_lifecycle"`
 		AgentExecutionPlan   []issueScanBriefPlanForTest  `json:"agent_execution_plan"`
-		AuthorityBoundaries  []string                     `json:"authority_boundaries"`
-		SelectionPolicy      struct {
+		RoleSeparationPolicy struct {
+			PolicyID      string `json:"policy_id"`
+			PolicyVersion string `json:"policy_version"`
+			ActorPolicies []struct {
+				ActorClass            string   `json:"actor_class"`
+				MapsToStageRoles      []string `json:"maps_to_stage_roles"`
+				CanOperateBranch      bool     `json:"can_operate_branch"`
+				CanMutateGitHub       bool     `json:"can_mutate_github"`
+				CanOpenPullRequest    bool     `json:"can_open_pull_request"`
+				CanApproveOrMerge     bool     `json:"can_approve_or_merge"`
+				AuthorityBoundary     string   `json:"authority_boundary"`
+				ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
+			} `json:"actor_policies"`
+			GlobalNonClaims []string `json:"global_non_claims"`
+		} `json:"role_separation_policy"`
+		AuthorityBoundaries []string `json:"authority_boundaries"`
+		SelectionPolicy     struct {
 			PolicyID       string   `json:"policy_id"`
 			SelectedRank   int      `json:"selected_rank"`
 			CandidateCount int      `json:"candidate_count"`
@@ -94,7 +109,7 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	if brief.Kind != "transpara_ai_github_issue_scan" || brief.SelectedIssue.Repo != "transpara-ai/hive" || brief.SelectedIssue.Number != 321 {
 		t.Fatalf("brief = %+v", brief)
 	}
-	if brief.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.4" {
+	if brief.LifecycleVersion != issueScanLifecycleVersion {
 		t.Fatalf("lifecycle version = %q", brief.LifecycleVersion)
 	}
 	if brief.SelectedIssue.Rank != 1 || brief.SelectionPolicy.PolicyID != "deterministic_actionability_rank_v0.2" || brief.SelectionPolicy.SelectedRank != 1 || brief.SelectionPolicy.CandidateCount != 1 {
@@ -102,6 +117,44 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(brief.SelectionPolicy.RankingInputs, "actionability_keyword_score") || !strings.Contains(brief.SelectionPolicy.Rationale, "actionability signals") {
 		t.Fatalf("selection policy rationale/inputs = %+v", brief.SelectionPolicy)
+	}
+	if brief.RoleSeparationPolicy.PolicyID != "civilization_issue_scan_role_separation_v0.1" || brief.RoleSeparationPolicy.PolicyVersion != "v0.1" {
+		t.Fatalf("role separation policy = %+v", brief.RoleSeparationPolicy)
+	}
+	if len(brief.RoleSeparationPolicy.ActorPolicies) != 6 {
+		t.Fatalf("role separation actor policies = %+v, want 6 actor classes", brief.RoleSeparationPolicy.ActorPolicies)
+	}
+	rolePolicyByActor := func(actor string) *struct {
+		ActorClass            string   `json:"actor_class"`
+		MapsToStageRoles      []string `json:"maps_to_stage_roles"`
+		CanOperateBranch      bool     `json:"can_operate_branch"`
+		CanMutateGitHub       bool     `json:"can_mutate_github"`
+		CanOpenPullRequest    bool     `json:"can_open_pull_request"`
+		CanApproveOrMerge     bool     `json:"can_approve_or_merge"`
+		AuthorityBoundary     string   `json:"authority_boundary"`
+		ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
+	} {
+		for i := range brief.RoleSeparationPolicy.ActorPolicies {
+			if brief.RoleSeparationPolicy.ActorPolicies[i].ActorClass == actor {
+				return &brief.RoleSeparationPolicy.ActorPolicies[i]
+			}
+		}
+		return nil
+	}
+	implementerPolicy := rolePolicyByActor("implementer")
+	if implementerPolicy == nil || !implementerPolicy.CanOperateBranch || implementerPolicy.CanMutateGitHub || implementerPolicy.CanOpenPullRequest || implementerPolicy.CanApproveOrMerge || !containsIssueScanValue(implementerPolicy.MapsToStageRoles, "implementer") {
+		t.Fatalf("implementer role separation policy = %+v", implementerPolicy)
+	}
+	reviewerPolicy := rolePolicyByActor("reviewer")
+	if reviewerPolicy == nil || reviewerPolicy.CanOperateBranch || reviewerPolicy.CanApproveOrMerge || !containsIssueScanValue(reviewerPolicy.MapsToStageRoles, "reviewer") {
+		t.Fatalf("reviewer role separation policy = %+v", reviewerPolicy)
+	}
+	humanPolicy := rolePolicyByActor("human_authority")
+	if humanPolicy == nil || !humanPolicy.CanApproveOrMerge || !humanPolicy.CanMutateGitHub || !containsIssueScanValue(humanPolicy.ForbiddenWithoutHuman, "hive_self_authorized_autonomy_increase") {
+		t.Fatalf("human authority role separation policy = %+v", humanPolicy)
+	}
+	if !containsIssueScanValue(brief.RoleSeparationPolicy.GlobalNonClaims, "github_issue_is_not_authority") || !containsIssueScanValue(brief.RoleSeparationPolicy.GlobalNonClaims, "no_autonomy_increase") {
+		t.Fatalf("role separation global non-claims = %+v", brief.RoleSeparationPolicy.GlobalNonClaims)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
