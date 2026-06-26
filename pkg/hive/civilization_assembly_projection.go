@@ -1588,6 +1588,14 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 		policy.ForbiddenAuthorityClaims = append([]string(nil), queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims...)
 		out.AutonomyGuardPolicy = &policy
 	}
+	if queued.HumanRequiredClassificationPolicy != nil {
+		policy := *queued.HumanRequiredClassificationPolicy
+		policy.HumanRequiredTriggers = append([]string(nil), queued.HumanRequiredClassificationPolicy.HumanRequiredTriggers...)
+		policy.EscalationOutputs = append([]string(nil), queued.HumanRequiredClassificationPolicy.EscalationOutputs...)
+		policy.ForbiddenWithoutHuman = append([]string(nil), queued.HumanRequiredClassificationPolicy.ForbiddenWithoutHuman...)
+		policy.NonAuthorityClaims = append([]string(nil), queued.HumanRequiredClassificationPolicy.NonAuthorityClaims...)
+		out.HumanRequiredClassificationPolicy = &policy
+	}
 	out.DevelopmentLifecycle = append([]OperatorQueuedRunLifecycleStage(nil), queued.DevelopmentLifecycle...)
 	for i := range out.DevelopmentLifecycle {
 		out.DevelopmentLifecycle[i].RequiredRoles = append([]string(nil), out.DevelopmentLifecycle[i].RequiredRoles...)
