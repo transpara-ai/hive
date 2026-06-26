@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/hive"
 	hiveregistry "github.com/transpara-ai/hive/pkg/registry"
 )
@@ -59,6 +60,28 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael"})
 	if err == nil || !strings.Contains(err.Error(), "repo") {
 		t.Fatalf("expected missing --repo error, got %v", err)
+	}
+}
+
+func TestFactoryScanIssuesRejectsMissingModelOverrideCatalogBeforeGitHub(t *testing.T) {
+	missingCatalog := filepath.Join(t.TempDir(), "missing-model-catalog.yaml")
+	err := routeAndDispatch([]string{
+		"factory", "scan-issues",
+		"--human", "Michael",
+		"--repo", "transpara-ai/hive",
+		"--catalog", missingCatalog,
+		"--model", "implementer=codex",
+	})
+	if err == nil {
+		t.Fatal("expected missing catalog error")
+	}
+	for _, want := range []string{"load catalog for model overrides", missingCatalog} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing catalog error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "gh issue list") || strings.Contains(err.Error(), "no open GitHub issues") {
+		t.Fatalf("catalog validation should run before GitHub scanning, got %v", err)
 	}
 }
 
@@ -2113,6 +2136,19 @@ func TestSafeIssueScanOperatorIDRejectsWhitespace(t *testing.T) {
 	}
 }
 
+func TestFactoryScanIssuesParsesModelOverridesBeforeGitHub(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "scan-issues",
+		"--human", "Michael",
+		"--repo", "transpara-ai/hive",
+		"--model", "implementer=codex",
+		"--model", "implementer=o3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("expected duplicate model override error before GitHub, got %v", err)
+	}
+}
+
 func registryRepoForTest(url string) hiveregistry.Repo {
 	return hiveregistry.Repo{URL: url}
 }
@@ -2168,6 +2204,53 @@ func TestValidateFactoryOrderModelOverridesPreservesCanOperateGuardrail(t *testi
 	})
 	if err == nil || !strings.Contains(err.Error(), "CanOperate") {
 		t.Fatalf("expected CanOperate guardrail error, got %v", err)
+	}
+}
+
+func TestValidateFactoryOrderModelOverridesAcceptsCodexForCanOperate(t *testing.T) {
+	overrides, err := validateFactoryOrderModelOverrides("", []hive.ModelOverrideRequest{
+		{Role: "implementer", Model: "codex"},
+	})
+	if err != nil {
+		t.Fatalf("validateFactoryOrderModelOverrides: %v", err)
+	}
+	if len(overrides) != 1 {
+		t.Fatalf("overrides = %+v, want one", overrides)
+	}
+	override := overrides[0]
+	if override.Role != "implementer" || override.ResolvedModel != "gpt-5.5" || override.ResolvedProvider != "codex-cli" || override.AuthMode != "subscription" {
+		t.Fatalf("override = %+v, want implementer codex-cli/gpt-5.5 subscription", override)
+	}
+}
+
+func TestFactoryMixedCatalogCodexImplementerCanOperate(t *testing.T) {
+	source, err := factoryModelSelectionSource(filepath.Join("..", "..", "catalog-mixed.yaml"))
+	if err != nil {
+		t.Fatalf("factoryModelSelectionSource: %v", err)
+	}
+	config := source()
+	resolved, err := config.Resolver.Resolve(modelconfig.ResolutionInput{
+		Role:       "implementer",
+		CanOperate: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve mixed catalog implementer: %v", err)
+	}
+	if resolved.Provider != "codex-cli" || resolved.Model != "gpt-5.5" || resolved.AuthMode != modelconfig.AuthSubscription {
+		t.Fatalf("resolved = %+v, want codex-cli/gpt-5.5 subscription", resolved)
+	}
+	if missing := modelconfig.ValidateCapabilities(resolved.Entry, []modelconfig.Capability{modelconfig.CapOperate}); len(missing) > 0 {
+		t.Fatalf("resolved implementer missing operate capability: %+v", missing)
+	}
+}
+
+func TestValidateFactoryOrderModelOverridesSkipsCatalogWithoutOverrides(t *testing.T) {
+	overrides, err := validateFactoryOrderModelOverrides(filepath.Join(t.TempDir(), "missing-model-catalog.yaml"), nil)
+	if err != nil {
+		t.Fatalf("validateFactoryOrderModelOverrides without overrides: %v", err)
+	}
+	if overrides != nil {
+		t.Fatalf("overrides = %+v, want nil", overrides)
 	}
 }
 

@@ -67,4 +67,4 @@ role_defaults:
   reviewer: deepseek-v4-pro    # OpenRouter
   strategist: deepseek-v4-pro  # OpenRouter
   planner: sonnet              # Claude (built-in)
-  implementer: opus            # Claude (forced claude-cli by CanOperate)
+  implementer: gpt5.5          # Codex CLI; CanOperate accepts claude-cli or codex-cli
