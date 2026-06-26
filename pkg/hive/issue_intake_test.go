@@ -822,6 +822,47 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 }
 
+func TestQueueIssueScanRunLaunchRecordsModelOverrides(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	req := IssueScanRunLaunchRequest{
+		OperatorID: IssueScanOperatorID("Michael Saucier"),
+		Issues: []GitHubIssueCandidate{
+			{
+				Repo:   "transpara-ai/hive",
+				Number: 322,
+				Title:  "Run issue-scan with Codex implementer",
+				URL:    "https://github.com/transpara-ai/hive/issues/322",
+				Body:   "The issue-scan launch should persist model overrides.",
+				Labels: []string{"cc:pr-ready"},
+			},
+		},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		ModelOverrides: []ModelOverrideRequest{
+			{Role: "implementer", Model: "codex"},
+		},
+	}
+
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, req, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+	requestEvents := requireRunLaunchEvents(t, rt.store, EventTypeFactoryRunRequested, 1)
+	content := requestEvents[0].Content().(FactoryRunRequestedContent)
+	if content.IntakeID != queued.IntakeID {
+		t.Fatalf("intake id = %q, want %q", content.IntakeID, queued.IntakeID)
+	}
+	if len(content.ModelOverrides) != 1 {
+		t.Fatalf("model overrides = %+v, want one", content.ModelOverrides)
+	}
+	override := content.ModelOverrides[0]
+	if override.Role != "implementer" || override.Model != "codex" {
+		t.Fatalf("recorded override = %+v, want implementer codex", override)
+	}
+	if override.ResolvedProvider != "codex-cli" || override.ResolvedModel != "gpt-5.5" || override.AuthMode != "subscription" {
+		t.Fatalf("resolved override = %+v, want codex-cli/gpt-5.5 subscription", override)
+	}
+}
+
 func TestQueueIssueScanRunLaunchRanksActionableIssueBeforeScannerOrder(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	req := IssueScanRunLaunchRequest{

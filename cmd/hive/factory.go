@@ -739,19 +739,33 @@ func validateFactoryOrderModelOverrides(catalogPath string, overrides []hive.Mod
 	if len(overrides) == 0 {
 		return nil, nil
 	}
-	var source hive.OperatorModelSelectionSource
-	if catalogPath != "" {
-		config, err := hive.OperatorModelSelectionFromCatalogPath(catalogPath, time.Time{})
-		if err != nil {
-			return nil, fmt.Errorf("load catalog for model overrides: %w", err)
-		}
-		source = func() hive.OperatorModelSelectionConfig { return config }
+	source, err := factoryModelSelectionSource(catalogPath)
+	if err != nil {
+		return nil, err
+	}
+	return validateFactoryOrderModelOverridesWithSource(source, overrides)
+}
+
+func validateFactoryOrderModelOverridesWithSource(source hive.OperatorModelSelectionSource, overrides []hive.ModelOverrideRequest) ([]hive.RunLaunchModelOverride, error) {
+	if len(overrides) == 0 {
+		return nil, nil
 	}
 	validated, err := hive.ValidateModelOverrides(overrides, source)
 	if err != nil {
 		return nil, fmt.Errorf("validate model overrides: %w", err)
 	}
 	return validated, nil
+}
+
+func factoryModelSelectionSource(catalogPath string) (hive.OperatorModelSelectionSource, error) {
+	if catalogPath == "" {
+		return nil, nil
+	}
+	config, err := hive.OperatorModelSelectionFromCatalogPath(catalogPath, time.Time{})
+	if err != nil {
+		return nil, fmt.Errorf("load catalog for model overrides: %w", err)
+	}
+	return func() hive.OperatorModelSelectionConfig { return config }, nil
 }
 
 func workFactoryOrderModelOverrides(overrides []hive.RunLaunchModelOverride) []work.FactoryOrderModelOverride {

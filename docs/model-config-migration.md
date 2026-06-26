@@ -126,6 +126,20 @@ Requires `OPENROUTER_API_KEY` env var.
 
 ### Codex CLI example
 
+The embedded catalog includes `codex` and `codex-fast` aliases for the local
+Codex CLI subscription path. No custom model entry is required for those aliases:
+
+```yaml
+role_defaults:
+  implementer: codex      # CanOperate via codex-cli
+  planner: codex
+  reviewer: codex
+  sysmon: codex-fast
+```
+
+For a Codex model that is not in the embedded catalog, add a model entry whose
+ID is the exact model name passed to `codex exec -m`:
+
 ```yaml
 models:
   - id: gpt-5.5                   # exact model name for codex exec -m
@@ -195,7 +209,7 @@ role_defaults:
   reviewer: deepseek        # OpenRouter
   strategist: sonnet        # Claude CLI (built-in)
   planner: sonnet           # Claude CLI (built-in)
-  implementer: opus         # Claude CLI (built-in, forced by CanOperate)
+  implementer: codex        # Codex CLI (built-in, CanOperate-capable)
 ```
 
 See `catalog-mixed.yaml` in the repo root for a complete working example.
@@ -213,6 +227,17 @@ go run ./cmd/resolve-model --role implementer --catalog my-catalog.yaml --can-op
 
 # Check cost estimate
 go run ./cmd/resolve-model --role cto --catalog my-catalog.yaml --estimate-cost --input-tokens 10000 --output-tokens 2000
+```
+
+Issue-scan launches can also carry durable per-run model overrides without
+starting or reloading a daemon:
+
+```bash
+go run ./cmd/hive factory scan-issues \
+  --human Michael \
+  --repo transpara-ai/hive \
+  --model implementer=codex \
+  --profile planner=codex-operate
 ```
 
 ## Key rules

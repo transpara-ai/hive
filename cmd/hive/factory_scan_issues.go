@@ -25,6 +25,7 @@ func cmdFactoryScanIssues(args []string) error {
 	storeDSN := fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
 	repoPath := fs.String("repo-path", "", "Path to repo for dispatch Operate context (default: current dir)")
 	repoWorkspaceRoot := fs.String("repo-workspace-root", "", "Path to directory containing Transpara-AI repo checkouts for implementation targets")
+	catalog := fs.String("catalog", "", "Custom YAML model catalog used to resolve/validate model override flags for this queued run; does not reload a running daemon")
 	limit := fs.Int("limit", 10, "Maximum open issues to read per repo")
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
@@ -32,8 +33,16 @@ func cmdFactoryScanIssues(args []string) error {
 	useRegistry := fs.Bool("registry", false, "Scan every Transpara-AI GitHub repo in repos.json when --repo is omitted")
 	repos := repeatedStringFlag{}
 	labels := repeatedStringFlag{}
+	modelOverrideFlags := factoryOrderModelOverrideFlags{}
 	fs.Var(&repos, "repo", "Transpara-AI repo slug to scan, e.g. transpara-ai/hive (repeatable; required unless --registry is set)")
 	fs.Var(&labels, "label", "GitHub issue label filter passed to gh issue list (repeatable)")
+	fs.Var(&modelOverrideFlags.models, "model", "Role-scoped model override role=model (repeatable)")
+	fs.Var(&modelOverrideFlags.providers, "provider", "Role-scoped provider override role=provider (repeatable)")
+	fs.Var(&modelOverrideFlags.profiles, "profile", "Role-scoped profile override role=profile (repeatable)")
+	fs.Var(&modelOverrideFlags.authModes, "auth-mode", "Role-scoped auth-mode opt-in role=subscription|api-key|local (repeatable)")
+	fs.Var(&modelOverrideFlags.preferredTiers, "preferred-tier", "Role-scoped preferred tier role=tier (repeatable)")
+	fs.Var(&modelOverrideFlags.requiredCapabilities, "required-capability", "Role-scoped required capability role=capability[,capability...] (repeatable)")
+	fs.Var(&modelOverrideFlags.maxCosts, "max-cost-per-call-usd", "Role-scoped per-call cost cap role=amount (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -49,9 +58,19 @@ func cmdFactoryScanIssues(args []string) error {
 	if *maxCostUSD < 0 {
 		return fmt.Errorf("--max-cost-usd must be zero or greater")
 	}
+	modelOverrides, err := parseFactoryOrderModelOverrideFlags(modelOverrideFlags)
+	if err != nil {
+		return err
+	}
+	modelSelectionSource, err := factoryModelSelectionSource(*catalog)
+	if err != nil {
+		return err
+	}
+	if _, err := validateFactoryOrderModelOverridesWithSource(modelSelectionSource, modelOverrides); err != nil {
+		return err
+	}
 	registryPath := ""
 	if len(repos) == 0 && *useRegistry {
-		var err error
 		registryPath, err = issueScanRegistryPath()
 		if err != nil {
 			return err
@@ -108,8 +127,9 @@ func cmdFactoryScanIssues(args []string) error {
 			PolicyRef:    hive.IssueScanDefaultPolicyRef,
 			Rationale:    "Civilization scanned Transpara-AI GitHub issues and selected one for governed factory execution.",
 		},
-		Budget: hive.RunLaunchBudget{MaxIterations: *maxIterations, MaxCostUSD: *maxCostUSD},
-	}, nil)
+		Budget:         hive.RunLaunchBudget{MaxIterations: *maxIterations, MaxCostUSD: *maxCostUSD},
+		ModelOverrides: modelOverrides,
+	}, modelSelectionSource)
 	if err != nil {
 		return fmt.Errorf("queue issue-scan run launch: %w", err)
 	}
