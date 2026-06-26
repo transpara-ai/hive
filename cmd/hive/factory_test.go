@@ -234,7 +234,7 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	if doc.Kind != "issue_scan_runner_contracts" {
 		t.Fatalf("contract kind = %q", doc.Kind)
 	}
-	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.7" {
+	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.8" {
 		t.Fatalf("contract lifecycle version = %q", doc.LifecycleVersion)
 	}
 	for _, want := range []string{
@@ -1255,7 +1255,7 @@ printf '%s\n' '{"role_outputs":[{"role":"strategist","summary":"selected issue i
 	}
 	runnerContext := hive.IssueScanStageRoleOutputRunnerContext{
 		Kind:             "issue_scan_stage_role_output_runner_context",
-		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:            "run_issue_001",
 		FactoryOrderID:   "fo_run_issue_001",
 		Repository:       "transpara-ai/hive",
@@ -1303,7 +1303,7 @@ printf '%s\n' '{"operate_result_body":"branch: codex/run-issue-001\ncommit: bbbb
 	}
 	runnerContext := hive.IssueScanImplementationRunnerContext{
 		Kind:                      "issue_scan_implementation_runner_context",
-		LifecycleVersion:          "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion:          "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:                     "run_issue_001",
 		FactoryOrderID:            "fo_run_issue_001",
 		Repository:                "transpara-ai/hive",
@@ -1345,7 +1345,7 @@ printf '%s\n' '{"operate_result_body":"branch: codex/run-issue-001-repair\ncommi
 	}
 	runnerContext := hive.IssueScanBlockerRepairRunnerContext{
 		Kind:                        "issue_scan_blocker_repair_runner_context",
-		LifecycleVersion:            "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion:            "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:                       "run_issue_001",
 		FactoryOrderID:              "fo_run_issue_001",
 		Repository:                  "transpara-ai/hive",
@@ -1390,7 +1390,7 @@ printf '%s\n' '{"repository":"transpara-ai/hive","review_ref":"artifact://review
 	}
 	reviewContext := hive.IssueScanAdversarialReviewContext{
 		Kind:                 "issue_scan_adversarial_review_context",
-		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion:     "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:                "run_issue_001",
 		FactoryOrderID:       "fo_run_issue_001",
 		Repository:           "transpara-ai/hive",
@@ -1431,7 +1431,7 @@ printf '%s\n' '{"draft_pr_receipt":{"kind":"transpara_ai_draft_pr_receipt","repo
 	}
 	readyContext := hive.IssueScanReadyPRRunnerContext{
 		Kind:             "issue_scan_ready_pr_runner_context",
-		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:            "run_issue_001",
 		FactoryOrderID:   "fo_run_issue_001",
 		Repository:       "transpara-ai/hive",
@@ -1475,7 +1475,7 @@ printf '%s\n' '{"review_ref":"artifact://ready-state/review.md","reviewed_head_s
 	}
 	reviewContext := hive.IssueScanReadyStateReviewContext{
 		Kind:             "issue_scan_ready_state_review_context",
-		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.7",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.8",
 		RunID:            "run_issue_001",
 		FactoryOrderID:   "fo_run_issue_001",
 		Repository:       "transpara-ai/hive",

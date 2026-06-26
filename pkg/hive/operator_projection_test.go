@@ -1143,6 +1143,24 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.NonAuthorityClaims, "classification_is_not_authority_decision") || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.NonAuthorityClaims, "no_protected_action_execution") {
 		t.Fatalf("queued human-required non-authority claims = %+v", queued.HumanRequiredClassificationPolicy.NonAuthorityClaims)
 	}
+	if queued.AuthorityRecommendationPolicy == nil || queued.AuthorityRecommendationPolicy.PolicyID != "civilization_issue_scan_authority_recommendation_v0.1" {
+		t.Fatalf("queued authority recommendation policy = %+v", queued.AuthorityRecommendationPolicy)
+	}
+	if queued.AuthorityRecommendationPolicy.RecommendationPosture != "recommendation_only_not_authority_decision" || queued.AuthorityRecommendationPolicy.DecisionBoundary != "external_human_scoped_authority_decision_required" {
+		t.Fatalf("queued authority recommendation posture = %+v", queued.AuthorityRecommendationPolicy)
+	}
+	if !containsModelProjectionString(queued.AuthorityRecommendationPolicy.EvidenceInputs, "selected_issue_scope_evidence") || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.EvidenceInputs, "human_required_classification_policy") {
+		t.Fatalf("queued authority recommendation evidence inputs = %+v", queued.AuthorityRecommendationPolicy.EvidenceInputs)
+	}
+	if !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RecommendationOutputs, "no_authority_decision") || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RecommendationOutputs, "no_write_no_action") {
+		t.Fatalf("queued authority recommendation outputs = %+v", queued.AuthorityRecommendationPolicy.RecommendationOutputs)
+	}
+	if !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RequiredHumanAuthority, "external_authority_decision_ref") || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RequiredHumanAuthority, "human_approval_ref") {
+		t.Fatalf("queued authority recommendation human refs = %+v", queued.AuthorityRecommendationPolicy.RequiredHumanAuthority)
+	}
+	if !containsModelProjectionString(queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "recommendation_is_authority_decision") || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "pr_ready_label_authorizes_protected_action") {
+		t.Fatalf("queued authority recommendation forbidden claims = %+v", queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1333,6 +1351,13 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 			ForbiddenWithoutHuman: []string{"write_eventgraph_truth"},
 			NonAuthorityClaims:    []string{"classification_is_not_authority_decision"},
 		},
+		AuthorityRecommendationPolicy: &OperatorQueuedRunAuthorityRecommendationPolicy{
+			PolicyID:                 "civilization_issue_scan_authority_recommendation_v0.1",
+			EvidenceInputs:           []string{"selected_issue_scope_evidence"},
+			RecommendationOutputs:    []string{"no_authority_decision"},
+			RequiredHumanAuthority:   []string{"external_authority_decision_ref"},
+			ForbiddenAuthorityClaims: []string{"recommendation_is_authority_decision"},
+		},
 		DevelopmentLifecycle: []OperatorQueuedRunLifecycleStage{
 			{ID: "runtime_completed_stage", EvidenceStatus: "runtime_completed"},
 			{ID: "declared_stage", EvidenceStatus: "expected_not_observed"},
@@ -1364,6 +1389,13 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 	out.HumanRequiredClassificationPolicy.EscalationOutputs[0] = "mutated"
 	if queued.HumanRequiredClassificationPolicy.EscalationOutputs[0] != "issue_parking_required" {
 		t.Fatalf("source human-required classification policy mutated: %+v", queued.HumanRequiredClassificationPolicy)
+	}
+	if out.AuthorityRecommendationPolicy == nil || !containsModelProjectionString(out.AuthorityRecommendationPolicy.RecommendationOutputs, "no_authority_decision") {
+		t.Fatalf("authority recommendation policy = %+v", out.AuthorityRecommendationPolicy)
+	}
+	out.AuthorityRecommendationPolicy.RecommendationOutputs[0] = "mutated"
+	if queued.AuthorityRecommendationPolicy.RecommendationOutputs[0] != "no_authority_decision" {
+		t.Fatalf("source authority recommendation policy mutated: %+v", queued.AuthorityRecommendationPolicy)
 	}
 	runtimeStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "runtime_completed_stage")
 	if runtimeStage == nil || runtimeStage.EvidenceStatus != "runtime_completed" {
@@ -2036,6 +2068,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.HumanRequiredClassificationPolicy == nil || !containsModelProjectionString(queued.HumanRequiredClassificationPolicy.EscalationOutputs, "issue_parking_required") {
 		t.Fatalf("queued human-required classification policy missing escalation boundary: %+v", queued.HumanRequiredClassificationPolicy)
 	}
+	if queued.AuthorityRecommendationPolicy == nil || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RecommendationOutputs, "no_authority_decision") {
+		t.Fatalf("queued authority recommendation policy missing no-authority boundary: %+v", queued.AuthorityRecommendationPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -2535,6 +2570,135 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsHumanRequiredClassificatio
 	}
 }
 
+func TestQueuedRunAuthorityRecommendationPolicyFromBriefSupportsLegacyV07WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV07
+	delete(doc, "authority_recommendation_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.7 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV07 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.7 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	classificationPolicy, err := queuedRunHumanRequiredClassificationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunHumanRequiredClassificationPolicyFromBrief: %v", err)
+	}
+	if classificationPolicy == nil || !containsModelProjectionString(classificationPolicy.EscalationOutputs, "issue_parking_required") {
+		t.Fatalf("legacy v0.7 human-required classification policy = %+v, want parsed policy", classificationPolicy)
+	}
+	authorityPolicy, err := queuedRunAuthorityRecommendationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunAuthorityRecommendationPolicyFromBrief: %v", err)
+	}
+	if authorityPolicy != nil {
+		t.Fatalf("legacy v0.7 authority recommendation policy = %+v, want nil", authorityPolicy)
+	}
+}
+
+func TestQueuedRunAuthorityRecommendationPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "authority_recommendation_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing authority recommendation policy brief: %v", err)
+	}
+
+	policy, err := queuedRunAuthorityRecommendationPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "authority_recommendation_policy is required") {
+		t.Fatalf("queuedRunAuthorityRecommendationPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsAuthorityRecommendationPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["authority_recommendation_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("authority_recommendation_policy = %#v, want object", doc["authority_recommendation_policy"])
+	}
+	policy["recommendation_posture"] = "recommendation_is_authority_decision"
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated authority recommendation policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_authority_recommendation",
+		IntakeID:     "intake_bad_authority_recommendation",
+		OperatorID:   "operator_001",
+		Title:        "Bad authority recommendation policy still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.AuthorityRecommendationPolicy != nil {
+		t.Fatalf("queued authority recommendation policy = %+v, want nil after validation error", queued.AuthorityRecommendationPolicy)
+	}
+	found := false
+	for _, projectionErr := range projection.Errors {
+		if strings.Contains(projectionErr, "authority recommendation policy projection") && strings.Contains(projectionErr, "recommendation_posture") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("projection errors = %+v, want authority recommendation policy validation error", projection.Errors)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
@@ -2561,6 +2725,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSepa
 	}
 	if queued.HumanRequiredClassificationPolicy != nil {
 		t.Fatalf("queued human-required classification policy = %+v, want nil for legacy kind-only brief", queued.HumanRequiredClassificationPolicy)
+	}
+	if queued.AuthorityRecommendationPolicy != nil {
+		t.Fatalf("queued authority recommendation policy = %+v, want nil for legacy kind-only brief", queued.AuthorityRecommendationPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
@@ -2593,6 +2760,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparation
 	}
 	if queued.HumanRequiredClassificationPolicy != nil {
 		t.Fatalf("queued human-required classification policy = %+v, want nil for foreign brief", queued.HumanRequiredClassificationPolicy)
+	}
+	if queued.AuthorityRecommendationPolicy != nil {
+		t.Fatalf("queued authority recommendation policy = %+v, want nil for foreign brief", queued.AuthorityRecommendationPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)

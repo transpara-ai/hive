@@ -164,6 +164,7 @@ type OperatorQueuedRunRequestEvidence struct {
 	RoleSeparationPolicy              *OperatorQueuedRunRoleSeparationPolicy              `json:"role_separation_policy,omitempty"`
 	AutonomyGuardPolicy               *OperatorQueuedRunAutonomyGuardPolicy               `json:"autonomy_guard_policy,omitempty"`
 	HumanRequiredClassificationPolicy *OperatorQueuedRunHumanRequiredClassificationPolicy `json:"human_required_classification_policy,omitempty"`
+	AuthorityRecommendationPolicy     *OperatorQueuedRunAuthorityRecommendationPolicy     `json:"authority_recommendation_policy,omitempty"`
 	DevelopmentLifecycle              []OperatorQueuedRunLifecycleStage                   `json:"development_lifecycle,omitempty"`
 	AgentExecutionPlan                []OperatorQueuedRunAgentPlanStep                    `json:"agent_execution_plan,omitempty"`
 	LifecycleEvidenceKind             string                                              `json:"lifecycle_evidence_kind,omitempty"`
@@ -217,6 +218,17 @@ type OperatorQueuedRunHumanRequiredClassificationPolicy struct {
 	EscalationOutputs     []string `json:"escalation_outputs,omitempty"`
 	ForbiddenWithoutHuman []string `json:"forbidden_without_human,omitempty"`
 	NonAuthorityClaims    []string `json:"non_authority_claims,omitempty"`
+}
+
+type OperatorQueuedRunAuthorityRecommendationPolicy struct {
+	PolicyID                 string   `json:"policy_id"`
+	PolicyVersion            string   `json:"policy_version"`
+	RecommendationPosture    string   `json:"recommendation_posture"`
+	DecisionBoundary         string   `json:"decision_boundary"`
+	EvidenceInputs           []string `json:"evidence_inputs,omitempty"`
+	RecommendationOutputs    []string `json:"recommendation_outputs,omitempty"`
+	RequiredHumanAuthority   []string `json:"required_human_authority,omitempty"`
+	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims,omitempty"`
 }
 
 type OperatorQueuedRunLifecycleStage struct {
@@ -683,6 +695,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			if err != nil {
 				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s human-required classification policy projection: %v", content.RunID, err))
 			}
+			authorityRecommendationPolicy, err := queuedRunAuthorityRecommendationPolicyFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s authority recommendation policy projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:                           eventID,
 				ConversationID:                    conversationID,
@@ -703,6 +719,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				RoleSeparationPolicy:              roleSeparationPolicy,
 				AutonomyGuardPolicy:               autonomyGuardPolicy,
 				HumanRequiredClassificationPolicy: humanRequiredClassificationPolicy,
+				AuthorityRecommendationPolicy:     authorityRecommendationPolicy,
 				DevelopmentLifecycle:              lifecycle,
 				AgentExecutionPlan:                agentPlan,
 				EvidenceKind:                      "queued_request_not_runtime_start",
@@ -849,7 +866,7 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if brief.Kind != issueScanBriefKind {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
 	}
-	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV06 && brief.LifecycleVersion != issueScanLifecycleVersionV05 && brief.LifecycleVersion != issueScanLifecycleVersionV04 && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV07 && brief.LifecycleVersion != issueScanLifecycleVersionV06 && brief.LifecycleVersion != issueScanLifecycleVersionV05 && brief.LifecycleVersion != issueScanLifecycleVersionV04 && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
 	}
 	expected := issueScanDevelopmentLifecycle()
@@ -976,7 +993,7 @@ func queuedRunRoleSeparationPolicyFromBrief(raw json.RawMessage) (*OperatorQueue
 		return nil, nil
 	}
 	switch brief.LifecycleVersion {
-	case issueScanLifecycleVersion, issueScanLifecycleVersionV06, issueScanLifecycleVersionV05:
+	case issueScanLifecycleVersion, issueScanLifecycleVersionV07, issueScanLifecycleVersionV06, issueScanLifecycleVersionV05:
 	case issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
 		return nil, nil
 	default:
@@ -1030,7 +1047,7 @@ func queuedRunAutonomyGuardPolicyFromBrief(raw json.RawMessage) (*OperatorQueued
 		return nil, nil
 	}
 	switch brief.LifecycleVersion {
-	case issueScanLifecycleVersion, issueScanLifecycleVersionV06:
+	case issueScanLifecycleVersion, issueScanLifecycleVersionV07, issueScanLifecycleVersionV06:
 	case issueScanLifecycleVersionV05, issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
 		return nil, nil
 	default:
@@ -1075,7 +1092,7 @@ func queuedRunHumanRequiredClassificationPolicyFromBrief(raw json.RawMessage) (*
 		return nil, nil
 	}
 	switch brief.LifecycleVersion {
-	case issueScanLifecycleVersion:
+	case issueScanLifecycleVersion, issueScanLifecycleVersionV07:
 	case issueScanLifecycleVersionV06, issueScanLifecycleVersionV05, issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
 		return nil, nil
 	default:
@@ -1098,6 +1115,73 @@ func queuedRunHumanRequiredClassificationPolicyFromBrief(raw json.RawMessage) (*
 		ForbiddenWithoutHuman: trimRunLaunchStrings(policy.ForbiddenWithoutHuman),
 		NonAuthorityClaims:    trimRunLaunchStrings(policy.NonAuthorityClaims),
 	}, nil
+}
+
+func queuedRunAuthorityRecommendationPolicyFromBrief(raw json.RawMessage) (*OperatorQueuedRunAuthorityRecommendationPolicy, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var brief struct {
+		Kind                          string                                        `json:"kind"`
+		LifecycleVersion              string                                        `json:"lifecycle_version"`
+		AuthorityRecommendationPolicy issueScanAuthorityRecommendationPolicyPayload `json:"authority_recommendation_policy"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return nil, fmt.Errorf("decode authority recommendation policy: %w", err)
+	}
+	if brief.Kind != issueScanBriefKind {
+		return nil, nil
+	}
+	if brief.LifecycleVersion == "" {
+		return nil, nil
+	}
+	switch brief.LifecycleVersion {
+	case issueScanLifecycleVersion:
+	case issueScanLifecycleVersionV07, issueScanLifecycleVersionV06, issueScanLifecycleVersionV05, issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported authority recommendation lifecycle version %q", brief.LifecycleVersion)
+	}
+	expected := issueScanAuthorityRecommendationPolicy()
+	policy := brief.AuthorityRecommendationPolicy
+	if strings.TrimSpace(policy.PolicyID) == "" && len(policy.EvidenceInputs) == 0 && len(policy.RecommendationOutputs) == 0 && len(policy.RequiredHumanAuthority) == 0 && len(policy.ForbiddenAuthorityClaims) == 0 {
+		return nil, fmt.Errorf("authority_recommendation_policy is required for lifecycle version %q", brief.LifecycleVersion)
+	}
+	if err := validateQueuedRunAuthorityRecommendationPolicy(policy, expected); err != nil {
+		return nil, err
+	}
+	return &OperatorQueuedRunAuthorityRecommendationPolicy{
+		PolicyID:                 strings.TrimSpace(policy.PolicyID),
+		PolicyVersion:            strings.TrimSpace(policy.PolicyVersion),
+		RecommendationPosture:    strings.TrimSpace(policy.RecommendationPosture),
+		DecisionBoundary:         strings.TrimSpace(policy.DecisionBoundary),
+		EvidenceInputs:           trimRunLaunchStrings(policy.EvidenceInputs),
+		RecommendationOutputs:    trimRunLaunchStrings(policy.RecommendationOutputs),
+		RequiredHumanAuthority:   trimRunLaunchStrings(policy.RequiredHumanAuthority),
+		ForbiddenAuthorityClaims: trimRunLaunchStrings(policy.ForbiddenAuthorityClaims),
+	}, nil
+}
+
+func validateQueuedRunAuthorityRecommendationPolicy(got, expected issueScanAuthorityRecommendationPolicyPayload) error {
+	switch {
+	case strings.TrimSpace(got.PolicyID) != expected.PolicyID:
+		return fmt.Errorf("authority_recommendation_policy.policy_id %q does not match expected %q", got.PolicyID, expected.PolicyID)
+	case strings.TrimSpace(got.PolicyVersion) != expected.PolicyVersion:
+		return fmt.Errorf("authority_recommendation_policy.policy_version %q does not match expected %q", got.PolicyVersion, expected.PolicyVersion)
+	case strings.TrimSpace(got.RecommendationPosture) != expected.RecommendationPosture:
+		return fmt.Errorf("authority_recommendation_policy.recommendation_posture %q does not match expected %q", got.RecommendationPosture, expected.RecommendationPosture)
+	case strings.TrimSpace(got.DecisionBoundary) != expected.DecisionBoundary:
+		return fmt.Errorf("authority_recommendation_policy.decision_boundary %q does not match expected %q", got.DecisionBoundary, expected.DecisionBoundary)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.EvidenceInputs), expected.EvidenceInputs):
+		return fmt.Errorf("authority_recommendation_policy.evidence_inputs %v do not match expected %v", got.EvidenceInputs, expected.EvidenceInputs)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.RecommendationOutputs), expected.RecommendationOutputs):
+		return fmt.Errorf("authority_recommendation_policy.recommendation_outputs %v do not match expected %v", got.RecommendationOutputs, expected.RecommendationOutputs)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.RequiredHumanAuthority), expected.RequiredHumanAuthority):
+		return fmt.Errorf("authority_recommendation_policy.required_human_authority %v do not match expected %v", got.RequiredHumanAuthority, expected.RequiredHumanAuthority)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.ForbiddenAuthorityClaims), expected.ForbiddenAuthorityClaims):
+		return fmt.Errorf("authority_recommendation_policy.forbidden_authority_claims %v do not match expected %v", got.ForbiddenAuthorityClaims, expected.ForbiddenAuthorityClaims)
+	}
+	return nil
 }
 
 func validateQueuedRunHumanRequiredClassificationPolicy(got, expected issueScanHumanRequiredClassificationPolicyPayload) error {
