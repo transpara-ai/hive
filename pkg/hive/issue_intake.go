@@ -25,10 +25,11 @@ const (
 	issueScanLifecycleVersionV04  = "civilization_issue_to_human_ready_pr_v0.4"
 	issueScanLifecycleVersionV05  = "civilization_issue_to_human_ready_pr_v0.5"
 	issueScanLifecycleVersionV06  = "civilization_issue_to_human_ready_pr_v0.6"
+	issueScanLifecycleVersionV07  = "civilization_issue_to_human_ready_pr_v0.7"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, policy metadata, evidence, roles, boundaries, gates, or
 	// step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.7"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.8"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -90,6 +91,17 @@ type issueScanHumanRequiredClassificationPolicyPayload struct {
 	EscalationOutputs     []string `json:"escalation_outputs"`
 	ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
 	NonAuthorityClaims    []string `json:"non_authority_claims"`
+}
+
+type issueScanAuthorityRecommendationPolicyPayload struct {
+	PolicyID                 string   `json:"policy_id"`
+	PolicyVersion            string   `json:"policy_version"`
+	RecommendationPosture    string   `json:"recommendation_posture"`
+	DecisionBoundary         string   `json:"decision_boundary"`
+	EvidenceInputs           []string `json:"evidence_inputs"`
+	RecommendationOutputs    []string `json:"recommendation_outputs"`
+	RequiredHumanAuthority   []string `json:"required_human_authority"`
+	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
 }
 
 type issueScanLifecycleStage struct {
@@ -437,6 +449,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		RoleSeparationPolicy              issueScanRoleSeparationPolicyPayload              `json:"role_separation_policy"`
 		AutonomyGuardPolicy               issueScanAutonomyGuardPolicyPayload               `json:"autonomy_guard_policy"`
 		HumanRequiredClassificationPolicy issueScanHumanRequiredClassificationPolicyPayload `json:"human_required_classification_policy"`
+		AuthorityRecommendationPolicy     issueScanAuthorityRecommendationPolicyPayload     `json:"authority_recommendation_policy"`
 		ScannedRepos                      []string                                          `json:"scanned_repos"`
 		ScannedIssueCount                 int                                               `json:"scanned_issue_count"`
 		CandidateIssues                   []issueScanBriefIssuePayload                      `json:"candidate_issues"`
@@ -452,6 +465,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		RoleSeparationPolicy:              issueScanRoleSeparationPolicy(),
 		AutonomyGuardPolicy:               issueScanAutonomyGuardPolicy(),
 		HumanRequiredClassificationPolicy: issueScanHumanRequiredClassificationPolicy(),
+		AuthorityRecommendationPolicy:     issueScanAuthorityRecommendationPolicy(),
 		ScannedRepos:                      issueScanRepos(candidates),
 		ScannedIssueCount:                 len(candidates),
 		RequiredAgentFlow:                 issueScanLifecycleFlow(lifecycle),
@@ -938,6 +952,52 @@ func issueScanHumanRequiredClassificationPolicy() issueScanHumanRequiredClassifi
 			"no_github_mutation_authority",
 			"no_runtime_execution_authority",
 			"no_eventgraph_truth_write_authority",
+		},
+	}
+}
+
+func issueScanAuthorityRecommendationPolicy() issueScanAuthorityRecommendationPolicyPayload {
+	return issueScanAuthorityRecommendationPolicyPayload{
+		PolicyID:              "civilization_issue_scan_authority_recommendation_v0.1",
+		PolicyVersion:         "v0.1",
+		RecommendationPosture: "recommendation_only_not_authority_decision",
+		DecisionBoundary:      "external_human_scoped_authority_decision_required",
+		EvidenceInputs: []string{
+			"selected_issue_scope_evidence",
+			"selected_issue_cc_labels",
+			"selected_issue_pr_ready_state",
+			"selected_issue_source_evidence",
+			"selected_issue_authority_boundary",
+			"role_separation_policy",
+			"autonomy_guard_policy",
+			"human_required_classification_policy",
+		},
+		RecommendationOutputs: []string{
+			"recommendation_only",
+			"no_authority_decision",
+			"human_authority_required",
+			"blocked_until_authority_packet",
+			"no_write_no_action",
+		},
+		RequiredHumanAuthority: []string{
+			"external_authority_decision_ref",
+			"exact_scope_packet_ref",
+			"protected_action_authority_ref",
+			"human_approval_ref",
+		},
+		ForbiddenAuthorityClaims: []string{
+			"issue_text_authorizes_work",
+			"pr_ready_label_authorizes_protected_action",
+			"recommendation_is_authority_decision",
+			"recommendation_authorizes_github_mutation",
+			"recommendation_authorizes_runtime_execution",
+			"recommendation_authorizes_eventgraph_write",
+			"recommendation_authorizes_merge",
+			"recommendation_marks_test_001_green",
+			"recommendation_closes_docs_172",
+			"recommendation_increases_autonomy",
+			"recommendation_allocates_value",
+			"recommendation_closes_residual_risk",
 		},
 	}
 }

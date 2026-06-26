@@ -107,6 +107,16 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			ForbiddenWithoutHuman []string `json:"forbidden_without_human"`
 			NonAuthorityClaims    []string `json:"non_authority_claims"`
 		} `json:"human_required_classification_policy"`
+		AuthorityRecommendationPolicy struct {
+			PolicyID                 string   `json:"policy_id"`
+			PolicyVersion            string   `json:"policy_version"`
+			RecommendationPosture    string   `json:"recommendation_posture"`
+			DecisionBoundary         string   `json:"decision_boundary"`
+			EvidenceInputs           []string `json:"evidence_inputs"`
+			RecommendationOutputs    []string `json:"recommendation_outputs"`
+			RequiredHumanAuthority   []string `json:"required_human_authority"`
+			ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+		} `json:"authority_recommendation_policy"`
 		AuthorityBoundaries []string `json:"authority_boundaries"`
 		SelectionPolicy     struct {
 			PolicyID       string   `json:"policy_id"`
@@ -210,6 +220,24 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.NonAuthorityClaims, "classification_is_not_authority_decision") || !containsIssueScanValue(brief.HumanRequiredClassificationPolicy.NonAuthorityClaims, "no_protected_action_execution") {
 		t.Fatalf("human-required non-authority claims = %+v", brief.HumanRequiredClassificationPolicy.NonAuthorityClaims)
+	}
+	if brief.AuthorityRecommendationPolicy.PolicyID != "civilization_issue_scan_authority_recommendation_v0.1" || brief.AuthorityRecommendationPolicy.PolicyVersion != "v0.1" {
+		t.Fatalf("authority recommendation policy = %+v", brief.AuthorityRecommendationPolicy)
+	}
+	if brief.AuthorityRecommendationPolicy.RecommendationPosture != "recommendation_only_not_authority_decision" || brief.AuthorityRecommendationPolicy.DecisionBoundary != "external_human_scoped_authority_decision_required" {
+		t.Fatalf("authority recommendation posture = %+v", brief.AuthorityRecommendationPolicy)
+	}
+	if !containsIssueScanValue(brief.AuthorityRecommendationPolicy.EvidenceInputs, "selected_issue_scope_evidence") || !containsIssueScanValue(brief.AuthorityRecommendationPolicy.EvidenceInputs, "human_required_classification_policy") {
+		t.Fatalf("authority recommendation evidence inputs = %+v", brief.AuthorityRecommendationPolicy.EvidenceInputs)
+	}
+	if !containsIssueScanValue(brief.AuthorityRecommendationPolicy.RecommendationOutputs, "no_authority_decision") || !containsIssueScanValue(brief.AuthorityRecommendationPolicy.RecommendationOutputs, "no_write_no_action") {
+		t.Fatalf("authority recommendation outputs = %+v", brief.AuthorityRecommendationPolicy.RecommendationOutputs)
+	}
+	if !containsIssueScanValue(brief.AuthorityRecommendationPolicy.RequiredHumanAuthority, "external_authority_decision_ref") || !containsIssueScanValue(brief.AuthorityRecommendationPolicy.RequiredHumanAuthority, "human_approval_ref") {
+		t.Fatalf("authority recommendation human refs = %+v", brief.AuthorityRecommendationPolicy.RequiredHumanAuthority)
+	}
+	if !containsIssueScanValue(brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "recommendation_is_authority_decision") || !containsIssueScanValue(brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "pr_ready_label_authorizes_protected_action") {
+		t.Fatalf("authority recommendation forbidden claims = %+v", brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
