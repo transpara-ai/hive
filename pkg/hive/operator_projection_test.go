@@ -2200,6 +2200,58 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsRoleSeparationPolicyError(
 	}
 }
 
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_kind_only_legacy",
+		IntakeID:     "intake_kind_only_legacy",
+		OperatorID:   "operator_001",
+		Title:        "Legacy kind-only issue scan brief",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        []byte(`{"kind":"transpara_ai_github_issue_scan","required_agent_flow":["research_issue_and_repo_context"]}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil for legacy kind-only brief", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparationPolicy(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_foreign_brief",
+		IntakeID:     "intake_foreign_brief",
+		OperatorID:   "operator_001",
+		Title:        "Foreign queued brief",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        []byte(`{"kind":"foreign_run_request","goal":"generic queued launch"}`),
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.RoleSeparationPolicy != nil {
+		t.Fatalf("queued role separation policy = %+v, want nil for foreign brief", queued.RoleSeparationPolicy)
+	}
+	if len(projection.Errors) != 0 {
+		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)
+	}
+}
+
 func TestQueuedRunLifecycleFromBriefSupportsLegacyV02LifecycleWithoutAgentPlan(t *testing.T) {
 	issue := GitHubIssueCandidate{
 		Repo:   "transpara-ai/hive",

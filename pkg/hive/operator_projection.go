@@ -936,11 +936,11 @@ func queuedRunRoleSeparationPolicyFromBrief(raw json.RawMessage) (*OperatorQueue
 	if err := json.Unmarshal(raw, &brief); err != nil {
 		return nil, fmt.Errorf("decode role separation policy: %w", err)
 	}
-	if brief.Kind == "" && brief.LifecycleVersion == "" {
+	if brief.Kind != issueScanBriefKind {
 		return nil, nil
 	}
-	if brief.Kind != issueScanBriefKind {
-		return nil, fmt.Errorf("unsupported role separation brief kind %q", brief.Kind)
+	if brief.LifecycleVersion == "" {
+		return nil, nil
 	}
 	switch brief.LifecycleVersion {
 	case issueScanLifecycleVersion:
