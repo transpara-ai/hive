@@ -88,6 +88,16 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			} `json:"actor_policies"`
 			GlobalNonClaims []string `json:"global_non_claims"`
 		} `json:"role_separation_policy"`
+		AutonomyGuardPolicy struct {
+			PolicyID                 string   `json:"policy_id"`
+			PolicyVersion            string   `json:"policy_version"`
+			RecommendationPosture    string   `json:"recommendation_posture"`
+			AutonomyCeiling          string   `json:"autonomy_ceiling"`
+			EvidenceInputs           []string `json:"evidence_inputs"`
+			FailClosedOutputs        []string `json:"fail_closed_outputs"`
+			HumanScopeTriggers       []string `json:"human_scope_triggers"`
+			ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+		} `json:"autonomy_guard_policy"`
 		AuthorityBoundaries []string `json:"authority_boundaries"`
 		SelectionPolicy     struct {
 			PolicyID       string   `json:"policy_id"`
@@ -155,6 +165,24 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(brief.RoleSeparationPolicy.GlobalNonClaims, "github_issue_is_not_authority") || !containsIssueScanValue(brief.RoleSeparationPolicy.GlobalNonClaims, "no_autonomy_increase") {
 		t.Fatalf("role separation global non-claims = %+v", brief.RoleSeparationPolicy.GlobalNonClaims)
+	}
+	if brief.AutonomyGuardPolicy.PolicyID != "civilization_issue_scan_autonomy_guard_v0.1" || brief.AutonomyGuardPolicy.PolicyVersion != "v0.1" {
+		t.Fatalf("autonomy guard policy = %+v", brief.AutonomyGuardPolicy)
+	}
+	if brief.AutonomyGuardPolicy.RecommendationPosture != "recommendation_only_no_authority" || brief.AutonomyGuardPolicy.AutonomyCeiling != "level_0_no_autonomy_increase" {
+		t.Fatalf("autonomy guard posture = %+v", brief.AutonomyGuardPolicy)
+	}
+	if !containsIssueScanValue(brief.AutonomyGuardPolicy.EvidenceInputs, "selected_issue_cc_labels") || !containsIssueScanValue(brief.AutonomyGuardPolicy.EvidenceInputs, "role_separation_policy") {
+		t.Fatalf("autonomy guard evidence inputs = %+v", brief.AutonomyGuardPolicy.EvidenceInputs)
+	}
+	if !containsIssueScanValue(brief.AutonomyGuardPolicy.FailClosedOutputs, "human_scope_required") || !containsIssueScanValue(brief.AutonomyGuardPolicy.FailClosedOutputs, "autonomy_increase_blocked") {
+		t.Fatalf("autonomy guard fail-closed outputs = %+v", brief.AutonomyGuardPolicy.FailClosedOutputs)
+	}
+	if !containsIssueScanValue(brief.AutonomyGuardPolicy.HumanScopeTriggers, "protected_action") || !containsIssueScanValue(brief.AutonomyGuardPolicy.HumanScopeTriggers, "autonomy_increase") {
+		t.Fatalf("autonomy guard human-scope triggers = %+v", brief.AutonomyGuardPolicy.HumanScopeTriggers)
+	}
+	if !containsIssueScanValue(brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_authorizes_autonomy_increase") || !containsIssueScanValue(brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_marks_test_001_green") {
+		t.Fatalf("autonomy guard forbidden claims = %+v", brief.AutonomyGuardPolicy.ForbiddenAuthorityClaims)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)

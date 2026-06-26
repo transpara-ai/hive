@@ -1580,6 +1580,14 @@ func civilizationAssemblyQueuedRunRequestWithStageEvidence(queued *OperatorQueue
 		}
 		out.RoleSeparationPolicy = &policy
 	}
+	if queued.AutonomyGuardPolicy != nil {
+		policy := *queued.AutonomyGuardPolicy
+		policy.EvidenceInputs = append([]string(nil), queued.AutonomyGuardPolicy.EvidenceInputs...)
+		policy.FailClosedOutputs = append([]string(nil), queued.AutonomyGuardPolicy.FailClosedOutputs...)
+		policy.HumanScopeTriggers = append([]string(nil), queued.AutonomyGuardPolicy.HumanScopeTriggers...)
+		policy.ForbiddenAuthorityClaims = append([]string(nil), queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims...)
+		out.AutonomyGuardPolicy = &policy
+	}
 	out.DevelopmentLifecycle = append([]OperatorQueuedRunLifecycleStage(nil), queued.DevelopmentLifecycle...)
 	for i := range out.DevelopmentLifecycle {
 		out.DevelopmentLifecycle[i].RequiredRoles = append([]string(nil), out.DevelopmentLifecycle[i].RequiredRoles...)

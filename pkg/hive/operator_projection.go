@@ -162,6 +162,7 @@ type OperatorQueuedRunRequestEvidence struct {
 	LifecycleVersion      string                                 `json:"lifecycle_version,omitempty"`
 	SelectionPolicy       *OperatorQueuedRunSelectionPolicy      `json:"selection_policy,omitempty"`
 	RoleSeparationPolicy  *OperatorQueuedRunRoleSeparationPolicy `json:"role_separation_policy,omitempty"`
+	AutonomyGuardPolicy   *OperatorQueuedRunAutonomyGuardPolicy  `json:"autonomy_guard_policy,omitempty"`
 	DevelopmentLifecycle  []OperatorQueuedRunLifecycleStage      `json:"development_lifecycle,omitempty"`
 	AgentExecutionPlan    []OperatorQueuedRunAgentPlanStep       `json:"agent_execution_plan,omitempty"`
 	LifecycleEvidenceKind string                                 `json:"lifecycle_evidence_kind,omitempty"`
@@ -194,6 +195,17 @@ type OperatorQueuedRunRoleSeparationActorPolicy struct {
 	AuthorityBoundary     string   `json:"authority_boundary"`
 	RequiredEvidence      []string `json:"required_evidence,omitempty"`
 	ForbiddenWithoutHuman []string `json:"forbidden_without_human,omitempty"`
+}
+
+type OperatorQueuedRunAutonomyGuardPolicy struct {
+	PolicyID                 string   `json:"policy_id"`
+	PolicyVersion            string   `json:"policy_version"`
+	RecommendationPosture    string   `json:"recommendation_posture"`
+	AutonomyCeiling          string   `json:"autonomy_ceiling"`
+	EvidenceInputs           []string `json:"evidence_inputs,omitempty"`
+	FailClosedOutputs        []string `json:"fail_closed_outputs,omitempty"`
+	HumanScopeTriggers       []string `json:"human_scope_triggers,omitempty"`
+	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims,omitempty"`
 }
 
 type OperatorQueuedRunLifecycleStage struct {
@@ -652,6 +664,10 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 			if err != nil {
 				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s role separation policy projection: %v", content.RunID, err))
 			}
+			autonomyGuardPolicy, err := queuedRunAutonomyGuardPolicyFromBrief(content.Brief)
+			if err != nil {
+				p.Errors = append(p.Errors, fmt.Sprintf("queued run %s autonomy guard policy projection: %v", content.RunID, err))
+			}
 			evidence.LastQueuedRunRequest = &OperatorQueuedRunRequestEvidence{
 				EventID:               eventID,
 				ConversationID:        conversationID,
@@ -670,6 +686,7 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 				LifecycleVersion:      lifecycleVersion,
 				SelectionPolicy:       selectionPolicy,
 				RoleSeparationPolicy:  roleSeparationPolicy,
+				AutonomyGuardPolicy:   autonomyGuardPolicy,
 				DevelopmentLifecycle:  lifecycle,
 				AgentExecutionPlan:    agentPlan,
 				EvidenceKind:          "queued_request_not_runtime_start",
@@ -816,7 +833,7 @@ func queuedRunLifecycleFromBrief(raw json.RawMessage) (string, string, []Operato
 	if brief.Kind != issueScanBriefKind {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle brief kind %q", brief.Kind)
 	}
-	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV04 && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
+	if brief.LifecycleVersion != issueScanLifecycleVersion && brief.LifecycleVersion != issueScanLifecycleVersionV05 && brief.LifecycleVersion != issueScanLifecycleVersionV04 && brief.LifecycleVersion != issueScanLifecycleVersionV03 && brief.LifecycleVersion != issueScanLifecycleVersionV02 {
 		return "", "", nil, nil, fmt.Errorf("unsupported lifecycle version %q", brief.LifecycleVersion)
 	}
 	expected := issueScanDevelopmentLifecycle()
@@ -943,7 +960,7 @@ func queuedRunRoleSeparationPolicyFromBrief(raw json.RawMessage) (*OperatorQueue
 		return nil, nil
 	}
 	switch brief.LifecycleVersion {
-	case issueScanLifecycleVersion:
+	case issueScanLifecycleVersion, issueScanLifecycleVersionV05:
 	case issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
 		return nil, nil
 	default:
@@ -976,6 +993,73 @@ func queuedRunRoleSeparationPolicyFromBrief(raw json.RawMessage) (*OperatorQueue
 		})
 	}
 	return out, nil
+}
+
+func queuedRunAutonomyGuardPolicyFromBrief(raw json.RawMessage) (*OperatorQueuedRunAutonomyGuardPolicy, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var brief struct {
+		Kind                string                              `json:"kind"`
+		LifecycleVersion    string                              `json:"lifecycle_version"`
+		AutonomyGuardPolicy issueScanAutonomyGuardPolicyPayload `json:"autonomy_guard_policy"`
+	}
+	if err := json.Unmarshal(raw, &brief); err != nil {
+		return nil, fmt.Errorf("decode autonomy guard policy: %w", err)
+	}
+	if brief.Kind != issueScanBriefKind {
+		return nil, nil
+	}
+	if brief.LifecycleVersion == "" {
+		return nil, nil
+	}
+	switch brief.LifecycleVersion {
+	case issueScanLifecycleVersion:
+	case issueScanLifecycleVersionV05, issueScanLifecycleVersionV04, issueScanLifecycleVersionV03, issueScanLifecycleVersionV02:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported autonomy guard lifecycle version %q", brief.LifecycleVersion)
+	}
+	expected := issueScanAutonomyGuardPolicy()
+	policy := brief.AutonomyGuardPolicy
+	if strings.TrimSpace(policy.PolicyID) == "" && len(policy.EvidenceInputs) == 0 && len(policy.FailClosedOutputs) == 0 && len(policy.HumanScopeTriggers) == 0 && len(policy.ForbiddenAuthorityClaims) == 0 {
+		return nil, fmt.Errorf("autonomy_guard_policy is required for lifecycle version %q", brief.LifecycleVersion)
+	}
+	if err := validateQueuedRunAutonomyGuardPolicy(policy, expected); err != nil {
+		return nil, err
+	}
+	return &OperatorQueuedRunAutonomyGuardPolicy{
+		PolicyID:                 strings.TrimSpace(policy.PolicyID),
+		PolicyVersion:            strings.TrimSpace(policy.PolicyVersion),
+		RecommendationPosture:    strings.TrimSpace(policy.RecommendationPosture),
+		AutonomyCeiling:          strings.TrimSpace(policy.AutonomyCeiling),
+		EvidenceInputs:           trimRunLaunchStrings(policy.EvidenceInputs),
+		FailClosedOutputs:        trimRunLaunchStrings(policy.FailClosedOutputs),
+		HumanScopeTriggers:       trimRunLaunchStrings(policy.HumanScopeTriggers),
+		ForbiddenAuthorityClaims: trimRunLaunchStrings(policy.ForbiddenAuthorityClaims),
+	}, nil
+}
+
+func validateQueuedRunAutonomyGuardPolicy(got, expected issueScanAutonomyGuardPolicyPayload) error {
+	switch {
+	case strings.TrimSpace(got.PolicyID) != expected.PolicyID:
+		return fmt.Errorf("autonomy_guard_policy.policy_id %q does not match expected %q", got.PolicyID, expected.PolicyID)
+	case strings.TrimSpace(got.PolicyVersion) != expected.PolicyVersion:
+		return fmt.Errorf("autonomy_guard_policy.policy_version %q does not match expected %q", got.PolicyVersion, expected.PolicyVersion)
+	case strings.TrimSpace(got.RecommendationPosture) != expected.RecommendationPosture:
+		return fmt.Errorf("autonomy_guard_policy.recommendation_posture %q does not match expected %q", got.RecommendationPosture, expected.RecommendationPosture)
+	case strings.TrimSpace(got.AutonomyCeiling) != expected.AutonomyCeiling:
+		return fmt.Errorf("autonomy_guard_policy.autonomy_ceiling %q does not match expected %q", got.AutonomyCeiling, expected.AutonomyCeiling)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.EvidenceInputs), expected.EvidenceInputs):
+		return fmt.Errorf("autonomy_guard_policy.evidence_inputs %v do not match expected %v", got.EvidenceInputs, expected.EvidenceInputs)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.FailClosedOutputs), expected.FailClosedOutputs):
+		return fmt.Errorf("autonomy_guard_policy.fail_closed_outputs %v do not match expected %v", got.FailClosedOutputs, expected.FailClosedOutputs)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.HumanScopeTriggers), expected.HumanScopeTriggers):
+		return fmt.Errorf("autonomy_guard_policy.human_scope_triggers %v do not match expected %v", got.HumanScopeTriggers, expected.HumanScopeTriggers)
+	case !sameOperatorProjectionStrings(trimRunLaunchStrings(got.ForbiddenAuthorityClaims), expected.ForbiddenAuthorityClaims):
+		return fmt.Errorf("autonomy_guard_policy.forbidden_authority_claims %v do not match expected %v", got.ForbiddenAuthorityClaims, expected.ForbiddenAuthorityClaims)
+	}
+	return nil
 }
 
 func validateQueuedRunRoleSeparationPolicy(got, expected issueScanRoleSeparationPolicyPayload) error {
