@@ -23,9 +23,11 @@ const (
 	issueScanLifecycleVersionV02  = "civilization_issue_to_human_ready_pr_v0.2"
 	issueScanLifecycleVersionV03  = "civilization_issue_to_human_ready_pr_v0.3"
 	issueScanLifecycleVersionV04  = "civilization_issue_to_human_ready_pr_v0.4"
+	issueScanLifecycleVersionV05  = "civilization_issue_to_human_ready_pr_v0.5"
 	// This version is a persisted brief contract. Bump it when lifecycle or
-	// agent-plan text, evidence, roles, boundaries, gates, or step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.5"
+	// agent-plan text, policy metadata, evidence, roles, boundaries, gates, or
+	// step order change.
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.6"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -66,6 +68,17 @@ type issueScanRoleSeparationActorPolicy struct {
 	AuthorityBoundary     string   `json:"authority_boundary"`
 	RequiredEvidence      []string `json:"required_evidence,omitempty"`
 	ForbiddenWithoutHuman []string `json:"forbidden_without_human,omitempty"`
+}
+
+type issueScanAutonomyGuardPolicyPayload struct {
+	PolicyID                 string   `json:"policy_id"`
+	PolicyVersion            string   `json:"policy_version"`
+	RecommendationPosture    string   `json:"recommendation_posture"`
+	AutonomyCeiling          string   `json:"autonomy_ceiling"`
+	EvidenceInputs           []string `json:"evidence_inputs"`
+	FailClosedOutputs        []string `json:"fail_closed_outputs"`
+	HumanScopeTriggers       []string `json:"human_scope_triggers"`
+	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
 }
 
 type issueScanLifecycleStage struct {
@@ -411,6 +424,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		SelectedIssue        issueScanBriefIssuePayload           `json:"selected_issue"`
 		SelectionPolicy      issueScanSelectionPolicyPayload      `json:"selection_policy"`
 		RoleSeparationPolicy issueScanRoleSeparationPolicyPayload `json:"role_separation_policy"`
+		AutonomyGuardPolicy  issueScanAutonomyGuardPolicyPayload  `json:"autonomy_guard_policy"`
 		ScannedRepos         []string                             `json:"scanned_repos"`
 		ScannedIssueCount    int                                  `json:"scanned_issue_count"`
 		CandidateIssues      []issueScanBriefIssuePayload         `json:"candidate_issues"`
@@ -424,6 +438,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		SelectedIssue:        issueScanBriefIssue(selected, 1),
 		SelectionPolicy:      issueScanSelectionPolicy(candidates),
 		RoleSeparationPolicy: issueScanRoleSeparationPolicy(),
+		AutonomyGuardPolicy:  issueScanAutonomyGuardPolicy(),
 		ScannedRepos:         issueScanRepos(candidates),
 		ScannedIssueCount:    len(candidates),
 		RequiredAgentFlow:    issueScanLifecycleFlow(lifecycle),
@@ -816,6 +831,51 @@ func issueScanRoleSeparationPolicy() issueScanRoleSeparationPolicyPayload {
 			"pull_request_is_not_merge_permission",
 			"no_autonomy_increase",
 			"no_test_001_green",
+		},
+	}
+}
+
+func issueScanAutonomyGuardPolicy() issueScanAutonomyGuardPolicyPayload {
+	return issueScanAutonomyGuardPolicyPayload{
+		PolicyID:              "civilization_issue_scan_autonomy_guard_v0.1",
+		PolicyVersion:         "v0.1",
+		RecommendationPosture: "recommendation_only_no_authority",
+		AutonomyCeiling:       "level_0_no_autonomy_increase",
+		EvidenceInputs: []string{
+			"selected_issue_scope_evidence",
+			"selected_issue_cc_labels",
+			"selected_issue_authority_boundary",
+			"role_separation_policy",
+			"source_evidence",
+		},
+		FailClosedOutputs: []string{
+			"recommendation_only",
+			"human_scope_required",
+			"protected_action_blocked",
+			"autonomy_increase_blocked",
+		},
+		HumanScopeTriggers: []string{
+			"protected_action",
+			"autonomy_increase",
+			"runtime_execution",
+			"github_mutation",
+			"eventgraph_write",
+			"merge",
+			"deploy",
+			"value_allocation",
+			"residual_risk_closure",
+			"test_001_green",
+			"docs_172_closure",
+		},
+		ForbiddenAuthorityClaims: []string{
+			"issue_text_is_authority",
+			"recommendation_authorizes_implementation",
+			"recommendation_authorizes_protected_action",
+			"recommendation_authorizes_runtime_execution",
+			"recommendation_authorizes_autonomy_increase",
+			"recommendation_authorizes_merge",
+			"recommendation_closes_residual_risk",
+			"recommendation_marks_test_001_green",
 		},
 	}
 }

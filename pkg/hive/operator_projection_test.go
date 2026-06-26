@@ -1107,6 +1107,24 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "github_issue_is_not_authority") || !containsModelProjectionString(queued.RoleSeparationPolicy.GlobalNonClaims, "no_autonomy_increase") {
 		t.Fatalf("role separation non-claims = %+v", queued.RoleSeparationPolicy.GlobalNonClaims)
 	}
+	if queued.AutonomyGuardPolicy == nil || queued.AutonomyGuardPolicy.PolicyID != "civilization_issue_scan_autonomy_guard_v0.1" {
+		t.Fatalf("queued autonomy guard policy = %+v", queued.AutonomyGuardPolicy)
+	}
+	if queued.AutonomyGuardPolicy.RecommendationPosture != "recommendation_only_no_authority" || queued.AutonomyGuardPolicy.AutonomyCeiling != "level_0_no_autonomy_increase" {
+		t.Fatalf("queued autonomy guard posture = %+v", queued.AutonomyGuardPolicy)
+	}
+	if !containsModelProjectionString(queued.AutonomyGuardPolicy.EvidenceInputs, "selected_issue_cc_labels") || !containsModelProjectionString(queued.AutonomyGuardPolicy.EvidenceInputs, "role_separation_policy") {
+		t.Fatalf("queued autonomy guard evidence inputs = %+v", queued.AutonomyGuardPolicy.EvidenceInputs)
+	}
+	if !containsModelProjectionString(queued.AutonomyGuardPolicy.FailClosedOutputs, "human_scope_required") || !containsModelProjectionString(queued.AutonomyGuardPolicy.FailClosedOutputs, "autonomy_increase_blocked") {
+		t.Fatalf("queued autonomy guard fail-closed outputs = %+v", queued.AutonomyGuardPolicy.FailClosedOutputs)
+	}
+	if !containsModelProjectionString(queued.AutonomyGuardPolicy.HumanScopeTriggers, "protected_action") || !containsModelProjectionString(queued.AutonomyGuardPolicy.HumanScopeTriggers, "autonomy_increase") {
+		t.Fatalf("queued autonomy guard human-scope triggers = %+v", queued.AutonomyGuardPolicy.HumanScopeTriggers)
+	}
+	if !containsModelProjectionString(queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_authorizes_autonomy_increase") || !containsModelProjectionString(queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims, "recommendation_marks_test_001_green") {
+		t.Fatalf("queued autonomy guard forbidden authority claims = %+v", queued.AutonomyGuardPolicy.ForbiddenAuthorityClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1283,6 +1301,13 @@ func TestBuildCivilizationAssemblyProjectionMarksQueuedLifecycleStageDeclaration
 func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeStatuses(t *testing.T) {
 	queued := &OperatorQueuedRunRequestEvidence{
 		RunID: "run_status_preservation",
+		AutonomyGuardPolicy: &OperatorQueuedRunAutonomyGuardPolicy{
+			PolicyID:                 "civilization_issue_scan_autonomy_guard_v0.1",
+			EvidenceInputs:           []string{"selected_issue_cc_labels"},
+			FailClosedOutputs:        []string{"human_scope_required"},
+			HumanScopeTriggers:       []string{"autonomy_increase"},
+			ForbiddenAuthorityClaims: []string{"recommendation_authorizes_autonomy_increase"},
+		},
 		DevelopmentLifecycle: []OperatorQueuedRunLifecycleStage{
 			{ID: "runtime_completed_stage", EvidenceStatus: "runtime_completed"},
 			{ID: "declared_stage", EvidenceStatus: "expected_not_observed"},
@@ -1300,6 +1325,13 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 	})
 	if out == nil {
 		t.Fatal("queued run with stage evidence returned nil")
+	}
+	if out.AutonomyGuardPolicy == nil || !containsModelProjectionString(out.AutonomyGuardPolicy.FailClosedOutputs, "human_scope_required") {
+		t.Fatalf("autonomy guard policy = %+v", out.AutonomyGuardPolicy)
+	}
+	out.AutonomyGuardPolicy.FailClosedOutputs[0] = "mutated"
+	if queued.AutonomyGuardPolicy.FailClosedOutputs[0] != "human_scope_required" {
+		t.Fatalf("source autonomy guard policy mutated: %+v", queued.AutonomyGuardPolicy)
 	}
 	runtimeStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "runtime_completed_stage")
 	if runtimeStage == nil || runtimeStage.EvidenceStatus != "runtime_completed" {
@@ -1966,6 +1998,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.RoleSeparationPolicy == nil || queuedRunRolePolicyByActor(queued.RoleSeparationPolicy.ActorPolicies, "scanner") == nil {
 		t.Fatalf("queued role separation policy missing scanner boundary: %+v", queued.RoleSeparationPolicy)
 	}
+	if queued.AutonomyGuardPolicy == nil || !containsModelProjectionString(queued.AutonomyGuardPolicy.FailClosedOutputs, "protected_action_blocked") {
+		t.Fatalf("queued autonomy guard policy missing fail-closed boundary: %+v", queued.AutonomyGuardPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -2200,6 +2235,135 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsRoleSeparationPolicyError(
 	}
 }
 
+func TestQueuedRunAutonomyGuardPolicyFromBriefSupportsLegacyV05WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV05
+	delete(doc, "autonomy_guard_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.5 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV05 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.5 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	rolePolicy, err := queuedRunRoleSeparationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief: %v", err)
+	}
+	if rolePolicy == nil || queuedRunRolePolicyByActor(rolePolicy.ActorPolicies, "scanner") == nil {
+		t.Fatalf("legacy v0.5 role separation policy = %+v, want parsed policy", rolePolicy)
+	}
+	autonomyPolicy, err := queuedRunAutonomyGuardPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunAutonomyGuardPolicyFromBrief: %v", err)
+	}
+	if autonomyPolicy != nil {
+		t.Fatalf("legacy v0.5 autonomy guard policy = %+v, want nil", autonomyPolicy)
+	}
+}
+
+func TestQueuedRunAutonomyGuardPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "autonomy_guard_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing autonomy policy brief: %v", err)
+	}
+
+	policy, err := queuedRunAutonomyGuardPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "autonomy_guard_policy is required") {
+		t.Fatalf("queuedRunAutonomyGuardPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsAutonomyGuardPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["autonomy_guard_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("autonomy_guard_policy = %#v, want object", doc["autonomy_guard_policy"])
+	}
+	policy["autonomy_ceiling"] = "level_1_autonomy_increase"
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated autonomy policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_autonomy_guard",
+		IntakeID:     "intake_bad_autonomy_guard",
+		OperatorID:   "operator_001",
+		Title:        "Bad autonomy guard still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.AutonomyGuardPolicy != nil {
+		t.Fatalf("queued autonomy guard policy = %+v, want nil after validation error", queued.AutonomyGuardPolicy)
+	}
+	found := false
+	for _, projectionErr := range projection.Errors {
+		if strings.Contains(projectionErr, "autonomy guard policy projection") && strings.Contains(projectionErr, "autonomy_ceiling") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("projection errors = %+v, want autonomy guard policy validation error", projection.Errors)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
@@ -2220,6 +2384,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSepa
 	}
 	if queued.RoleSeparationPolicy != nil {
 		t.Fatalf("queued role separation policy = %+v, want nil for legacy kind-only brief", queued.RoleSeparationPolicy)
+	}
+	if queued.AutonomyGuardPolicy != nil {
+		t.Fatalf("queued autonomy guard policy = %+v, want nil for legacy kind-only brief", queued.AutonomyGuardPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
@@ -2246,6 +2413,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparation
 	}
 	if queued.RoleSeparationPolicy != nil {
 		t.Fatalf("queued role separation policy = %+v, want nil for foreign brief", queued.RoleSeparationPolicy)
+	}
+	if queued.AutonomyGuardPolicy != nil {
+		t.Fatalf("queued autonomy guard policy = %+v, want nil for foreign brief", queued.AutonomyGuardPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)
