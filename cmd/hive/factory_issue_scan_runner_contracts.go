@@ -71,7 +71,7 @@ func issueScanRunnerContractsJSON() ([]byte, error) {
 func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 	return issueScanRunnerContractsDocument{
 		Kind:             "issue_scan_runner_contracts",
-		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.8",
+		LifecycleVersion: "civilization_issue_to_human_ready_pr_v0.9",
 		Purpose:          "Operator-readable contract for wiring external issue-scan runners into the governed Civilization lifecycle.",
 		FullChainDaemonFlags: []string{
 			"--issue-scan-require-full-chain",

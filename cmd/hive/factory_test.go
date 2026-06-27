@@ -257,7 +257,7 @@ func TestFactoryIssueScanRunnerContractsDocumentsFullChain(t *testing.T) {
 	if doc.Kind != "issue_scan_runner_contracts" {
 		t.Fatalf("contract kind = %q", doc.Kind)
 	}
-	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.8" {
+	if doc.LifecycleVersion != "civilization_issue_to_human_ready_pr_v0.9" {
 		t.Fatalf("contract lifecycle version = %q", doc.LifecycleVersion)
 	}
 	for _, want := range []string{

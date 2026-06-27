@@ -1161,6 +1161,27 @@ func TestBuildCivilizationAssemblyProjectionProjectsQueuedIssueScanLifecycle(t *
 	if !containsModelProjectionString(queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "recommendation_is_authority_decision") || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "pr_ready_label_authorizes_protected_action") {
 		t.Fatalf("queued authority recommendation forbidden claims = %+v", queued.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims)
 	}
+	if queued.ValueAllocationBoundaryPolicy == nil || queued.ValueAllocationBoundaryPolicy.PolicyID != "civilization_issue_scan_value_allocation_boundary_v0.1" {
+		t.Fatalf("queued value-allocation boundary policy = %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	if queued.ValueAllocationBoundaryPolicy.BoundaryPosture != "deny_by_default_human_required" || queued.ValueAllocationBoundaryPolicy.DisplayMode != "pull_display_only_not_routing_or_action" {
+		t.Fatalf("queued value-allocation boundary posture = %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	if !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ClassificationOutputs, "value_allocation_candidate") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ClassificationOutputs, "no_allocation_authority") {
+		t.Fatalf("queued value-allocation classification outputs = %+v", queued.ValueAllocationBoundaryPolicy.ClassificationOutputs)
+	}
+	if !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.RequiredHumanAuthority, "external_committee_value_allocation_decision") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.RequiredHumanAuthority, "human_approval_ref") {
+		t.Fatalf("queued value-allocation required human authority = %+v", queued.ValueAllocationBoundaryPolicy.RequiredHumanAuthority)
+	}
+	if !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "allocate_value") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "route_value_allocation_candidate") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "notify_as_action") {
+		t.Fatalf("queued value-allocation forbidden system actions = %+v", queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions)
+	}
+	if !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims, "display_authorizes_allocation") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims, "human_required_label_is_approval") {
+		t.Fatalf("queued value-allocation forbidden authority claims = %+v", queued.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims)
+	}
+	if !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.NonAuthorityClaims, "display_is_not_authority_decision") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.NonAuthorityClaims, "no_value_allocation_execution") {
+		t.Fatalf("queued value-allocation non-authority claims = %+v", queued.ValueAllocationBoundaryPolicy.NonAuthorityClaims)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("queued lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -1358,6 +1379,16 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 			RequiredHumanAuthority:   []string{"external_authority_decision_ref"},
 			ForbiddenAuthorityClaims: []string{"recommendation_is_authority_decision"},
 		},
+		ValueAllocationBoundaryPolicy: &OperatorQueuedRunValueAllocationBoundaryPolicy{
+			PolicyID:                 "civilization_issue_scan_value_allocation_boundary_v0.1",
+			BoundaryPosture:          "deny_by_default_human_required",
+			DisplayMode:              "pull_display_only_not_routing_or_action",
+			ClassificationOutputs:    []string{"value_allocation_candidate"},
+			RequiredHumanAuthority:   []string{"external_committee_value_allocation_decision"},
+			ForbiddenSystemActions:   []string{"allocate_value"},
+			ForbiddenAuthorityClaims: []string{"display_authorizes_allocation"},
+			NonAuthorityClaims:       []string{"display_is_not_authority_decision"},
+		},
 		DevelopmentLifecycle: []OperatorQueuedRunLifecycleStage{
 			{ID: "runtime_completed_stage", EvidenceStatus: "runtime_completed"},
 			{ID: "declared_stage", EvidenceStatus: "expected_not_observed"},
@@ -1396,6 +1427,29 @@ func TestCivilizationAssemblyQueuedRunRequestWithStageEvidencePreservesRuntimeSt
 	out.AuthorityRecommendationPolicy.RecommendationOutputs[0] = "mutated"
 	if queued.AuthorityRecommendationPolicy.RecommendationOutputs[0] != "no_authority_decision" {
 		t.Fatalf("source authority recommendation policy mutated: %+v", queued.AuthorityRecommendationPolicy)
+	}
+	if out.ValueAllocationBoundaryPolicy == nil || !containsModelProjectionString(out.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "allocate_value") {
+		t.Fatalf("value-allocation boundary policy = %+v", out.ValueAllocationBoundaryPolicy)
+	}
+	out.ValueAllocationBoundaryPolicy.ForbiddenSystemActions[0] = "mutated"
+	if queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions[0] != "allocate_value" {
+		t.Fatalf("source value-allocation boundary policy mutated: %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	out.ValueAllocationBoundaryPolicy.ClassificationOutputs[0] = "mutated"
+	if queued.ValueAllocationBoundaryPolicy.ClassificationOutputs[0] != "value_allocation_candidate" {
+		t.Fatalf("source value-allocation classification outputs mutated: %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	out.ValueAllocationBoundaryPolicy.RequiredHumanAuthority[0] = "mutated"
+	if queued.ValueAllocationBoundaryPolicy.RequiredHumanAuthority[0] != "external_committee_value_allocation_decision" {
+		t.Fatalf("source value-allocation required human authority mutated: %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	out.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims[0] = "mutated"
+	if queued.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims[0] != "display_authorizes_allocation" {
+		t.Fatalf("source value-allocation forbidden authority claims mutated: %+v", queued.ValueAllocationBoundaryPolicy)
+	}
+	out.ValueAllocationBoundaryPolicy.NonAuthorityClaims[0] = "mutated"
+	if queued.ValueAllocationBoundaryPolicy.NonAuthorityClaims[0] != "display_is_not_authority_decision" {
+		t.Fatalf("source value-allocation non-authority claims mutated: %+v", queued.ValueAllocationBoundaryPolicy)
 	}
 	runtimeStage := queuedRunLifecycleStageByID(out.DevelopmentLifecycle, "runtime_completed_stage")
 	if runtimeStage == nil || runtimeStage.EvidenceStatus != "runtime_completed" {
@@ -2071,6 +2125,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceDistinguishesQueuedIntent(t *test
 	if queued.AuthorityRecommendationPolicy == nil || !containsModelProjectionString(queued.AuthorityRecommendationPolicy.RecommendationOutputs, "no_authority_decision") {
 		t.Fatalf("queued authority recommendation policy missing no-authority boundary: %+v", queued.AuthorityRecommendationPolicy)
 	}
+	if queued.ValueAllocationBoundaryPolicy == nil || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "allocate_value") || !containsModelProjectionString(queued.ValueAllocationBoundaryPolicy.NonAuthorityClaims, "no_value_allocation_execution") {
+		t.Fatalf("queued value-allocation boundary policy missing no-allocation boundary: %+v", queued.ValueAllocationBoundaryPolicy)
+	}
 	if queued.LifecycleEvidenceKind != "expected_lifecycle_not_runtime_progress" {
 		t.Fatalf("lifecycle evidence kind = %q", queued.LifecycleEvidenceKind)
 	}
@@ -2699,6 +2756,156 @@ func TestBuildOperatorProjectionRuntimeEvidenceRecordsAuthorityRecommendationPol
 	}
 }
 
+func TestQueuedRunValueAllocationBoundaryPolicyFromBriefSupportsLegacyV08WithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	doc["lifecycle_version"] = issueScanLifecycleVersionV08
+	delete(doc, "value_allocation_boundary_policy")
+	legacy, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal legacy v0.8 brief: %v", err)
+	}
+
+	kind, version, lifecycle, agentPlan, err := queuedRunLifecycleFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunLifecycleFromBrief: %v", err)
+	}
+	if kind != issueScanBriefKind || version != issueScanLifecycleVersionV08 || len(lifecycle) != 7 || len(agentPlan) != 18 {
+		t.Fatalf("metadata = kind %q version %q lifecycle %d plan %d, want v0.8 with lifecycle and plan", kind, version, len(lifecycle), len(agentPlan))
+	}
+	rolePolicy, err := queuedRunRoleSeparationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunRoleSeparationPolicyFromBrief: %v", err)
+	}
+	if rolePolicy == nil || queuedRunRolePolicyByActor(rolePolicy.ActorPolicies, "scanner") == nil {
+		t.Fatalf("legacy v0.8 role separation policy = %+v, want parsed policy", rolePolicy)
+	}
+	autonomyPolicy, err := queuedRunAutonomyGuardPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunAutonomyGuardPolicyFromBrief: %v", err)
+	}
+	if autonomyPolicy == nil || !containsModelProjectionString(autonomyPolicy.FailClosedOutputs, "human_scope_required") {
+		t.Fatalf("legacy v0.8 autonomy guard policy = %+v, want parsed policy", autonomyPolicy)
+	}
+	classificationPolicy, err := queuedRunHumanRequiredClassificationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunHumanRequiredClassificationPolicyFromBrief: %v", err)
+	}
+	if classificationPolicy == nil || !containsModelProjectionString(classificationPolicy.EscalationOutputs, "issue_parking_required") {
+		t.Fatalf("legacy v0.8 human-required classification policy = %+v, want parsed policy", classificationPolicy)
+	}
+	authorityPolicy, err := queuedRunAuthorityRecommendationPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunAuthorityRecommendationPolicyFromBrief: %v", err)
+	}
+	if authorityPolicy == nil || !containsModelProjectionString(authorityPolicy.RecommendationOutputs, "no_authority_decision") {
+		t.Fatalf("legacy v0.8 authority recommendation policy = %+v, want parsed policy", authorityPolicy)
+	}
+	valuePolicy, err := queuedRunValueAllocationBoundaryPolicyFromBrief(legacy)
+	if err != nil {
+		t.Fatalf("queuedRunValueAllocationBoundaryPolicyFromBrief: %v", err)
+	}
+	if valuePolicy != nil {
+		t.Fatalf("legacy v0.8 value-allocation boundary policy = %+v, want nil", valuePolicy)
+	}
+}
+
+func TestQueuedRunValueAllocationBoundaryPolicyFromBriefRejectsCurrentBriefWithoutPolicy(t *testing.T) {
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	delete(doc, "value_allocation_boundary_policy")
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal missing value-allocation boundary policy brief: %v", err)
+	}
+
+	policy, err := queuedRunValueAllocationBoundaryPolicyFromBrief(mutated)
+	if err == nil || !strings.Contains(err.Error(), "value_allocation_boundary_policy is required") {
+		t.Fatalf("queuedRunValueAllocationBoundaryPolicyFromBrief error = %v policy = %+v; want required policy error", err, policy)
+	}
+}
+
+func TestBuildOperatorProjectionRuntimeEvidenceRecordsValueAllocationBoundaryPolicyError(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 321,
+		Title:  "Teach the Civilization to scan issues",
+		URL:    "https://github.com/transpara-ai/hive/issues/321",
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(brief, &doc); err != nil {
+		t.Fatalf("unmarshal brief: %v", err)
+	}
+	policy, ok := doc["value_allocation_boundary_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("value_allocation_boundary_policy = %#v, want object", doc["value_allocation_boundary_policy"])
+	}
+	policy["boundary_posture"] = "display_authorizes_allocation"
+	mutated, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated value-allocation boundary policy brief: %v", err)
+	}
+
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:        "run_bad_value_allocation_boundary",
+		IntakeID:     "intake_bad_value_allocation_boundary",
+		OperatorID:   "operator_001",
+		Title:        "Bad value-allocation boundary policy still projects queued request",
+		Status:       "queued",
+		TargetRepos:  []string{"transpara-ai/hive"},
+		BriefEventID: newTestEventID(t),
+		Brief:        mutated,
+	})
+
+	projection := BuildOperatorProjection(s, 50)
+	queued := projection.RuntimeEvidence.LastQueuedRunRequest
+	if queued == nil {
+		t.Fatal("last queued run request is nil")
+	}
+	if queued.ValueAllocationBoundaryPolicy != nil {
+		t.Fatalf("queued value-allocation boundary policy = %+v, want nil after validation error", queued.ValueAllocationBoundaryPolicy)
+	}
+	found := false
+	for _, projectionErr := range projection.Errors {
+		if strings.Contains(projectionErr, "value-allocation boundary policy projection") && strings.Contains(projectionErr, "boundary_posture") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("projection errors = %+v, want value-allocation boundary policy validation error", projection.Errors)
+	}
+}
+
 func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSeparationPolicy(t *testing.T) {
 	s, _, appendEvent := newOperatorProjectionStore(t)
 	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
@@ -2728,6 +2935,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresLegacyBriefWithoutRoleSepa
 	}
 	if queued.AuthorityRecommendationPolicy != nil {
 		t.Fatalf("queued authority recommendation policy = %+v, want nil for legacy kind-only brief", queued.AuthorityRecommendationPolicy)
+	}
+	if queued.ValueAllocationBoundaryPolicy != nil {
+		t.Fatalf("queued value-allocation boundary policy = %+v, want nil for legacy kind-only brief", queued.ValueAllocationBoundaryPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for legacy kind-only brief", projection.Errors)
@@ -2763,6 +2973,9 @@ func TestBuildOperatorProjectionRuntimeEvidenceIgnoresForeignBriefRoleSeparation
 	}
 	if queued.AuthorityRecommendationPolicy != nil {
 		t.Fatalf("queued authority recommendation policy = %+v, want nil for foreign brief", queued.AuthorityRecommendationPolicy)
+	}
+	if queued.ValueAllocationBoundaryPolicy != nil {
+		t.Fatalf("queued value-allocation boundary policy = %+v, want nil for foreign brief", queued.ValueAllocationBoundaryPolicy)
 	}
 	if len(projection.Errors) != 0 {
 		t.Fatalf("projection errors = %+v, want none for foreign brief", projection.Errors)
