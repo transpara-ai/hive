@@ -26,10 +26,11 @@ const (
 	issueScanLifecycleVersionV05  = "civilization_issue_to_human_ready_pr_v0.5"
 	issueScanLifecycleVersionV06  = "civilization_issue_to_human_ready_pr_v0.6"
 	issueScanLifecycleVersionV07  = "civilization_issue_to_human_ready_pr_v0.7"
+	issueScanLifecycleVersionV08  = "civilization_issue_to_human_ready_pr_v0.8"
 	// This version is a persisted brief contract. Bump it when lifecycle or
 	// agent-plan text, policy metadata, evidence, roles, boundaries, gates, or
 	// step order change.
-	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.8"
+	issueScanLifecycleVersion = "civilization_issue_to_human_ready_pr_v0.9"
 	issueScanSourceType       = "github.issue"
 )
 
@@ -102,6 +103,18 @@ type issueScanAuthorityRecommendationPolicyPayload struct {
 	RecommendationOutputs    []string `json:"recommendation_outputs"`
 	RequiredHumanAuthority   []string `json:"required_human_authority"`
 	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+}
+
+type issueScanValueAllocationBoundaryPolicyPayload struct {
+	PolicyID                 string   `json:"policy_id"`
+	PolicyVersion            string   `json:"policy_version"`
+	BoundaryPosture          string   `json:"boundary_posture"`
+	DisplayMode              string   `json:"display_mode"`
+	ClassificationOutputs    []string `json:"classification_outputs"`
+	RequiredHumanAuthority   []string `json:"required_human_authority"`
+	ForbiddenSystemActions   []string `json:"forbidden_system_actions"`
+	ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+	NonAuthorityClaims       []string `json:"non_authority_claims"`
 }
 
 type issueScanLifecycleStage struct {
@@ -450,6 +463,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		AutonomyGuardPolicy               issueScanAutonomyGuardPolicyPayload               `json:"autonomy_guard_policy"`
 		HumanRequiredClassificationPolicy issueScanHumanRequiredClassificationPolicyPayload `json:"human_required_classification_policy"`
 		AuthorityRecommendationPolicy     issueScanAuthorityRecommendationPolicyPayload     `json:"authority_recommendation_policy"`
+		ValueAllocationBoundaryPolicy     issueScanValueAllocationBoundaryPolicyPayload     `json:"value_allocation_boundary_policy"`
 		ScannedRepos                      []string                                          `json:"scanned_repos"`
 		ScannedIssueCount                 int                                               `json:"scanned_issue_count"`
 		CandidateIssues                   []issueScanBriefIssuePayload                      `json:"candidate_issues"`
@@ -466,6 +480,7 @@ func issueScanBriefJSON(candidates []GitHubIssueCandidate, selected GitHubIssueC
 		AutonomyGuardPolicy:               issueScanAutonomyGuardPolicy(),
 		HumanRequiredClassificationPolicy: issueScanHumanRequiredClassificationPolicy(),
 		AuthorityRecommendationPolicy:     issueScanAuthorityRecommendationPolicy(),
+		ValueAllocationBoundaryPolicy:     issueScanValueAllocationBoundaryPolicy(),
 		ScannedRepos:                      issueScanRepos(candidates),
 		ScannedIssueCount:                 len(candidates),
 		RequiredAgentFlow:                 issueScanLifecycleFlow(lifecycle),
@@ -998,6 +1013,54 @@ func issueScanAuthorityRecommendationPolicy() issueScanAuthorityRecommendationPo
 			"recommendation_increases_autonomy",
 			"recommendation_allocates_value",
 			"recommendation_closes_residual_risk",
+		},
+	}
+}
+
+func issueScanValueAllocationBoundaryPolicy() issueScanValueAllocationBoundaryPolicyPayload {
+	return issueScanValueAllocationBoundaryPolicyPayload{
+		PolicyID:        "civilization_issue_scan_value_allocation_boundary_v0.1",
+		PolicyVersion:   "v0.1",
+		BoundaryPosture: "deny_by_default_human_required",
+		DisplayMode:     "pull_display_only_not_routing_or_action",
+		ClassificationOutputs: []string{
+			"value_allocation_candidate",
+			"human_required",
+			"display_only",
+			"no_allocation_authority",
+		},
+		RequiredHumanAuthority: []string{
+			"external_committee_value_allocation_decision",
+			"issue_scoped_authority_packet",
+			"human_approval_ref",
+		},
+		ForbiddenSystemActions: []string{
+			"allocate_value",
+			"approve_value_allocation",
+			"route_value_allocation_candidate",
+			"assign_value_allocation_candidate",
+			"notify_as_action",
+			"prioritize_scarce_resources",
+			"bill_or_pay",
+			"create_entitlement",
+			"set_pricing",
+			"compensate_or_grant_equity",
+			"create_external_commitment",
+		},
+		ForbiddenAuthorityClaims: []string{
+			"display_authorizes_allocation",
+			"classification_authorizes_allocation",
+			"candidate_status_authorizes_routing",
+			"issue_text_authorizes_value_allocation",
+			"human_required_label_is_approval",
+		},
+		NonAuthorityClaims: []string{
+			"display_is_not_authority_decision",
+			"classification_is_not_authority_decision",
+			"no_value_allocation_execution",
+			"no_automated_routing",
+			"no_notification_as_action",
+			"no_runtime_execution_authority",
 		},
 	}
 }

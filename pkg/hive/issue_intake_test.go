@@ -117,6 +117,17 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 			RequiredHumanAuthority   []string `json:"required_human_authority"`
 			ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
 		} `json:"authority_recommendation_policy"`
+		ValueAllocationBoundaryPolicy struct {
+			PolicyID                 string   `json:"policy_id"`
+			PolicyVersion            string   `json:"policy_version"`
+			BoundaryPosture          string   `json:"boundary_posture"`
+			DisplayMode              string   `json:"display_mode"`
+			ClassificationOutputs    []string `json:"classification_outputs"`
+			RequiredHumanAuthority   []string `json:"required_human_authority"`
+			ForbiddenSystemActions   []string `json:"forbidden_system_actions"`
+			ForbiddenAuthorityClaims []string `json:"forbidden_authority_claims"`
+			NonAuthorityClaims       []string `json:"non_authority_claims"`
+		} `json:"value_allocation_boundary_policy"`
 		AuthorityBoundaries []string `json:"authority_boundaries"`
 		SelectionPolicy     struct {
 			PolicyID       string   `json:"policy_id"`
@@ -238,6 +249,27 @@ func TestQueueIssueScanRunLaunchDispatchesFactoryOrder(t *testing.T) {
 	}
 	if !containsIssueScanValue(brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "recommendation_is_authority_decision") || !containsIssueScanValue(brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims, "pr_ready_label_authorizes_protected_action") {
 		t.Fatalf("authority recommendation forbidden claims = %+v", brief.AuthorityRecommendationPolicy.ForbiddenAuthorityClaims)
+	}
+	if brief.ValueAllocationBoundaryPolicy.PolicyID != "civilization_issue_scan_value_allocation_boundary_v0.1" || brief.ValueAllocationBoundaryPolicy.PolicyVersion != "v0.1" {
+		t.Fatalf("value-allocation boundary policy = %+v", brief.ValueAllocationBoundaryPolicy)
+	}
+	if brief.ValueAllocationBoundaryPolicy.BoundaryPosture != "deny_by_default_human_required" || brief.ValueAllocationBoundaryPolicy.DisplayMode != "pull_display_only_not_routing_or_action" {
+		t.Fatalf("value-allocation boundary posture = %+v", brief.ValueAllocationBoundaryPolicy)
+	}
+	if !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ClassificationOutputs, "value_allocation_candidate") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ClassificationOutputs, "no_allocation_authority") {
+		t.Fatalf("value-allocation classification outputs = %+v", brief.ValueAllocationBoundaryPolicy.ClassificationOutputs)
+	}
+	if !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.RequiredHumanAuthority, "external_committee_value_allocation_decision") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.RequiredHumanAuthority, "human_approval_ref") {
+		t.Fatalf("value-allocation required human authority = %+v", brief.ValueAllocationBoundaryPolicy.RequiredHumanAuthority)
+	}
+	if !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "allocate_value") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "route_value_allocation_candidate") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ForbiddenSystemActions, "notify_as_action") {
+		t.Fatalf("value-allocation forbidden system actions = %+v", brief.ValueAllocationBoundaryPolicy.ForbiddenSystemActions)
+	}
+	if !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims, "display_authorizes_allocation") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims, "human_required_label_is_approval") {
+		t.Fatalf("value-allocation forbidden authority claims = %+v", brief.ValueAllocationBoundaryPolicy.ForbiddenAuthorityClaims)
+	}
+	if !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.NonAuthorityClaims, "display_is_not_authority_decision") || !containsIssueScanValue(brief.ValueAllocationBoundaryPolicy.NonAuthorityClaims, "no_value_allocation_execution") {
+		t.Fatalf("value-allocation non-authority claims = %+v", brief.ValueAllocationBoundaryPolicy.NonAuthorityClaims)
 	}
 	if !containsIssueScanValue(brief.RequiredAgentFlow, "run_adversarial_review") || !containsIssueScanValue(brief.RequiredAgentFlow, "surface_ready_for_Human_result_PR") {
 		t.Fatalf("required agent flow missing review/ready PR: %+v", brief.RequiredAgentFlow)
