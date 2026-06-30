@@ -185,6 +185,9 @@ func cmdGovernedDaemon(name string, args []string) error {
 	issueScanMaxIterations := fs.Int("issue-scan-max-iterations", 30, "Queued issue-scan run iteration budget")
 	issueScanMaxCostUSD := fs.Float64("issue-scan-max-cost-usd", 25, "Queued issue-scan run cost budget in USD")
 	issueScanMaxNewRuns := fs.Int("issue-scan-max-new-runs", 1, "Maximum new issue-scan runs this daemon instance may queue; bounds unattended scan cost")
+	issueScanMaxDuration := fs.Duration("issue-scan-max-duration", 0, "Hard wall-clock cap for this daemon issue-scan scanner process; 0 disables")
+	issueScanKillSwitch := fs.String("issue-scan-kill-switch", "", "Path whose existence permanently halts daemon issue scanning for this process before queueing work")
+	issueScanOneActive := fs.Bool("issue-scan-one-active", false, "Refuse to queue a new issue-scan run while any existing unparked issue-scan run lacks terminal ready evidence")
 	issueScanRegistry := fs.Bool("issue-scan-registry", false, "Scan every Transpara-AI GitHub repo in repos.json when no --issue-scan-repo is supplied")
 	issueScanRequireFullChain := fs.Bool("issue-scan-require-full-chain", false, "Fail startup unless the issue-scan daemon is configured through ready-for-Human PR evidence")
 	issueScanRepos := repeatedStringFlag{}
@@ -295,6 +298,9 @@ func cmdGovernedDaemon(name string, args []string) error {
 		if *issueScanMaxNewRuns <= 0 {
 			return fmt.Errorf("--issue-scan-max-new-runs must be greater than zero")
 		}
+		if *issueScanMaxDuration < 0 {
+			return fmt.Errorf("--issue-scan-max-duration must be zero or greater")
+		}
 		registryPath := ""
 		if len(issueScanRepos) == 0 && *issueScanRegistry {
 			var err error
@@ -315,6 +321,9 @@ func cmdGovernedDaemon(name string, args []string) error {
 			MaxIterations:  *issueScanMaxIterations,
 			MaxCostUSD:     *issueScanMaxCostUSD,
 			MaxNewRuns:     *issueScanMaxNewRuns,
+			MaxDuration:    *issueScanMaxDuration,
+			KillSwitchPath: *issueScanKillSwitch,
+			OneActive:      *issueScanOneActive,
 			Interval:       *issueScanInterval,
 			AuthorityScope: "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
 		}
