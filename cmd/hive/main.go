@@ -1359,7 +1359,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 			defer scannerWG.Done()
 			runIssueScanScannerLoop(scannerCtx, scannerContext, *issueScanScanner, ghIssueLister{})
 		}()
-		fmt.Fprintf(os.Stderr, "Issue-scan scanner: enabled interval=%s repos=%s limit=%d max_new_runs=%d\n", issueScanScanner.Interval, strings.Join(issueScanScanner.Repos, ","), issueScanScanner.Limit, issueScanScanner.MaxNewRuns)
+		fmt.Fprintf(os.Stderr, "Issue-scan scanner: enabled interval=%s repos=%s limit=%d max_new_runs=%d max_duration=%s one_active=%t kill_switch=%q\n", issueScanScanner.Interval, strings.Join(issueScanScanner.Repos, ","), issueScanScanner.Limit, issueScanScanner.MaxNewRuns, issueScanScanner.MaxDuration, issueScanScanner.OneActive, issueScanScanner.KillSwitchPath)
 	}
 
 	runErr := rt.Run(ctx, idea)

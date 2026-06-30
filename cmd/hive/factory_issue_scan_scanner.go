@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/work"
 )
 
 type issueScanIssueLister interface {
@@ -32,6 +35,9 @@ type issueScanScannerConfig struct {
 	MaxIterations  int
 	MaxCostUSD     float64
 	MaxNewRuns     int
+	MaxDuration    time.Duration
+	KillSwitchPath string
+	OneActive      bool
 	Interval       time.Duration
 	AuthorityScope string
 }
@@ -40,10 +46,13 @@ type issueScanScannerCycleResult struct {
 	ScannedIssues     int
 	SkippedExisting   int
 	SkippedNotPRReady int
+	SkippedActive     int
 	Queued            bool
 	QueuedRunID       string
 	QueuedIssue       hive.GitHubIssueCandidate
 }
+
+var errIssueScanKillSwitchActive = errors.New("issue-scan kill switch active")
 
 func scanGitHubIssuesWith(ctx context.Context, repos []string, limit int, labels []string, lister issueScanIssueLister) ([]hive.GitHubIssueCandidate, error) {
 	if lister == nil {
@@ -64,34 +73,63 @@ func runIssueScanScannerLoop(ctx context.Context, fc *factoryContext, config iss
 	if config.Interval <= 0 {
 		return
 	}
+	if config.MaxDuration > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, config.MaxDuration)
+		defer cancel()
+	}
 	queuedRuns := 0
-	run := func() {
+	run := func() bool {
+		if err := issueScanKillSwitchError(config.KillSwitchPath); err != nil {
+			if errors.Is(err, errIssueScanKillSwitchActive) {
+				fmt.Fprintf(os.Stderr, "Issue-scan scanner: halted by kill switch: %v\n", err)
+				return false
+			}
+			fmt.Fprintf(os.Stderr, "WARNING: issue-scan scanner skipped this tick while checking kill switch: %v\n", err)
+			return true
+		}
 		if config.MaxNewRuns > 0 && queuedRuns >= config.MaxNewRuns {
 			fmt.Fprintf(os.Stderr, "Issue-scan scanner: max new run cap reached (%d); no scan attempted\n", config.MaxNewRuns)
-			return
+			return true
 		}
 		result, err := runIssueScanScannerCycle(ctx, fc, config, lister)
 		if err != nil {
+			if errors.Is(err, errIssueScanKillSwitchActive) {
+				fmt.Fprintf(os.Stderr, "Issue-scan scanner: halted by kill switch: %v\n", err)
+				return false
+			}
 			fmt.Fprintf(os.Stderr, "WARNING: issue-scan scanner failed closed: %v\n", err)
-			return
+			return true
 		}
 		if result.Queued {
 			queuedRuns++
 			fmt.Fprintf(os.Stderr, "Issue-scan scanner: queued %s for %s#%d, skipped %d existing issue(s), and skipped %d non-PR-ready issue(s)\n", result.QueuedRunID, result.QueuedIssue.Repo, result.QueuedIssue.Number, result.SkippedExisting, result.SkippedNotPRReady)
-			return
+			return true
+		}
+		if result.SkippedActive > 0 {
+			fmt.Fprintf(os.Stderr, "Issue-scan scanner: one-active guard skipped scan while %d issue-scan run(s) remain active\n", result.SkippedActive)
+			return true
 		}
 		fmt.Fprintf(os.Stderr, "Issue-scan scanner: scanned %d issue(s); skipped %d non-PR-ready issue(s); no new issue-scan FactoryOrder queued\n", result.ScannedIssues, result.SkippedNotPRReady)
+		return true
 	}
 
-	run()
+	if !run() {
+		return
+	}
 	ticker := time.NewTicker(config.Interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			if config.MaxDuration > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				fmt.Fprintf(os.Stderr, "Issue-scan scanner: hard duration cap reached after %s; stopping scanner loop\n", config.MaxDuration)
+			}
 			return
 		case <-ticker.C:
-			run()
+			if !run() {
+				return
+			}
 		}
 	}
 }
@@ -118,6 +156,22 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	}
 	if config.MaxNewRuns < 0 {
 		return result, fmt.Errorf("issue-scan max_new_runs must be zero or greater")
+	}
+	if config.MaxDuration < 0 {
+		return result, fmt.Errorf("issue-scan max_duration must be zero or greater")
+	}
+	if err := issueScanKillSwitchError(config.KillSwitchPath); err != nil {
+		return result, err
+	}
+	if config.OneActive {
+		active, err := issueScanActiveRunIDs(fc.store)
+		if err != nil {
+			return result, err
+		}
+		if len(active) > 0 {
+			result.SkippedActive = len(active)
+			return result, nil
+		}
 	}
 
 	issues, err := scanGitHubIssuesWith(ctx, config.Repos, config.Limit, config.Labels, lister)
@@ -170,6 +224,136 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	result.QueuedRunID = queued.RunID
 	result.QueuedIssue = queued.Selected
 	return result, nil
+}
+
+func issueScanKillSwitchError(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%w: %s", errIssueScanKillSwitchActive, path)
+	} else if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else {
+		return fmt.Errorf("check issue-scan kill switch %s: %w", path, err)
+	}
+}
+
+func issueScanActiveRunIDs(s store.Store) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	parked, err := issueScanParkedRunIDs(s)
+	if err != nil {
+		return nil, err
+	}
+	terminal, err := issueScanTerminalRunIDs(s)
+	if err != nil {
+		return nil, err
+	}
+	active := map[string]struct{}{}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(hive.EventTypeFactoryRunRequested, 100, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("fetch factory.run.requested events: %w", err)
+		}
+		for _, ev := range page.Items() {
+			content, ok := ev.Content().(hive.FactoryRunRequestedContent)
+			if !ok || !factoryRunRequestedIsIssueScan(content) {
+				continue
+			}
+			runID := strings.TrimSpace(content.RunID)
+			if runID == "" || parked[runID] || terminal[runID] {
+				continue
+			}
+			active[runID] = struct{}{}
+		}
+		if !page.HasMore() {
+			break
+		}
+		cursor = page.Cursor()
+	}
+	out := make([]string, 0, len(active))
+	for runID := range active {
+		out = append(out, runID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func issueScanParkedRunIDs(s store.Store) (map[string]bool, error) {
+	out := map[string]bool{}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(hive.EventTypeIssueScanRunParked, 100, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("fetch hive.issuescan.run.parked events: %w", err)
+		}
+		for _, ev := range page.Items() {
+			content, ok := ev.Content().(hive.IssueScanRunParkedContent)
+			if !ok {
+				continue
+			}
+			if runID := strings.TrimSpace(content.RunID); runID != "" {
+				out[runID] = true
+			}
+		}
+		if !page.HasMore() {
+			return out, nil
+		}
+		cursor = page.Cursor()
+	}
+}
+
+func issueScanTerminalRunIDs(s store.Store) (map[string]bool, error) {
+	out := map[string]bool{}
+	cursor := types.None[types.Cursor]()
+	for {
+		page, err := s.ByType(work.EventTypeTaskArtifact, 100, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("fetch work.task.artifact events: %w", err)
+		}
+		for _, ev := range page.Items() {
+			content, ok := ev.Content().(work.TaskArtifactContent)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(content.Label) != hive.IssueScanReadyPREvidenceArtifactLabel {
+				continue
+			}
+			runID, err := issueScanTerminalReadyEvidenceRunID(content.Body)
+			if err != nil {
+				return nil, fmt.Errorf("parse terminal ready evidence artifact %s: %w", ev.ID().Value(), err)
+			}
+			if runID != "" {
+				out[runID] = true
+			}
+		}
+		if !page.HasMore() {
+			return out, nil
+		}
+		cursor = page.Cursor()
+	}
+}
+
+func issueScanTerminalReadyEvidenceRunID(body string) (string, error) {
+	raw := strings.TrimSpace(body)
+	if raw == "" {
+		return "", fmt.Errorf("%s artifact has empty body", hive.IssueScanReadyPREvidenceArtifactLabel)
+	}
+	var payload struct {
+		Kind  string `json:"kind"`
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", fmt.Errorf("decode %s artifact body: %w", hive.IssueScanReadyPREvidenceArtifactLabel, err)
+	}
+	if kind := strings.TrimSpace(payload.Kind); kind != "" && kind != hive.IssueScanReadyPREvidenceArtifactLabel {
+		return "", fmt.Errorf("kind %q does not match %q", kind, hive.IssueScanReadyPREvidenceArtifactLabel)
+	}
+	return strings.TrimSpace(payload.RunID), nil
 }
 
 func issueScanCandidateAlreadyRequested(issue hive.GitHubIssueCandidate, existing map[string]struct{}) bool {
