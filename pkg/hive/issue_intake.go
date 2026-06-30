@@ -342,6 +342,9 @@ func IssueScanCandidatePRReady(issue GitHubIssueCandidate) bool {
 	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
 		return false
 	}
+	if _, ok := labels[IssueScanProtectedActionLabel]; ok {
+		return false
+	}
 	return true
 }
 

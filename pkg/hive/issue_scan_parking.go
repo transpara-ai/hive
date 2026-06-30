@@ -16,6 +16,14 @@ const (
 	IssueScanParkBlockerHumanScope      = "needs_human_scope"
 	IssueScanParkBlockerProtectedAction = "protected_action"
 	IssueScanParkBlockerDuplicateChain  = "duplicate_chain"
+	IssueScanParkBlockerNotPRReady      = "not_pr_ready"
+
+	IssueScanParkEvidenceClassLifecycle    = "issue_scan_lifecycle_parking"
+	IssueScanParkEvidenceClassLevel1Canary = "level1_dark_factory_canary_issue_discovery"
+	IssueScanParkLifecycleLevel1Canary     = "level1_dark_factory_canary_v0.1"
+
+	IssueScanParkAuthorityBoundaryLifecycle    = "parked issue-scan lifecycle; external runners remain stopped while parked; no issue closure, merge, deploy, value allocation, or autonomy increase"
+	IssueScanParkAuthorityBoundaryLevel1Canary = "canary-scoped issue-scan parking; no protected action, runtime execution, issue closure, merge, deploy, value allocation, or autonomy increase"
 )
 
 // IssueScanTargetState is optional live target issue state used to park queued
@@ -227,6 +235,9 @@ func (r *Runtime) recordIssueScanRunParked(runID string, decision issueScanRunPa
 		Repository:        strings.TrimSpace(decision.Repository),
 		IssueNumber:       decision.IssueNumber,
 		StageID:           strings.TrimSpace(decision.StageID),
+		LifecycleVersion:  issueScanLifecycleVersion,
+		EvidenceClass:     IssueScanParkEvidenceClassLifecycle,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLifecycle,
 		BlockerType:       strings.TrimSpace(decision.BlockerType),
 		Detail:            strings.TrimSpace(decision.Detail),
 		RequiredAction:    strings.TrimSpace(decision.RequiredAction),
