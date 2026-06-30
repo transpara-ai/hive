@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.4.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.5.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
@@ -53,6 +53,8 @@ type CivilizationAssemblyProjection struct {
 	FactoryOrderSummary                []CivilizationAssemblyFactoryOrder     `json:"factory_order_summary"`
 	WorkEvidenceSummary                CivilizationAssemblyWorkEvidence       `json:"work_evidence_summary"`
 	QueuedRunRequest                   *CivilizationAssemblyQueuedRunRequest  `json:"queued_run_request,omitempty"`
+	IssueIntakeProjection              CivilizationIssueIntakeProjection      `json:"issue_intake_projection,omitempty"`
+	IssueScanProjection                CivilizationIssueScanProjection        `json:"issue_scan_projection,omitempty"`
 	SiteConsumerStatus                 CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
 	OpenGateSummary                    []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
 	ResidualRiskSummary                []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
@@ -225,6 +227,120 @@ type CivilizationAssemblyArtifactEvidence struct {
 // of expected lifecycle evidence.
 type CivilizationAssemblyQueuedRunRequest = OperatorQueuedRunRequestEvidence
 
+type CivilizationIssueRef struct {
+	Repo        string   `json:"repo"`
+	Number      int      `json:"number"`
+	URL         string   `json:"url,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	State       string   `json:"state,omitempty"`
+	StateReason string   `json:"state_reason,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+}
+
+type CivilizationIssueIntakeProjection struct {
+	Status            string                                  `json:"status,omitempty"`
+	Summary           string                                  `json:"summary,omitempty"`
+	Issues            []CivilizationIssueIntakeProjected      `json:"issues,omitempty"`
+	Groups            []CivilizationIssueIntakeGroupProjected `json:"groups,omitempty"`
+	SourceRefs        []string                                `json:"source_refs,omitempty"`
+	ScannerBoundaries []string                                `json:"scanner_boundaries,omitempty"`
+}
+
+type CivilizationIssueIntakeProjected struct {
+	Repo              string   `json:"repo"`
+	Number            int      `json:"number"`
+	URL               string   `json:"url,omitempty"`
+	Title             string   `json:"title,omitempty"`
+	State             string   `json:"state,omitempty"`
+	StateReason       string   `json:"state_reason,omitempty"`
+	Labels            []string `json:"labels,omitempty"`
+	PrimaryRepo       string   `json:"primary_repo,omitempty"`
+	TouchedSubstrate  string   `json:"touched_substrate,omitempty"`
+	TouchedSubstrates []string `json:"touched_substrates,omitempty"`
+	RiskClass         string   `json:"risk_class,omitempty"`
+	RiskClasses       []string `json:"risk_classes,omitempty"`
+	UnrecognizedRisk  []string `json:"unrecognized_risk_terms,omitempty"`
+	Readiness         string   `json:"readiness,omitempty"`
+	ReadinessStates   []string `json:"readiness_states,omitempty"`
+	PRReadyWhen       string   `json:"pr_ready_when,omitempty"`
+	AuthorityBoundary string   `json:"authority_boundary,omitempty"`
+	UpdatedAt         string   `json:"updated_at,omitempty"`
+	SourceRefs        []string `json:"source_refs,omitempty"`
+}
+
+type CivilizationIssueIntakeGroupProjected struct {
+	GroupID          string                 `json:"group_id,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	PrimaryRepo      string                 `json:"primary_repo,omitempty"`
+	TouchedSubstrate string                 `json:"touched_substrate,omitempty"`
+	RiskClass        string                 `json:"risk_class,omitempty"`
+	Readiness        string                 `json:"readiness,omitempty"`
+	Recommendation   string                 `json:"recommendation,omitempty"`
+	IssueRefs        []CivilizationIssueRef `json:"issue_refs,omitempty"`
+	Blockers         []string               `json:"blockers,omitempty"`
+	SourceRefs       []string               `json:"source_refs,omitempty"`
+}
+
+type CivilizationIssueScanProjection struct {
+	Runs     []CivilizationIssueScanRunProjected     `json:"runs,omitempty"`
+	Stages   []CivilizationIssueScanStageProjected   `json:"stages,omitempty"`
+	Blockers []CivilizationIssueScanBlockerProjected `json:"blockers,omitempty"`
+	Lineage  []CivilizationIssueScanLineageProjected `json:"lineage,omitempty"`
+}
+
+type CivilizationIssueScanRunProjected struct {
+	RunID            string                 `json:"run_id"`
+	FactoryOrderID   string                 `json:"factory_order_id,omitempty"`
+	LifecycleVersion string                 `json:"lifecycle_version"`
+	State            string                 `json:"state"`
+	TargetIssue      CivilizationIssueRef   `json:"target_issue"`
+	SelectedIssue    CivilizationIssueRef   `json:"selected_issue"`
+	CandidateIssues  []CivilizationIssueRef `json:"candidate_issues,omitempty"`
+	SourceRefs       []string               `json:"source_refs,omitempty"`
+	EvidenceRefs     []string               `json:"evidence_refs,omitempty"`
+}
+
+type CivilizationIssueScanStageProjected struct {
+	RunID             string   `json:"run_id"`
+	FactoryOrderID    string   `json:"factory_order_id,omitempty"`
+	StageID           string   `json:"stage_id"`
+	StageNumber       int      `json:"stage_number"`
+	StageCount        int      `json:"stage_count,omitempty"`
+	CanonicalTaskID   string   `json:"canonical_task_id"`
+	TaskID            string   `json:"task_id,omitempty"`
+	CurrentState      string   `json:"current_state"`
+	CompletionGate    string   `json:"completion_gate"`
+	AuthorityBoundary string   `json:"authority_boundary"`
+	AssignedAgentIDs  []string `json:"assigned_agent_ids,omitempty"`
+	TouchingAgentIDs  []string `json:"touching_agent_ids,omitempty"`
+	EvidenceRefs      []string `json:"evidence_refs,omitempty"`
+	SourceRefs        []string `json:"source_refs,omitempty"`
+}
+
+type CivilizationIssueScanBlockerProjected struct {
+	RunID          string   `json:"run_id"`
+	FactoryOrderID string   `json:"factory_order_id,omitempty"`
+	StageID        string   `json:"stage_id,omitempty"`
+	BlockerType    string   `json:"blocker_type"`
+	Reason         string   `json:"reason,omitempty"`
+	RequiredAction string   `json:"required_action"`
+	EvidenceRefs   []string `json:"evidence_refs,omitempty"`
+	SourceRefs     []string `json:"source_refs,omitempty"`
+}
+
+type CivilizationIssueScanLineageProjected struct {
+	RunID             string   `json:"run_id"`
+	FactoryOrderID    string   `json:"factory_order_id,omitempty"`
+	StageID           string   `json:"stage_id,omitempty"`
+	CanonicalTaskID   string   `json:"canonical_task_id"`
+	PrimaryTaskID     string   `json:"primary_task_id,omitempty"`
+	TaskIDs           []string `json:"task_ids"`
+	DuplicateTaskIDs  []string `json:"duplicate_task_ids,omitempty"`
+	DuplicateOf       string   `json:"duplicate_of,omitempty"`
+	SupersededTaskIDs []string `json:"superseded_task_ids,omitempty"`
+	SourceRefs        []string `json:"source_refs,omitempty"`
+}
+
 type CivilizationAssemblyGateSummary struct {
 	ID                 string   `json:"id"`
 	GateName           string   `json:"gate_name"`
@@ -255,6 +371,14 @@ type civilizationAssemblyFactoryOrderWorkEvidence struct {
 	DependencySourceTruncated   bool
 	LifecycleSourceTruncated    bool
 	VerificationSourceTruncated bool
+}
+
+type civilizationAssemblyIssueScanProjectionEvidence struct {
+	Intake     CivilizationIssueIntakeProjection
+	Scan       CivilizationIssueScanProjection
+	SourceRefs []string
+	Truncated  bool
+	Errors     []string
 }
 
 type civilizationAssemblyTaskArtifactEvidence struct {
@@ -324,7 +448,9 @@ type civilizationAssemblyTaskVerificationEvidence struct {
 func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...OperatorProjectionOption) CivilizationAssemblyProjection {
 	operatorProjection := BuildOperatorProjection(s, limit, opts...)
 	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
-	sourceRefs := compactStrings(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...))
+	issueScanEvidence := civilizationAssemblyIssueScanProjections(s, limit)
+	operatorProjection.Errors = append(operatorProjection.Errors, issueScanEvidence.Errors...)
+	sourceRefs := compactStrings(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)
 
@@ -344,13 +470,15 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		FactoryOrderSummary:                factoryOrders,
 		WorkEvidenceSummary:                civilizationAssemblyWorkEvidence(operatorProjection, factoryOrders, factoryOrderWorkEvidence),
 		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs, factoryOrderWorkEvidence.Tasks),
+		IssueIntakeProjection:              issueScanEvidence.Intake,
+		IssueScanProjection:                issueScanEvidence.Scan,
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
 			SourceRefs: []string{civilizationAssemblyReadOnlyRoutePath},
 		},
 		OpenGateSummary:             civilizationAssemblyOpenGates(operatorProjection),
-		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection, factoryOrdersTruncated, factoryOrderWorkEvidence, limit),
+		ResidualRiskSummary:         civilizationAssemblyResidualRisks(operatorProjection, factoryOrdersTruncated, factoryOrderWorkEvidence, issueScanEvidence.Truncated, limit),
 		WithheldOrUnavailableFields: civilizationAssemblyUnavailableFields(operatorProjection, factoryOrders, factoryOrdersQueryFailed),
 		BoundaryFlags: []string{
 			"eventgraph_derived",
@@ -377,6 +505,332 @@ func civilizationAssemblyStatus(p OperatorProjection) string {
 		return civilizationAssemblyStatusPartial
 	}
 	return civilizationAssemblyStatusComplete
+}
+
+func civilizationAssemblyIssueScanProjections(s store.Store, limit int) civilizationAssemblyIssueScanProjectionEvidence {
+	intake := CivilizationIssueIntakeProjection{
+		Status:  civilizationAssemblyFieldUnavailable,
+		Summary: "No scanner-visible issue intake records are projected.",
+		ScannerBoundaries: []string{
+			"read-only GitHub issue discovery",
+			"human-scope/protected/deferred issues park without execution",
+			"projection is not PR readiness, runtime readiness, issue closure, merge, deploy, or Test 001 GREEN evidence",
+			"updated_at is the EventGraph parked-evidence timestamp, not the GitHub issue last-modified time",
+			"touched_substrate is derived only from the repository slug; no code or substrate analysis is performed",
+			"issue intake rows are point-in-time parked snapshots and may be superseded by later FactoryOrder lifecycle evidence",
+		},
+	}
+	scan := CivilizationIssueScanProjection{}
+	if s == nil {
+		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan records: store is required"}}
+	}
+	if limit <= 0 {
+		limit = defaultOperatorProjectionLimit
+	}
+	page, err := s.ByType(EventTypeIssueScanRunParked, limit, types.None[types.Cursor]())
+	if err != nil {
+		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan parked records: " + err.Error()}}
+	}
+	events := page.Items()
+	truncated := page.HasMore()
+	if len(events) == 0 {
+		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}
+	}
+
+	sourceRefs := make([]string, 0, len(events))
+	intake.Issues = make([]CivilizationIssueIntakeProjected, 0, len(events))
+	scan.Runs = make([]CivilizationIssueScanRunProjected, 0, len(events))
+	scan.Blockers = make([]CivilizationIssueScanBlockerProjected, 0, len(events))
+	for _, ev := range events {
+		content, ok := ev.Content().(IssueScanRunParkedContent)
+		if !ok {
+			continue
+		}
+		issue := civilizationAssemblyIssueRefFromParked(content)
+		if issue.Repo == "" || issue.Number <= 0 {
+			continue
+		}
+		refs := compactStrings(append([]string{ev.ID().Value()}, content.SourceRefs...))
+		sourceRefs = append(sourceRefs, refs...)
+		primaryBlockerType := civilizationAssemblyIssuePrimaryBlockerType(content)
+		riskClass := civilizationAssemblyIssueRiskClass(primaryBlockerType)
+		readiness := civilizationAssemblyIssueReadiness(primaryBlockerType)
+		riskClasses := civilizationAssemblyIssueRiskClasses(content)
+		readinessStates := civilizationAssemblyIssueReadinessStates(content)
+		blockers := civilizationAssemblyIssueScanBlockersFromParked(content, ev.ID().Value(), refs)
+		authorityBoundary := civilizationAssemblyIssueScanAuthorityBoundary(content)
+		intake.Issues = append(intake.Issues, CivilizationIssueIntakeProjected{
+			Repo:              issue.Repo,
+			Number:            issue.Number,
+			URL:               issue.URL,
+			Title:             issue.Title,
+			State:             issue.State,
+			StateReason:       issue.StateReason,
+			Labels:            append([]string(nil), issue.Labels...),
+			PrimaryRepo:       issue.Repo,
+			TouchedSubstrate:  civilizationAssemblyIssueTouchedSubstrate(issue.Repo),
+			TouchedSubstrates: []string{civilizationAssemblyIssueTouchedSubstrate(issue.Repo)},
+			RiskClass:         riskClass,
+			RiskClasses:       riskClasses,
+			Readiness:         readiness,
+			ReadinessStates:   readinessStates,
+			PRReadyWhen:       content.RequiredAction,
+			AuthorityBoundary: authorityBoundary,
+			UpdatedAt:         ev.Timestamp().Value().UTC().Format(time.RFC3339Nano),
+			SourceRefs:        refs,
+		})
+		state := "parked"
+		if civilizationAssemblyIssueHasHumanActionBlocker(blockers) {
+			state = "human_action"
+		}
+		scan.Runs = append(scan.Runs, CivilizationIssueScanRunProjected{
+			RunID:            strings.TrimSpace(content.RunID),
+			FactoryOrderID:   strings.TrimSpace(content.FactoryOrderID),
+			LifecycleVersion: civilizationAssemblyIssueScanLifecycleVersion(content),
+			State:            state,
+			TargetIssue:      issue,
+			SelectedIssue:    issue,
+			CandidateIssues:  []CivilizationIssueRef{issue},
+			SourceRefs:       refs,
+			EvidenceRefs:     []string{ev.ID().Value()},
+		})
+		scan.Blockers = append(scan.Blockers, blockers...)
+	}
+	if len(intake.Issues) == 0 {
+		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, SourceRefs: compactStrings(sourceRefs), Truncated: truncated}
+	}
+	sort.Slice(intake.Issues, func(i, j int) bool {
+		if intake.Issues[i].Repo == intake.Issues[j].Repo {
+			return intake.Issues[i].Number < intake.Issues[j].Number
+		}
+		return intake.Issues[i].Repo < intake.Issues[j].Repo
+	})
+	sort.Slice(scan.Runs, func(i, j int) bool {
+		return scan.Runs[i].RunID < scan.Runs[j].RunID
+	})
+	sort.Slice(scan.Blockers, func(i, j int) bool {
+		if scan.Blockers[i].RunID == scan.Blockers[j].RunID {
+			return scan.Blockers[i].BlockerType < scan.Blockers[j].BlockerType
+		}
+		return scan.Blockers[i].RunID < scan.Blockers[j].RunID
+	})
+	intake.Status = civilizationAssemblyFieldAvailable
+	intake.Summary = fmt.Sprintf("%d scanner-visible issue(s) projected from parked issue-scan evidence.", len(intake.Issues))
+	if truncated {
+		intake.Summary = fmt.Sprintf("%s Projection is truncated at %d parked issue-scan event(s).", intake.Summary, limit)
+	}
+	intake.SourceRefs = compactStrings(sourceRefs)
+	return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, SourceRefs: compactStrings(sourceRefs), Truncated: truncated}
+}
+
+func civilizationAssemblyIssueRiskClasses(content IssueScanRunParkedContent) []string {
+	classes := []string{civilizationAssemblyIssueRiskClass(content.BlockerType)}
+	labels := issueScanLabelSet(content.TargetIssueLabels)
+	if _, ok := labels[IssueScanProtectedActionLabel]; ok {
+		classes = append(classes, "protected-action")
+	}
+	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
+		classes = append(classes, "human-scope")
+	}
+	if _, ok := labels[IssueScanPRDeferredLabel]; ok {
+		classes = append(classes, "human-scope")
+	}
+	if strings.TrimSpace(content.BlockerType) == IssueScanParkBlockerNotPRReady {
+		classes = append(classes, "not-pr-ready")
+	}
+	return compactStrings(classes)
+}
+
+func civilizationAssemblyIssueScanLifecycleVersion(content IssueScanRunParkedContent) string {
+	if value := strings.TrimSpace(content.LifecycleVersion); value != "" {
+		return value
+	}
+	if civilizationAssemblyIssueScanParkedEventIsCanary(content) {
+		return IssueScanParkLifecycleLevel1Canary
+	}
+	if strings.TrimSpace(content.FactoryOrderID) != "" || strings.TrimSpace(content.StageID) != "" {
+		return issueScanLifecycleVersion
+	}
+	return "issue_scan_parked_lifecycle_unavailable"
+}
+
+func civilizationAssemblyIssueScanAuthorityBoundary(content IssueScanRunParkedContent) string {
+	if value := strings.TrimSpace(content.AuthorityBoundary); value != "" {
+		return value
+	}
+	if civilizationAssemblyIssueScanParkedEventIsCanary(content) {
+		return IssueScanParkAuthorityBoundaryLevel1Canary
+	}
+	return IssueScanParkAuthorityBoundaryLifecycle
+}
+
+func civilizationAssemblyIssueScanParkedEventIsCanary(content IssueScanRunParkedContent) bool {
+	return strings.TrimSpace(content.EvidenceClass) == IssueScanParkEvidenceClassLevel1Canary
+}
+
+func civilizationAssemblyIssuePrimaryBlockerType(content IssueScanRunParkedContent) string {
+	blockerType := strings.TrimSpace(content.BlockerType)
+	labels := issueScanLabelSet(content.TargetIssueLabels)
+	if blockerType == IssueScanParkBlockerProtectedAction {
+		return IssueScanParkBlockerProtectedAction
+	}
+	if _, ok := labels[IssueScanProtectedActionLabel]; ok {
+		return IssueScanParkBlockerProtectedAction
+	}
+	if blockerType == IssueScanParkBlockerHumanScope {
+		return IssueScanParkBlockerHumanScope
+	}
+	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
+		return IssueScanParkBlockerHumanScope
+	}
+	if _, ok := labels[IssueScanPRDeferredLabel]; ok {
+		return IssueScanParkBlockerHumanScope
+	}
+	return blockerType
+}
+
+func civilizationAssemblyIssueReadinessStates(content IssueScanRunParkedContent) []string {
+	states := []string{civilizationAssemblyIssueReadiness(content.BlockerType)}
+	labels := issueScanLabelSet(content.TargetIssueLabels)
+	if _, ok := labels[IssueScanProtectedActionLabel]; ok {
+		states = append(states, civilizationAssemblyIssueReadiness(IssueScanParkBlockerProtectedAction))
+	}
+	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
+		states = append(states, civilizationAssemblyIssueReadiness(IssueScanParkBlockerHumanScope))
+	}
+	if _, ok := labels[IssueScanPRDeferredLabel]; ok {
+		states = append(states, "parked: PR deferred")
+	}
+	if strings.TrimSpace(content.BlockerType) == IssueScanParkBlockerNotPRReady {
+		states = append(states, civilizationAssemblyIssueReadiness(IssueScanParkBlockerNotPRReady))
+	}
+	return compactStrings(states)
+}
+
+func civilizationAssemblyIssueScanBlockersFromParked(content IssueScanRunParkedContent, eventRef string, refs []string) []CivilizationIssueScanBlockerProjected {
+	runID := strings.TrimSpace(content.RunID)
+	factoryOrderID := strings.TrimSpace(content.FactoryOrderID)
+	stageID := strings.TrimSpace(content.StageID)
+	seen := map[string]bool{}
+	blockers := make([]CivilizationIssueScanBlockerProjected, 0, 3)
+	add := func(blockerType, reason, requiredAction string) {
+		blockerType = strings.TrimSpace(blockerType)
+		if blockerType == "" || seen[blockerType] {
+			return
+		}
+		seen[blockerType] = true
+		blockers = append(blockers, CivilizationIssueScanBlockerProjected{
+			RunID:          runID,
+			FactoryOrderID: factoryOrderID,
+			StageID:        stageID,
+			BlockerType:    blockerType,
+			Reason:         strings.TrimSpace(reason),
+			RequiredAction: strings.TrimSpace(requiredAction),
+			EvidenceRefs:   []string{eventRef},
+			SourceRefs:     refs,
+		})
+	}
+	add(content.BlockerType, content.Detail, content.RequiredAction)
+
+	labels := issueScanLabelSet(content.TargetIssueLabels)
+	if _, ok := labels[IssueScanProtectedActionLabel]; ok {
+		add(
+			IssueScanParkBlockerProtectedAction,
+			fmt.Sprintf("%s#%d is labeled %s", strings.TrimSpace(content.Repository), content.IssueNumber, IssueScanProtectedActionLabel),
+			"human must authorize the protected-action boundary before Hive may continue",
+		)
+	}
+	if _, ok := labels[IssueScanNeedsHumanScopeLabel]; ok {
+		add(
+			IssueScanParkBlockerHumanScope,
+			fmt.Sprintf("%s#%d is labeled %s", strings.TrimSpace(content.Repository), content.IssueNumber, IssueScanNeedsHumanScopeLabel),
+			"human must clarify scope and remove the human-scope blocker before Hive may continue",
+		)
+	}
+	if _, ok := labels[IssueScanPRDeferredLabel]; ok {
+		add(
+			IssueScanParkBlockerHumanScope,
+			fmt.Sprintf("%s#%d is labeled %s", strings.TrimSpace(content.Repository), content.IssueNumber, IssueScanPRDeferredLabel),
+			"human must move the issue to PR-ready before Hive may continue",
+		)
+	}
+	return blockers
+}
+
+func civilizationAssemblyIssueHasHumanActionBlocker(blockers []CivilizationIssueScanBlockerProjected) bool {
+	for _, blocker := range blockers {
+		switch blockerType := strings.TrimSpace(blocker.BlockerType); blockerType {
+		case IssueScanParkBlockerHumanScope, IssueScanParkBlockerProtectedAction, IssueScanParkBlockerNotPRReady, IssueScanParkBlockerStaleTarget, IssueScanParkBlockerDuplicateChain:
+			return true
+		case "":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func civilizationAssemblyIssueRefFromParked(content IssueScanRunParkedContent) CivilizationIssueRef {
+	labels := compactStrings(content.TargetIssueLabels)
+	url := ""
+	for _, ref := range content.SourceRefs {
+		ref = strings.TrimSpace(ref)
+		if strings.HasPrefix(ref, "https://github.com/") {
+			url = ref
+			break
+		}
+	}
+	return CivilizationIssueRef{
+		Repo:   strings.TrimSpace(content.Repository),
+		Number: content.IssueNumber,
+		URL:    url,
+		State:  valueOr(strings.TrimSpace(content.TargetIssueState), "unknown"),
+		Labels: labels,
+	}
+}
+
+func civilizationAssemblyIssueRiskClass(blockerType string) string {
+	switch strings.TrimSpace(blockerType) {
+	case IssueScanParkBlockerProtectedAction:
+		return "protected-action"
+	case IssueScanParkBlockerHumanScope:
+		return "human-scope"
+	case IssueScanParkBlockerStaleTarget:
+		return "stale-target"
+	case IssueScanParkBlockerDuplicateChain:
+		return "duplicate-chain"
+	case IssueScanParkBlockerNotPRReady:
+		return "not-pr-ready"
+	default:
+		return "unknown"
+	}
+}
+
+func civilizationAssemblyIssueReadiness(blockerType string) string {
+	switch strings.TrimSpace(blockerType) {
+	case IssueScanParkBlockerProtectedAction:
+		return "parked: protected-action authority required"
+	case IssueScanParkBlockerHumanScope:
+		return "parked: human scope required"
+	case IssueScanParkBlockerStaleTarget:
+		return "parked: stale target"
+	case IssueScanParkBlockerDuplicateChain:
+		return "parked: duplicate chain"
+	case IssueScanParkBlockerNotPRReady:
+		return "parked: not PR-ready"
+	default:
+		return "parked: unknown blocker"
+	}
+}
+
+func civilizationAssemblyIssueTouchedSubstrate(repo string) string {
+	repo = strings.TrimSpace(repo)
+	_, name, ok := strings.Cut(repo, "/")
+	if !ok || strings.TrimSpace(name) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(name)
 }
 
 func civilizationAssemblyHead(s store.Store, p *OperatorProjection) string {
@@ -1717,8 +2171,8 @@ func civilizationAssemblyOpenGates(p OperatorProjection) []CivilizationAssemblyG
 	return gates
 }
 
-func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence, limit int) []CivilizationAssemblyResidualRisk {
-	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+4)
+func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTruncated bool, factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence, issueScanTruncated bool, limit int) []CivilizationAssemblyResidualRisk {
+	risks := make([]CivilizationAssemblyResidualRisk, 0, len(p.RuntimeEvidence.Limitations)+len(p.Errors)+5)
 	for i, limitation := range p.RuntimeEvidence.Limitations {
 		risks = append(risks, CivilizationAssemblyResidualRisk{
 			ID:       fmt.Sprintf("runtime_limitation_%02d", i+1),
@@ -1795,6 +2249,18 @@ func civilizationAssemblyResidualRisks(p OperatorProjection, factoryOrdersTrunca
 			Severity: "info",
 			Status:   "open",
 			Summary:  fmt.Sprintf("FactoryOrder verification evidence is bounded to %d work.task.verification.attached events; evidence refs outside that projection page may be omitted.", limit),
+		})
+	}
+	if issueScanTruncated {
+		if limit <= 0 {
+			limit = defaultOperatorProjectionLimit
+		}
+		risks = append(risks, CivilizationAssemblyResidualRisk{
+			ID:       "issue_scan_parked_source_limit_01",
+			Kind:     "issue_scan_projection_limit",
+			Severity: "info",
+			Status:   "open",
+			Summary:  fmt.Sprintf("Issue-scan parked evidence is bounded to %d hive.issuescan.run.parked events; parked issue refs outside that projection page may be omitted.", limit),
 		})
 	}
 	return risks

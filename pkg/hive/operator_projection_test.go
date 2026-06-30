@@ -412,6 +412,253 @@ func TestBuildCivilizationAssemblyProjectionEmptyStoreKeepsUnavailableFieldsAndA
 	}
 }
 
+func TestBuildCivilizationAssemblyProjectionProjectsParkedIssueScanCanary(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	parked := appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "level1_canary_transpara-ai_docs_226",
+		Repository:        "transpara-ai/docs",
+		IssueNumber:       226,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       IssueScanParkBlockerHumanScope,
+		Detail:            "transpara-ai/docs#226 is labeled cc:needs-human-scope",
+		RequiredAction:    "human must clarify scope and remove the human-scope blocker before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/docs/issues/226", "canary://level1-dark-factory/issue-discovery"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:intake", "cc:needs-human-scope", "cc:protected-action"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if projection.IssueIntakeProjection.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("issue intake status = %q, want available", projection.IssueIntakeProjection.Status)
+	}
+	if len(projection.IssueIntakeProjection.Issues) != 1 {
+		t.Fatalf("issue intake issues = %+v, want one", projection.IssueIntakeProjection.Issues)
+	}
+	issue := projection.IssueIntakeProjection.Issues[0]
+	if issue.Repo != "transpara-ai/docs" || issue.Number != 226 {
+		t.Fatalf("issue intake row identity = %+v", issue)
+	}
+	if issue.RiskClass != "protected-action" || issue.Readiness != "parked: protected-action authority required" {
+		t.Fatalf("issue intake row risk/readiness = %+v, want protected-action singular fields", issue)
+	}
+	if issue.UpdatedAt == "" {
+		t.Fatalf("issue intake row missing updated_at: %+v", issue)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, issue.UpdatedAt); err != nil {
+		t.Fatalf("issue updated_at = %q, want RFC3339 parked-evidence timestamp: %v", issue.UpdatedAt, err)
+	}
+	if !containsString(projection.IssueIntakeProjection.ScannerBoundaries, "updated_at is the EventGraph parked-evidence timestamp, not the GitHub issue last-modified time") {
+		t.Fatalf("scanner boundaries = %+v, want updated_at evidence-time boundary", projection.IssueIntakeProjection.ScannerBoundaries)
+	}
+	if !containsString(projection.IssueIntakeProjection.ScannerBoundaries, "touched_substrate is derived only from the repository slug; no code or substrate analysis is performed") {
+		t.Fatalf("scanner boundaries = %+v, want repo-derived substrate boundary", projection.IssueIntakeProjection.ScannerBoundaries)
+	}
+	if !containsString(projection.IssueIntakeProjection.ScannerBoundaries, "issue intake rows are point-in-time parked snapshots and may be superseded by later FactoryOrder lifecycle evidence") {
+		t.Fatalf("scanner boundaries = %+v, want parked snapshot supersession boundary", projection.IssueIntakeProjection.ScannerBoundaries)
+	}
+	if !containsString(issue.RiskClasses, "human-scope") || !containsString(issue.RiskClasses, "protected-action") {
+		t.Fatalf("issue risk classes = %+v, want human-scope and protected-action", issue.RiskClasses)
+	}
+	if !containsString(issue.ReadinessStates, "parked: human scope required") || !containsString(issue.ReadinessStates, "parked: protected-action authority required") {
+		t.Fatalf("issue readiness states = %+v, want human-scope and protected-action readiness", issue.ReadinessStates)
+	}
+	if len(projection.IssueScanProjection.Runs) != 1 || projection.IssueScanProjection.Runs[0].State != "human_action" {
+		t.Fatalf("issue-scan runs = %+v, want human_action run", projection.IssueScanProjection.Runs)
+	}
+	if projection.IssueScanProjection.Runs[0].LifecycleVersion != IssueScanParkLifecycleLevel1Canary {
+		t.Fatalf("issue-scan lifecycle version = %q, want canary event lifecycle", projection.IssueScanProjection.Runs[0].LifecycleVersion)
+	}
+	if issue.AuthorityBoundary != IssueScanParkAuthorityBoundaryLevel1Canary {
+		t.Fatalf("issue authority boundary = %q, want canary event boundary", issue.AuthorityBoundary)
+	}
+	if len(projection.IssueScanProjection.Blockers) != 2 {
+		t.Fatalf("issue-scan blockers = %+v, want human-scope and protected-action blockers", projection.IssueScanProjection.Blockers)
+	}
+	blockers := map[string]CivilizationIssueScanBlockerProjected{}
+	for _, blocker := range projection.IssueScanProjection.Blockers {
+		blockers[blocker.BlockerType] = blocker
+	}
+	for _, blockerType := range []string{IssueScanParkBlockerHumanScope, IssueScanParkBlockerProtectedAction} {
+		blocker, ok := blockers[blockerType]
+		if !ok || !containsString(blocker.EvidenceRefs, parked.ID().Value()) {
+			t.Fatalf("blocker %s = %+v, want evidence ref %s", blockerType, blocker, parked.ID().Value())
+		}
+	}
+	if !containsString(projection.SourceEventIDsOrQueryWindow, parked.ID().Value()) {
+		t.Fatalf("source refs = %+v, want parked event %s", projection.SourceEventIDsOrQueryWindow, parked.ID().Value())
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDoesNotRelabelLifecycleParkingAsCanary(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "run_issue_scan_docs_226",
+		FactoryOrderID:    "fo_issue_scan_docs_226",
+		Repository:        "transpara-ai/docs",
+		IssueNumber:       226,
+		StageID:           "research_issue_and_repo_context",
+		BlockerType:       IssueScanParkBlockerStaleTarget,
+		Detail:            "transpara-ai/docs#226 is closed",
+		RequiredAction:    "confirm the issue is still in scope or queue a fresh run against a live target",
+		SourceRefs:        []string{"https://github.com/transpara-ai/docs/issues/226"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "closed",
+		TargetIssueLabels: []string{IssueScanPRReadyLabel},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.IssueScanProjection.Runs) != 1 {
+		t.Fatalf("issue-scan runs = %+v, want one lifecycle parked run", projection.IssueScanProjection.Runs)
+	}
+	run := projection.IssueScanProjection.Runs[0]
+	if run.LifecycleVersion == IssueScanParkLifecycleLevel1Canary || run.LifecycleVersion != issueScanLifecycleVersion {
+		t.Fatalf("issue-scan lifecycle version = %q, want lifecycle version without canary relabel", run.LifecycleVersion)
+	}
+	if run.State != "human_action" {
+		t.Fatalf("issue-scan run state = %q, want human_action for stale target required action", run.State)
+	}
+	if len(projection.IssueIntakeProjection.Issues) != 1 {
+		t.Fatalf("issue intake issues = %+v, want one", projection.IssueIntakeProjection.Issues)
+	}
+	issue := projection.IssueIntakeProjection.Issues[0]
+	if issue.AuthorityBoundary != IssueScanParkAuthorityBoundaryLifecycle || strings.Contains(issue.AuthorityBoundary, "canary") {
+		t.Fatalf("issue authority boundary = %q, want lifecycle boundary without canary relabel", issue.AuthorityBoundary)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionTreatsNotPRReadyAsHumanAction(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "level1_canary_transpara-ai_docs_226",
+		Repository:        "transpara-ai/docs",
+		IssueNumber:       226,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       IssueScanParkBlockerNotPRReady,
+		Detail:            "transpara-ai/docs#226 lacks cc:pr-ready",
+		RequiredAction:    "human must mark the issue PR-ready before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/docs/issues/226", "canary://level1-dark-factory/issue-discovery"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:intake"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.IssueScanProjection.Runs) != 1 || projection.IssueScanProjection.Runs[0].State != "human_action" {
+		t.Fatalf("issue-scan runs = %+v, want not-pr-ready human_action run", projection.IssueScanProjection.Runs)
+	}
+	if len(projection.IssueIntakeProjection.Issues) != 1 {
+		t.Fatalf("issue intake issues = %+v, want one", projection.IssueIntakeProjection.Issues)
+	}
+	issue := projection.IssueIntakeProjection.Issues[0]
+	if issue.RiskClass != "not-pr-ready" || issue.Readiness != "parked: not PR-ready" {
+		t.Fatalf("issue projection = %+v, want not-pr-ready risk/readiness", issue)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionTreatsUnknownBlockerAsHumanAction(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "level1_canary_transpara-ai_docs_226",
+		Repository:        "transpara-ai/docs",
+		IssueNumber:       226,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       "future_blocker",
+		Detail:            "future blocker type projected from event",
+		RequiredAction:    "human must inspect the unknown blocker before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/docs/issues/226", "canary://level1-dark-factory/issue-discovery"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:intake"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.IssueScanProjection.Runs) != 1 || projection.IssueScanProjection.Runs[0].State != "human_action" {
+		t.Fatalf("issue-scan runs = %+v, want unknown blocker human_action run", projection.IssueScanProjection.Runs)
+	}
+	if len(projection.IssueIntakeProjection.Issues) != 1 {
+		t.Fatalf("issue intake issues = %+v, want one", projection.IssueIntakeProjection.Issues)
+	}
+	issue := projection.IssueIntakeProjection.Issues[0]
+	if issue.RiskClass != "unknown" || issue.Readiness != "parked: unknown blocker" {
+		t.Fatalf("issue projection = %+v, want unknown risk/readiness", issue)
+	}
+	if containsString(issue.RiskClasses, "not-pr-ready") {
+		t.Fatalf("unknown blocker risk classes = %+v, must not masquerade as not-pr-ready", issue.RiskClasses)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionDefaultsMissingParkedIssueStateToUnknown(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "level1_canary_transpara-ai_docs_226",
+		Repository:        "transpara-ai/docs",
+		IssueNumber:       226,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       IssueScanParkBlockerNotPRReady,
+		Detail:            "transpara-ai/docs#226 lacks cc:pr-ready",
+		RequiredAction:    "human must mark the issue PR-ready before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/docs/issues/226", "canary://level1-dark-factory/issue-discovery"},
+		ParkedBy:          actorID,
+		TargetIssueLabels: []string{"cc:intake"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	if len(projection.IssueIntakeProjection.Issues) != 1 {
+		t.Fatalf("issue intake issues = %+v, want one", projection.IssueIntakeProjection.Issues)
+	}
+	issue := projection.IssueIntakeProjection.Issues[0]
+	if issue.State != "unknown" {
+		t.Fatalf("issue state = %q, want unknown when parked event has no target issue state", issue.State)
+	}
+}
+
+func TestBuildCivilizationAssemblyProjectionSignalsIssueScanTruncation(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	for i := 1; i <= 3; i++ {
+		appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+			RunID:             fmt.Sprintf("level1_canary_transpara-ai_docs_%03d", i),
+			Repository:        "transpara-ai/docs",
+			IssueNumber:       200 + i,
+			LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+			EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+			AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+			BlockerType:       IssueScanParkBlockerNotPRReady,
+			Detail:            "issue lacks cc:pr-ready",
+			RequiredAction:    "human must mark the issue PR-ready before Hive may continue",
+			SourceRefs:        []string{fmt.Sprintf("https://github.com/transpara-ai/docs/issues/%d", 200+i)},
+			ParkedBy:          actorID,
+			TargetIssueState:  "open",
+			TargetIssueLabels: []string{"cc:intake"},
+		})
+	}
+
+	projection := BuildCivilizationAssemblyProjection(s, 2)
+
+	if len(projection.IssueIntakeProjection.Issues) != 2 {
+		t.Fatalf("issue intake issues = %d, want page-limited 2", len(projection.IssueIntakeProjection.Issues))
+	}
+	if !strings.Contains(projection.IssueIntakeProjection.Summary, "truncated at 2") {
+		t.Fatalf("issue intake summary = %q, want truncation note", projection.IssueIntakeProjection.Summary)
+	}
+	if !civilizationProjectionHasResidualRisk(projection, "issue_scan_parked_source_limit_01") {
+		t.Fatalf("residual risks = %+v, want issue-scan truncation residual", projection.ResidualRiskSummary)
+	}
+}
+
 func TestBuildCivilizationAssemblyProjectionProjectsWorkFactoryOrders(t *testing.T) {
 	s, actorID, appendEvent := newOperatorProjectionStore(t)
 	taskEvent := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{

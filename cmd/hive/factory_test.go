@@ -1753,6 +1753,64 @@ func TestRunIssueScanScannerCycleSkipsExistingSourceWhenIntakeMissing(t *testing
 	}
 }
 
+func TestRunIssueScanScannerCycleIgnoresCanaryParkedEvidenceForQueueDedupe(t *testing.T) {
+	ctx := context.Background()
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	issue := hive.GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 206,
+		Title:  "Canary parked issue later becomes PR-ready",
+		URL:    "https://github.com/transpara-ai/hive/issues/206",
+		State:  "open",
+		Labels: []string{"cc:intake"},
+	}
+	if _, err := recordCanaryIssueParked(
+		ctx,
+		fc,
+		issue,
+		"level1_canary_transpara-ai_hive_206_0000",
+		hive.IssueScanParkBlockerNotPRReady,
+		"transpara-ai/hive#206 lacks cc:pr-ready",
+		"human must mark the issue PR-ready before Hive may continue",
+	); err != nil {
+		t.Fatalf("recordCanaryIssueParked: %v", err)
+	}
+
+	lister := fakeIssueScanLister{
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 206,
+				Title:  "Canary parked issue later becomes PR-ready",
+				URL:    "https://github.com/transpara-ai/hive/issues/206",
+				State:  "open",
+				Labels: []string{"cc:intake", "cc:pr-ready"},
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:    hive.IssueScanOperatorID("Michael"),
+		Repos:         []string{"transpara-ai/hive"},
+		Limit:         10,
+		MaxIterations: 30,
+		MaxCostUSD:    25,
+	}
+
+	result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err != nil {
+		t.Fatalf("runIssueScanScannerCycle: %v", err)
+	}
+	if !result.Queued || result.QueuedIssue.Number != 206 || result.SkippedExisting != 0 {
+		t.Fatalf("cycle = %+v, want canary parked evidence ignored for queue dedupe", result)
+	}
+}
+
 func TestRunIssueScanScannerCycleSkipsNonPRReadyIssues(t *testing.T) {
 	ctx := context.Background()
 	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
@@ -1852,6 +1910,7 @@ func TestIssueScanCandidatePRReadyRequiresPositiveReadyLabel(t *testing.T) {
 		{name: "missing ready", labels: []string{"cc:intake"}, want: false},
 		{name: "deferred wins", labels: []string{"cc:pr-ready", "cc:pr-deferred"}, want: false},
 		{name: "needs human scope wins", labels: []string{"cc:pr-ready", "cc:needs-human-scope"}, want: false},
+		{name: "protected action wins", labels: []string{"cc:pr-ready", "cc:protected-action"}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

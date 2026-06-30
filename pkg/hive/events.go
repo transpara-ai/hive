@@ -220,6 +220,9 @@ type IssueScanRunParkedContent struct {
 	Repository        string        `json:"repository,omitempty"`
 	IssueNumber       int           `json:"issue_number,omitempty"`
 	StageID           string        `json:"stage_id,omitempty"`
+	LifecycleVersion  string        `json:"lifecycle_version,omitempty"`
+	EvidenceClass     string        `json:"evidence_class,omitempty"`
+	AuthorityBoundary string        `json:"authority_boundary,omitempty"`
 	BlockerType       string        `json:"blocker_type"`
 	Detail            string        `json:"detail,omitempty"`
 	RequiredAction    string        `json:"required_action"`

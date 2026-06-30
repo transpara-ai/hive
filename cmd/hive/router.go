@@ -61,6 +61,7 @@ func helpText() string {
 	b.WriteString("  factory daemon           Always-on governing loop with governed issue-scan controls\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
 	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
+	b.WriteString("  factory canary-scan      Level 1 canary issue discovery with parked evidence only\n")
 	b.WriteString("  factory run-issue-scan-stage-role-output\n")
 	b.WriteString("                           Run configured planning-stage role-output command\n")
 	b.WriteString("  factory run-issue-scan-implementation\n")
