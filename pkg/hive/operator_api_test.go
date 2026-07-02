@@ -1132,12 +1132,15 @@ func (s *gatedCountingStore) callCount() int {
 // channel) cannot complete until every concurrent request has been
 // dispatched to the mux and had the opportunity to call singleflight.Do —
 // removing any dependency on client-side goroutine/network scheduling.
-func gateAfterNHandlerEntries(next http.Handler, n int, gate chan struct{}) http.Handler {
+// releaseGate is idempotent so BOTH the normal path (Nth arrival) and the
+// test's timeout path can release the gate: httptest.Server.Close waits for
+// active handlers, so a timed-out attempt must unblock the gated store read
+// BEFORE closing the server or the failure would hang instead of reporting.
+func gateAfterNHandlerEntries(next http.Handler, n int, releaseGate func()) http.Handler {
 	var arrived int32
-	var once sync.Once
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if int(atomic.AddInt32(&arrived, 1)) >= n {
-			once.Do(func() { close(gate) })
+			releaseGate()
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -1237,7 +1240,9 @@ func TestOperatorProjectionServerSingleflightCollapsesConcurrentRequests(t *test
 		// client/network scheduling. See the function doc for why this still
 		// does not guarantee every request reaches Do before the leader's
 		// flight completes.
-		handler := gateAfterNHandlerEntries(NewOperatorProjectionServer(gated, "secret", 50), concurrency, gate)
+		var gateOnce sync.Once
+		releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
+		handler := gateAfterNHandlerEntries(NewOperatorProjectionServer(gated, "secret", 50), concurrency, releaseGate)
 		ts := httptest.NewServer(handler)
 
 		var wg sync.WaitGroup
@@ -1283,6 +1288,11 @@ func TestOperatorProjectionServerSingleflightCollapsesConcurrentRequests(t *test
 		select {
 		case <-waitDone:
 		case <-time.After(waitTimeout):
+			// Release the gate FIRST: a handler may still be blocked on the
+			// gated store read, and httptest.Server.Close waits for active
+			// handlers — closing without releasing would hang the test run
+			// instead of failing with this message.
+			releaseGate()
 			ts.Close()
 			t.Fatalf("attempt %d: concurrent requests did not complete within %s (possible deadlock in gate/handler)", attempt, waitTimeout)
 		}
