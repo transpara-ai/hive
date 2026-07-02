@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.5.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.6.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
@@ -55,14 +55,19 @@ type CivilizationAssemblyProjection struct {
 	QueuedRunRequest                   *CivilizationAssemblyQueuedRunRequest  `json:"queued_run_request,omitempty"`
 	IssueIntakeProjection              CivilizationIssueIntakeProjection      `json:"issue_intake_projection,omitempty"`
 	IssueScanProjection                CivilizationIssueScanProjection        `json:"issue_scan_projection,omitempty"`
-	SiteConsumerStatus                 CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
-	OpenGateSummary                    []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
-	ResidualRiskSummary                []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
-	WithheldOrUnavailableFields        []CivilizationAssemblyUnavailableField `json:"withheld_or_unavailable_fields"`
-	BoundaryFlags                      []string                               `json:"boundary_flags"`
-	ProvenanceRefs                     []string                               `json:"provenance_refs"`
-	ValidationRefs                     []string                               `json:"validation_refs"`
-	FailureReasons                     []string                               `json:"failure_reasons,omitempty"`
+	// RecentIssueScanRuns has NO omitempty: it is always populated (status
+	// becomes "unavailable" with zero runs and an honest summary when the
+	// store has no qualifying evidence) so Site can rely on `status` being
+	// present without special-casing a missing field.
+	RecentIssueScanRuns         CivilizationRecentIssueScanRuns        `json:"recent_issue_scan_runs"`
+	SiteConsumerStatus          CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
+	OpenGateSummary             []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
+	ResidualRiskSummary         []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
+	WithheldOrUnavailableFields []CivilizationAssemblyUnavailableField `json:"withheld_or_unavailable_fields"`
+	BoundaryFlags               []string                               `json:"boundary_flags"`
+	ProvenanceRefs              []string                               `json:"provenance_refs"`
+	ValidationRefs              []string                               `json:"validation_refs"`
+	FailureReasons              []string                               `json:"failure_reasons,omitempty"`
 }
 
 type CivilizationAssemblyFieldStatus struct {
@@ -448,9 +453,24 @@ type civilizationAssemblyTaskVerificationEvidence struct {
 func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...OperatorProjectionOption) CivilizationAssemblyProjection {
 	operatorProjection := BuildOperatorProjection(s, limit, opts...)
 	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
-	issueScanEvidence := civilizationAssemblyIssueScanProjections(s, limit)
+	// The parked-run page is fetched ONCE here and feeds BOTH the board fold
+	// (issue intake/issue-scan projections) and the recent-runs rail fold.
+	// parkedOK and parkedFetched are DIFFERENT signals (see
+	// civilizationAssemblyNormalizedParkedRuns and civilizationRecentIssueScanRuns
+	// doc comments): parkedOK is the board fold's short-circuit (false for a
+	// fetch failure OR a confirmably-empty page); parkedFetched is narrower
+	// and only false when the page could not be read at all, which is what
+	// the rail fold needs to distinguish "parked-absence proven" from
+	// "parked-absence unknowable".
+	normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, parkedFetched := civilizationAssemblyNormalizedParkedRuns(s, limit)
+	issueScanEvidence := civilizationAssemblyIssueScanProjections(normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, limit)
 	operatorProjection.Errors = append(operatorProjection.Errors, issueScanEvidence.Errors...)
-	sourceRefs := compactStrings(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...))
+	requestedEvents, requestedTruncated, requestedErr := civilizationAssemblyFactoryRunRequestedEvents(s, limit)
+	if requestedErr != nil {
+		operatorProjection.Errors = append(operatorProjection.Errors, "project recent issue-scan requested runs: "+requestedErr.Error())
+	}
+	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, factoryOrders, factoryOrderWorkEvidence)
+	sourceRefs := compactStrings(append(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...), civilizationRecentIssueScanSourceRefs(recentIssueScanRuns)...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)
 
@@ -472,6 +492,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs, factoryOrderWorkEvidence.Tasks),
 		IssueIntakeProjection:              issueScanEvidence.Intake,
 		IssueScanProjection:                issueScanEvidence.Scan,
+		RecentIssueScanRuns:                recentIssueScanRuns,
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
@@ -507,94 +528,57 @@ func civilizationAssemblyStatus(p OperatorProjection) string {
 	return civilizationAssemblyStatusComplete
 }
 
-func civilizationAssemblyIssueScanProjections(s store.Store, limit int) civilizationAssemblyIssueScanProjectionEvidence {
-	intake := CivilizationIssueIntakeProjection{
-		Status:  civilizationAssemblyFieldUnavailable,
-		Summary: "No scanner-visible issue intake records are projected.",
-		ScannerBoundaries: []string{
-			"read-only GitHub issue discovery",
-			"human-scope/protected/deferred issues park without execution",
-			"projection is not PR readiness, runtime readiness, issue closure, merge, deploy, or Test 001 GREEN evidence",
-			"updated_at is the EventGraph parked-evidence timestamp, not the GitHub issue last-modified time",
-			"touched_substrate is derived only from the repository slug; no code or substrate analysis is performed",
-			"issue intake rows are point-in-time parked snapshots and may be superseded by later FactoryOrder lifecycle evidence",
-		},
-	}
-	scan := CivilizationIssueScanProjection{}
-	if s == nil {
-		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan records: store is required"}}
+func civilizationAssemblyIssueScanProjections(normalized []civilizationAssemblyNormalizedParkedRun, truncated bool, evidence civilizationAssemblyIssueScanProjectionEvidence, ok bool, limit int) civilizationAssemblyIssueScanProjectionEvidence {
+	if !ok {
+		return evidence
 	}
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
 	}
-	page, err := s.ByType(EventTypeIssueScanRunParked, limit, types.None[types.Cursor]())
-	if err != nil {
-		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan parked records: " + err.Error()}}
-	}
-	events := page.Items()
-	truncated := page.HasMore()
-	if len(events) == 0 {
+	intake := evidence.Intake
+	scan := evidence.Scan
+	if len(normalized) == 0 {
 		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}
 	}
 
-	sourceRefs := make([]string, 0, len(events))
-	intake.Issues = make([]CivilizationIssueIntakeProjected, 0, len(events))
-	scan.Runs = make([]CivilizationIssueScanRunProjected, 0, len(events))
-	scan.Blockers = make([]CivilizationIssueScanBlockerProjected, 0, len(events))
-	for _, ev := range events {
-		content, ok := ev.Content().(IssueScanRunParkedContent)
-		if !ok {
-			continue
-		}
-		issue := civilizationAssemblyIssueRefFromParked(content)
-		if issue.Repo == "" || issue.Number <= 0 {
-			continue
-		}
-		refs := compactStrings(append([]string{ev.ID().Value()}, content.SourceRefs...))
-		sourceRefs = append(sourceRefs, refs...)
-		primaryBlockerType := civilizationAssemblyIssuePrimaryBlockerType(content)
-		riskClass := civilizationAssemblyIssueRiskClass(primaryBlockerType)
-		readiness := civilizationAssemblyIssueReadiness(primaryBlockerType)
-		riskClasses := civilizationAssemblyIssueRiskClasses(content)
-		readinessStates := civilizationAssemblyIssueReadinessStates(content)
-		blockers := civilizationAssemblyIssueScanBlockersFromParked(content, ev.ID().Value(), refs)
-		authorityBoundary := civilizationAssemblyIssueScanAuthorityBoundary(content)
+	sourceRefs := make([]string, 0, len(normalized))
+	intake.Issues = make([]CivilizationIssueIntakeProjected, 0, len(normalized))
+	scan.Runs = make([]CivilizationIssueScanRunProjected, 0, len(normalized))
+	scan.Blockers = make([]CivilizationIssueScanBlockerProjected, 0, len(normalized))
+	for _, run := range normalized {
+		sourceRefs = append(sourceRefs, run.Refs...)
 		intake.Issues = append(intake.Issues, CivilizationIssueIntakeProjected{
-			Repo:              issue.Repo,
-			Number:            issue.Number,
-			URL:               issue.URL,
-			Title:             issue.Title,
-			State:             issue.State,
-			StateReason:       issue.StateReason,
-			Labels:            append([]string(nil), issue.Labels...),
-			PrimaryRepo:       issue.Repo,
-			TouchedSubstrate:  civilizationAssemblyIssueTouchedSubstrate(issue.Repo),
-			TouchedSubstrates: []string{civilizationAssemblyIssueTouchedSubstrate(issue.Repo)},
-			RiskClass:         riskClass,
-			RiskClasses:       riskClasses,
-			Readiness:         readiness,
-			ReadinessStates:   readinessStates,
-			PRReadyWhen:       content.RequiredAction,
-			AuthorityBoundary: authorityBoundary,
-			UpdatedAt:         ev.Timestamp().Value().UTC().Format(time.RFC3339Nano),
-			SourceRefs:        refs,
+			Repo:              run.Issue.Repo,
+			Number:            run.Issue.Number,
+			URL:               run.Issue.URL,
+			Title:             run.Issue.Title,
+			State:             run.Issue.State,
+			StateReason:       run.Issue.StateReason,
+			Labels:            append([]string(nil), run.Issue.Labels...),
+			PrimaryRepo:       run.Issue.Repo,
+			TouchedSubstrate:  civilizationAssemblyIssueTouchedSubstrate(run.Issue.Repo),
+			TouchedSubstrates: []string{civilizationAssemblyIssueTouchedSubstrate(run.Issue.Repo)},
+			RiskClass:         run.RiskClass,
+			RiskClasses:       run.RiskClasses,
+			Readiness:         run.Readiness,
+			ReadinessStates:   run.ReadinessStates,
+			PRReadyWhen:       run.RawRequiredAction,
+			AuthorityBoundary: run.AuthorityBoundary,
+			UpdatedAt:         run.EventTimestamp.UTC().Format(time.RFC3339Nano),
+			SourceRefs:        run.Refs,
 		})
-		state := "parked"
-		if civilizationAssemblyIssueHasHumanActionBlocker(blockers) {
-			state = "human_action"
-		}
 		scan.Runs = append(scan.Runs, CivilizationIssueScanRunProjected{
-			RunID:            strings.TrimSpace(content.RunID),
-			FactoryOrderID:   strings.TrimSpace(content.FactoryOrderID),
-			LifecycleVersion: civilizationAssemblyIssueScanLifecycleVersion(content),
-			State:            state,
-			TargetIssue:      issue,
-			SelectedIssue:    issue,
-			CandidateIssues:  []CivilizationIssueRef{issue},
-			SourceRefs:       refs,
-			EvidenceRefs:     []string{ev.ID().Value()},
+			RunID:            run.RunID,
+			FactoryOrderID:   run.FactoryOrderID,
+			LifecycleVersion: run.LifecycleVersion,
+			State:            run.State,
+			TargetIssue:      run.Issue,
+			SelectedIssue:    run.Issue,
+			CandidateIssues:  []CivilizationIssueRef{run.Issue},
+			SourceRefs:       run.Refs,
+			EvidenceRefs:     []string{run.EventID},
 		})
-		scan.Blockers = append(scan.Blockers, blockers...)
+		scan.Blockers = append(scan.Blockers, run.Blockers...)
 	}
 	if len(intake.Issues) == 0 {
 		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, SourceRefs: compactStrings(sourceRefs), Truncated: truncated}
