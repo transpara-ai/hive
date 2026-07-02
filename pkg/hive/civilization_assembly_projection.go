@@ -1024,6 +1024,17 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 	return out
 }
 
+// civilizationAssemblyFactoryOrders returns, in order: the projected factory
+// orders, the aggregated Work evidence, whether the work.task.created page
+// truncated, and workEvidenceQueryFailed. workEvidenceQueryFailed is an
+// ALLOWLIST signal — it is true (query failed) unless EVERY sub-read this
+// function performs is proven to have succeeded: the work.task.created page
+// fetch itself, the artifact/dependency/lifecycle/verification ByType reads,
+// and the per-task civilizationAssemblyProjectWorkTask projection (which
+// itself reads lifecycle transitions) for every task-created event. Any one
+// of those failing means "no work evidence found" for the affected task(s)
+// is unprovable rather than proven-absent, so the caller must not promote
+// affected requested runs to queued/in_flight (CFAR round 2 finding 1).
 func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, limit int) ([]CivilizationAssemblyFactoryOrder, civilizationAssemblyFactoryOrderWorkEvidence, bool, bool) {
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
@@ -1035,30 +1046,39 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	}
 	truncated := page.HasMore()
 
+	// workEvidenceQueryFailed defaults to false and is OR'd true by any
+	// sub-read failure below (allowlist: stays false only when every
+	// sub-read this function performs proves successful).
+	workEvidenceQueryFailed := false
+
 	byID := map[string]*CivilizationAssemblyFactoryOrder{}
 	taskStore := work.NewTaskStore(s, nil, nil)
 	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
 	artifactByTask, artifactTruncated, artifactErrors, err := civilizationAssemblyWorkTaskArtifactEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task artifact refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, artifactErrors...)
 	workEvidence.ArtifactSourceTruncated = artifactTruncated
 	dependencyByTask, dependencyTruncated, dependencyErrors, err := civilizationAssemblyWorkTaskDependencyEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task dependency source refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, dependencyErrors...)
 	workEvidence.DependencySourceTruncated = dependencyTruncated
 	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, lifecycleErrors...)
 	workEvidence.LifecycleSourceTruncated = lifecycleTruncated
 	verificationByTask, verificationTruncated, verificationErrors, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task verification evidence refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, verificationErrors...)
 	workEvidence.VerificationSourceTruncated = verificationTruncated
@@ -1111,6 +1131,14 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		taskProjection, legacyProjection, err := civilizationAssemblyProjectWorkTask(taskStore, ev.ID())
 		if err != nil {
 			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
+			// This task's own lifecycle/legacy projection failed (ProjectTask/
+			// ProjectLegacyTask read Work evidence internally): the task is
+			// omitted from workEvidence.Tasks below, so "no stage work
+			// evidence" for this factory order is no longer provable — only
+			// unproven. workEvidenceQueryFailed must reflect that (CFAR
+			// round 2 finding 1) even though the work.task.created page
+			// itself succeeded.
+			workEvidenceQueryFailed = true
 			continue
 		}
 		var roleContract civilizationAssemblyTaskRoleContract
@@ -1144,7 +1172,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ID < out[j].ID
 	})
-	return out, workEvidence, truncated, false
+	return out, workEvidence, truncated, workEvidenceQueryFailed
 }
 
 func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types.EventID) (work.TaskProjection, work.LegacyTaskProjection, error) {

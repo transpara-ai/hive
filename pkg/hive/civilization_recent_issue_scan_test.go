@@ -1145,6 +1145,109 @@ func TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceFailureDegradesToRec
 	}
 }
 
+// recentIssueScanLifecycleReadFailureStore fails ONLY the
+// work.task.lifecycle.transitioned ByType read (civilizationAssemblyWorkTaskLifecycleEvidence's
+// query inside civilizationAssemblyFactoryOrders) while every other read,
+// including the work.task.created page itself, succeeds. This reproduces
+// CFAR round 2 finding 1: a non-work.task.created Work evidence read can
+// fail while factoryOrdersQueryFailed stays false (only the TaskCreated page
+// failure trips that flag) and the failed stage task is silently omitted
+// from factoryOrderWorkEvidence.Tasks — leaving workEvidenceUnprovable false
+// and letting the fold promote the row past recorded even though the work
+// evidence is provably incomplete, not provably absent.
+type recentIssueScanLifecycleReadFailureStore struct {
+	store.Store
+}
+
+func (s recentIssueScanLifecycleReadFailureStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	if eventType == work.EventTypeTaskLifecycleTransitioned {
+		return types.NewPage[event.Event](nil, types.None[types.Cursor](), false), errors.New("work task lifecycle query unavailable")
+	}
+	return s.Store.ByType(eventType, limit, after)
+}
+
+// TestCivilizationRecentIssueScanRunsPartialWorkEvidenceReadFailureDegradesToRecorded
+// covers CFAR round 2 finding 1: when a non-work.task.created Work evidence
+// sub-read fails (here, work.task.lifecycle.transitioned) while the
+// work.task.created page itself succeeds, factoryOrdersQueryFailed must
+// still become true and the run must degrade to recorded — NOT be promoted
+// to queued/in_flight on the strength of an incomplete work-evidence read.
+// Before the fix, this sub-read's error was only appended to
+// operatorProjection.Errors (surfacing as a FailureReason) while
+// factoryOrdersQueryFailed remained false, so the fold treated "no stage
+// work evidence found" (because the stage task's lifecycle read silently
+// failed) as proof of absence and emitted the run as queued.
+func TestCivilizationRecentIssueScanRunsPartialWorkEvidenceReadFailureDegradesToRecorded(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 914,
+		Title:  "Requested run with a failed lifecycle-transition read",
+		URL:    "https://github.com/transpara-ai/hive/issues/914",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_lifecycle_read_failure",
+		IntakeID:   "intake_issue_scan_lifecycle_read_failure",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#914",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+	orderID, err := factoryOrderIDForRunLaunch("run_issue_scan_lifecycle_read_failure")
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	// Seed the factory-order stage task-created event so the TaskCreated page
+	// succeeds and carries real stage evidence for this order — the
+	// projection has genuine stage work, but the lifecycle-transition read
+	// that would help substantiate it fails.
+	appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Issue-scan stage: Research issue and repo context",
+		Description:            "Stage ID: research_issue_and_repo_context",
+		CreatedBy:              actorID,
+		CanonicalTaskID:        issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context"),
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_lifecycle_read_failure"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_lifecycle_read_failure"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "repo_context_packet"},
+	})
+
+	failingStore := recentIssueScanLifecycleReadFailureStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(failingStore, 50)
+
+	rail := projection.RecentIssueScanRuns
+	var run *CivilizationRecentIssueScanRun
+	for i := range rail.Runs {
+		if rail.Runs[i].RunID == "run_issue_scan_lifecycle_read_failure" {
+			run = &rail.Runs[i]
+		}
+	}
+	if run == nil {
+		t.Fatalf("rail runs = %+v, want run_issue_scan_lifecycle_read_failure present as recorded", rail.Runs)
+	}
+	if run.State != civilizationRecentIssueScanStateRecorded {
+		t.Fatalf("state = %q, want recorded (lifecycle-transition read failed, work evidence is unprovable, not absent)", run.State)
+	}
+}
+
 // TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceTruncationDegradesToRecorded
 // covers the truncated (as opposed to outright-failed) half of the same
 // finding: when the work.task.created page itself hits its limit

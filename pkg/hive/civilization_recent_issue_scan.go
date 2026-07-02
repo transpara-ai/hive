@@ -317,6 +317,42 @@ func civilizationRecentIssueScanParseBrief(content FactoryRunRequestedContent) (
 // so it does not additionally claim truncation. Parked rows are UNAFFECTED
 // — their evidence (hive.issuescan.run.parked) is independent of work-task
 // evidence.
+//
+// workEvidenceQueryFailed is NOT limited to the work.task.created page fetch
+// itself. civilizationAssemblyFactoryOrders performs several Work reads
+// while assembling factoryOrderWorkEvidence — the work.task.created page,
+// the task-artifact/dependency/lifecycle-transition/verification ByType
+// reads, and the per-task civilizationAssemblyProjectWorkTask projection
+// (which itself reads lifecycle transitions) for every task-created event.
+// workEvidenceQueryFailed is an ALLOWLIST over that whole set: it is true
+// (query failed) unless EVERY one of those sub-reads is proven to have
+// succeeded. A failure in any single sub-read (for example,
+// work.task.lifecycle.transitioned erroring while the task-created page
+// itself succeeds) silently omits the affected task from
+// factoryOrderWorkEvidence.Tasks — "no stage work evidence" for that factory
+// order is then unproven, not proven-absent, so it must not be read as
+// grounds for a queued row (CFAR round 2 finding 1). This is why the flag is
+// computed by OR-ing every sub-read's error signal at the source rather than
+// by inspecting FailureReasons here: string-matching accumulated error text
+// is not a reliable substitute for a fail-closed boolean threaded from the
+// read site.
+//
+// The completed evidence-uncertainty matrix this fold enforces:
+//   - parked page: unreadable -> whole rail unavailable (section
+//     unavailable); truncated -> per-run degrade to recorded when no parked
+//     row matches (absence unproven, not proven).
+//   - requested page: unreadable -> whole rail unavailable (section
+//     unavailable); truncated -> honest absence is impossible to claim, but
+//     since requestedEvents only iterates what WAS fetched, a requested
+//     page's own truncation only risks omitting rows entirely (they are
+//     simply not present in requestedEvents), not misclassifying rows that
+//     ARE present.
+//   - work evidence (factory-order/stage work-task evidence, all sub-reads
+//     enumerated above): ANY read failure or truncation across the whole
+//     set -> every requested run that would otherwise be evaluated for
+//     in_flight/queued degrades to recorded instead. No queued or in_flight
+//     promotion is ever made from a work-evidence computation that is not
+//     proven fully successful and complete.
 func civilizationRecentIssueScanRuns(
 	parkedRuns []civilizationAssemblyNormalizedParkedRun,
 	parkedTruncated bool,
