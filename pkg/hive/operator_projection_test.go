@@ -4626,3 +4626,76 @@ func writeRoleDefaultCatalogAt(t *testing.T, path, role, model string) {
 		t.Fatalf("write catalog: %v", err)
 	}
 }
+
+func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
+	catalogPath := filepath.Join("..", "..", "catalog-mixed.yaml")
+	wantAliases := map[string][]string{
+		"claude-opus-4-8": {"opus-4-8"},
+		"claude-fable-5":  {"fable", "fable-5"},
+	}
+
+	// The entries must exist in catalog-mixed.yaml ITSELF, not only in the
+	// embedded eventgraph defaults — MergeCatalogs replaces same-ID base
+	// entries with the user file's copy, so the user file's copy is what
+	// survives the merge (packet D5 / CFADA1-adv3).
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("read catalog-mixed.yaml: %v", err)
+	}
+	userCatalog, _, _, err := modelconfig.ParseCatalogYAML(data)
+	if err != nil {
+		t.Fatalf("parse catalog-mixed.yaml: %v", err)
+	}
+	for id := range wantAliases {
+		entry, ok := userCatalog.Lookup(id)
+		if !ok {
+			t.Fatalf("catalog-mixed.yaml missing model entry %q", id)
+		}
+		if entry.Provider != "claude-cli" || entry.AuthMode != modelconfig.AuthSubscription {
+			t.Fatalf("catalog-mixed.yaml entry %q = provider %q auth %q, want claude-cli subscription", id, entry.Provider, entry.AuthMode)
+		}
+		if entry.Tier != modelconfig.TierJudgment {
+			t.Fatalf("catalog-mixed.yaml entry %q tier = %q, want judgment", id, entry.Tier)
+		}
+		if entry.ContextWindow != 1_000_000 || entry.MaxOutputTokens != 16_384 {
+			t.Fatalf("catalog-mixed.yaml entry %q window/output = %d/%d, want 1000000/16384", id, entry.ContextWindow, entry.MaxOutputTokens)
+		}
+	}
+
+	// Loaded via the same path hive uses for the ops projection
+	// (OperatorModelSelectionFromCatalogPath → ResolverFromCatalogFile →
+	// MergeCatalogs): both new ids and every new alias must resolve post-merge.
+	config, err := OperatorModelSelectionFromCatalogPath(catalogPath, time.Unix(1_700_000_000, 0).UTC())
+	if err != nil {
+		t.Fatalf("OperatorModelSelectionFromCatalogPath: %v", err)
+	}
+	merged := config.Resolver.Catalog()
+	for id, aliases := range wantAliases {
+		entry, ok := merged.Lookup(id)
+		if !ok {
+			t.Fatalf("merged catalog missing id %q", id)
+		}
+		if entry.ID != id {
+			t.Fatalf("merged catalog lookup %q resolved to %q", id, entry.ID)
+		}
+		for _, alias := range aliases {
+			aliased, ok := merged.Lookup(alias)
+			if !ok {
+				t.Fatalf("merged catalog missing alias %q for %q", alias, id)
+			}
+			if aliased.ID != id {
+				t.Fatalf("merged catalog alias %q resolved to %q, want %q", alias, aliased.ID, id)
+			}
+		}
+	}
+
+	// The live alias `opus` must stay bound to claude-opus-4-6 — adding
+	// opus-4-8 must not silently rebind it (packet D1 / IADA-4).
+	opus, ok := merged.Lookup("opus")
+	if !ok {
+		t.Fatal("merged catalog missing alias \"opus\"")
+	}
+	if opus.ID != "claude-opus-4-6" {
+		t.Fatalf("merged catalog alias \"opus\" resolved to %q, want claude-opus-4-6", opus.ID)
+	}
+}
