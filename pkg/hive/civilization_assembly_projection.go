@@ -466,10 +466,11 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 	issueScanEvidence := civilizationAssemblyIssueScanProjections(normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, limit)
 	operatorProjection.Errors = append(operatorProjection.Errors, issueScanEvidence.Errors...)
 	requestedEvents, requestedTruncated, requestedErr := civilizationAssemblyFactoryRunRequestedEvents(s, limit)
+	requestedFetched := requestedErr == nil
 	if requestedErr != nil {
 		operatorProjection.Errors = append(operatorProjection.Errors, "project recent issue-scan requested runs: "+requestedErr.Error())
 	}
-	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, factoryOrders, factoryOrderWorkEvidence)
+	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, requestedFetched, factoryOrders, factoryOrderWorkEvidence, factoryOrdersQueryFailed, factoryOrdersTruncated)
 	sourceRefs := compactStrings(append(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...), civilizationRecentIssueScanSourceRefs(recentIssueScanRuns)...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)

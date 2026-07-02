@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -222,6 +223,48 @@ func civilizationRecentIssueScanBlockerForType(blockers []CivilizationIssueScanB
 	return CivilizationIssueScanBlockerProjected{}, false
 }
 
+// civilizationRecentIssueScanBrief carries the fields the rail needs from a
+// factory.run.requested event's Brief payload: the selected issue (repo,
+// number, URL, title — CFAR finding 3) so queued/in_flight/recorded rows can
+// populate real issue identity instead of leaving those fields at zero
+// values. An empty Repo means the brief carried no selected issue (or wasn't
+// an issue-scan brief), which the caller falls back to TargetRepos[0] for.
+type civilizationRecentIssueScanBrief struct {
+	Repo   string
+	Number int
+	URL    string
+	Title  string
+}
+
+// civilizationRecentIssueScanParseBrief parses content.Brief EXACTLY ONCE,
+// extracting both the issue-scan kind predicate (previously
+// isIssueScanRunLaunch's sole responsibility) and the selected-issue fields
+// in the same decode, so the fold no longer parses each requested event's
+// Brief JSON twice for two different purposes. ok=false means the event is
+// not an issue-scan run launch (wrong/missing kind) and must be excluded
+// from the rail entirely, exactly as isIssueScanRunLaunch's callers already
+// require; a brief with the right kind but no selected issue still returns
+// ok=true with a zero-value civilizationRecentIssueScanBrief (Repo=="" so
+// the caller's TargetRepos[0] fallback applies).
+func civilizationRecentIssueScanParseBrief(content FactoryRunRequestedContent) (civilizationRecentIssueScanBrief, bool) {
+	var raw struct {
+		Kind          string                     `json:"kind"`
+		SelectedIssue issueScanBriefIssuePayload `json:"selected_issue"`
+	}
+	if err := json.Unmarshal(content.Brief, &raw); err != nil {
+		return civilizationRecentIssueScanBrief{}, false
+	}
+	if strings.TrimSpace(raw.Kind) != issueScanBriefKind {
+		return civilizationRecentIssueScanBrief{}, false
+	}
+	return civilizationRecentIssueScanBrief{
+		Repo:   strings.TrimSpace(raw.SelectedIssue.Repo),
+		Number: raw.SelectedIssue.Number,
+		URL:    strings.TrimSpace(raw.SelectedIssue.URL),
+		Title:  strings.TrimSpace(raw.SelectedIssue.Title),
+	}, true
+}
+
 // civilizationRecentIssueScanRuns is the PURE fold deriving the
 // recent_issue_scan_runs rail per design packet D1-D3. It performs no I/O —
 // all store reads happen in the builder, which fetches the parked page ONCE
@@ -250,14 +293,41 @@ func civilizationRecentIssueScanBlockerForType(blockers []CivilizationIssueScanB
 //     becomes unavailable with zero runs, mirroring the board fold's
 //     short-circuit on the same underlying fetch failure
 //     (civilizationAssemblyIssueScanProjections).
+//
+// requestedFetched mirrors parkedFetched for the OTHER primary evidence
+// source: requestedFetched=false means the factory.run.requested page itself
+// could not be read (nil store, ByType error). Without it the fold has no
+// signal for ANY requested run — not even "queued vs recorded" — so the
+// whole rail fails CLOSED the same way as an unreadable parked page (CFAR
+// finding 1).
+//
+// workEvidenceQueryFailed/workEvidenceTruncated propagate the THIRD evidence
+// source's own uncertainty: the reused work.task.created
+// query/factory-order-evidence computation (civilizationAssemblyFactoryOrders
+// in the builder) can itself fail outright or truncate. Either condition
+// makes "does this factory order carry stage work-task evidence" unprovable
+// — the fold can prove neither work-evidence-absence (queued) nor
+// work-evidence-presence-and-completeness (in_flight) for requested runs —
+// so every requested run that would otherwise be evaluated for in_flight/
+// queued degrades to recorded instead (existence proven via the issue-scan
+// predicate match, position unproven). Truncated is set to true only when
+// workEvidenceTruncated caused the degrade (truncation is itself evidence
+// the projection window is incomplete); a pure query failure is reported
+// through operatorProjection.Errors/FailureReasons by the builder already,
+// so it does not additionally claim truncation. Parked rows are UNAFFECTED
+// — their evidence (hive.issuescan.run.parked) is independent of work-task
+// evidence.
 func civilizationRecentIssueScanRuns(
 	parkedRuns []civilizationAssemblyNormalizedParkedRun,
 	parkedTruncated bool,
 	parkedFetched bool,
 	requestedEvents []event.Event,
 	requestedTruncated bool,
+	requestedFetched bool,
 	factoryOrders []CivilizationAssemblyFactoryOrder,
 	factoryOrderWorkEvidence civilizationAssemblyFactoryOrderWorkEvidence,
+	workEvidenceQueryFailed bool,
+	workEvidenceTruncated bool,
 ) CivilizationRecentIssueScanRuns {
 	out := CivilizationRecentIssueScanRuns{
 		Status:  civilizationAssemblyFieldUnavailable,
@@ -266,6 +336,10 @@ func civilizationRecentIssueScanRuns(
 
 	if !parkedFetched {
 		out.Summary = "Recent issue-scan runs are unavailable: the parked-run evidence page could not be read."
+		return out
+	}
+	if !requestedFetched {
+		out.Summary = "Recent issue-scan runs are unavailable: the requested-run evidence page could not be read."
 		return out
 	}
 
@@ -279,6 +353,11 @@ func civilizationRecentIssueScanRuns(
 		}
 	}
 	stageTaskFactoryOrders := civilizationRecentIssueScanFactoryOrdersWithStageEvidence(factoryOrderWorkEvidence)
+	// workEvidenceUnprovable: neither "no work evidence" (queued) nor "work
+	// evidence present" (in_flight) can be trusted from a failed or
+	// truncated work-task-evidence source, so both promotions are withheld
+	// (CFAR finding 1).
+	workEvidenceUnprovable := workEvidenceQueryFailed || workEvidenceTruncated
 
 	runs := make([]civilizationRecentIssueScanSortableRun, 0, len(parkedByRun)+len(requestedEvents))
 	seenRun := map[string]bool{}
@@ -288,7 +367,8 @@ func civilizationRecentIssueScanRuns(
 		if !ok {
 			continue
 		}
-		if !isIssueScanRunLaunch(content) {
+		brief, ok := civilizationRecentIssueScanParseBrief(content)
+		if !ok {
 			continue
 		}
 		runID := strings.TrimSpace(content.RunID)
@@ -309,22 +389,39 @@ func civilizationRecentIssueScanRuns(
 		// No parked event matched this run. "No parked event" is only
 		// provable when the parked page was NOT truncated (CFADA2-3).
 		if parkedTruncated {
-			row := civilizationRecentIssueScanRecordedRun(ev, content)
+			row := civilizationRecentIssueScanRecordedRun(ev, content, brief)
+			runs = append(runs, civilizationRecentIssueScanSortableRun{run: row, lastEventAt: ev.Timestamp().Value()})
+			continue
+		}
+
+		// Work-task evidence itself is unprovable (query failed or
+		// truncated): cannot prove absence (queued) nor presence+completeness
+		// (in_flight) for this requested run, so it degrades to recorded
+		// (CFAR finding 1).
+		if workEvidenceUnprovable {
+			row := civilizationRecentIssueScanRecordedRun(ev, content, brief)
 			runs = append(runs, civilizationRecentIssueScanSortableRun{run: row, lastEventAt: ev.Timestamp().Value()})
 			continue
 		}
 
 		orderID, err := factoryOrderIDForRunLaunch(runID)
-		inFlight := false
-		if err == nil && factoryOrderByID[orderID] && stageTaskFactoryOrders[orderID] {
-			inFlight = true
+		proof, hasProof := civilizationRecentIssueScanStageProof{}, false
+		if err == nil && factoryOrderByID[orderID] {
+			proof, hasProof = stageTaskFactoryOrders[orderID]
 		}
-		if inFlight {
-			row := civilizationRecentIssueScanInFlightRun(ev, content, orderID)
-			runs = append(runs, civilizationRecentIssueScanSortableRun{run: row, lastEventAt: ev.Timestamp().Value()})
+		if hasProof {
+			row := civilizationRecentIssueScanInFlightRun(ev, content, orderID, proof, brief)
+			lastEventAt := ev.Timestamp().Value()
+			if proof.TimestampMS > 0 {
+				proofTime := time.UnixMilli(proof.TimestampMS).UTC()
+				if proofTime.After(lastEventAt) {
+					lastEventAt = proofTime
+				}
+			}
+			runs = append(runs, civilizationRecentIssueScanSortableRun{run: row, lastEventAt: lastEventAt})
 			continue
 		}
-		row := civilizationRecentIssueScanQueuedRun(ev, content)
+		row := civilizationRecentIssueScanQueuedRun(ev, content, brief)
 		runs = append(runs, civilizationRecentIssueScanSortableRun{run: row, lastEventAt: ev.Timestamp().Value()})
 	}
 
@@ -355,7 +452,7 @@ func civilizationRecentIssueScanRuns(
 		return runs[i].run.RunID < runs[j].run.RunID
 	})
 
-	out.Truncated = parkedTruncated || requestedTruncated
+	out.Truncated = parkedTruncated || requestedTruncated || workEvidenceTruncated
 	if len(runs) == 0 {
 		if out.Truncated {
 			out.Summary = "No recent issue-scan run activity is projected; the projection window is truncated and older runs may be omitted."
@@ -443,59 +540,120 @@ func civilizationRecentIssueScanRunFromParked(parked civilizationAssemblyNormali
 	}
 }
 
-func civilizationRecentIssueScanQueuedRun(ev event.Event, content FactoryRunRequestedContent) CivilizationRecentIssueScanRun {
-	return civilizationRecentIssueScanRequestedRun(ev, content, civilizationRecentIssueScanStateQueued, "")
+func civilizationRecentIssueScanQueuedRun(ev event.Event, content FactoryRunRequestedContent, brief civilizationRecentIssueScanBrief) CivilizationRecentIssueScanRun {
+	return civilizationRecentIssueScanRequestedRun(ev, content, brief, civilizationRecentIssueScanStateQueued, "", civilizationRecentIssueScanStageProof{})
 }
 
-func civilizationRecentIssueScanInFlightRun(ev event.Event, content FactoryRunRequestedContent, orderID string) CivilizationRecentIssueScanRun {
-	return civilizationRecentIssueScanRequestedRun(ev, content, civilizationRecentIssueScanStateInFlight, orderID)
+func civilizationRecentIssueScanInFlightRun(ev event.Event, content FactoryRunRequestedContent, orderID string, proof civilizationRecentIssueScanStageProof, brief civilizationRecentIssueScanBrief) CivilizationRecentIssueScanRun {
+	return civilizationRecentIssueScanRequestedRun(ev, content, brief, civilizationRecentIssueScanStateInFlight, orderID, proof)
 }
 
-func civilizationRecentIssueScanRecordedRun(ev event.Event, content FactoryRunRequestedContent) CivilizationRecentIssueScanRun {
-	return civilizationRecentIssueScanRequestedRun(ev, content, civilizationRecentIssueScanStateRecorded, "")
+func civilizationRecentIssueScanRecordedRun(ev event.Event, content FactoryRunRequestedContent, brief civilizationRecentIssueScanBrief) CivilizationRecentIssueScanRun {
+	return civilizationRecentIssueScanRequestedRun(ev, content, brief, civilizationRecentIssueScanStateRecorded, "", civilizationRecentIssueScanStageProof{})
 }
 
-func civilizationRecentIssueScanRequestedRun(ev event.Event, content FactoryRunRequestedContent, state, factoryOrderID string) CivilizationRecentIssueScanRun {
+func civilizationRecentIssueScanRequestedRun(ev event.Event, content FactoryRunRequestedContent, brief civilizationRecentIssueScanBrief, state, factoryOrderID string, proof civilizationRecentIssueScanStageProof) CivilizationRecentIssueScanRun {
 	if factoryOrderID == "" {
 		if orderID, err := factoryOrderIDForRunLaunch(content.RunID); err == nil {
 			factoryOrderID = orderID
 		}
 	}
-	timestamp := civilizationRecentIssueScanFormatTimestamp(ev.Timestamp().Value())
+	requestedTimestamp := ev.Timestamp().Value()
+	timestamp := civilizationRecentIssueScanFormatTimestamp(requestedTimestamp)
 	// TargetRepos[0] is guarded by the length check below: an empty
 	// TargetRepos leaves Repo as "" (acceptable per contract — Repo is only
 	// proven when the requested event actually names a target repo) rather
 	// than indexing out of range. This is the single shared constructor for
 	// the queued/in_flight/recorded rows, so the guard covers all three.
-	repo := ""
-	if len(content.TargetRepos) > 0 {
+	// Brief-sourced issue fields (CFAR finding 3) take precedence when the
+	// brief carries a selected issue; Repo falls back to TargetRepos[0] only
+	// when the brief has none.
+	repo := brief.Repo
+	if repo == "" && len(content.TargetRepos) > 0 {
 		repo = strings.TrimSpace(content.TargetRepos[0])
 	}
+	sourceRefs := []string{ev.ID().Value()}
+	stageID := ""
+	lastEventAtTimestamp := requestedTimestamp
+	if state == civilizationRecentIssueScanStateInFlight {
+		// CFAR finding 2: an in_flight row must carry the stage-evidence task
+		// reference that PROVES the state, not just the requested event's own
+		// ID — otherwise the row's evidence doesn't substantiate the state it
+		// claims. last_event_at reflects the LATEST of the requested event and
+		// the proving task evidence; first_event_at stays the requested event
+		// (the run's own origin never moves).
+		if proof.TaskRef != "" {
+			sourceRefs = append(sourceRefs, proof.TaskRef)
+		}
+		stageID = proof.StageID
+		if proof.TimestampMS > 0 {
+			proofTime := time.UnixMilli(proof.TimestampMS).UTC()
+			if proofTime.After(lastEventAtTimestamp) {
+				lastEventAtTimestamp = proofTime
+			}
+		}
+	}
+	lastEventAt := civilizationRecentIssueScanFormatTimestamp(lastEventAtTimestamp)
 	return CivilizationRecentIssueScanRun{
 		RunID:          strings.TrimSpace(content.RunID),
 		FactoryOrderID: factoryOrderID,
 		Repo:           repo,
+		IssueNumber:    brief.Number,
+		IssueURL:       brief.URL,
+		IssueTitle:     brief.Title,
 		State:          state,
 		FirstEventAt:   timestamp,
-		LastEventAt:    timestamp,
-		SourceRefs:     compactStrings([]string{ev.ID().Value()}),
+		LastEventAt:    lastEventAt,
+		StageID:        stageID,
+		SourceRefs:     compactStrings(sourceRefs),
 	}
 }
 
-// civilizationRecentIssueScanFactoryOrdersWithStageEvidence returns the set
-// of factory-order IDs carrying at least one work-task evidence record for
-// an issue-scan lifecycle stage (a task with a resolvable LifecycleStageID),
-// not merely the FactoryOrder's own seed task. This is the "≥1 work-task
-// evidence record" proof required to promote queued -> in_flight.
-func civilizationRecentIssueScanFactoryOrdersWithStageEvidence(workEvidence civilizationAssemblyFactoryOrderWorkEvidence) map[string]bool {
-	out := map[string]bool{}
+// civilizationRecentIssueScanStageProof carries the PROVING work-task
+// evidence for one factory order's in_flight promotion: the task reference
+// (event ID or canonical task ID — whichever the task evidence exposes),
+// the lifecycle stage ID, and that task's own event timestamp (derived from
+// its UUIDv7 event ID, since CivilizationAssemblyTaskEvidence carries no
+// timestamp field of its own). When a factory order has more than one
+// qualifying stage task, the LATEST one wins (CFAR finding 2: last_event_at
+// must reflect the latest work-task evidence, not merely the first match).
+type civilizationRecentIssueScanStageProof struct {
+	TaskRef     string
+	StageID     string
+	TimestampMS int64
+}
+
+// civilizationRecentIssueScanFactoryOrdersWithStageEvidence returns, per
+// factory-order ID, the PROVING work-task evidence record for an issue-scan
+// lifecycle stage (a task with a resolvable LifecycleStageID), not merely
+// the FactoryOrder's own seed task. This is the "≥1 work-task evidence
+// record" proof required to promote queued -> in_flight (CFAR finding 2:
+// the in_flight row must carry this proof in its own source_refs/stage_id/
+// last_event_at, not just the requested event's).
+func civilizationRecentIssueScanFactoryOrdersWithStageEvidence(workEvidence civilizationAssemblyFactoryOrderWorkEvidence) map[string]civilizationRecentIssueScanStageProof {
+	out := map[string]civilizationRecentIssueScanStageProof{}
 	for _, task := range workEvidence.Tasks {
 		orderID := strings.TrimSpace(task.FactoryOrderID)
 		stageID := strings.TrimSpace(task.LifecycleStageID)
 		if orderID == "" || stageID == "" {
 			continue
 		}
-		out[orderID] = true
+		taskRef := strings.TrimSpace(task.CanonicalTaskID)
+		if taskRef == "" {
+			taskRef = strings.TrimSpace(task.ID)
+		}
+		if taskRef == "" {
+			continue
+		}
+		var taskTimestampMS int64
+		if id, err := types.NewEventID(task.ID); err == nil {
+			taskTimestampMS = id.TimestampMS()
+		}
+		candidate := civilizationRecentIssueScanStageProof{TaskRef: taskRef, StageID: stageID, TimestampMS: taskTimestampMS}
+		existing, ok := out[orderID]
+		if !ok || candidate.TimestampMS > existing.TimestampMS {
+			out[orderID] = candidate
+		}
 	}
 	return out
 }

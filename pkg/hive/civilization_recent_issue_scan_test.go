@@ -992,7 +992,7 @@ func TestRecentIssueScanFoldLatencyBudget(t *testing.T) {
 	// civilizationRecentIssueScanRuns) so the isolated timing reflects a
 	// realistic input shape, not a synthetic one.
 	operatorProjection := BuildOperatorProjection(s, limit)
-	factoryOrders, factoryOrderWorkEvidence, _, _ := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
+	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
 	normalizedParkedRuns, parkedTruncated, _, _, parkedFetched := civilizationAssemblyNormalizedParkedRuns(s, limit)
 	requestedEvents, requestedTruncated, err := civilizationAssemblyFactoryRunRequestedEvents(s, limit)
 	if err != nil {
@@ -1000,7 +1000,7 @@ func TestRecentIssueScanFoldLatencyBudget(t *testing.T) {
 	}
 
 	foldStart := time.Now()
-	fold := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, factoryOrders, factoryOrderWorkEvidence)
+	fold := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, err == nil, factoryOrders, factoryOrderWorkEvidence, factoryOrdersQueryFailed, factoryOrdersTruncated)
 	foldElapsed := time.Since(foldStart)
 
 	if fold.Status != civilizationAssemblyFieldAvailable || len(fold.Runs) == 0 {
@@ -1025,4 +1025,432 @@ func TestRecentIssueScanFoldLatencyBudget(t *testing.T) {
 	}
 
 	t.Logf("builder=%s fold=%s (%.2f%% of builder, informational only — see NOTE on relative budget above) seeded_events=%d rail_runs=%d raceEnabled=%v", builderElapsed, foldElapsed, 100*float64(foldElapsed)/float64(builderElapsed), seeded, len(fold.Runs), raceEnabled)
+}
+
+// recentIssueScanRequestedFetchFailureStore fails ONLY the
+// hive.factory.run.requested ByType query, so a hive.issuescan.run.parked
+// query against the same underlying store still succeeds. This isolates the
+// "requested-run page could not be fetched" condition — the mirror-image of
+// recentIssueScanParkedFetchFailureStore above (CFAR finding 1).
+type recentIssueScanRequestedFetchFailureStore struct {
+	store.Store
+}
+
+func (s recentIssueScanRequestedFetchFailureStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	if eventType == EventTypeFactoryRunRequested {
+		return types.NewPage[event.Event](nil, types.None[types.Cursor](), false), errors.New("requested-run query unavailable")
+	}
+	return s.Store.ByType(eventType, limit, after)
+}
+
+// TestCivilizationRecentIssueScanRunsRequestedFetchFailureIsUnavailable covers
+// CFAR finding 1 (evidence-read uncertainty not propagated): when the
+// requested-run query itself fails, the fold has no signal at all about
+// queued/in_flight/recorded runs and must fail CLOSED — status unavailable,
+// zero runs, honest summary — mirroring the existing parked-fetch-failure
+// rule rather than silently falling back to "no requested runs" (which would
+// look identical to a healthy empty store).
+func TestCivilizationRecentIssueScanRunsRequestedFetchFailureIsUnavailable(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+
+	// Parked evidence exists and is readable; only the requested-run query
+	// fails. Even though a parked/human_action run could theoretically still
+	// be rendered from parked evidence alone, the requested-run query failure
+	// means the fold cannot know whether OTHER runs exist only in the
+	// requested-event stream (e.g. queued runs with no parked event yet), so
+	// the whole rail must fail closed rather than partially render.
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "run_issue_scan_requested_fetch_failure",
+		Repository:        "transpara-ai/hive",
+		IssueNumber:       910,
+		BlockerType:       IssueScanParkBlockerHumanScope,
+		RequiredAction:    "human must clarify scope",
+		SourceRefs:        []string{"https://github.com/transpara-ai/hive/issues/910"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:needs-human-scope"},
+	})
+
+	failingStore := recentIssueScanRequestedFetchFailureStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(failingStore, 50)
+
+	rail := projection.RecentIssueScanRuns
+	if rail.Status != civilizationAssemblyFieldUnavailable {
+		t.Fatalf("rail status = %q, want unavailable when the requested-run page cannot be fetched", rail.Status)
+	}
+	if len(rail.Runs) != 0 {
+		t.Fatalf("rail runs = %+v, want zero when requested-run evidence cannot be read", rail.Runs)
+	}
+	if rail.Summary == "" {
+		t.Fatalf("summary is empty, want an honest summary mentioning the unreadable requested-run evidence")
+	}
+}
+
+// TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceFailureDegradesToRecorded
+// covers CFAR finding 1's second half: when the reused factory-order/work
+// evidence computation itself FAILED (not merely absent), in_flight/queued
+// cannot be proven for ANY requested run — the fold cannot prove
+// work-evidence-absence (queued) NOR work-evidence-presence (in_flight), so
+// every requested-issue-scan run must degrade to recorded rather than
+// defaulting to queued (which would silently assert "no work evidence
+// exists" when the truth is "work evidence could not be read").
+func TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceFailureDegradesToRecorded(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 911,
+		Title:  "Requested run with unreadable work evidence",
+		URL:    "https://github.com/transpara-ai/hive/issues/911",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_work_evidence_failure",
+		IntakeID:   "intake_issue_scan_work_evidence_failure",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#911",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+
+	failingStore := factoryOrderReadFailureStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(failingStore, 50)
+
+	rail := projection.RecentIssueScanRuns
+	var run *CivilizationRecentIssueScanRun
+	for i := range rail.Runs {
+		if rail.Runs[i].RunID == "run_issue_scan_work_evidence_failure" {
+			run = &rail.Runs[i]
+		}
+	}
+	if run == nil {
+		t.Fatalf("rail runs = %+v, want run_issue_scan_work_evidence_failure present as recorded", rail.Runs)
+	}
+	if run.State != civilizationRecentIssueScanStateRecorded {
+		t.Fatalf("state = %q, want recorded (work evidence unreadable, cannot prove queued or in_flight)", run.State)
+	}
+}
+
+// TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceTruncationDegradesToRecorded
+// covers the truncated (as opposed to outright-failed) half of the same
+// finding: when the work.task.created page itself hits its limit
+// (HasMore()==true), "no work-task evidence exists for this factory order"
+// is unprovable — an in_flight promotion in that state could be a false
+// negative masked as queued, so every requested run degrades to recorded and
+// the rail's Truncated flag is set to reflect the cause.
+func TestCivilizationRecentIssueScanRunsFactoryOrderEvidenceTruncationDegradesToRecorded(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+
+	// Seed enough work.task.created events (unrelated to the run under test)
+	// that the work-task page hits a small limit and reports HasMore().
+	for i := 0; i < 3; i++ {
+		appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+			Title:                  fmt.Sprintf("Filler task %d", i),
+			Description:            "filler",
+			CreatedBy:              actorID,
+			FactoryOrderID:         fmt.Sprintf("fo_filler_%d", i),
+			RequirementIDs:         []string{fmt.Sprintf("req_filler_%d", i)},
+			AcceptanceCriterionIDs: []string{fmt.Sprintf("ac_filler_%d", i)},
+			Cell:                   "implementation",
+			RiskClass:              "high",
+			ExpectedOutputs:        []string{"ready-for-Human result PR"},
+		})
+	}
+
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 912,
+		Title:  "Requested run with truncated work evidence",
+		URL:    "https://github.com/transpara-ai/hive/issues/912",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_work_evidence_truncated",
+		IntakeID:   "intake_issue_scan_work_evidence_truncated",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#912",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+
+	// limit=2 forces the 3 filler work.task.created events (plus the run's
+	// own factory.run.requested, a different event type) to truncate the
+	// work.task.created page specifically.
+	projection := BuildCivilizationAssemblyProjection(s, 2)
+
+	rail := projection.RecentIssueScanRuns
+	var run *CivilizationRecentIssueScanRun
+	for i := range rail.Runs {
+		if rail.Runs[i].RunID == "run_issue_scan_work_evidence_truncated" {
+			run = &rail.Runs[i]
+		}
+	}
+	if run == nil {
+		t.Fatalf("rail runs = %+v, want run_issue_scan_work_evidence_truncated present as recorded", rail.Runs)
+	}
+	if run.State != civilizationRecentIssueScanStateRecorded {
+		t.Fatalf("state = %q, want recorded (work-task evidence page truncated, cannot prove queued or in_flight)", run.State)
+	}
+	if !rail.Truncated {
+		t.Fatalf("rail truncated = false, want true when work-task evidence truncation caused the degrade")
+	}
+}
+
+// TestCivilizationRecentIssueScanRunsInFlightCarriesTaskProof covers CFAR
+// finding 2: an in_flight row must carry the stage-evidence task reference
+// that PROVES the in_flight state, not just the factory.run.requested
+// event's own ID — otherwise the row's own source_refs/timestamps don't
+// substantiate the state it claims. Asserts the lifecycle-stage task's ID is
+// present in source_refs and last_event_at reflects the LATEST work-task
+// evidence timestamp (the lifecycle-stage task, appended after the seed
+// task), not the (earlier) requested event's timestamp.
+func TestCivilizationRecentIssueScanRunsInFlightCarriesTaskProof(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 913,
+		Title:  "In-flight run carries its proving evidence",
+		URL:    "https://github.com/transpara-ai/hive/issues/913",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	requested := appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_in_flight_proof",
+		IntakeID:   "intake_issue_scan_in_flight_proof",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#913",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+	orderID, err := factoryOrderIDForRunLaunch("run_issue_scan_in_flight_proof")
+	if err != nil {
+		t.Fatalf("factoryOrderIDForRunLaunch: %v", err)
+	}
+	appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Resolve transpara-ai/hive#913",
+		Description:            "FactoryOrder seed task.",
+		CreatedBy:              actorID,
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_in_flight_proof"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_in_flight_proof"},
+		Cell:                   "implementation",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"ready-for-Human result PR"},
+	})
+	// Sleep past a full second boundary so the stage task's event timestamp
+	// not only sorts strictly after the requested event's (UUIDv7,
+	// time-ordered) but also formats to a DIFFERENT RFC3339-second string —
+	// the output format's precision, so last_event_at vs first_event_at can
+	// be asserted unambiguously without depending on sub-second formatting.
+	time.Sleep(1100 * time.Millisecond)
+	stageTask := appendEvent(work.EventTypeTaskCreated, work.TaskCreatedContent{
+		Title:                  "Issue-scan stage: Research issue and repo context",
+		Description:            "Stage ID: research_issue_and_repo_context",
+		CreatedBy:              actorID,
+		CanonicalTaskID:        issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context"),
+		FactoryOrderID:         orderID,
+		RequirementIDs:         []string{"req_run_issue_scan_in_flight_proof"},
+		AcceptanceCriterionIDs: []string{"ac_run_issue_scan_in_flight_proof"},
+		Cell:                   "planning",
+		RiskClass:              "high",
+		ExpectedOutputs:        []string{"stage declaration artifact remains pending runtime evidence", "repo_context_packet"},
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	rail := projection.RecentIssueScanRuns
+	var run *CivilizationRecentIssueScanRun
+	for i := range rail.Runs {
+		if rail.Runs[i].RunID == "run_issue_scan_in_flight_proof" {
+			run = &rail.Runs[i]
+		}
+	}
+	if run == nil {
+		t.Fatalf("rail runs = %+v, want run_issue_scan_in_flight_proof present", rail.Runs)
+	}
+	if run.State != civilizationRecentIssueScanStateInFlight {
+		t.Fatalf("state = %q, want in_flight", run.State)
+	}
+	// The proving task reference is the stage task's CanonicalTaskID when
+	// present (the stable, human-legible reference the work-evidence fold
+	// exposes), not the raw event ID — mirrors CivilizationAssemblyTaskEvidence's
+	// own CanonicalTaskID-first convention.
+	wantTaskRef := issueScanLifecycleStageTaskCanonicalID(orderID, "research_issue_and_repo_context")
+	if !containsString(run.SourceRefs, wantTaskRef) {
+		t.Fatalf("source_refs = %+v, want the lifecycle-stage task's canonical task ID %s (the evidence that PROVES in_flight)", run.SourceRefs, wantTaskRef)
+	}
+	if run.StageID != "research_issue_and_repo_context" {
+		t.Fatalf("stage_id = %q, want research_issue_and_repo_context", run.StageID)
+	}
+	if run.FirstEventAt == "" {
+		t.Fatalf("first_event_at is empty, want the requested event's timestamp")
+	}
+	requestedTS := requested.Timestamp().Value().UTC().Format(time.RFC3339)
+	if run.FirstEventAt != requestedTS {
+		t.Fatalf("first_event_at = %q, want the requested event's timestamp %q (unchanged)", run.FirstEventAt, requestedTS)
+	}
+	stageTaskTS := stageTask.ID().TimestampMS()
+	requestedEventTS := requested.Timestamp().Value().UnixMilli()
+	if stageTaskTS <= requestedEventTS {
+		t.Skip("test fixture invariant broken: stage task event ID must sort after the requested event's timestamp")
+	}
+	lastEventParsed, err := time.Parse(time.RFC3339, run.LastEventAt)
+	if err != nil {
+		t.Fatalf("last_event_at = %q, want RFC3339: %v", run.LastEventAt, err)
+	}
+	if lastEventParsed.Before(requested.Timestamp().Value()) {
+		t.Fatalf("last_event_at = %q, want it no earlier than the requested event's timestamp %q", run.LastEventAt, requestedTS)
+	}
+	if run.LastEventAt == run.FirstEventAt {
+		t.Fatalf("last_event_at = %q equals first_event_at, want it to reflect the LATER stage-task evidence timestamp", run.LastEventAt)
+	}
+}
+
+// TestCivilizationRecentIssueScanRunsBriefSourcedIssueFields covers CFAR
+// finding 3: queued/in_flight/recorded rows must populate Repo/IssueNumber/
+// IssueURL/IssueTitle from the issue-scan brief's selected issue (already
+// present in content.Brief), not leave them at zero values. Repo falling
+// back to TargetRepos[0] is exercised separately below.
+func TestCivilizationRecentIssueScanRunsBriefSourcedIssueFields(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 914,
+		Title:  "Brief-sourced issue fields reach the rail",
+		URL:    "https://github.com/transpara-ai/hive/issues/914",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_brief_fields",
+		IntakeID:   "intake_issue_scan_brief_fields",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#914",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	rail := projection.RecentIssueScanRuns
+	if len(rail.Runs) != 1 {
+		t.Fatalf("rail runs = %+v, want one", rail.Runs)
+	}
+	run := rail.Runs[0]
+	if run.State != civilizationRecentIssueScanStateQueued {
+		t.Fatalf("state = %q, want queued", run.State)
+	}
+	if run.IssueNumber != 914 {
+		t.Fatalf("issue_number = %d, want 914 (from brief selected issue, not zero value)", run.IssueNumber)
+	}
+	if run.IssueURL != "https://github.com/transpara-ai/hive/issues/914" {
+		t.Fatalf("issue_url = %q, want the brief's selected issue URL", run.IssueURL)
+	}
+	if run.IssueTitle != "Brief-sourced issue fields reach the rail" {
+		t.Fatalf("issue_title = %q, want the brief's selected issue title", run.IssueTitle)
+	}
+	if run.Repo != "transpara-ai/hive" {
+		t.Fatalf("repo = %q, want transpara-ai/hive from the brief's selected issue", run.Repo)
+	}
+}
+
+// TestCivilizationRecentIssueScanRunsBriefMissingIssueFallsBackToTargetRepos
+// covers the fallback half of finding 3: when the brief lacks a selected
+// issue (empty repo), Repo must still fall back to TargetRepos[0] exactly as
+// before, rather than being left blank.
+func TestCivilizationRecentIssueScanRunsBriefMissingIssueFallsBackToTargetRepos(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+	// A brief with the issue-scan kind but no selected_issue payload at all
+	// (distinct from the "generic non-issue-scan brief" exclusion case,
+	// which is excluded from the rail entirely).
+	brief := []byte(`{"kind":"` + issueScanBriefKind + `"}`)
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_brief_no_issue",
+		IntakeID:   "intake_issue_scan_brief_no_issue",
+		OperatorID: "operator_michael",
+		Title:      "Resolve without a selected issue",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/fallback-repo"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+
+	projection := BuildCivilizationAssemblyProjection(s, 50)
+
+	rail := projection.RecentIssueScanRuns
+	if len(rail.Runs) != 1 {
+		t.Fatalf("rail runs = %+v, want one", rail.Runs)
+	}
+	run := rail.Runs[0]
+	if run.Repo != "transpara-ai/fallback-repo" {
+		t.Fatalf("repo = %q, want fallback to TargetRepos[0] when the brief has no selected issue", run.Repo)
+	}
+	if run.IssueNumber != 0 {
+		t.Fatalf("issue_number = %d, want 0 when the brief has no selected issue", run.IssueNumber)
+	}
 }
