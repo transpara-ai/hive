@@ -11,6 +11,17 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/safety"
+	"golang.org/x/sync/singleflight"
+)
+
+// operatorProjectionSingleflightKeyOperatorProjection and
+// ...KeyCivilizationAssemblyProjection are the singleflight.Group keys for
+// the two read-only projection endpoints (D2). Each endpoint has its own key
+// so a burst of requests to one endpoint never collapses into (or waits on)
+// the other's flight.
+const (
+	operatorProjectionSingleflightKeyOperatorProjection             = "operator-projection"
+	operatorProjectionSingleflightKeyCivilizationAssemblyProjection = "civilization-assembly-projection"
 )
 
 // maxDecisionBodyBytes caps the POST /api/hive/operator-decision request body
@@ -97,20 +108,34 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 		opt(&options)
 	}
 
+	// projectionFlight collapses concurrent identical GETs on each projection
+	// endpoint into ONE fresh computation (D2). This is request-collapsing
+	// over fresh computations, not caching: every request that lands (leader
+	// or sharer) receives a real computation's true generated_at, and no
+	// result is retained beyond the in-flight window — the next request after
+	// a flight completes always triggers a brand new computation.
+	var projectionFlight singleflight.Group
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/hive/operator-projection", func(w http.ResponseWriter, r *http.Request) {
 		if !operatorBearerOK(apiKey, r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		writeOperatorProjectionJSON(w, BuildOperatorProjection(s, limit, options.projectionOptions...))
+		result, _, _ := projectionFlight.Do(operatorProjectionSingleflightKeyOperatorProjection, func() (any, error) {
+			return BuildOperatorProjection(s, limit, options.projectionOptions...), nil
+		})
+		writeOperatorProjectionJSON(w, result)
 	})
 	mux.HandleFunc("GET /api/hive/civilization/assembly-projection", func(w http.ResponseWriter, r *http.Request) {
 		if !operatorBearerOK(apiKey, r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		writeOperatorProjectionJSON(w, BuildCivilizationAssemblyProjection(s, limit, options.projectionOptions...))
+		result, _, _ := projectionFlight.Do(operatorProjectionSingleflightKeyCivilizationAssemblyProjection, func() (any, error) {
+			return BuildCivilizationAssemblyProjection(s, limit, options.projectionOptions...), nil
+		})
+		writeOperatorProjectionJSON(w, result)
 	})
 	if options.writer != nil {
 		writer := options.writer

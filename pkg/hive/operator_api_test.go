@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -1016,5 +1018,245 @@ func TestOperatorDecisionEndpointRejectsAlreadyDecided(t *testing.T) {
 	}
 	if proj.AuthorityDecisions[0].Outcome != "denied" {
 		t.Fatalf("decision outcome = %q, want denied (denial must not be overwritten)", proj.AuthorityDecisions[0].Outcome)
+	}
+}
+
+// TestOperatorProjectionServerServesRecentIssueScanRunsEndToEnd covers D1-D3 +
+// the handler leg of the D2 TDD plan: a seeded store containing an issue-scan
+// parked event must be visible in the assembly-projection endpoint's
+// recent_issue_scan_runs section with the expected run/state, over a real
+// httptest server using the same handler-mounting pattern as every other
+// operator API test in this file.
+func TestOperatorProjectionServerServesRecentIssueScanRunsEndToEnd(t *testing.T) {
+	s, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "run_ops_api_e2e_parked_001",
+		Repository:        "transpara-ai/hive",
+		IssueNumber:       777,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       IssueScanParkBlockerHumanScope,
+		Detail:            "transpara-ai/hive#777 is labeled cc:needs-human-scope",
+		RequiredAction:    "human must clarify scope before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/hive/issues/777"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:intake", "cc:needs-human-scope"},
+	})
+
+	handler := NewOperatorProjectionServer(s, "secret", 50)
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/hive/civilization/assembly-projection", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get assembly projection: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var projection CivilizationAssemblyProjection
+	if err := json.NewDecoder(resp.Body).Decode(&projection); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	rail := projection.RecentIssueScanRuns
+	if rail.Status != civilizationAssemblyFieldAvailable {
+		t.Fatalf("recent_issue_scan_runs.status = %q, want available", rail.Status)
+	}
+	if len(rail.Runs) != 1 {
+		t.Fatalf("recent_issue_scan_runs.runs = %+v, want one", rail.Runs)
+	}
+	run := rail.Runs[0]
+	if run.RunID != "run_ops_api_e2e_parked_001" {
+		t.Fatalf("run_id = %q, want run_ops_api_e2e_parked_001", run.RunID)
+	}
+	if run.State != "human_action" {
+		t.Fatalf("state = %q, want human_action", run.State)
+	}
+	if run.Repo != "transpara-ai/hive" || run.IssueNumber != 777 {
+		t.Fatalf("run issue ref = %+v, want transpara-ai/hive#777", run)
+	}
+}
+
+// gatedCountingStore wraps a store.Store, counting every ByType call for a
+// single tracked event type and, on the FIRST such call only, blocking on a
+// gate channel until it is closed. Paired with gateAfterNHandlerEntries
+// (which holds the HTTP handler itself, at the server, until N requests have
+// arrived), this makes the singleflight-collapse assertion deterministic
+// rather than racy: no tracked store read can complete until every one of
+// the N requests has actually been received and dispatched by the server —
+// not merely "sent" by the client — and had the opportunity to join the
+// shared flight.
+type gatedCountingStore struct {
+	store.Store
+	trackedType types.EventType
+	gate        chan struct{}
+
+	count int32
+	gated int32
+}
+
+func (s *gatedCountingStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	if eventType == s.trackedType {
+		atomic.AddInt32(&s.count, 1)
+		if atomic.AddInt32(&s.gated, 1) == 1 && s.gate != nil {
+			// Only the first call blocks on the gate; this proves at most one
+			// underlying computation is ever actually running the tracked
+			// query at a time when singleflight is collapsing concurrent
+			// requests. Later calls (a fresh flight after the first
+			// completes) do not re-block.
+			<-s.gate
+		}
+	}
+	return s.Store.ByType(eventType, limit, after)
+}
+
+func (s *gatedCountingStore) callCount() int {
+	return int(atomic.LoadInt32(&s.count))
+}
+
+// gateAfterNHandlerEntries wraps an http.Handler so that the Nth request to
+// actually reach the server (ServeHTTP invoked — i.e. accepted, routed, and
+// dispatched, not merely sent by a client) closes gate exactly once. This is
+// the server-side arrival signal the singleflight-collapse test needs: it
+// guarantees the underlying store's gated tracked read (blocked on the same
+// channel) cannot complete until every concurrent request has been
+// dispatched to the mux and had the opportunity to call singleflight.Do —
+// removing any dependency on client-side goroutine/network scheduling.
+func gateAfterNHandlerEntries(next http.Handler, n int, gate chan struct{}) http.Handler {
+	var arrived int32
+	var once sync.Once
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(atomic.AddInt32(&arrived, 1)) >= n {
+			once.Do(func() { close(gate) })
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// TestOperatorProjectionServerSingleflightCollapsesConcurrentRequests covers
+// D2's singleflight requirement: N=4 concurrent GETs to the civilization
+// assembly-projection endpoint must collapse to fewer than N fresh
+// computations of the tracked query (hive.issuescan.run.parked, fetched
+// exactly once per BuildCivilizationAssemblyProjection call), while every
+// response is still 200 with valid, identical JSON. Determinism comes from a
+// SERVER-SIDE gate: the underlying store's tracked read blocks until the Nth
+// request has actually been dispatched to the handler (gateAfterNHandlerEntries),
+// so the one live computation cannot complete before every concurrent
+// request has had the chance to join its flight. This proves the collapse
+// by construction, independent of client/network/goroutine scheduling.
+func TestOperatorProjectionServerSingleflightCollapsesConcurrentRequests(t *testing.T) {
+	baseStore, actorID, appendEvent := newOperatorProjectionStore(t)
+	appendEvent(EventTypeIssueScanRunParked, IssueScanRunParkedContent{
+		RunID:             "run_ops_api_singleflight_001",
+		Repository:        "transpara-ai/hive",
+		IssueNumber:       778,
+		LifecycleVersion:  IssueScanParkLifecycleLevel1Canary,
+		EvidenceClass:     IssueScanParkEvidenceClassLevel1Canary,
+		AuthorityBoundary: IssueScanParkAuthorityBoundaryLevel1Canary,
+		BlockerType:       IssueScanParkBlockerHumanScope,
+		Detail:            "transpara-ai/hive#778 is labeled cc:needs-human-scope",
+		RequiredAction:    "human must clarify scope before Hive may continue",
+		SourceRefs:        []string{"https://github.com/transpara-ai/hive/issues/778"},
+		ParkedBy:          actorID,
+		TargetIssueState:  "open",
+		TargetIssueLabels: []string{"cc:intake", "cc:needs-human-scope"},
+	})
+
+	// Compute the per-build tracked-call count sequentially first, exactly as
+	// the task brief requires, so the concurrent assertion below is relative
+	// to ground truth rather than an assumed constant.
+	sequential := &gatedCountingStore{Store: baseStore, trackedType: EventTypeIssueScanRunParked}
+	_ = BuildCivilizationAssemblyProjection(sequential, 50)
+	perBuildCount := sequential.callCount()
+	if perBuildCount < 1 {
+		t.Fatalf("perBuildCount = %d, want >= 1 tracked call per build", perBuildCount)
+	}
+
+	const concurrency = 4
+	gate := make(chan struct{})
+	gated := &gatedCountingStore{
+		Store:       baseStore,
+		trackedType: EventTypeIssueScanRunParked,
+		gate:        gate,
+	}
+	// gateAfterNHandlerEntries closes gate only once the SERVER has actually
+	// dispatched the Nth request to the mux — the store's tracked read (also
+	// blocked on gate) therefore cannot complete until every one of the 4
+	// concurrent requests has been received and had the chance to join the
+	// shared singleflight.Do call, regardless of client/network scheduling.
+	handler := gateAfterNHandlerEntries(NewOperatorProjectionServer(gated, "secret", 50), concurrency, gate)
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	var wg sync.WaitGroup
+	responses := make([]*http.Response, concurrency)
+	bodies := make([][]byte, concurrency)
+	errs := make([]error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/hive/civilization/assembly-projection", nil)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			req.Header.Set("Authorization", "Bearer secret")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			responses[i] = resp
+			bodies[i] = body
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+
+	for i := 0; i < concurrency; i++ {
+		if responses[i].StatusCode != http.StatusOK {
+			t.Fatalf("response %d status = %d, want %d body=%s", i, responses[i].StatusCode, http.StatusOK, bodies[i])
+		}
+		var decoded CivilizationAssemblyProjection
+		if err := json.Unmarshal(bodies[i], &decoded); err != nil {
+			t.Fatalf("decode response %d: %v body=%s", i, err, bodies[i])
+		}
+		if len(decoded.RecentIssueScanRuns.Runs) != 1 || decoded.RecentIssueScanRuns.Runs[0].RunID != "run_ops_api_singleflight_001" {
+			t.Fatalf("response %d recent_issue_scan_runs = %+v, want run_ops_api_singleflight_001", i, decoded.RecentIssueScanRuns)
+		}
+		if !bytes.Equal(bodies[i], bodies[0]) {
+			t.Fatalf("response %d body differs from response 0 (singleflight sharers must receive identical bytes):\n%d: %s\n0: %s", i, i, bodies[i], bodies[0])
+		}
+	}
+
+	total := gated.callCount()
+	if total >= concurrency*perBuildCount {
+		t.Fatalf("tracked ByType calls = %d, want < %d (perBuildCount=%d * concurrency=%d): singleflight did not collapse concurrent requests", total, concurrency*perBuildCount, perBuildCount, concurrency)
+	}
+	if total < perBuildCount {
+		t.Fatalf("tracked ByType calls = %d, want >= %d (at least one real computation must have run)", total, perBuildCount)
 	}
 }
