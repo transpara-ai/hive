@@ -4629,9 +4629,38 @@ func writeRoleDefaultCatalogAt(t *testing.T, path, role, model string) {
 
 func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
 	catalogPath := filepath.Join("..", "..", "catalog-mixed.yaml")
-	wantAliases := map[string][]string{
-		"claude-opus-4-8": {"opus-4-8"},
-		"claude-fable-5":  {"fable", "fable-5"},
+	// MergeCatalogs replaces same-ID embedded entries WHOLESALE with the user
+	// file's copy, so a wrong catalog-mixed price or capability set would
+	// silently override eventgraph's correct entry and feed the cost gates
+	// (MaxCostPerCallUSD, CheapestWithCapabilities) and CanOperate validation
+	// — pin all four pricing numbers and the exact capability list post-merge.
+	wantCapabilities := []modelconfig.Capability{
+		modelconfig.CapTools, modelconfig.CapReasoning, modelconfig.CapCoding,
+		modelconfig.CapVision, modelconfig.CapOperate, modelconfig.CapLargeContext,
+		modelconfig.CapStructuredOut,
+	}
+	wantEntries := map[string]struct {
+		aliases []string
+		pricing modelconfig.ModelPricing
+	}{
+		"claude-opus-4-8": {
+			aliases: []string{"opus-4-8"},
+			pricing: modelconfig.ModelPricing{
+				InputPerMillion:      5.00,
+				OutputPerMillion:     25.00,
+				CacheReadPerMillion:  0.50,
+				CacheWritePerMillion: 6.25,
+			},
+		},
+		"claude-fable-5": {
+			aliases: []string{"fable", "fable-5"},
+			pricing: modelconfig.ModelPricing{
+				InputPerMillion:      10.00,
+				OutputPerMillion:     50.00,
+				CacheReadPerMillion:  1.00,
+				CacheWritePerMillion: 12.50,
+			},
+		},
 	}
 
 	// The entries must exist in catalog-mixed.yaml ITSELF, not only in the
@@ -4646,7 +4675,7 @@ func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse catalog-mixed.yaml: %v", err)
 	}
-	for id := range wantAliases {
+	for id := range wantEntries {
 		entry, ok := userCatalog.Lookup(id)
 		if !ok {
 			t.Fatalf("catalog-mixed.yaml missing model entry %q", id)
@@ -4670,7 +4699,7 @@ func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
 		t.Fatalf("OperatorModelSelectionFromCatalogPath: %v", err)
 	}
 	merged := config.Resolver.Catalog()
-	for id, aliases := range wantAliases {
+	for id, want := range wantEntries {
 		entry, ok := merged.Lookup(id)
 		if !ok {
 			t.Fatalf("merged catalog missing id %q", id)
@@ -4678,7 +4707,18 @@ func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
 		if entry.ID != id {
 			t.Fatalf("merged catalog lookup %q resolved to %q", id, entry.ID)
 		}
-		for _, alias := range aliases {
+		if entry.Pricing != want.pricing {
+			t.Fatalf("merged catalog entry %q pricing = %+v, want %+v", id, entry.Pricing, want.pricing)
+		}
+		if len(entry.Capabilities) != len(wantCapabilities) {
+			t.Fatalf("merged catalog entry %q capabilities = %v, want %v", id, entry.Capabilities, wantCapabilities)
+		}
+		for i, capability := range wantCapabilities {
+			if entry.Capabilities[i] != capability {
+				t.Fatalf("merged catalog entry %q capabilities = %v, want %v", id, entry.Capabilities, wantCapabilities)
+			}
+		}
+		for _, alias := range want.aliases {
 			aliased, ok := merged.Lookup(alias)
 			if !ok {
 				t.Fatalf("merged catalog missing alias %q for %q", alias, id)
@@ -4743,19 +4783,37 @@ func TestOperatorModelRoleAssignmentSelectionModeRoundTrip(t *testing.T) {
 }
 
 func TestOperatorModelRoleAssignmentErrorPathsCarryNoSelectionMode(t *testing.T) {
+	// operatorModelRoleAssignment has exactly three error-return paths before
+	// SelectionMode is set; one row per path completes the input-domain sweep.
 	config := DefaultOperatorModelSelectionConfig(time.Unix(1_700_000_000, 0).UTC())
 	config.RolePolicies = map[string]OperatorModelRolePolicy{
-		// Resolve itself fails: the token is not a catalog id, alias, or tier.
+		// Path 1 — Resolve itself fails: the token is not a catalog id,
+		// alias, or tier.
 		"guardian": {Policy: &modelconfig.RoleModelPolicy{Model: "no-such-model"}},
-		// Resolve succeeds but the stored-policy validation fails afterwards:
-		// an api-key model without the explicit auth_mode opt-in.
+		// Path 2 — Resolve succeeds but validateRunLaunchOverrideResolvedConfig
+		// fails: an api-key model without the explicit auth_mode opt-in.
 		"sysmon": {Policy: &modelconfig.RoleModelPolicy{Model: "api-sonnet"}},
+		// Path 3 — Resolve succeeds but validateStoredModelRolePolicyResolution
+		// fails: the stored resolved_model no longer matches what the current
+		// resolver produces.
+		"allocator": {
+			Policy:        &modelconfig.RoleModelPolicy{Model: "sonnet"},
+			ResolvedModel: "claude-opus-4-6",
+		},
 	}
 	selection := BuildOperatorModelSelection(config)
-	for _, role := range []string{"guardian", "sysmon"} {
+	wantErrors := map[string]string{
+		"guardian":  "not found in catalog",
+		"sysmon":    "opt in to metered API-key models",
+		"allocator": "stored resolved_model",
+	}
+	for role, wantError := range wantErrors {
 		assignment := requireModelAssignment(t, selection, role)
 		if assignment.Error == "" {
 			t.Fatalf("%s assignment expected an error, got none: %+v", role, assignment)
+		}
+		if !strings.Contains(assignment.Error, wantError) {
+			t.Fatalf("%s error = %q, want the %q gate (containing %q)", role, assignment.Error, role, wantError)
 		}
 		if assignment.SelectionMode != "" {
 			t.Fatalf("%s error-path selection_mode = %q, want empty — mode is never synthesized", role, assignment.SelectionMode)
