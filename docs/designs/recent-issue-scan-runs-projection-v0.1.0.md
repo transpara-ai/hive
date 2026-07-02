@@ -1,8 +1,8 @@
 # Recent Issue-Scan Runs Projection — Design Packet
 
 - **doc_id:** HIVE-RECENT-ISSUE-SCAN-RUNS-DESIGN-001
-- **version:** v0.1.0
-- **status:** IADA applied → CFADA
+- **version:** v0.2.0 (CFADA round 1 resolved)
+- **status:** CFADA round 2
 - **issues:** https://github.com/transpara-ai/hive/issues/240 (this repo) · https://github.com/transpara-ai/site/issues/204 (consumer)
 - **base:** hive main @ 02ae3d4; site consumer stacks on site PR #203
 - **scope:** projection-only fold in `pkg/hive/civilization_assembly_projection.go` + hive-ops-api serving; site renders a rail. NO new event types, NO writes, NO scanner/lifecycle behavior change.
@@ -19,17 +19,26 @@ New top-level section `recent_issue_scan_runs` (contract in hive#240, restated i
 
 | state | proof required |
 |---|---|
-| `parked` / `human_action` | `hive.issuescan.run.parked` content — EXACTLY the mapping the existing board fold uses (shared helper, not a re-derivation) |
-| `queued` | issue-scan `factory.run.requested` present AND no parked event for the run AND no work evidence joined |
-| `in_flight` | queued proof + the run's factory order has work-task evidence in the folds the builder ALREADY computes (join by FactoryOrderID; no new queries) |
-| `ready_for_human` | final-stage completion evidence already present in the builder's existing folds — **implementer must verify this is provable without new store queries; if not provable, DROP this state from v1** and let such runs surface as `in_flight`/`recorded`; scope reduction is the fail-safe direction (IADA-1) |
-| `recorded` | fallback for a run whose existence is proven but whose lifecycle position is not — honest catch-all; NEVER a healthy-looking default |
+| `parked` / `human_action` | `hive.issuescan.run.parked` content — via a SHARED normalized parked-run helper feeding BOTH the board fold and the rail (one record: state, issue ref, blocker fields, refs, link key — CFADA1-adv4) |
+| `queued` | an issue-scan `factory.run.requested` event (identified by the issue-scan brief/lifecycle predicate — the same predicate the queued-lifecycle fold uses; generic factory runs are EXCLUDED entirely, they never even reach `recorded` — CFADA1-adv1) with no parked event for the run and no work evidence joined |
+| `in_flight` | queued proof + the run's `FactoryOrderID` resolves to a factory-order summary ALREADY built by the operator projection AND that summary carries ≥1 work-task evidence record. If the order summary is absent (limit/truncation), the run stays `queued` — under-claiming is the safe direction |
+| `recorded` | fallback for a run whose existence is proven (issue-scan predicate matched) but whose lifecycle position is not — honest catch-all; NEVER a healthy-looking default |
 
-Precedence when evidence conflicts: parked/human_action > ready_for_human > in_flight > queued > recorded (a terminal parked fact beats an older queued fact). Dedupe by `run_id`, keeping the highest-precedence state and merging source_refs (IADA-2).
+**`ready_for_human` is DROPPED from v1 (CFADA1-2).** Hive's own stage-evidence code states stage evidence is not PR-readiness or human-approval proof (`pkg/hive/issue_scan_stage_runtime_evidence.go:18-20,63-67`), and the all-stages-complete check is runtime logic, not a projection fold output. Approximating it from visible final-stage work evidence could paint an incomplete run healthy. Runs in that position surface as `in_flight`. A future packet may add the state when the projection folds an explicit, non-truncated all-stage completion proof.
 
-### D2 — Reuse fetched pages; at most one new query
+**Evidence sourcing (CFADA1-1 — corrected reuse claim):** the operator projection exposes only `LastQueuedRunRequest` (`operator_projection.go:679-719`) — the queued fold is NOT reusable for a multi-run rail. The rail fold is therefore authorized exactly ONE new store query: a `ByType(EventTypeFactoryRunRequested, limit, …)` page, filtered by the issue-scan predicate. The parked page and the factory-order/work evidence are reused from the builder's existing outputs. Total new store round-trips: one.
 
-The endpoint already costs ~5s live. The fold MUST reuse: the parked-events page (already fetched), the queued-run fold (`factory.run.requested`, already fetched for QueuedRunRequest), and the factory-order/work evidence (already folded). If `ready_for_human` needs one additional `ByType` page, that is the single permitted new query and must be measured (IADA-3: a timed test comparing builder duration with/without the new fold on a seeded store; assert the delta is bounded — no order-of-magnitude regression).
+Precedence when evidence conflicts: parked/human_action > in_flight > queued > recorded. Dedupe by `run_id` (CFADA1-3):
+- runs whose `run_id` is blank after TrimSpace are EXCLUDED from the rail (cannot be deduped or linked; the board's own handling of such events is unchanged);
+- multiple parked events for one run → the record with the LATEST event timestamp wins whole (no field-mixing between events); `source_refs` are the union;
+- parked vs queued for one run → parked wins whole, refs unioned.
+
+### D2 — Latency: one new query, absolute fold budget, and a consumer-side timeout fix (CFADA1-4)
+
+The endpoint measured 5.2s live against the site's 5s intake client timeout — the surface already flaps to honest-unavailable TODAY, and no hive-side delta test alone can fix that. Two-part resolution:
+
+- **Hive:** the rail fold adds exactly ONE store query (the `factory.run.requested` page, D1) and otherwise consumes already-fetched pages/folds. Timed regression test on a seeded store asserts the builder's added wall-clock from the new fold is < 250ms absolute AND < 10% relative — a hard budget, not just "no order-of-magnitude regression".
+- **Site (companion half, site#204):** the civilization-projection HTTP client timeout is raised from 5s to **9s** — above the measured 5.2s with headroom, deliberately BELOW the intake surface's 10s poll interval so polls can never overlap. This is a consumer-resilience fix that stands on its own (the intake board benefits immediately) and is required for the rail to be usable at all. The console's honest-unavailable behavior on timeout is unchanged.
 
 ### D3 — Timestamps and ordering
 
@@ -41,7 +50,8 @@ The endpoint already costs ~5s live. The fold MUST reuse: the parked-events page
 
 ### D5 — Site rail (consumer half; site#204)
 
-- View-model derivation in `buildConsoleIssueScan`: rail data only when surface freshness usable AND section `status == "available"` (allowlist); absent field / unknown status / unavailable → no rail, board unchanged.
+- View-model derivation in `buildConsoleIssueScan`: rail data only when the surface freshness is one of the EXISTING usable states — `current`, `stale`, or `partial`, exactly the set that renders the board (CFADA1-adv2: the rail and board share one freshness decision; they can never diverge) — AND the section's own `status == "available"` (allowlist); absent field / unknown status / unavailable → no rail, board unchanged.
+- Civilization-projection client timeout 5s → 9s (D2).
 - Rail renders inside the polled intake fragment (refreshes with the board; inherits the B1 drawer-reset semantics untouched).
 - State→style map is an allowlist (amber for parked/human_action, emerald for ready_for_human, neutral for queued/in_flight/recorded); unknown state values render escaped text with neutral style — `default` is neutral, never a healthy color.
 - Drawer links ONLY for runs whose (run_id, stage_id) exists on the rendered board (site-side index at build time); everything else unlinked. No dead links, no fabricated targets (IADA-5).
@@ -61,7 +71,17 @@ As specified in hive#240: top-level `recent_issue_scan_runs: {status: "available
 
 Hive: state-domain table test (every D1 state + recorded fallback + precedence conflicts + dedupe + blank run_id skip); consistency test (parked run appears in board AND rail with identical state/ref via shared helper); truncation test; empty-store unavailable test; handler test (hive-ops-api serves the section); timed fold-delta test (D2). Site: 1.5.0 byte-compat regression; rail rendering (states, order, truncation marker); link-only-when-on-board test; hostile-field escaping incl. unknown state neutral-styling; read-only guard extension.
 
-## 6. IADA record (v0.1.0, 2026-07-02)
+## 6. CFADA record
+
+### Round 1 (codex, 2026-07-02, via its CFADA governance skill) — VERDICT: BLOCKERS (4) → all resolved in v0.2.0
+
+- **CFADA1-1 (false reuse claim):** the queued-run fold exposes only `LastQueuedRunRequest`; a multi-run rail cannot reuse it. Resolved: exactly one new authorized store query (`factory.run.requested` page with the issue-scan predicate); parked page + factory-order/work evidence reused.
+- **CFADA1-2 (`ready_for_human` unprovable):** stage evidence is explicitly not PR-readiness proof, and the all-stage completion check is runtime logic, not a fold output. Resolved: state DROPPED from v1; such runs surface as `in_flight`.
+- **CFADA1-3 (dedupe underspecified):** multiple parked events per run and blank run_ids had no contract. Resolved: latest-parked-event-wins-whole (no field mixing), refs unioned; blank run_id excluded from the rail.
+- **CFADA1-4 (latency budget insufficient):** the endpoint already exceeds the site's 5s client timeout. Resolved: hard hive fold budget (<250ms absolute, <10% relative, timed test) PLUS site civilization-client timeout 5s → 9s (bounded under the 10s poll to prevent overlap).
+- Advisories adopted: issue-scan predicate excludes generic factory runs entirely (adv1); rail freshness bound to the board's exact usable-state set (adv2); 1.5.0 byte-compat kept (adv3); shared normalized parked-run helper feeding board + rail (adv4).
+
+## 7. IADA record (v0.1.0, 2026-07-02)
 
 - **IADA-1 (unprovable ready state):** if final-stage completion cannot be proven from existing folds without new queries, the state is dropped from v1 rather than approximated — scope reduction over guessing.
 - **IADA-2 (conflicting evidence):** same run in parked page and queued fold → explicit precedence + dedupe by run_id; without this, the rail could show one run twice in two states.
