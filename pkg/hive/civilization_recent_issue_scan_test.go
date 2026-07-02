@@ -1,10 +1,13 @@
 package hive
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
 )
@@ -702,4 +705,88 @@ func TestCivilizationRecentIssueScanRunsStateDomain(t *testing.T) {
 			t.Fatalf("rail runs[1] = %+v, want the older run second", projection.RecentIssueScanRuns.Runs[1])
 		}
 	})
+}
+
+// recentIssueScanParkedFetchFailureStore fails ONLY the
+// hive.issuescan.run.parked ByType query, so a factory.run.requested query
+// against the same underlying store still succeeds. This isolates the
+// "parked page could not be fetched" condition from every other store
+// behavior (mirrors factoryOrderReadFailureStore's pattern for a different
+// event type).
+type recentIssueScanParkedFetchFailureStore struct {
+	store.Store
+}
+
+func (s recentIssueScanParkedFetchFailureStore) ByType(eventType types.EventType, limit int, after types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	if eventType == EventTypeIssueScanRunParked {
+		return types.NewPage[event.Event](nil, types.None[types.Cursor](), false), errors.New("parked-run query unavailable")
+	}
+	return s.Store.ByType(eventType, limit, after)
+}
+
+// TestCivilizationRecentIssueScanRunsParkedFetchFailureIsUnavailable covers
+// the Critical review finding: when the parked-run page fetch fails, the
+// rail fold must fail CLOSED (status unavailable, zero runs) rather than
+// treating "fetch failed" as "confirmed parked-absence" and evaluating
+// factory.run.requested runs for in_flight/queued as if parked-absence were
+// proven. The board fold already short-circuits on this (parkedOK==false);
+// this test proves the rail now does too, and that the board's existing
+// behavior is unchanged.
+func TestCivilizationRecentIssueScanRunsParkedFetchFailureIsUnavailable(t *testing.T) {
+	s, _, appendEvent := newOperatorProjectionStore(t)
+
+	issue := GitHubIssueCandidate{
+		Repo:   "transpara-ai/hive",
+		Number: 900,
+		Title:  "Requested run with unreadable parked evidence",
+		URL:    "https://github.com/transpara-ai/hive/issues/900",
+		Body:   "Body",
+		Labels: []string{"civilization"},
+	}
+	brief, err := issueScanBriefJSON([]GitHubIssueCandidate{issue}, issue)
+	if err != nil {
+		t.Fatalf("issueScanBriefJSON: %v", err)
+	}
+	appendEvent(EventTypeFactoryRunRequested, FactoryRunRequestedContent{
+		RunID:      "run_issue_scan_parked_fetch_failure",
+		IntakeID:   "intake_issue_scan_parked_fetch_failure",
+		OperatorID: "operator_michael",
+		Title:      "Resolve transpara-ai/hive#900",
+		Status:     "queued",
+		Authority: RunLaunchAuthority{
+			InitialLevel: event.AuthorityLevelRequired,
+			Scope:        "transpara-ai issue scan to ready-for-Human PR; no merge or deploy",
+			PolicyRef:    IssueScanDefaultPolicyRef,
+			Rationale:    "Civilization selected a Transpara-AI GitHub issue for governed factory execution.",
+		},
+		Budget:        RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+		TargetRepos:   []string{"transpara-ai/hive"},
+		SourceEventID: newTestEventID(t),
+		BriefEventID:  newTestEventID(t),
+		Brief:         brief,
+	})
+
+	failingStore := recentIssueScanParkedFetchFailureStore{Store: s}
+	projection := BuildCivilizationAssemblyProjection(failingStore, 50)
+
+	rail := projection.RecentIssueScanRuns
+	if rail.Status != civilizationAssemblyFieldUnavailable {
+		t.Fatalf("rail status = %q, want unavailable when the parked page cannot be fetched", rail.Status)
+	}
+	if len(rail.Runs) != 0 {
+		t.Fatalf("rail runs = %+v, want zero when parked-absence cannot be proven", rail.Runs)
+	}
+	if !strings.Contains(rail.Summary, "parked") {
+		t.Fatalf("rail summary = %q, want it to mention the unreadable parked evidence", rail.Summary)
+	}
+
+	// The board fold already short-circuits on parked-fetch failure
+	// (parkedOK==false) prior to this fix. Assert that behavior is
+	// unchanged by this change.
+	if projection.IssueIntakeProjection.Status != civilizationAssemblyFieldUnavailable {
+		t.Fatalf("board intake status = %q, want unavailable (unchanged behavior)", projection.IssueIntakeProjection.Status)
+	}
+	if len(projection.IssueScanProjection.Runs) != 0 {
+		t.Fatalf("board scan runs = %+v, want zero (unchanged behavior)", projection.IssueScanProjection.Runs)
+	}
 }

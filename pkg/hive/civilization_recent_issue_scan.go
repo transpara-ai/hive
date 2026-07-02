@@ -121,8 +121,20 @@ func civilizationRecentIssueScanNormalizeParkedEvent(ev event.Event, content Iss
 // hive.issuescan.run.parked store fetch shared by both the board fold and
 // the recent-runs rail fold. It returns normalized runs plus the page's
 // truncation flag; ok=false means the caller should return the returned
-// evidence as-is (I/O error, nil store, or empty page).
-func civilizationAssemblyNormalizedParkedRuns(s store.Store, limit int) ([]civilizationAssemblyNormalizedParkedRun, bool, civilizationAssemblyIssueScanProjectionEvidence, bool) {
+// evidence as-is (I/O error, nil store, or empty page) — this is the board
+// fold's existing short-circuit signal and is preserved unchanged.
+//
+// The fifth return value, fetched, is a STRICTLY NARROWER signal than ok:
+// fetched=true iff the store fetch itself succeeded (s non-nil, ByType
+// returned no error), REGARDLESS of whether the resulting page was empty.
+// fetched=false means the page could not be read at all (nil store or
+// ByType error) — parked-absence is UNKNOWN, not proven. This distinction
+// matters to the rail fold, which (unlike the board fold) still has
+// independent requested-run evidence to evaluate when the parked page is
+// confirmably empty (fetched=true, ok=false, zero events): that is proof of
+// parked-absence, not an unreadable page, so the rail must not be forced
+// unavailable in that case. Only fetched=false forces the rail unavailable.
+func civilizationAssemblyNormalizedParkedRuns(s store.Store, limit int) ([]civilizationAssemblyNormalizedParkedRun, bool, civilizationAssemblyIssueScanProjectionEvidence, bool, bool) {
 	intake := CivilizationIssueIntakeProjection{
 		Status:  civilizationAssemblyFieldUnavailable,
 		Summary: "No scanner-visible issue intake records are projected.",
@@ -137,19 +149,19 @@ func civilizationAssemblyNormalizedParkedRuns(s store.Store, limit int) ([]civil
 	}
 	scan := CivilizationIssueScanProjection{}
 	if s == nil {
-		return nil, false, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan records: store is required"}}, false
+		return nil, false, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan records: store is required"}}, false, false
 	}
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
 	}
 	page, err := s.ByType(EventTypeIssueScanRunParked, limit, types.None[types.Cursor]())
 	if err != nil {
-		return nil, false, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan parked records: " + err.Error()}}, false
+		return nil, false, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan parked records: " + err.Error()}}, false, false
 	}
 	events := page.Items()
 	truncated := page.HasMore()
 	if len(events) == 0 {
-		return nil, truncated, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}, false
+		return nil, truncated, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}, false, true
 	}
 	normalized := make([]civilizationAssemblyNormalizedParkedRun, 0, len(events))
 	for _, ev := range events {
@@ -163,7 +175,7 @@ func civilizationAssemblyNormalizedParkedRuns(s store.Store, limit int) ([]civil
 		}
 		normalized = append(normalized, run)
 	}
-	return normalized, truncated, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}, true
+	return normalized, truncated, civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}, true, true
 }
 
 // civilizationAssemblyFactoryRunRequestedEvents is the ONE new store query
@@ -220,9 +232,28 @@ func civilizationRecentIssueScanBlockerForType(blockers []CivilizationIssueScanB
 // Dedupe by run_id: blank run_id excluded; multiple parked events for one
 // run collapse to the latest-timestamp event (whole record, no field
 // mixing), tie-broken by lexicographically greater event ID, refs unioned.
+//
+// parked-fetch failure vs parked-page truncation are DIFFERENT signals and
+// must not be conflated:
+//   - Truncation (parkedTruncated=true) means the parked page is REAL but
+//     INCOMPLETE — a requested run with no matching parked row cannot be
+//     proven parked-absent, so it degrades to recorded (see below).
+//   - Fetch failure (parkedFetched=false) means there is NO parked evidence
+//     at all — the page could not be read (nil store, ByType error). This is
+//     narrower than "the page was empty": an empty-but-successfully-fetched
+//     page (parkedFetched=true, zero parkedRuns) IS proof of parked-absence
+//     and is handled the normal way below. Only an unreadable page makes
+//     "no parked event matched this run_id" unknowable rather than merely
+//     unproven — evaluating requested runs for in_flight/queued in that case
+//     would silently assume parked-absence that was never demonstrated. This
+//     fold therefore fails CLOSED on parkedFetched=false: the whole rail
+//     becomes unavailable with zero runs, mirroring the board fold's
+//     short-circuit on the same underlying fetch failure
+//     (civilizationAssemblyIssueScanProjections).
 func civilizationRecentIssueScanRuns(
 	parkedRuns []civilizationAssemblyNormalizedParkedRun,
 	parkedTruncated bool,
+	parkedFetched bool,
 	requestedEvents []event.Event,
 	requestedTruncated bool,
 	factoryOrders []CivilizationAssemblyFactoryOrder,
@@ -231,6 +262,11 @@ func civilizationRecentIssueScanRuns(
 	out := CivilizationRecentIssueScanRuns{
 		Status:  civilizationAssemblyFieldUnavailable,
 		Summary: "No recent issue-scan run activity is projected.",
+	}
+
+	if !parkedFetched {
+		out.Summary = "Recent issue-scan runs are unavailable: the parked-run evidence page could not be read."
+		return out
 	}
 
 	parkedByRun := civilizationRecentIssueScanDedupeParked(parkedRuns)
@@ -426,6 +462,11 @@ func civilizationRecentIssueScanRequestedRun(ev event.Event, content FactoryRunR
 		}
 	}
 	timestamp := civilizationRecentIssueScanFormatTimestamp(ev.Timestamp().Value())
+	// TargetRepos[0] is guarded by the length check below: an empty
+	// TargetRepos leaves Repo as "" (acceptable per contract — Repo is only
+	// proven when the requested event actually names a target repo) rather
+	// than indexing out of range. This is the single shared constructor for
+	// the queued/in_flight/recorded rows, so the guard covers all three.
 	repo := ""
 	if len(content.TargetRepos) > 0 {
 		repo = strings.TrimSpace(content.TargetRepos[0])

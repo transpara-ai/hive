@@ -455,14 +455,21 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
 	// The parked-run page is fetched ONCE here and feeds BOTH the board fold
 	// (issue intake/issue-scan projections) and the recent-runs rail fold.
-	normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK := civilizationAssemblyNormalizedParkedRuns(s, limit)
+	// parkedOK and parkedFetched are DIFFERENT signals (see
+	// civilizationAssemblyNormalizedParkedRuns and civilizationRecentIssueScanRuns
+	// doc comments): parkedOK is the board fold's short-circuit (false for a
+	// fetch failure OR a confirmably-empty page); parkedFetched is narrower
+	// and only false when the page could not be read at all, which is what
+	// the rail fold needs to distinguish "parked-absence proven" from
+	// "parked-absence unknowable".
+	normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, parkedFetched := civilizationAssemblyNormalizedParkedRuns(s, limit)
 	issueScanEvidence := civilizationAssemblyIssueScanProjections(normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, limit)
 	operatorProjection.Errors = append(operatorProjection.Errors, issueScanEvidence.Errors...)
 	requestedEvents, requestedTruncated, requestedErr := civilizationAssemblyFactoryRunRequestedEvents(s, limit)
 	if requestedErr != nil {
 		operatorProjection.Errors = append(operatorProjection.Errors, "project recent issue-scan requested runs: "+requestedErr.Error())
 	}
-	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, requestedEvents, requestedTruncated, factoryOrders, factoryOrderWorkEvidence)
+	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, factoryOrders, factoryOrderWorkEvidence)
 	sourceRefs := compactStrings(append(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...), civilizationRecentIssueScanSourceRefs(recentIssueScanRuns)...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)
