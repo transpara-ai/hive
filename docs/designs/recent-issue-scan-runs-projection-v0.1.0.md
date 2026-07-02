@@ -1,8 +1,8 @@
 # Recent Issue-Scan Runs Projection — Design Packet
 
 - **doc_id:** HIVE-RECENT-ISSUE-SCAN-RUNS-DESIGN-001
-- **version:** v0.3.0 (CFADA rounds 1-2 resolved)
-- **status:** CFADA round 3
+- **version:** v0.4.0 (CFADA rounds 1-3 resolved)
+- **status:** CFADA round 4 (confirmation)
 - **issues:** https://github.com/transpara-ai/hive/issues/240 (this repo) · https://github.com/transpara-ai/site/issues/204 (consumer)
 - **base:** hive main @ 02ae3d4; site consumer stacks on site PR #203
 - **scope:** projection-only fold in `pkg/hive/civilization_assembly_projection.go` + hive-ops-api serving; site renders a rail. NO new event types, NO writes, NO scanner/lifecycle behavior change.
@@ -54,7 +54,7 @@ Corrected premise (CFADA2-adv1): the site's `civilizationOpsProjectionClient` ti
 ### D5 — Site rail (consumer half; site#204)
 
 - View-model derivation in `buildConsoleIssueScan`: rail data only when the surface freshness is one of the EXISTING usable states — `current`, `stale`, or `partial`, exactly the set that renders the board (CFADA1-adv2: the rail and board share one freshness decision; they can never diverge) — AND the section's own `status == "available"` (allowlist); absent field / unknown status / unavailable → no rail, board unchanged.
-- Civilization-projection client timeout 5s → 9s (D2).
+- Civilization-projection client timeout 8s → 9s (D2; `graph/ops.go:1119`).
 - Rail renders inside the polled intake fragment (refreshes with the board; inherits the B1 drawer-reset semantics untouched).
 - State→style map is an allowlist over the v1 state set ONLY (amber for parked/human_action, neutral for queued/in_flight/recorded — `ready_for_human` does not exist in v1 and gets NO mapping; CFADA2-1); unknown state values (including a future ready state) render escaped text with neutral style — `default` is neutral, never a healthy color.
 - Drawer links ONLY for runs whose (run_id, stage_id) exists on the rendered board (site-side index at build time); everything else unlinked. No dead links, no fabricated targets (IADA-5).
@@ -67,7 +67,7 @@ As specified in hive#240: top-level `recent_issue_scan_runs: {status: "available
 ## 4. Non-goals
 
 - No new event emission; no scanner changes; no single-issue enqueue.
-- No caching/latency rework of hive-ops-api (B3 covers work-server; hive-ops-api latency work is out of scope).
+- No TTL caching or precomputation of projections (D2's singleflight is request-collapsing over fresh computations, not caching; broader hive-ops-api latency rework beyond D2 stays out of scope; B3 covers work-server).
 - No governed writes on the site; no changes to the board section's existing shape.
 
 ## 5. TDD plan
@@ -99,3 +99,8 @@ Hive: state-domain table test (every D1 state + recorded fallback + precedence c
 - **IADA-3 (latency budget):** the endpoint is borderline against the site's 5s client timeout TODAY (measured 5.2s live); the fold reuses fetched pages, permits at most one new query, and carries a timed regression test.
 - **IADA-4 (timestamp honesty):** zero/unparseable event timestamps must not default to `now` (would fake recency); fields omitted, site renders unageable.
 - **IADA-5 (dead links):** rail entries link to drawers only for (run_id, stage_id) pairs present on the rendered board; a link to a non-existent drawer target would render an honest not-found drawer but still be a fabricated affordance.
+
+### Round 3 (codex, 2026-07-02) — VERDICT: BLOCKERS (1) → resolved in v0.4.0
+
+- **CFADA3-1 (internal inconsistency):** §4 non-goals still forbade "caching/latency rework" that D2 mandates, and D5 kept the stale 5s premise. Resolved: non-goals now distinguishes singleflight (request-collapsing over fresh computations — in scope) from TTL caching/precomputation (out of scope); D5 says 8s → 9s.
+- Advisories: both predicates confirmed real (`isIssueScanRunLaunch` = brief.kind == transpara_ai_github_issue_scan; `factoryOrderIDForRunLaunch` = fo_run_<suffix>); singleflight implementation notes adopted — applied AFTER auth, keyed per endpoint, fresh computation, per-request response writing.
