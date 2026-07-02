@@ -1007,10 +1007,22 @@ func TestRecentIssueScanFoldLatencyBudget(t *testing.T) {
 		t.Fatalf("isolated fold result = %+v, want it to match the builder's non-empty available rail (fixture invariant broken)", fold)
 	}
 
-	const absoluteBudget = 250 * time.Millisecond
+	// The 250ms budget below has near-zero margin under -race: race
+	// instrumentation adds ~4-10x CPU overhead to every memory access, and
+	// measured fold times under -race have been observed in the 200-243ms
+	// range on this fixture — uncomfortably close to 250ms and prone to
+	// flaking on instrumentation overhead rather than a real regression.
+	// raceEnabled (race_enabled_test.go / race_disabled_test.go) relaxes the
+	// budget to 1000ms specifically for -race builds. The production latency
+	// claim is the non-race 250ms number; the race build only needs enough
+	// headroom to not flake.
+	absoluteBudget := 250 * time.Millisecond
+	if raceEnabled {
+		absoluteBudget = 1000 * time.Millisecond
+	}
 	if foldElapsed >= absoluteBudget {
-		t.Fatalf("fold wall-clock = %s, want < %s (absolute budget)", foldElapsed, absoluteBudget)
+		t.Fatalf("fold wall-clock = %s, want < %s (absolute budget, raceEnabled=%v)", foldElapsed, absoluteBudget, raceEnabled)
 	}
 
-	t.Logf("builder=%s fold=%s (%.2f%% of builder, informational only — see NOTE on relative budget above) seeded_events=%d rail_runs=%d", builderElapsed, foldElapsed, 100*float64(foldElapsed)/float64(builderElapsed), seeded, len(fold.Runs))
+	t.Logf("builder=%s fold=%s (%.2f%% of builder, informational only — see NOTE on relative budget above) seeded_events=%d rail_runs=%d raceEnabled=%v", builderElapsed, foldElapsed, 100*float64(foldElapsed)/float64(builderElapsed), seeded, len(fold.Runs), raceEnabled)
 }
