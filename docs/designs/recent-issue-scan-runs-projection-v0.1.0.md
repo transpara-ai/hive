@@ -1,8 +1,8 @@
 # Recent Issue-Scan Runs Projection — Design Packet
 
 - **doc_id:** HIVE-RECENT-ISSUE-SCAN-RUNS-DESIGN-001
-- **version:** v0.2.0 (CFADA round 1 resolved)
-- **status:** CFADA round 2
+- **version:** v0.3.0 (CFADA rounds 1-2 resolved)
+- **status:** CFADA round 3
 - **issues:** https://github.com/transpara-ai/hive/issues/240 (this repo) · https://github.com/transpara-ai/site/issues/204 (consumer)
 - **base:** hive main @ 02ae3d4; site consumer stacks on site PR #203
 - **scope:** projection-only fold in `pkg/hive/civilization_assembly_projection.go` + hive-ops-api serving; site renders a rail. NO new event types, NO writes, NO scanner/lifecycle behavior change.
@@ -20,8 +20,8 @@ New top-level section `recent_issue_scan_runs` (contract in hive#240, restated i
 | state | proof required |
 |---|---|
 | `parked` / `human_action` | `hive.issuescan.run.parked` content — via a SHARED normalized parked-run helper feeding BOTH the board fold and the rail (one record: state, issue ref, blocker fields, refs, link key — CFADA1-adv4) |
-| `queued` | an issue-scan `factory.run.requested` event (identified by the issue-scan brief/lifecycle predicate — the same predicate the queued-lifecycle fold uses; generic factory runs are EXCLUDED entirely, they never even reach `recorded` — CFADA1-adv1) with no parked event for the run and no work evidence joined |
-| `in_flight` | queued proof + the run's `FactoryOrderID` resolves to a factory-order summary ALREADY built by the operator projection AND that summary carries ≥1 work-task evidence record. If the order summary is absent (limit/truncation), the run stays `queued` — under-claiming is the safe direction |
+| `queued` | an issue-scan `factory.run.requested` event — identified by **`isIssueScanRunLaunch(content)`**, the exact kind predicate hive dispatch itself uses (CFADA2-2; NOT the `queuedRunLifecycleFromBrief` lifecycle parser, whose legacy behavior differs); generic factory runs are EXCLUDED entirely, they never even reach `recorded` — with no parked event for the run and no work evidence joined, AND the parked page was NOT truncated (see truncation rule below) |
+| `in_flight` | queued proof + the run's factory order — derived via **`factoryOrderIDForRunLaunch(run_id)`** and joined against the operator projection's existing `FactoryOrderSummary`/work-evidence outputs (CFADA2-adv2) — carries ≥1 work-task evidence record. If the order summary is absent (limit/truncation), the run stays `queued` — under-claiming is the safe direction |
 | `recorded` | fallback for a run whose existence is proven (issue-scan predicate matched) but whose lifecycle position is not — honest catch-all; NEVER a healthy-looking default |
 
 **`ready_for_human` is DROPPED from v1 (CFADA1-2).** Hive's own stage-evidence code states stage evidence is not PR-readiness or human-approval proof (`pkg/hive/issue_scan_stage_runtime_evidence.go:18-20,63-67`), and the all-stages-complete check is runtime logic, not a projection fold output. Approximating it from visible final-stage work evidence could paint an incomplete run healthy. Runs in that position surface as `in_flight`. A future packet may add the state when the projection folds an explicit, non-truncated all-stage completion proof.
@@ -30,15 +30,18 @@ New top-level section `recent_issue_scan_runs` (contract in hive#240, restated i
 
 Precedence when evidence conflicts: parked/human_action > in_flight > queued > recorded. Dedupe by `run_id` (CFADA1-3):
 - runs whose `run_id` is blank after TrimSpace are EXCLUDED from the rail (cannot be deduped or linked; the board's own handling of such events is unchanged);
-- multiple parked events for one run → the record with the LATEST event timestamp wins whole (no field-mixing between events); `source_refs` are the union;
+- multiple parked events for one run → the record with the LATEST event timestamp wins whole (no field-mixing between events); ties and zero timestamps break deterministically by lexicographically greater event ID (CFADA2-adv3); `source_refs` are the union;
 - parked vs queued for one run → parked wins whole, refs unioned.
 
-### D2 — Latency: one new query, absolute fold budget, and a consumer-side timeout fix (CFADA1-4)
+**Truncation × precedence rule (CFADA2-3):** "no parked event for this run" is only provable when the parked page did NOT hit its limit. When the parked page IS truncated, every requested-run not matched to a parked event degrades to `recorded` (its parked-absence is unproven — it must not claim `queued`/`in_flight`), and `truncated: true` is set. When the requested-run page is truncated, `truncated: true` is set and older runs are simply absent (absence from the rail is honest; a wrong state is not).
 
-The endpoint measured 5.2s live against the site's 5s intake client timeout — the surface already flaps to honest-unavailable TODAY, and no hive-side delta test alone can fix that. Two-part resolution:
+### D2 — Latency: one new query, absolute fold budget, singleflight, and a consumer timeout with corrected premise (CFADA1-4, CFADA2-4)
 
-- **Hive:** the rail fold adds exactly ONE store query (the `factory.run.requested` page, D1) and otherwise consumes already-fetched pages/folds. Timed regression test on a seeded store asserts the builder's added wall-clock from the new fold is < 250ms absolute AND < 10% relative — a hard budget, not just "no order-of-magnitude regression".
-- **Site (companion half, site#204):** the civilization-projection HTTP client timeout is raised from 5s to **9s** — above the measured 5.2s with headroom, deliberately BELOW the intake surface's 10s poll interval so polls can never overlap. This is a consumer-resilience fix that stands on its own (the intake board benefits immediately) and is required for the rail to be usable at all. The console's honest-unavailable behavior on timeout is unchanged.
+Corrected premise (CFADA2-adv1): the site's `civilizationOpsProjectionClient` timeout is **8s** today (`graph/ops.go:1119`), not 5s; the endpoint measures 5.2s solo. The live flapping comes from CONCURRENCY: with site PR #203, an open drawer self-refreshes every 10s in addition to the board's 10s poll — two overlapping full-projection computations contend in Postgres and push each other past 8s. Three-part resolution:
+
+- **Hive fold budget:** the rail fold adds exactly ONE store query (the `factory.run.requested` page, D1) and otherwise consumes already-fetched pages/folds. Timed regression test on a seeded store asserts the builder's added wall-clock is < 250ms absolute AND < 10% relative.
+- **Hive singleflight (CFADA2-4):** hive-ops-api wraps the two projection endpoints in `golang.org/x/sync/singleflight` (already in the module graph) keyed by endpoint — concurrent identical requests share ONE fresh computation. This is honesty-preserving (every response is a real computation with its true `generated_at`; sharers receive the same fresh result — no TTL cache, no staleness introduced) and collapses the board+drawer concurrent-duplicate load to a single upstream computation.
+- **Site client timeout 8s → 9s** for the civilization client only: headroom above the 5.2s solo measurement, deliberately below every poller's own 10s interval so no poller can self-overlap. With singleflight upstream, concurrent pollers no longer multiply computation, so 9s is adequate. Honest-unavailable behavior on timeout unchanged.
 
 ### D3 — Timestamps and ordering
 
@@ -53,7 +56,7 @@ The endpoint measured 5.2s live against the site's 5s intake client timeout — 
 - View-model derivation in `buildConsoleIssueScan`: rail data only when the surface freshness is one of the EXISTING usable states — `current`, `stale`, or `partial`, exactly the set that renders the board (CFADA1-adv2: the rail and board share one freshness decision; they can never diverge) — AND the section's own `status == "available"` (allowlist); absent field / unknown status / unavailable → no rail, board unchanged.
 - Civilization-projection client timeout 5s → 9s (D2).
 - Rail renders inside the polled intake fragment (refreshes with the board; inherits the B1 drawer-reset semantics untouched).
-- State→style map is an allowlist (amber for parked/human_action, emerald for ready_for_human, neutral for queued/in_flight/recorded); unknown state values render escaped text with neutral style — `default` is neutral, never a healthy color.
+- State→style map is an allowlist over the v1 state set ONLY (amber for parked/human_action, neutral for queued/in_flight/recorded — `ready_for_human` does not exist in v1 and gets NO mapping; CFADA2-1); unknown state values (including a future ready state) render escaped text with neutral style — `default` is neutral, never a healthy color.
 - Drawer links ONLY for runs whose (run_id, stage_id) exists on the rendered board (site-side index at build time); everything else unlinked. No dead links, no fabricated targets (IADA-5).
 - Relative age from `last_event_at`; unparseable → age omitted.
 
@@ -80,6 +83,14 @@ Hive: state-domain table test (every D1 state + recorded fallback + precedence c
 - **CFADA1-3 (dedupe underspecified):** multiple parked events per run and blank run_ids had no contract. Resolved: latest-parked-event-wins-whole (no field mixing), refs unioned; blank run_id excluded from the rail.
 - **CFADA1-4 (latency budget insufficient):** the endpoint already exceeds the site's 5s client timeout. Resolved: hard hive fold budget (<250ms absolute, <10% relative, timed test) PLUS site civilization-client timeout 5s → 9s (bounded under the 10s poll to prevent overlap).
 - Advisories adopted: issue-scan predicate excludes generic factory runs entirely (adv1); rail freshness bound to the board's exact usable-state set (adv2); 1.5.0 byte-compat kept (adv3); shared normalized parked-run helper feeding board + rail (adv4).
+
+### Round 2 (codex, 2026-07-02) — VERDICT: BLOCKERS (4) → all resolved in v0.3.0
+
+- **CFADA2-1 (ready state leaked through the consumer):** packet D5 still mapped `ready_for_human` to emerald and site#204 still said "ready". Resolved: scrubbed everywhere; the style allowlist covers the v1 state set only; a future ready state renders neutral until a provable fold exists.
+- **CFADA2-2 (predicate imprecision):** resolved — the predicate is `isIssueScanRunLaunch(content)`, the kind predicate hive dispatch uses; the lifecycle parser is explicitly rejected.
+- **CFADA2-3 (truncation × precedence):** a truncated parked page makes parked-absence unprovable. Resolved: unmatched requested-runs degrade to `recorded` when the parked page is truncated; requested-page truncation yields honest absence, never a wrong state.
+- **CFADA2-4 (concurrent pollers defeat a bare timeout bump):** board + drawer each poll at 10s, overlapping computations contend past the client timeout. Resolved: hive-ops-api singleflight on the projection endpoints (honesty-preserving — no TTL cache) + corrected 8s→9s premise (adv1).
+- Advisories adopted: real 8s base documented (adv1); `factoryOrderIDForRunLaunch` join spelled out (adv2); deterministic (timestamp, event ID) tie-breaker (adv3).
 
 ## 7. IADA record (v0.1.0, 2026-07-02)
 
