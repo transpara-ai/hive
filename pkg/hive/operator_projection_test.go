@@ -4699,3 +4699,120 @@ func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
 		t.Fatalf("merged catalog alias \"opus\" resolved to %q, want claude-opus-4-6", opus.ID)
 	}
 }
+
+func TestOperatorModelRoleAssignmentSelectionModeRoundTrip(t *testing.T) {
+	loadedAt := time.Unix(1_700_000_000, 0).UTC()
+
+	// Every starter role resolves through the embedded role_defaults map
+	// (guardian → sonnet, implementer → opus, ...), so the role-default layer
+	// wins the token and the starter policy's PreferredTier never fires:
+	// system config chose the model → system-default.
+	defaultSelection := BuildOperatorModelSelection(DefaultOperatorModelSelectionConfig(loadedAt))
+	for _, role := range []string{"guardian", "implementer"} {
+		assignment := requireModelAssignment(t, defaultSelection, role)
+		if assignment.Error != "" {
+			t.Fatalf("%s assignment unexpectedly errored: %q", role, assignment.Error)
+		}
+		if assignment.SelectionMode != string(modelconfig.SelectionModeSystemDefault) {
+			t.Fatalf("%s selection_mode = %q, want %q", role, assignment.SelectionMode, modelconfig.SelectionModeSystemDefault)
+		}
+	}
+
+	// A stored role policy pinning a concrete catalog alias is an explicit pin.
+	pinned := DefaultOperatorModelSelectionConfig(loadedAt)
+	pinned.RolePolicies = map[string]OperatorModelRolePolicy{
+		"guardian": {Policy: &modelconfig.RoleModelPolicy{Model: "sonnet"}},
+	}
+	pinnedGuardian := requireModelAssignment(t, BuildOperatorModelSelection(pinned), "guardian")
+	if pinnedGuardian.Error != "" {
+		t.Fatalf("pinned guardian assignment unexpectedly errored: %q", pinnedGuardian.Error)
+	}
+	if pinnedGuardian.SelectionMode != string(modelconfig.SelectionModeManualExplicit) {
+		t.Fatalf("pinned guardian selection_mode = %q, want %q", pinnedGuardian.SelectionMode, modelconfig.SelectionModeManualExplicit)
+	}
+
+	// Without a role default for guardian, the starter policy's PreferredTier
+	// selects via tier defaults → auto-tier.
+	tierGuardian := requireModelAssignment(t, BuildOperatorModelSelection(testModelSelectionConfigWithoutRoleDefault("guardian", loadedAt)), "guardian")
+	if tierGuardian.Error != "" {
+		t.Fatalf("tier guardian assignment unexpectedly errored: %q", tierGuardian.Error)
+	}
+	if tierGuardian.SelectionMode != string(modelconfig.SelectionModeAutoTier) {
+		t.Fatalf("tier guardian selection_mode = %q, want %q", tierGuardian.SelectionMode, modelconfig.SelectionModeAutoTier)
+	}
+}
+
+func TestOperatorModelRoleAssignmentErrorPathsCarryNoSelectionMode(t *testing.T) {
+	config := DefaultOperatorModelSelectionConfig(time.Unix(1_700_000_000, 0).UTC())
+	config.RolePolicies = map[string]OperatorModelRolePolicy{
+		// Resolve itself fails: the token is not a catalog id, alias, or tier.
+		"guardian": {Policy: &modelconfig.RoleModelPolicy{Model: "no-such-model"}},
+		// Resolve succeeds but the stored-policy validation fails afterwards:
+		// an api-key model without the explicit auth_mode opt-in.
+		"sysmon": {Policy: &modelconfig.RoleModelPolicy{Model: "api-sonnet"}},
+	}
+	selection := BuildOperatorModelSelection(config)
+	for _, role := range []string{"guardian", "sysmon"} {
+		assignment := requireModelAssignment(t, selection, role)
+		if assignment.Error == "" {
+			t.Fatalf("%s assignment expected an error, got none: %+v", role, assignment)
+		}
+		if assignment.SelectionMode != "" {
+			t.Fatalf("%s error-path selection_mode = %q, want empty — mode is never synthesized", role, assignment.SelectionMode)
+		}
+	}
+}
+
+func TestOperatorModelRoleAssignmentSelectionModeJSONShape(t *testing.T) {
+	empty := OperatorModelRoleAssignment{Role: "guardian", Source: "starter-role-definition"}
+	data, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal assignment without mode: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal assignment JSON: %v", err)
+	}
+	if _, ok := fields["selection_mode"]; ok {
+		t.Fatalf("selection_mode key present in %s, want omitted when empty", data)
+	}
+
+	set := empty
+	set.SelectionMode = string(modelconfig.SelectionModeManualExplicit)
+	data, err = json.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal assignment with mode: %v", err)
+	}
+	fields = nil
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal assignment JSON: %v", err)
+	}
+	if got, ok := fields["selection_mode"]; !ok || got != string(modelconfig.SelectionModeManualExplicit) {
+		t.Fatalf("selection_mode in %s = %v (present=%v), want %q", data, got, ok, modelconfig.SelectionModeManualExplicit)
+	}
+}
+
+func testModelSelectionConfigWithoutRoleDefault(role string, loadedAt time.Time) OperatorModelSelectionConfig {
+	base := modelconfig.DefaultResolver()
+	defaults := base.Defaults()
+	tierModels := make(map[modelconfig.ModelTier]string, len(defaults.TierModels))
+	for tier, model := range defaults.TierModels {
+		tierModels[tier] = model
+	}
+	roleModels := make(map[string]string, len(defaults.RoleModels))
+	for name, model := range defaults.RoleModels {
+		if name == role {
+			continue
+		}
+		roleModels[name] = model
+	}
+	defaults.TierModels = tierModels
+	defaults.RoleModels = roleModels
+	return OperatorModelSelectionConfig{
+		Resolver:      modelconfig.NewResolver(base.Catalog(), nil, defaults),
+		CatalogSource: "test-no-role-default",
+		LoadedAt:      loadedAt,
+		ReloadMode:    operatorModelCatalogReloadMode,
+		HotReload:     false,
+	}
+}
