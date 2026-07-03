@@ -10,6 +10,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
+	"github.com/transpara-ai/work/pkg/worklifecycle"
 )
 
 const (
@@ -192,6 +193,8 @@ type CivilizationAssemblyTaskEvidence struct {
 	Cell                    string                                   `json:"cell,omitempty"`
 	RiskClass               string                                   `json:"risk_class,omitempty"`
 	Status                  string                                   `json:"status"`
+	Canonical               *worklifecycle.CanonicalWorkState        `json:"canonical,omitempty"`
+	CanonicalError          string                                   `json:"canonical_error,omitempty"`
 	Ready                   bool                                     `json:"ready"`
 	Blocked                 bool                                     `json:"blocked"`
 	RequirementRefs         []string                                 `json:"requirement_refs,omitempty"`
@@ -1219,6 +1222,8 @@ func civilizationAssemblyTaskEvidence(taskID types.EventID, content work.TaskCre
 		Cell:                    strings.TrimSpace(content.Cell),
 		RiskClass:               strings.TrimSpace(content.RiskClass),
 		Status:                  status,
+		Canonical:               taskProjection.Canonical,
+		CanonicalError:          taskProjection.CanonicalError,
 		Ready:                   ready,
 		Blocked:                 blocked,
 		RequirementRefs:         compactStrings(content.RequirementIDs),
