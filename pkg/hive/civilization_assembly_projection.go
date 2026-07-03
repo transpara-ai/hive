@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	civilizationAssemblyProjectionSchemaVersion = "1.5.0"
+	civilizationAssemblyProjectionSchemaVersion = "1.6.0"
 	civilizationAssemblyProjectionSubject       = "civilization_assembly"
 
 	civilizationAssemblyStatusComplete    = "complete"
@@ -55,14 +55,19 @@ type CivilizationAssemblyProjection struct {
 	QueuedRunRequest                   *CivilizationAssemblyQueuedRunRequest  `json:"queued_run_request,omitempty"`
 	IssueIntakeProjection              CivilizationIssueIntakeProjection      `json:"issue_intake_projection,omitempty"`
 	IssueScanProjection                CivilizationIssueScanProjection        `json:"issue_scan_projection,omitempty"`
-	SiteConsumerStatus                 CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
-	OpenGateSummary                    []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
-	ResidualRiskSummary                []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
-	WithheldOrUnavailableFields        []CivilizationAssemblyUnavailableField `json:"withheld_or_unavailable_fields"`
-	BoundaryFlags                      []string                               `json:"boundary_flags"`
-	ProvenanceRefs                     []string                               `json:"provenance_refs"`
-	ValidationRefs                     []string                               `json:"validation_refs"`
-	FailureReasons                     []string                               `json:"failure_reasons,omitempty"`
+	// RecentIssueScanRuns has NO omitempty: it is always populated (status
+	// becomes "unavailable" with zero runs and an honest summary when the
+	// store has no qualifying evidence) so Site can rely on `status` being
+	// present without special-casing a missing field.
+	RecentIssueScanRuns         CivilizationRecentIssueScanRuns        `json:"recent_issue_scan_runs"`
+	SiteConsumerStatus          CivilizationAssemblyFieldStatus        `json:"site_consumer_status"`
+	OpenGateSummary             []CivilizationAssemblyGateSummary      `json:"open_gate_summary"`
+	ResidualRiskSummary         []CivilizationAssemblyResidualRisk     `json:"residual_risk_summary"`
+	WithheldOrUnavailableFields []CivilizationAssemblyUnavailableField `json:"withheld_or_unavailable_fields"`
+	BoundaryFlags               []string                               `json:"boundary_flags"`
+	ProvenanceRefs              []string                               `json:"provenance_refs"`
+	ValidationRefs              []string                               `json:"validation_refs"`
+	FailureReasons              []string                               `json:"failure_reasons,omitempty"`
 }
 
 type CivilizationAssemblyFieldStatus struct {
@@ -448,9 +453,25 @@ type civilizationAssemblyTaskVerificationEvidence struct {
 func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...OperatorProjectionOption) CivilizationAssemblyProjection {
 	operatorProjection := BuildOperatorProjection(s, limit, opts...)
 	factoryOrders, factoryOrderWorkEvidence, factoryOrdersTruncated, factoryOrdersQueryFailed := civilizationAssemblyFactoryOrders(&operatorProjection, s, limit)
-	issueScanEvidence := civilizationAssemblyIssueScanProjections(s, limit)
+	// The parked-run page is fetched ONCE here and feeds BOTH the board fold
+	// (issue intake/issue-scan projections) and the recent-runs rail fold.
+	// parkedOK and parkedFetched are DIFFERENT signals (see
+	// civilizationAssemblyNormalizedParkedRuns and civilizationRecentIssueScanRuns
+	// doc comments): parkedOK is the board fold's short-circuit (false for a
+	// fetch failure OR a confirmably-empty page); parkedFetched is narrower
+	// and only false when the page could not be read at all, which is what
+	// the rail fold needs to distinguish "parked-absence proven" from
+	// "parked-absence unknowable".
+	normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, parkedFetched := civilizationAssemblyNormalizedParkedRuns(s, limit)
+	issueScanEvidence := civilizationAssemblyIssueScanProjections(normalizedParkedRuns, parkedTruncated, parkedEvidence, parkedOK, limit)
 	operatorProjection.Errors = append(operatorProjection.Errors, issueScanEvidence.Errors...)
-	sourceRefs := compactStrings(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...))
+	requestedEvents, requestedTruncated, requestedErr := civilizationAssemblyFactoryRunRequestedEvents(s, limit)
+	requestedFetched := requestedErr == nil
+	if requestedErr != nil {
+		operatorProjection.Errors = append(operatorProjection.Errors, "project recent issue-scan requested runs: "+requestedErr.Error())
+	}
+	recentIssueScanRuns := civilizationRecentIssueScanRuns(normalizedParkedRuns, parkedTruncated, parkedFetched, requestedEvents, requestedTruncated, requestedFetched, factoryOrders, factoryOrderWorkEvidence, factoryOrdersQueryFailed, factoryOrdersTruncated)
+	sourceRefs := compactStrings(append(append(append(civilizationAssemblySourceRefs(operatorProjection), factoryOrderWorkEvidence.SourceRefs...), issueScanEvidence.SourceRefs...), civilizationRecentIssueScanSourceRefs(recentIssueScanRuns)...))
 	head := civilizationAssemblyHead(s, &operatorProjection)
 	status := civilizationAssemblyStatus(operatorProjection)
 
@@ -472,6 +493,7 @@ func BuildCivilizationAssemblyProjection(s store.Store, limit int, opts ...Opera
 		QueuedRunRequest:                   civilizationAssemblyQueuedRunRequestWithStageEvidence(operatorProjection.RuntimeEvidence.LastQueuedRunRequest, factoryOrderWorkEvidence.StageArtifactRefs, factoryOrderWorkEvidence.Tasks),
 		IssueIntakeProjection:              issueScanEvidence.Intake,
 		IssueScanProjection:                issueScanEvidence.Scan,
+		RecentIssueScanRuns:                recentIssueScanRuns,
 		SiteConsumerStatus: CivilizationAssemblyFieldStatus{
 			Status:     civilizationAssemblyFieldAvailable,
 			Summary:    "Hive exposes a read-only Civilization Assembly projection for Site rendering; Site is not a graph writer or executor.",
@@ -507,94 +529,57 @@ func civilizationAssemblyStatus(p OperatorProjection) string {
 	return civilizationAssemblyStatusComplete
 }
 
-func civilizationAssemblyIssueScanProjections(s store.Store, limit int) civilizationAssemblyIssueScanProjectionEvidence {
-	intake := CivilizationIssueIntakeProjection{
-		Status:  civilizationAssemblyFieldUnavailable,
-		Summary: "No scanner-visible issue intake records are projected.",
-		ScannerBoundaries: []string{
-			"read-only GitHub issue discovery",
-			"human-scope/protected/deferred issues park without execution",
-			"projection is not PR readiness, runtime readiness, issue closure, merge, deploy, or Test 001 GREEN evidence",
-			"updated_at is the EventGraph parked-evidence timestamp, not the GitHub issue last-modified time",
-			"touched_substrate is derived only from the repository slug; no code or substrate analysis is performed",
-			"issue intake rows are point-in-time parked snapshots and may be superseded by later FactoryOrder lifecycle evidence",
-		},
-	}
-	scan := CivilizationIssueScanProjection{}
-	if s == nil {
-		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan records: store is required"}}
+func civilizationAssemblyIssueScanProjections(normalized []civilizationAssemblyNormalizedParkedRun, truncated bool, evidence civilizationAssemblyIssueScanProjectionEvidence, ok bool, limit int) civilizationAssemblyIssueScanProjectionEvidence {
+	if !ok {
+		return evidence
 	}
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
 	}
-	page, err := s.ByType(EventTypeIssueScanRunParked, limit, types.None[types.Cursor]())
-	if err != nil {
-		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Errors: []string{"project issue-scan parked records: " + err.Error()}}
-	}
-	events := page.Items()
-	truncated := page.HasMore()
-	if len(events) == 0 {
+	intake := evidence.Intake
+	scan := evidence.Scan
+	if len(normalized) == 0 {
 		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, Truncated: truncated}
 	}
 
-	sourceRefs := make([]string, 0, len(events))
-	intake.Issues = make([]CivilizationIssueIntakeProjected, 0, len(events))
-	scan.Runs = make([]CivilizationIssueScanRunProjected, 0, len(events))
-	scan.Blockers = make([]CivilizationIssueScanBlockerProjected, 0, len(events))
-	for _, ev := range events {
-		content, ok := ev.Content().(IssueScanRunParkedContent)
-		if !ok {
-			continue
-		}
-		issue := civilizationAssemblyIssueRefFromParked(content)
-		if issue.Repo == "" || issue.Number <= 0 {
-			continue
-		}
-		refs := compactStrings(append([]string{ev.ID().Value()}, content.SourceRefs...))
-		sourceRefs = append(sourceRefs, refs...)
-		primaryBlockerType := civilizationAssemblyIssuePrimaryBlockerType(content)
-		riskClass := civilizationAssemblyIssueRiskClass(primaryBlockerType)
-		readiness := civilizationAssemblyIssueReadiness(primaryBlockerType)
-		riskClasses := civilizationAssemblyIssueRiskClasses(content)
-		readinessStates := civilizationAssemblyIssueReadinessStates(content)
-		blockers := civilizationAssemblyIssueScanBlockersFromParked(content, ev.ID().Value(), refs)
-		authorityBoundary := civilizationAssemblyIssueScanAuthorityBoundary(content)
+	sourceRefs := make([]string, 0, len(normalized))
+	intake.Issues = make([]CivilizationIssueIntakeProjected, 0, len(normalized))
+	scan.Runs = make([]CivilizationIssueScanRunProjected, 0, len(normalized))
+	scan.Blockers = make([]CivilizationIssueScanBlockerProjected, 0, len(normalized))
+	for _, run := range normalized {
+		sourceRefs = append(sourceRefs, run.Refs...)
 		intake.Issues = append(intake.Issues, CivilizationIssueIntakeProjected{
-			Repo:              issue.Repo,
-			Number:            issue.Number,
-			URL:               issue.URL,
-			Title:             issue.Title,
-			State:             issue.State,
-			StateReason:       issue.StateReason,
-			Labels:            append([]string(nil), issue.Labels...),
-			PrimaryRepo:       issue.Repo,
-			TouchedSubstrate:  civilizationAssemblyIssueTouchedSubstrate(issue.Repo),
-			TouchedSubstrates: []string{civilizationAssemblyIssueTouchedSubstrate(issue.Repo)},
-			RiskClass:         riskClass,
-			RiskClasses:       riskClasses,
-			Readiness:         readiness,
-			ReadinessStates:   readinessStates,
-			PRReadyWhen:       content.RequiredAction,
-			AuthorityBoundary: authorityBoundary,
-			UpdatedAt:         ev.Timestamp().Value().UTC().Format(time.RFC3339Nano),
-			SourceRefs:        refs,
+			Repo:              run.Issue.Repo,
+			Number:            run.Issue.Number,
+			URL:               run.Issue.URL,
+			Title:             run.Issue.Title,
+			State:             run.Issue.State,
+			StateReason:       run.Issue.StateReason,
+			Labels:            append([]string(nil), run.Issue.Labels...),
+			PrimaryRepo:       run.Issue.Repo,
+			TouchedSubstrate:  civilizationAssemblyIssueTouchedSubstrate(run.Issue.Repo),
+			TouchedSubstrates: []string{civilizationAssemblyIssueTouchedSubstrate(run.Issue.Repo)},
+			RiskClass:         run.RiskClass,
+			RiskClasses:       run.RiskClasses,
+			Readiness:         run.Readiness,
+			ReadinessStates:   run.ReadinessStates,
+			PRReadyWhen:       run.RawRequiredAction,
+			AuthorityBoundary: run.AuthorityBoundary,
+			UpdatedAt:         run.EventTimestamp.UTC().Format(time.RFC3339Nano),
+			SourceRefs:        run.Refs,
 		})
-		state := "parked"
-		if civilizationAssemblyIssueHasHumanActionBlocker(blockers) {
-			state = "human_action"
-		}
 		scan.Runs = append(scan.Runs, CivilizationIssueScanRunProjected{
-			RunID:            strings.TrimSpace(content.RunID),
-			FactoryOrderID:   strings.TrimSpace(content.FactoryOrderID),
-			LifecycleVersion: civilizationAssemblyIssueScanLifecycleVersion(content),
-			State:            state,
-			TargetIssue:      issue,
-			SelectedIssue:    issue,
-			CandidateIssues:  []CivilizationIssueRef{issue},
-			SourceRefs:       refs,
-			EvidenceRefs:     []string{ev.ID().Value()},
+			RunID:            run.RunID,
+			FactoryOrderID:   run.FactoryOrderID,
+			LifecycleVersion: run.LifecycleVersion,
+			State:            run.State,
+			TargetIssue:      run.Issue,
+			SelectedIssue:    run.Issue,
+			CandidateIssues:  []CivilizationIssueRef{run.Issue},
+			SourceRefs:       run.Refs,
+			EvidenceRefs:     []string{run.EventID},
 		})
-		scan.Blockers = append(scan.Blockers, blockers...)
+		scan.Blockers = append(scan.Blockers, run.Blockers...)
 	}
 	if len(intake.Issues) == 0 {
 		return civilizationAssemblyIssueScanProjectionEvidence{Intake: intake, Scan: scan, SourceRefs: compactStrings(sourceRefs), Truncated: truncated}
@@ -1039,6 +1024,17 @@ func civilizationAssemblyLifecycle(p OperatorProjection) []CivilizationAssemblyL
 	return out
 }
 
+// civilizationAssemblyFactoryOrders returns, in order: the projected factory
+// orders, the aggregated Work evidence, whether the work.task.created page
+// truncated, and workEvidenceQueryFailed. workEvidenceQueryFailed is an
+// ALLOWLIST signal — it is true (query failed) unless EVERY sub-read this
+// function performs is proven to have succeeded: the work.task.created page
+// fetch itself, the artifact/dependency/lifecycle/verification ByType reads,
+// and the per-task civilizationAssemblyProjectWorkTask projection (which
+// itself reads lifecycle transitions) for every task-created event. Any one
+// of those failing means "no work evidence found" for the affected task(s)
+// is unprovable rather than proven-absent, so the caller must not promote
+// affected requested runs to queued/in_flight (CFAR round 2 finding 1).
 func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, limit int) ([]CivilizationAssemblyFactoryOrder, civilizationAssemblyFactoryOrderWorkEvidence, bool, bool) {
 	if limit <= 0 {
 		limit = defaultOperatorProjectionLimit
@@ -1050,30 +1046,39 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	}
 	truncated := page.HasMore()
 
+	// workEvidenceQueryFailed defaults to false and is OR'd true by any
+	// sub-read failure below (allowlist: stays false only when every
+	// sub-read this function performs proves successful).
+	workEvidenceQueryFailed := false
+
 	byID := map[string]*CivilizationAssemblyFactoryOrder{}
 	taskStore := work.NewTaskStore(s, nil, nil)
 	workEvidence := civilizationAssemblyFactoryOrderWorkEvidence{}
 	artifactByTask, artifactTruncated, artifactErrors, err := civilizationAssemblyWorkTaskArtifactEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task artifact refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, artifactErrors...)
 	workEvidence.ArtifactSourceTruncated = artifactTruncated
 	dependencyByTask, dependencyTruncated, dependencyErrors, err := civilizationAssemblyWorkTaskDependencyEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task dependency source refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, dependencyErrors...)
 	workEvidence.DependencySourceTruncated = dependencyTruncated
 	lifecycleByTask, lifecycleTruncated, lifecycleErrors, err := civilizationAssemblyWorkTaskLifecycleEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task lifecycle source refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, lifecycleErrors...)
 	workEvidence.LifecycleSourceTruncated = lifecycleTruncated
 	verificationByTask, verificationTruncated, verificationErrors, err := civilizationAssemblyWorkTaskVerificationEvidence(s, limit)
 	if err != nil {
 		p.Errors = append(p.Errors, fmt.Sprintf("project Work task verification evidence refs: %v", err))
+		workEvidenceQueryFailed = true
 	}
 	p.Errors = append(p.Errors, verificationErrors...)
 	workEvidence.VerificationSourceTruncated = verificationTruncated
@@ -1126,6 +1131,14 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 		taskProjection, legacyProjection, err := civilizationAssemblyProjectWorkTask(taskStore, ev.ID())
 		if err != nil {
 			p.Errors = append(p.Errors, fmt.Sprintf("project Work task %s for civilization factory order %s: %v", ev.ID().Value(), orderID, err))
+			// This task's own lifecycle/legacy projection failed (ProjectTask/
+			// ProjectLegacyTask read Work evidence internally): the task is
+			// omitted from workEvidence.Tasks below, so "no stage work
+			// evidence" for this factory order is no longer provable — only
+			// unproven. workEvidenceQueryFailed must reflect that (CFAR
+			// round 2 finding 1) even though the work.task.created page
+			// itself succeeded.
+			workEvidenceQueryFailed = true
 			continue
 		}
 		var roleContract civilizationAssemblyTaskRoleContract
@@ -1159,7 +1172,7 @@ func civilizationAssemblyFactoryOrders(p *OperatorProjection, s store.Store, lim
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ID < out[j].ID
 	})
-	return out, workEvidence, truncated, false
+	return out, workEvidence, truncated, workEvidenceQueryFailed
 }
 
 func civilizationAssemblyProjectWorkTask(taskStore *work.TaskStore, taskID types.EventID) (work.TaskProjection, work.LegacyTaskProjection, error) {
