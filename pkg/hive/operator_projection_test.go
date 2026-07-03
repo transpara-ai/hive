@@ -4626,3 +4626,251 @@ func writeRoleDefaultCatalogAt(t *testing.T, path, role, model string) {
 		t.Fatalf("write catalog: %v", err)
 	}
 }
+
+func TestCatalogMixedAddsCurrentClaudeModelsAndSurvivesMerge(t *testing.T) {
+	catalogPath := filepath.Join("..", "..", "catalog-mixed.yaml")
+	// MergeCatalogs replaces same-ID embedded entries WHOLESALE with the user
+	// file's copy, so a wrong catalog-mixed price or capability set would
+	// silently override eventgraph's correct entry and feed the cost gates
+	// (MaxCostPerCallUSD, CheapestWithCapabilities) and CanOperate validation
+	// — pin all four pricing numbers and the exact capability list post-merge.
+	wantCapabilities := []modelconfig.Capability{
+		modelconfig.CapTools, modelconfig.CapReasoning, modelconfig.CapCoding,
+		modelconfig.CapVision, modelconfig.CapOperate, modelconfig.CapLargeContext,
+		modelconfig.CapStructuredOut,
+	}
+	wantEntries := map[string]struct {
+		aliases []string
+		pricing modelconfig.ModelPricing
+	}{
+		"claude-opus-4-8": {
+			aliases: []string{"opus-4-8"},
+			pricing: modelconfig.ModelPricing{
+				InputPerMillion:      5.00,
+				OutputPerMillion:     25.00,
+				CacheReadPerMillion:  0.50,
+				CacheWritePerMillion: 6.25,
+			},
+		},
+		"claude-fable-5": {
+			aliases: []string{"fable", "fable-5"},
+			pricing: modelconfig.ModelPricing{
+				InputPerMillion:      10.00,
+				OutputPerMillion:     50.00,
+				CacheReadPerMillion:  1.00,
+				CacheWritePerMillion: 12.50,
+			},
+		},
+	}
+
+	// The entries must exist in catalog-mixed.yaml ITSELF, not only in the
+	// embedded eventgraph defaults — MergeCatalogs replaces same-ID base
+	// entries with the user file's copy, so the user file's copy is what
+	// survives the merge (packet D5 / CFADA1-adv3).
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("read catalog-mixed.yaml: %v", err)
+	}
+	userCatalog, _, _, err := modelconfig.ParseCatalogYAML(data)
+	if err != nil {
+		t.Fatalf("parse catalog-mixed.yaml: %v", err)
+	}
+	for id := range wantEntries {
+		entry, ok := userCatalog.Lookup(id)
+		if !ok {
+			t.Fatalf("catalog-mixed.yaml missing model entry %q", id)
+		}
+		if entry.Provider != "claude-cli" || entry.AuthMode != modelconfig.AuthSubscription {
+			t.Fatalf("catalog-mixed.yaml entry %q = provider %q auth %q, want claude-cli subscription", id, entry.Provider, entry.AuthMode)
+		}
+		if entry.Tier != modelconfig.TierJudgment {
+			t.Fatalf("catalog-mixed.yaml entry %q tier = %q, want judgment", id, entry.Tier)
+		}
+		if entry.ContextWindow != 1_000_000 || entry.MaxOutputTokens != 16_384 {
+			t.Fatalf("catalog-mixed.yaml entry %q window/output = %d/%d, want 1000000/16384", id, entry.ContextWindow, entry.MaxOutputTokens)
+		}
+	}
+
+	// Loaded via the same path hive uses for the ops projection
+	// (OperatorModelSelectionFromCatalogPath → ResolverFromCatalogFile →
+	// MergeCatalogs): both new ids and every new alias must resolve post-merge.
+	config, err := OperatorModelSelectionFromCatalogPath(catalogPath, time.Unix(1_700_000_000, 0).UTC())
+	if err != nil {
+		t.Fatalf("OperatorModelSelectionFromCatalogPath: %v", err)
+	}
+	merged := config.Resolver.Catalog()
+	for id, want := range wantEntries {
+		entry, ok := merged.Lookup(id)
+		if !ok {
+			t.Fatalf("merged catalog missing id %q", id)
+		}
+		if entry.ID != id {
+			t.Fatalf("merged catalog lookup %q resolved to %q", id, entry.ID)
+		}
+		if entry.Pricing != want.pricing {
+			t.Fatalf("merged catalog entry %q pricing = %+v, want %+v", id, entry.Pricing, want.pricing)
+		}
+		if len(entry.Capabilities) != len(wantCapabilities) {
+			t.Fatalf("merged catalog entry %q capabilities = %v, want %v", id, entry.Capabilities, wantCapabilities)
+		}
+		for i, capability := range wantCapabilities {
+			if entry.Capabilities[i] != capability {
+				t.Fatalf("merged catalog entry %q capabilities = %v, want %v", id, entry.Capabilities, wantCapabilities)
+			}
+		}
+		for _, alias := range want.aliases {
+			aliased, ok := merged.Lookup(alias)
+			if !ok {
+				t.Fatalf("merged catalog missing alias %q for %q", alias, id)
+			}
+			if aliased.ID != id {
+				t.Fatalf("merged catalog alias %q resolved to %q, want %q", alias, aliased.ID, id)
+			}
+		}
+	}
+
+	// The live alias `opus` must stay bound to claude-opus-4-6 — adding
+	// opus-4-8 must not silently rebind it (packet D1 / IADA-4).
+	opus, ok := merged.Lookup("opus")
+	if !ok {
+		t.Fatal("merged catalog missing alias \"opus\"")
+	}
+	if opus.ID != "claude-opus-4-6" {
+		t.Fatalf("merged catalog alias \"opus\" resolved to %q, want claude-opus-4-6", opus.ID)
+	}
+}
+
+func TestOperatorModelRoleAssignmentSelectionModeRoundTrip(t *testing.T) {
+	loadedAt := time.Unix(1_700_000_000, 0).UTC()
+
+	// Every starter role resolves through the embedded role_defaults map
+	// (guardian → sonnet, implementer → opus, ...), so the role-default layer
+	// wins the token and the starter policy's PreferredTier never fires:
+	// system config chose the model → system-default.
+	defaultSelection := BuildOperatorModelSelection(DefaultOperatorModelSelectionConfig(loadedAt))
+	for _, role := range []string{"guardian", "implementer"} {
+		assignment := requireModelAssignment(t, defaultSelection, role)
+		if assignment.Error != "" {
+			t.Fatalf("%s assignment unexpectedly errored: %q", role, assignment.Error)
+		}
+		if assignment.SelectionMode != string(modelconfig.SelectionModeSystemDefault) {
+			t.Fatalf("%s selection_mode = %q, want %q", role, assignment.SelectionMode, modelconfig.SelectionModeSystemDefault)
+		}
+	}
+
+	// A stored role policy pinning a concrete catalog alias is an explicit pin.
+	pinned := DefaultOperatorModelSelectionConfig(loadedAt)
+	pinned.RolePolicies = map[string]OperatorModelRolePolicy{
+		"guardian": {Policy: &modelconfig.RoleModelPolicy{Model: "sonnet"}},
+	}
+	pinnedGuardian := requireModelAssignment(t, BuildOperatorModelSelection(pinned), "guardian")
+	if pinnedGuardian.Error != "" {
+		t.Fatalf("pinned guardian assignment unexpectedly errored: %q", pinnedGuardian.Error)
+	}
+	if pinnedGuardian.SelectionMode != string(modelconfig.SelectionModeManualExplicit) {
+		t.Fatalf("pinned guardian selection_mode = %q, want %q", pinnedGuardian.SelectionMode, modelconfig.SelectionModeManualExplicit)
+	}
+
+	// Without a role default for guardian, the starter policy's PreferredTier
+	// selects via tier defaults → auto-tier.
+	tierGuardian := requireModelAssignment(t, BuildOperatorModelSelection(testModelSelectionConfigWithoutRoleDefault("guardian", loadedAt)), "guardian")
+	if tierGuardian.Error != "" {
+		t.Fatalf("tier guardian assignment unexpectedly errored: %q", tierGuardian.Error)
+	}
+	if tierGuardian.SelectionMode != string(modelconfig.SelectionModeAutoTier) {
+		t.Fatalf("tier guardian selection_mode = %q, want %q", tierGuardian.SelectionMode, modelconfig.SelectionModeAutoTier)
+	}
+}
+
+func TestOperatorModelRoleAssignmentErrorPathsCarryNoSelectionMode(t *testing.T) {
+	// operatorModelRoleAssignment has exactly three error-return paths before
+	// SelectionMode is set; one row per path completes the input-domain sweep.
+	config := DefaultOperatorModelSelectionConfig(time.Unix(1_700_000_000, 0).UTC())
+	config.RolePolicies = map[string]OperatorModelRolePolicy{
+		// Path 1 — Resolve itself fails: the token is not a catalog id,
+		// alias, or tier.
+		"guardian": {Policy: &modelconfig.RoleModelPolicy{Model: "no-such-model"}},
+		// Path 2 — Resolve succeeds but validateRunLaunchOverrideResolvedConfig
+		// fails: an api-key model without the explicit auth_mode opt-in.
+		"sysmon": {Policy: &modelconfig.RoleModelPolicy{Model: "api-sonnet"}},
+		// Path 3 — Resolve succeeds but validateStoredModelRolePolicyResolution
+		// fails: the stored resolved_model no longer matches what the current
+		// resolver produces.
+		"allocator": {
+			Policy:        &modelconfig.RoleModelPolicy{Model: "sonnet"},
+			ResolvedModel: "claude-opus-4-6",
+		},
+	}
+	selection := BuildOperatorModelSelection(config)
+	wantErrors := map[string]string{
+		"guardian":  "not found in catalog",
+		"sysmon":    "opt in to metered API-key models",
+		"allocator": "stored resolved_model",
+	}
+	for role, wantError := range wantErrors {
+		assignment := requireModelAssignment(t, selection, role)
+		if assignment.Error == "" {
+			t.Fatalf("%s assignment expected an error, got none: %+v", role, assignment)
+		}
+		if !strings.Contains(assignment.Error, wantError) {
+			t.Fatalf("%s error = %q, want the %q gate (containing %q)", role, assignment.Error, role, wantError)
+		}
+		if assignment.SelectionMode != "" {
+			t.Fatalf("%s error-path selection_mode = %q, want empty — mode is never synthesized", role, assignment.SelectionMode)
+		}
+	}
+}
+
+func TestOperatorModelRoleAssignmentSelectionModeJSONShape(t *testing.T) {
+	empty := OperatorModelRoleAssignment{Role: "guardian", Source: "starter-role-definition"}
+	data, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal assignment without mode: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal assignment JSON: %v", err)
+	}
+	if _, ok := fields["selection_mode"]; ok {
+		t.Fatalf("selection_mode key present in %s, want omitted when empty", data)
+	}
+
+	set := empty
+	set.SelectionMode = string(modelconfig.SelectionModeManualExplicit)
+	data, err = json.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal assignment with mode: %v", err)
+	}
+	fields = nil
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal assignment JSON: %v", err)
+	}
+	if got, ok := fields["selection_mode"]; !ok || got != string(modelconfig.SelectionModeManualExplicit) {
+		t.Fatalf("selection_mode in %s = %v (present=%v), want %q", data, got, ok, modelconfig.SelectionModeManualExplicit)
+	}
+}
+
+func testModelSelectionConfigWithoutRoleDefault(role string, loadedAt time.Time) OperatorModelSelectionConfig {
+	base := modelconfig.DefaultResolver()
+	defaults := base.Defaults()
+	tierModels := make(map[modelconfig.ModelTier]string, len(defaults.TierModels))
+	for tier, model := range defaults.TierModels {
+		tierModels[tier] = model
+	}
+	roleModels := make(map[string]string, len(defaults.RoleModels))
+	for name, model := range defaults.RoleModels {
+		if name == role {
+			continue
+		}
+		roleModels[name] = model
+	}
+	defaults.TierModels = tierModels
+	defaults.RoleModels = roleModels
+	return OperatorModelSelectionConfig{
+		Resolver:      modelconfig.NewResolver(base.Catalog(), nil, defaults),
+		CatalogSource: "test-no-role-default",
+		LoadedAt:      loadedAt,
+		ReloadMode:    operatorModelCatalogReloadMode,
+		HotReload:     false,
+	}
+}

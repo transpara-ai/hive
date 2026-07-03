@@ -234,12 +234,18 @@ type OperatorModelPricing struct {
 }
 
 type OperatorModelRoleAssignment struct {
-	Role                 string   `json:"role"`
-	Tier                 string   `json:"tier,omitempty"`
-	CanOperate           bool     `json:"can_operate"`
-	Model                string   `json:"model,omitempty"`
-	Provider             string   `json:"provider,omitempty"`
-	AuthMode             string   `json:"auth_mode,omitempty"`
+	Role       string `json:"role"`
+	Tier       string `json:"tier,omitempty"`
+	CanOperate bool   `json:"can_operate"`
+	Model      string `json:"model,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	AuthMode   string `json:"auth_mode,omitempty"`
+	// SelectionMode mirrors the resolver's ResolvedConfig.Mode for a
+	// successfully resolved assignment (manual-explicit, auto-tier,
+	// system-default). Empty when the assignment was built without a
+	// successful Resolve — never synthesized; consumers treat absence as
+	// not-projected and fall back to their own inference.
+	SelectionMode        string   `json:"selection_mode,omitempty"`
 	Profile              string   `json:"profile,omitempty"`
 	PolicyModel          string   `json:"policy_model,omitempty"`
 	PolicyProvider       string   `json:"policy_provider,omitempty"`
@@ -383,6 +389,10 @@ func operatorModelRoleAssignment(resolver *modelconfig.Resolver, role *modelconf
 	assignment.Model = resolved.Model
 	assignment.Provider = resolved.Provider
 	assignment.AuthMode = string(resolved.AuthMode)
+	// Populated only from a successful resolution — every error path above
+	// returns before this point, so an unresolved assignment never carries a
+	// synthesized mode (packet D3 / CFADA2-adv4).
+	assignment.SelectionMode = string(resolved.Mode)
 	assignment.Trace = append([]string(nil), resolved.Trace...)
 	return assignment
 }
