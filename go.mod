@@ -10,6 +10,7 @@ require (
 	github.com/transpara-ai/agent v0.0.0
 	github.com/transpara-ai/eventgraph/go v0.0.0-20260514214920-cf255c0d24cd
 	github.com/transpara-ai/work v0.0.0
+	golang.org/x/sync v0.18.0
 )
 
 replace (
@@ -29,7 +30,6 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
