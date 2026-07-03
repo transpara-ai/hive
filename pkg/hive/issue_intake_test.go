@@ -3463,9 +3463,16 @@ func TestPostEventIssueScanProgressDoesNotWaitForConfiguredRunner(t *testing.T) 
 		rt.progressIssueScanLifecycleAfterTaskCommands(context.Background(), 1, 1)
 		close(done)
 	}()
+	// release only closes after done (or on failure below), so a post-event
+	// pass coupled to the runner could never close done before any finite
+	// deadline — the timeout bounds "blocked forever", it does not assert
+	// latency. The inline pass legitimately takes 100-600ms of store scanning
+	// on a loaded host (measured up to 589ms at load average ~1.5x cores), so
+	// a tight deadline flakes on scheduling noise without adding detection
+	// power.
 	select {
 	case <-done:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(10 * time.Second):
 		close(release)
 		t.Fatal("post-event progress waited on configured runner")
 	}
