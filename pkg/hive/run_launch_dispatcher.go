@@ -51,6 +51,7 @@ type RunLaunchDispatchResult struct {
 	AlreadyDispatchedIDs             []string
 	DispatchedIssueScanRunIDs        []string
 	AlreadyDispatchedIssueScanRunIDs []string
+	SourceIssueMarkers               []IssueScanSourceIssueMarkerBridgeResult
 }
 
 // DispatchQueuedRunLaunches binds queued POST /api/hive/runs requests into the
@@ -149,6 +150,17 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 				errs = append(errs, fmt.Errorf("run %q: repair issue-scan lifecycle stage task drafts: %w", content.RunID, err))
 				continue
 			}
+			if isIssueScanRunLaunch(content) {
+				if parked, err := r.issueScanRunIsParked(content.RunID); err != nil {
+					errs = append(errs, fmt.Errorf("run %q: check parked state before issue-scan source marker bridge: %w", content.RunID, err))
+				} else if !parked {
+					if marker, ok, err := r.bridgeIssueScanDispatchAcquiredSourceMarker(context.Background(), content, request.ID(), taskID, orderID); err != nil {
+						errs = append(errs, fmt.Errorf("run %q: repair issue-scan source marker bridge: %w", content.RunID, err))
+					} else if ok {
+						result.SourceIssueMarkers = append(result.SourceIssueMarkers, marker)
+					}
+				}
+			}
 			result.AlreadyDispatched++
 			result.AlreadyDispatchedIDs = append(result.AlreadyDispatchedIDs, taskID.Value())
 			if isIssueScanRunLaunch(content) {
@@ -201,6 +213,11 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 			errs = append(errs, fmt.Errorf("run %q: create issue-scan lifecycle stage task drafts: %w", content.RunID, err))
 			continue
 		}
+		if marker, ok, err := r.bridgeIssueScanDispatchAcquiredSourceMarker(context.Background(), content, request.ID(), task.ID, orderID); err != nil {
+			errs = append(errs, fmt.Errorf("run %q: issue-scan source marker bridge: %w", content.RunID, err))
+		} else if ok {
+			result.SourceIssueMarkers = append(result.SourceIssueMarkers, marker)
+		}
 		result.Dispatched++
 		result.DispatchedTaskIDs = append(result.DispatchedTaskIDs, task.ID)
 		result.DispatchedStageTaskIDs = append(result.DispatchedStageTaskIDs, stageTaskIDs...)
@@ -214,6 +231,84 @@ func (r *Runtime) dispatchQueuedRunLaunches(limit int, onlyRunID string) (RunLau
 	}
 
 	return result, errors.Join(errs...)
+}
+
+func (r *Runtime) bridgeIssueScanDispatchAcquiredSourceMarker(ctx context.Context, content FactoryRunRequestedContent, requestID, taskID types.EventID, orderID string) (IssueScanSourceIssueMarkerBridgeResult, bool, error) {
+	if !isIssueScanRunLaunch(content) {
+		return IssueScanSourceIssueMarkerBridgeResult{}, false, nil
+	}
+	brief, ready, err := issueScanSourceMarkerResearchBrief(content)
+	if err != nil {
+		return IssueScanSourceIssueMarkerBridgeResult{}, true, err
+	}
+	if !ready {
+		return IssueScanSourceIssueMarkerBridgeResult{}, false, nil
+	}
+	stageID := issueScanSourceMarkerFirstStageID(content)
+	input := IssueScanSourceIssueMarkerInput{
+		Transition:     IssueScanSourceIssueMarkerAcquired,
+		Issue:          issueScanSourceIssueMarkerIssueFromBrief(brief.SelectedIssue),
+		RunID:          strings.TrimSpace(content.RunID),
+		FactoryOrderID: strings.TrimSpace(orderID),
+		StageID:        stageID,
+		StageState:     "acquired",
+		ActorRole:      "hive.issue_scan_dispatcher",
+		WorkRefs: compactStrings([]string{
+			"work.factory_order:" + strings.TrimSpace(orderID),
+			issueScanSourceMarkerEventRef("work.task", taskID),
+		}),
+		EventGraphRefs: compactStrings([]string{
+			issueScanSourceMarkerEventRef("eventgraph.factory.run.requested", requestID),
+		}),
+		EvidenceRefs: issueScanSourceMarkerRunLaunchSourceRefs(content),
+		GeneratedAt:  time.Now().UTC(),
+	}
+	result, err := r.BridgeIssueScanSourceIssueMarker(ctx, input)
+	return result, true, err
+}
+
+func issueScanSourceMarkerResearchBrief(content FactoryRunRequestedContent) (issueScanResearchBrief, bool, error) {
+	var meta struct {
+		Kind             string `json:"kind"`
+		LifecycleVersion string `json:"lifecycle_version"`
+	}
+	if err := json.Unmarshal(content.Brief, &meta); err != nil {
+		return issueScanResearchBrief{}, true, fmt.Errorf("decode issue-scan marker brief metadata: %w", err)
+	}
+	if strings.TrimSpace(meta.Kind) != issueScanBriefKind {
+		return issueScanResearchBrief{}, false, nil
+	}
+	if strings.TrimSpace(meta.LifecycleVersion) == "" {
+		return issueScanResearchBrief{}, false, nil
+	}
+	brief, err := issueScanResearchBriefFromContent(content)
+	return brief, true, err
+}
+
+func issueScanSourceMarkerFirstStageID(content FactoryRunRequestedContent) string {
+	_, _, lifecycle, _, err := queuedRunLifecycleFromBrief(content.Brief)
+	if err != nil || len(lifecycle) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lifecycle[0].ID)
+}
+
+func issueScanSourceMarkerRunLaunchSourceRefs(content FactoryRunRequestedContent) []string {
+	refs := make([]string, 0, len(content.Sources))
+	for _, source := range content.Sources {
+		if ref := strings.TrimSpace(source.Ref); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	return compactStrings(refs)
+}
+
+func issueScanSourceMarkerEventRef(kind string, id types.EventID) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" || id.IsZero() {
+		return ""
+	}
+	return kind + ":" + id.Value()
 }
 
 func (r *Runtime) ensureIssueScanExecutionPlanArtifact(content FactoryRunRequestedContent, requestID, taskID types.EventID, body string) error {

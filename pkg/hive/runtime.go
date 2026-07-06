@@ -90,6 +90,7 @@ type Runtime struct {
 	issueScanDraftPRCreator            work.Epic11PullRequestCreator
 	issueScanReadyPRRunner             IssueScanReadyPRRunner
 	issueScanTargetStateResolver       IssueScanTargetStateResolver
+	issueScanSourceIssueMarkerClient   IssueScanSourceIssueMarkerClient
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -133,6 +134,7 @@ type Config struct {
 	IssueScanDraftPRCreator            work.Epic11PullRequestCreator      // optional approved issue-scan draft-PR creator
 	IssueScanReadyPRRunner             IssueScanReadyPRRunner             // optional terminal ready-PR evidence runner
 	IssueScanTargetStateResolver       IssueScanTargetStateResolver       // optional live target issue state resolver used to park stale/protected runs
+	IssueScanSourceIssueMarkerClient   IssueScanSourceIssueMarkerClient   // optional source GitHub issue marker client; nil keeps marker bridge dry-run only
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -212,6 +214,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		issueScanDraftPRCreator:            cfg.IssueScanDraftPRCreator,
 		issueScanReadyPRRunner:             cfg.IssueScanReadyPRRunner,
 		issueScanTargetStateResolver:       cfg.IssueScanTargetStateResolver,
+		issueScanSourceIssueMarkerClient:   cfg.IssueScanSourceIssueMarkerClient,
 		telemetryWriter:                    cfg.TelemetryWriter,
 		apiClient:                          cfg.APIClient,
 		providerFactory:                    intelligence.New,

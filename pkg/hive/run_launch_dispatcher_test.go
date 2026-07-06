@@ -2,7 +2,9 @@ package hive
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -438,6 +440,189 @@ func TestDispatchQueuedRunLaunchRepairsMissingIssueScanExecutionPlanArtifact(t *
 	assertIssueScanStageTaskDrafts(t, rt, tasks, parentTaskID, parentFactoryOrderID, expectedStages)
 }
 
+func TestDispatchQueuedRunLaunchAppliesAcquiredSourceIssueMarker(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	client := &fakeIssueScanMarkerClient{}
+	rt.issueScanSourceIssueMarkerClient = client
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 247,
+			Title:  "Wire source-issue marker bridge",
+			URL:    "https://github.com/transpara-ai/hive/issues/247",
+			Body:   "Wire the marker bridge without treating comments as truth.",
+			Labels: []string{IssueScanPRReadyLabel},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want one dispatched and no failures", result)
+	}
+	if len(result.SourceIssueMarkers) != 1 {
+		t.Fatalf("source issue markers = %+v, want one acquired marker", result.SourceIssueMarkers)
+	}
+	marker := result.SourceIssueMarkers[0]
+	if marker.DryRun || !marker.Applied || !marker.CommentCreated || marker.Transition != IssueScanSourceIssueMarkerAcquired {
+		t.Fatalf("marker result = %+v, want applied acquired marker", marker)
+	}
+	if marker.Repository != "transpara-ai/hive" || marker.IssueNumber != 247 || marker.FactoryOrderID == "" {
+		t.Fatalf("marker target/order = %+v, want hive#247 with FactoryOrder", marker)
+	}
+	if !containsIssueScanValue(marker.LabelsAdded, IssueScanFactoryStatusLabelAcquired) {
+		t.Fatalf("labels added = %+v, want acquired label", marker.LabelsAdded)
+	}
+	for _, ref := range []string{"work.factory_order:", "work.task:", "eventgraph.factory.run.requested:"} {
+		if !containsIssueScanPrefix(marker.CanonicalRefs, ref) {
+			t.Fatalf("marker canonical refs = %+v, want prefix %q", marker.CanonicalRefs, ref)
+		}
+	}
+	if len(client.comments) != 1 || !strings.Contains(client.comments[0], "Factory issue-scan marker: acquired") {
+		t.Fatalf("client comments = %+v, want acquired marker comment", client.comments)
+	}
+
+	replay, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("replay DispatchQueuedRunLaunch: %v", err)
+	}
+	if replay.AlreadyDispatched != 1 || len(replay.SourceIssueMarkers) != 1 {
+		t.Fatalf("replay result = %+v, want already dispatched with one marker", replay)
+	}
+	if replay.SourceIssueMarkers[0].CommentCreated || !replay.SourceIssueMarkers[0].CommentSkipped {
+		t.Fatalf("replay marker = %+v, want duplicate comment skipped", replay.SourceIssueMarkers[0])
+	}
+	if len(client.comments) != 1 {
+		t.Fatalf("comments after replay = %+v, want no duplicate marker comment", client.comments)
+	}
+}
+
+func TestDispatchQueuedRunLaunchDryRunsAcquiredSourceIssueMarkerWithoutClient(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 247,
+			Title:  "Wire source-issue marker bridge",
+			URL:    "https://github.com/transpara-ai/hive/issues/247",
+			Labels: []string{IssueScanPRReadyLabel},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("DispatchQueuedRunLaunch: %v", err)
+	}
+	if len(result.SourceIssueMarkers) != 1 {
+		t.Fatalf("source issue markers = %+v, want one planned marker", result.SourceIssueMarkers)
+	}
+	marker := result.SourceIssueMarkers[0]
+	if !marker.DryRun || marker.Applied || marker.CommentCreated || marker.CommentSkipped {
+		t.Fatalf("marker result = %+v, want dry-run-only marker without client", marker)
+	}
+	if marker.IdempotencyKey == "" || marker.Transition != IssueScanSourceIssueMarkerAcquired {
+		t.Fatalf("marker = %+v, want acquired marker with idempotency key", marker)
+	}
+}
+
+func TestDispatchQueuedRunLaunchContinuesWhenSourceIssueMarkerClientFails(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	rt.issueScanSourceIssueMarkerClient = &failingIssueScanMarkerClient{err: errors.New("github marker unavailable")}
+	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
+		OperatorID: "operator_michael",
+		Issues: []GitHubIssueCandidate{{
+			Repo:   "transpara-ai/hive",
+			Number: 247,
+			Title:  "Wire source-issue marker bridge",
+			URL:    "https://github.com/transpara-ai/hive/issues/247",
+			Labels: []string{IssueScanPRReadyLabel},
+		}},
+		Budget: RunLaunchBudget{MaxIterations: 12, MaxCostUSD: 25},
+	}, nil)
+	if err != nil {
+		t.Fatalf("QueueIssueScanRunLaunch: %v", err)
+	}
+
+	result, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err == nil || !strings.Contains(err.Error(), "github marker unavailable") {
+		t.Fatalf("DispatchQueuedRunLaunch error = %v, want surfaced marker error", err)
+	}
+	if result.Dispatched != 1 || result.Failed != 0 {
+		t.Fatalf("dispatch result = %+v, want canonical dispatch despite marker projection error", result)
+	}
+	if len(result.DispatchedIssueScanRunIDs) != 1 || result.DispatchedIssueScanRunIDs[0] != queued.RunID {
+		t.Fatalf("dispatched issue-scan run ids = %+v, want %s", result.DispatchedIssueScanRunIDs, queued.RunID)
+	}
+	tasks, err := rt.tasks.List(100)
+	if err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks) != 1+len(issueScanDevelopmentLifecycle()) {
+		t.Fatalf("task count = %d, want parent plus lifecycle stage drafts", len(tasks))
+	}
+}
+
+func TestDispatchQueuedRunLaunchSkipsAcquiredMarkerForAlreadyParkedRun(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued := queueIssueScanParkingRun(t, rt, writer, 247)
+	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
+		return IssueScanTargetState{
+			Repository:  "transpara-ai/hive",
+			Number:      247,
+			State:       "closed",
+			StateReason: "completed",
+			Labels:      []string{IssueScanPRReadyLabel},
+		}, nil
+	}
+
+	initial, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
+	if err != nil {
+		t.Fatalf("initial ProgressIssueScanRunLifecycleWithConfiguredRunners: %v", err)
+	}
+	assertIssueScanParked(t, initial, IssueScanParkBlockerStaleTarget)
+
+	client := &fakeIssueScanMarkerClient{}
+	rt.issueScanSourceIssueMarkerClient = client
+	markerPass, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
+	if err != nil {
+		t.Fatalf("marker ProgressIssueScanRunLifecycleWithConfiguredRunners: %v", err)
+	}
+	if len(markerPass.ParkedRuns) != 1 || markerPass.ParkedRuns[0].SourceIssueMarker.Transition != IssueScanSourceIssueMarkerParked {
+		t.Fatalf("marker pass parked runs = %+v, want parked source marker", markerPass.ParkedRuns)
+	}
+	if len(client.comments) != 1 || strings.Contains(client.comments[0], "Factory issue-scan marker: acquired") || !strings.Contains(client.comments[0], "Factory issue-scan marker: parked") {
+		t.Fatalf("comments after parked marker pass = %+v, want only parked marker", client.comments)
+	}
+	addedCount := len(client.addedLabels)
+	removedCount := len(client.removedLabels)
+
+	replay, err := rt.DispatchQueuedRunLaunch(queued.RunID)
+	if err != nil {
+		t.Fatalf("replay DispatchQueuedRunLaunch: %v", err)
+	}
+	if replay.AlreadyDispatched != 1 || len(replay.SourceIssueMarkers) != 0 {
+		t.Fatalf("replay dispatch = %+v, want already-dispatched with no acquired marker", replay)
+	}
+	if len(client.comments) != 1 || strings.Contains(client.comments[0], "Factory issue-scan marker: acquired") {
+		t.Fatalf("comments after dispatch replay = %+v, want no acquired marker", client.comments)
+	}
+	if len(client.addedLabels) != addedCount || len(client.removedLabels) != removedCount {
+		t.Fatalf("label mutations changed on parked dispatch replay: added %d->%d removed %d->%d", addedCount, len(client.addedLabels), removedCount, len(client.removedLabels))
+	}
+}
+
 func TestIssueScanLifecycleStageArtifactsRejectsUnsafeLabels(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -785,6 +970,15 @@ func countArtifactsWithLabelPrefix(artifacts []work.ArtifactEvent, prefix string
 		}
 	}
 	return count
+}
+
+func containsIssueScanPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertIssueScanStageTaskDrafts(t *testing.T, rt *Runtime, tasks []work.Task, parentTaskID types.EventID, factoryOrderID string, stages []issueScanLifecycleStage) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -57,6 +58,7 @@ type IssueScanRunParkResult struct {
 	Parked            bool
 	AlreadyParked     bool
 	ParkEventID       types.EventID
+	SourceIssueMarker IssueScanSourceIssueMarkerBridgeResult
 }
 
 type issueScanRunParkingDecision struct {
@@ -90,7 +92,13 @@ func (r *Runtime) parkBlockedIssueScanRuns(ctx context.Context, dispatch RunLaun
 		}
 		if ok {
 			inactive[runID] = true
-			results = append(results, issueScanRunParkResultFromContent(existing, true, false, eventID))
+			parkedResult := issueScanRunParkResultFromContent(existing, true, false, eventID)
+			if marker, ok, err := r.bridgeIssueScanParkedSourceMarker(ctx, runID, existing, eventID); err != nil {
+				errs = append(errs, fmt.Errorf("run %q: already-parked source marker bridge: %w", runID, err))
+			} else if ok {
+				parkedResult.SourceIssueMarker = marker
+			}
+			results = append(results, parkedResult)
 			continue
 		}
 		decision, shouldPark, err := r.issueScanRunParkingDecision(ctx, runID)
@@ -109,7 +117,20 @@ func (r *Runtime) parkBlockedIssueScanRuns(ctx context.Context, dispatch RunLaun
 			continue
 		}
 		inactive[runID] = true
-		results = append(results, IssueScanRunParkResult{
+		parkedContent := IssueScanRunParkedContent{
+			RunID:             runID,
+			FactoryOrderID:    decision.FactoryOrderID,
+			Repository:        decision.Repository,
+			IssueNumber:       decision.IssueNumber,
+			StageID:           decision.StageID,
+			BlockerType:       decision.BlockerType,
+			Detail:            decision.Detail,
+			RequiredAction:    decision.RequiredAction,
+			SourceRefs:        compactStrings(decision.SourceRefs),
+			TargetIssueState:  decision.TargetIssueState,
+			TargetIssueLabels: append([]string(nil), decision.TargetIssueLabels...),
+		}
+		parkedResult := IssueScanRunParkResult{
 			RunID:             runID,
 			FactoryOrderID:    decision.FactoryOrderID,
 			Repository:        decision.Repository,
@@ -122,7 +143,13 @@ func (r *Runtime) parkBlockedIssueScanRuns(ctx context.Context, dispatch RunLaun
 			TargetIssueLabels: append([]string(nil), decision.TargetIssueLabels...),
 			Parked:            true,
 			ParkEventID:       eventID,
-		})
+		}
+		if marker, ok, err := r.bridgeIssueScanParkedSourceMarker(ctx, runID, parkedContent, eventID); err != nil {
+			errs = append(errs, fmt.Errorf("run %q: parked source marker bridge: %w", runID, err))
+		} else if ok {
+			parkedResult.SourceIssueMarker = marker
+		}
+		results = append(results, parkedResult)
 	}
 	if len(inactive) > 0 {
 		active = filterIssueScanDispatchRuns(dispatch, inactive)
@@ -255,6 +282,61 @@ func (r *Runtime) recordIssueScanRunParked(runID string, decision issueScanRunPa
 		return types.EventID{}, fmt.Errorf("append issue-scan parked event: %w", err)
 	}
 	return stored.ID(), nil
+}
+
+func (r *Runtime) bridgeIssueScanParkedSourceMarker(ctx context.Context, runID string, parked IssueScanRunParkedContent, parkEventID types.EventID) (IssueScanSourceIssueMarkerBridgeResult, bool, error) {
+	if r == nil || r.store == nil {
+		return IssueScanSourceIssueMarkerBridgeResult{}, false, nil
+	}
+	requests, err := fetchFactoryRunRequestedEventByRunID(r.store, runID)
+	if err != nil {
+		return IssueScanSourceIssueMarkerBridgeResult{}, true, err
+	}
+	if len(requests) == 0 {
+		return IssueScanSourceIssueMarkerBridgeResult{}, true, fmt.Errorf("queued run %q not found", runID)
+	}
+	content, ok := requests[0].Content().(FactoryRunRequestedContent)
+	if !ok || !isIssueScanRunLaunch(content) {
+		return IssueScanSourceIssueMarkerBridgeResult{}, false, nil
+	}
+	brief, ready, err := issueScanSourceMarkerResearchBrief(content)
+	if err != nil {
+		return IssueScanSourceIssueMarkerBridgeResult{}, true, err
+	}
+	if !ready {
+		return IssueScanSourceIssueMarkerBridgeResult{}, false, nil
+	}
+	transition := issueScanSourceMarkerParkedTransition(parked.BlockerType)
+	input := IssueScanSourceIssueMarkerInput{
+		Transition:     transition,
+		Issue:          issueScanSourceIssueMarkerIssueFromBrief(brief.SelectedIssue),
+		RunID:          strings.TrimSpace(runID),
+		FactoryOrderID: strings.TrimSpace(parked.FactoryOrderID),
+		StageID:        strings.TrimSpace(parked.StageID),
+		StageState:     strings.TrimSpace(parked.BlockerType),
+		ActorRole:      "hive.issue_scan_parking",
+		WorkRefs: compactStrings([]string{
+			"work.factory_order:" + strings.TrimSpace(parked.FactoryOrderID),
+			"work.lifecycle_state:parked",
+		}),
+		EventGraphRefs: compactStrings([]string{
+			issueScanSourceMarkerEventRef("eventgraph.factory.run.requested", requests[0].ID()),
+			issueScanSourceMarkerEventRef("eventgraph.hive.issuescan.run.parked", parkEventID),
+		}),
+		EvidenceRefs: compactStrings(append(append([]string(nil), parked.SourceRefs...), issueScanSourceMarkerRunLaunchSourceRefs(content)...)),
+		GeneratedAt:  time.Now().UTC(),
+	}
+	result, err := r.BridgeIssueScanSourceIssueMarker(ctx, input)
+	return result, true, err
+}
+
+func issueScanSourceMarkerParkedTransition(blockerType string) IssueScanSourceIssueMarkerTransition {
+	switch strings.TrimSpace(blockerType) {
+	case IssueScanParkBlockerHumanScope, IssueScanParkBlockerProtectedAction, IssueScanParkBlockerNotPRReady:
+		return IssueScanSourceIssueMarkerHumanAction
+	default:
+		return IssueScanSourceIssueMarkerParked
+	}
 }
 
 func (r *Runtime) issueScanRunParked(runID string) (IssueScanRunParkedContent, types.EventID, bool, error) {

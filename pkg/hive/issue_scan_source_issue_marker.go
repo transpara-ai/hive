@@ -72,7 +72,9 @@ type IssueScanSourceIssueMarkerPlan struct {
 
 // IssueScanSourceIssueMarkerClient is the minimum GitHub issue mutation surface
 // needed to apply a planned marker. Implementations should make RemoveLabels
-// tolerant of labels that are already absent.
+// tolerant of labels that are already absent. ListCommentBodies must return all
+// existing comment bodies for the issue, across all pages, so hidden
+// idempotency keys cannot be missed.
 type IssueScanSourceIssueMarkerClient interface {
 	AddLabels(ctx context.Context, repo string, number int, labels []string) error
 	RemoveLabels(ctx context.Context, repo string, number int, labels []string) error
@@ -85,6 +87,72 @@ type IssueScanSourceIssueMarkerApplyResult struct {
 	LabelsRemoved  []string
 	CommentCreated bool
 	CommentSkipped bool
+}
+
+// IssueScanSourceIssueMarkerBridgeResult records one runtime bridge pass. A
+// dry-run result proves Hive could derive a valid projection plan without
+// mutating GitHub. An applied result means an explicitly configured client
+// accepted the same plan at the GitHub mutation boundary.
+type IssueScanSourceIssueMarkerBridgeResult struct {
+	RunID             string
+	FactoryOrderID    string
+	Repository        string
+	IssueNumber       int
+	Transition        IssueScanSourceIssueMarkerTransition
+	StageID           string
+	IdempotencyKey    string
+	DryRun            bool
+	Applied           bool
+	CommentCreated    bool
+	CommentSkipped    bool
+	LabelsAdded       []string
+	LabelsRemoved     []string
+	CanonicalRefs     []string
+	WorkRefs          []string
+	EventGraphRefs    []string
+	EvidenceRefs      []string
+	TruthBoundary     string
+	AuthorityBoundary string
+}
+
+// BridgeIssueScanSourceIssueMarker is the single Runtime-owned bridge from
+// canonical issue-scan state into source GitHub issue marker projection. It
+// plans on every call, but it applies only when an explicit marker client is
+// configured; nil client keeps the bridge dry-run-only.
+func (r *Runtime) BridgeIssueScanSourceIssueMarker(ctx context.Context, input IssueScanSourceIssueMarkerInput) (IssueScanSourceIssueMarkerBridgeResult, error) {
+	plan, err := PlanIssueScanSourceIssueMarker(input)
+	if err != nil {
+		return IssueScanSourceIssueMarkerBridgeResult{}, err
+	}
+	result := IssueScanSourceIssueMarkerBridgeResult{
+		RunID:             strings.TrimSpace(input.RunID),
+		FactoryOrderID:    strings.TrimSpace(input.FactoryOrderID),
+		Repository:        plan.Repo,
+		IssueNumber:       plan.IssueNumber,
+		Transition:        plan.Transition,
+		StageID:           strings.TrimSpace(input.StageID),
+		IdempotencyKey:    plan.IdempotencyKey,
+		DryRun:            r == nil || r.issueScanSourceIssueMarkerClient == nil,
+		CanonicalRefs:     append([]string(nil), plan.CanonicalRefs...),
+		WorkRefs:          compactStrings(input.WorkRefs),
+		EventGraphRefs:    compactStrings(input.EventGraphRefs),
+		EvidenceRefs:      compactStrings(input.EvidenceRefs),
+		TruthBoundary:     plan.TruthBoundary,
+		AuthorityBoundary: plan.AuthorityBoundary,
+	}
+	if result.DryRun {
+		return result, nil
+	}
+	applied, err := ApplyIssueScanSourceIssueMarker(ctx, r.issueScanSourceIssueMarkerClient, plan)
+	if err != nil {
+		return result, err
+	}
+	result.Applied = true
+	result.CommentCreated = applied.CommentCreated
+	result.CommentSkipped = applied.CommentSkipped
+	result.LabelsAdded = append([]string(nil), applied.LabelsAdded...)
+	result.LabelsRemoved = append([]string(nil), applied.LabelsRemoved...)
+	return result, nil
 }
 
 // PlanIssueScanSourceIssueMarker returns the idempotent label/comment payload
@@ -138,6 +206,14 @@ func ApplyIssueScanSourceIssueMarker(ctx context.Context, client IssueScanSource
 	if err := validateIssueScanSourceIssueMarkerPlan(plan); err != nil {
 		return result, err
 	}
+	bodies, err := client.ListCommentBodies(ctx, plan.Repo, plan.IssueNumber)
+	if err != nil {
+		return result, fmt.Errorf("list source issue marker comments: %w", err)
+	}
+	if IssueScanSourceIssueMarkerCommentExists(bodies, plan) {
+		result.CommentSkipped = true
+		return result, nil
+	}
 	if len(plan.RemoveLabels) > 0 {
 		if err := client.RemoveLabels(ctx, plan.Repo, plan.IssueNumber, plan.RemoveLabels); err != nil {
 			return result, fmt.Errorf("remove source issue marker labels: %w", err)
@@ -149,14 +225,6 @@ func ApplyIssueScanSourceIssueMarker(ctx context.Context, client IssueScanSource
 			return result, fmt.Errorf("add source issue marker labels: %w", err)
 		}
 		result.LabelsAdded = append([]string(nil), plan.AddLabels...)
-	}
-	bodies, err := client.ListCommentBodies(ctx, plan.Repo, plan.IssueNumber)
-	if err != nil {
-		return result, fmt.Errorf("list source issue marker comments: %w", err)
-	}
-	if IssueScanSourceIssueMarkerCommentExists(bodies, plan) {
-		result.CommentSkipped = true
-		return result, nil
 	}
 	if err := client.CreateComment(ctx, plan.Repo, plan.IssueNumber, plan.CommentBody); err != nil {
 		return result, fmt.Errorf("create source issue marker comment: %w", err)
@@ -277,6 +345,19 @@ func issueScanSourceIssueMarkerRefs(input IssueScanSourceIssueMarkerInput, issue
 	refs = append(refs, input.EventGraphRefs...)
 	refs = append(refs, input.EvidenceRefs...)
 	return compactStrings(refs)
+}
+
+func issueScanSourceIssueMarkerIssueFromBrief(issue issueScanBriefIssuePayload) GitHubIssueCandidate {
+	return GitHubIssueCandidate{
+		Repo:        issue.Repo,
+		Number:      issue.Number,
+		Title:       issue.Title,
+		URL:         issue.URL,
+		State:       issue.State,
+		StateReason: issue.StateReason,
+		Labels:      append([]string(nil), issue.Labels...),
+		Body:        issue.Body,
+	}
 }
 
 func issueScanSourceIssueMarkerRemoveLabels(addLabel string) []string {

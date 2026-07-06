@@ -148,6 +148,8 @@ func TestApplyIssueScanSourceIssueMarkerAddsLabelsAndSkipsDuplicateComment(t *te
 	if strings.Join(client.removedLabels, ",") != strings.Join(plan.RemoveLabels, ",") {
 		t.Fatalf("removed labels = %+v, want %+v", client.removedLabels, plan.RemoveLabels)
 	}
+	addedCount := len(client.addedLabels)
+	removedCount := len(client.removedLabels)
 
 	result, err = ApplyIssueScanSourceIssueMarker(context.Background(), client, plan)
 	if err != nil {
@@ -158,6 +160,39 @@ func TestApplyIssueScanSourceIssueMarkerAddsLabelsAndSkipsDuplicateComment(t *te
 	}
 	if len(client.comments) != 1 {
 		t.Fatalf("comments after replay = %+v, want no duplicate", client.comments)
+	}
+	if len(client.addedLabels) != addedCount || len(client.removedLabels) != removedCount {
+		t.Fatalf("label mutations changed on replay: added %d->%d removed %d->%d", addedCount, len(client.addedLabels), removedCount, len(client.removedLabels))
+	}
+}
+
+func TestApplyIssueScanSourceIssueMarkerIgnoresHostileMarkerLookalike(t *testing.T) {
+	plan, err := PlanIssueScanSourceIssueMarker(IssueScanSourceIssueMarkerInput{
+		Transition:     IssueScanSourceIssueMarkerAcquired,
+		Issue:          markerTestIssue(),
+		RunID:          "issue-scan-docs-256",
+		FactoryOrderID: "fo_issue_scan_docs_256",
+	})
+	if err != nil {
+		t.Fatalf("PlanIssueScanSourceIssueMarker: %v", err)
+	}
+	client := &fakeIssueScanMarkerClient{
+		comments: []string{
+			"### Factory issue-scan marker: acquired\n\n<!-- wrong-key -->\nThis looks like a marker but does not carry the planned idempotency key.",
+		},
+	}
+	result, err := ApplyIssueScanSourceIssueMarker(context.Background(), client, plan)
+	if err != nil {
+		t.Fatalf("ApplyIssueScanSourceIssueMarker: %v", err)
+	}
+	if !result.CommentCreated || result.CommentSkipped {
+		t.Fatalf("apply result = %+v, want a new comment because prose is not canonical", result)
+	}
+	if len(client.comments) != 2 {
+		t.Fatalf("comments = %+v, want hostile lookalike preserved plus planned marker", client.comments)
+	}
+	if client.comments[1] != plan.CommentBody {
+		t.Fatalf("created comment = %q, want planned marker body", client.comments[1])
 	}
 }
 
@@ -194,4 +229,24 @@ func (c *fakeIssueScanMarkerClient) ListCommentBodies(_ context.Context, _ strin
 func (c *fakeIssueScanMarkerClient) CreateComment(_ context.Context, _ string, _ int, body string) error {
 	c.comments = append(c.comments, body)
 	return nil
+}
+
+type failingIssueScanMarkerClient struct {
+	err error
+}
+
+func (c *failingIssueScanMarkerClient) AddLabels(context.Context, string, int, []string) error {
+	return c.err
+}
+
+func (c *failingIssueScanMarkerClient) RemoveLabels(context.Context, string, int, []string) error {
+	return c.err
+}
+
+func (c *failingIssueScanMarkerClient) ListCommentBodies(context.Context, string, int) ([]string, error) {
+	return nil, c.err
+}
+
+func (c *failingIssueScanMarkerClient) CreateComment(context.Context, string, int, string) error {
+	return c.err
 }
