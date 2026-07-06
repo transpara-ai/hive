@@ -13,6 +13,8 @@ import (
 func TestProgressIssueScanLifecycleParksClosedTargetBeforeConfiguredRunners(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued := queueIssueScanParkingRun(t, rt, writer, 225)
+	client := &fakeIssueScanMarkerClient{}
+	rt.issueScanSourceIssueMarkerClient = client
 	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
 		return IssueScanTargetState{
 			Repository:  "transpara-ai/hive",
@@ -49,6 +51,21 @@ func TestProgressIssueScanLifecycleParksClosedTargetBeforeConfiguredRunners(t *t
 	if count := issueScanParkedEventCount(t, rt); count != 1 {
 		t.Fatalf("parked event count = %d, want 1", count)
 	}
+	if len(progress.ParkedRuns) != 1 {
+		t.Fatalf("parked runs = %+v, want one", progress.ParkedRuns)
+	}
+	marker := progress.ParkedRuns[0].SourceIssueMarker
+	if marker.Transition != IssueScanSourceIssueMarkerParked || !marker.Applied || !marker.CommentCreated {
+		t.Fatalf("source marker = %+v, want applied parked marker", marker)
+	}
+	if !containsIssueScanValue(marker.LabelsAdded, IssueScanFactoryStatusLabelParked) {
+		t.Fatalf("marker labels added = %+v, want parked label", marker.LabelsAdded)
+	}
+	if len(client.comments) != 2 || !strings.Contains(client.comments[1], "Factory issue-scan marker: parked") {
+		t.Fatalf("client comments = %+v, want parked marker", client.comments)
+	}
+	addedCount := len(client.addedLabels)
+	removedCount := len(client.removedLabels)
 
 	again, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
 	if err != nil {
@@ -59,6 +76,15 @@ func TestProgressIssueScanLifecycleParksClosedTargetBeforeConfiguredRunners(t *t
 	}
 	if count := issueScanParkedEventCount(t, rt); count != 1 {
 		t.Fatalf("parked event count after second pass = %d, want 1", count)
+	}
+	if len(again.ParkedRuns) != 1 || !again.ParkedRuns[0].SourceIssueMarker.CommentSkipped {
+		t.Fatalf("second parked marker = %+v, want duplicate comment skipped", again.ParkedRuns)
+	}
+	if len(client.comments) != 2 {
+		t.Fatalf("comments after parked replay = %+v, want no duplicate", client.comments)
+	}
+	if len(client.addedLabels) != addedCount || len(client.removedLabels) != removedCount {
+		t.Fatalf("label mutations changed on parked replay: added %d->%d removed %d->%d", addedCount, len(client.addedLabels), removedCount, len(client.removedLabels))
 	}
 }
 
@@ -107,6 +133,38 @@ func TestParkedIssueScanRunStopsDirectLifecycleHelpers(t *testing.T) {
 	}
 	if _, err := rt.CompleteIssueScanLifecycleStage(queued.RunID, "research_issue_and_repo_context", IssueScanStageRuntimeEvidence{}, false); err == nil || !strings.Contains(err.Error(), "is parked") {
 		t.Fatalf("CompleteIssueScanLifecycleStage parked error = %v, want parked refusal", err)
+	}
+}
+
+func TestProgressIssueScanLifecycleParksWhenSourceIssueMarkerClientFails(t *testing.T) {
+	rt, writer := newRunLaunchDispatchRuntime(t)
+	queued := queueIssueScanParkingRun(t, rt, writer, 225)
+	rt.issueScanSourceIssueMarkerClient = &failingIssueScanMarkerClient{err: errors.New("github marker unavailable")}
+	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
+		return IssueScanTargetState{
+			Repository:  "transpara-ai/hive",
+			Number:      225,
+			State:       "closed",
+			StateReason: "completed",
+			Labels:      []string{IssueScanPRReadyLabel},
+		}, nil
+	}
+	runnerCalls := 0
+	rt.issueScanStageRoleOutputRunner = func(context.Context, IssueScanStageRoleOutputRunnerContext) (IssueScanStageRoleOutputRunnerResult, error) {
+		runnerCalls++
+		return IssueScanStageRoleOutputRunnerResult{}, fmt.Errorf("parked run must not invoke configured runners")
+	}
+
+	progress, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
+	if err == nil || !strings.Contains(err.Error(), "github marker unavailable") {
+		t.Fatalf("ProgressIssueScanRunLifecycleWithConfiguredRunners error = %v, want surfaced marker error", err)
+	}
+	assertIssueScanParked(t, progress, IssueScanParkBlockerStaleTarget)
+	if runnerCalls != 0 || len(progress.StageRoleOutputRuns) != 0 {
+		t.Fatalf("runner calls/progress = %d/%+v, want none", runnerCalls, progress.StageRoleOutputRuns)
+	}
+	if count := issueScanParkedEventCount(t, rt); count != 1 {
+		t.Fatalf("parked event count = %d, want 1 despite marker projection error", count)
 	}
 }
 
@@ -181,6 +239,8 @@ func TestProgressIssueScanLifecycleParksHumanScopeAndProtectedLabels(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			rt, writer := newRunLaunchDispatchRuntime(t)
 			queued := queueIssueScanParkingRun(t, rt, writer, 225)
+			client := &fakeIssueScanMarkerClient{}
+			rt.issueScanSourceIssueMarkerClient = client
 			rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
 				return IssueScanTargetState{
 					Repository: "transpara-ai/hive",
@@ -203,6 +263,19 @@ func TestProgressIssueScanLifecycleParksHumanScopeAndProtectedLabels(t *testing.
 			assertIssueScanParked(t, progress, tc.blockerType)
 			if runnerCalls != 0 || len(progress.StageRoleOutputRuns) != 0 {
 				t.Fatalf("runner calls/progress = %d/%+v, want none", runnerCalls, progress.StageRoleOutputRuns)
+			}
+			if len(progress.ParkedRuns) != 1 {
+				t.Fatalf("parked runs = %+v, want one", progress.ParkedRuns)
+			}
+			marker := progress.ParkedRuns[0].SourceIssueMarker
+			if marker.Transition != IssueScanSourceIssueMarkerHumanAction || !marker.Applied || !marker.CommentCreated {
+				t.Fatalf("source marker = %+v, want applied human_action marker", marker)
+			}
+			if !containsIssueScanValue(marker.LabelsAdded, IssueScanFactoryStatusLabelParked) {
+				t.Fatalf("marker labels added = %+v, want parked label", marker.LabelsAdded)
+			}
+			if len(client.comments) != 2 || !strings.Contains(client.comments[1], "Factory issue-scan marker: human_action") {
+				t.Fatalf("client comments = %+v, want human_action marker", client.comments)
 			}
 		})
 	}

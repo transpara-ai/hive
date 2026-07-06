@@ -138,6 +138,26 @@ func TestNewWiresIssueScanBlockerRepairRunner(t *testing.T) {
 	}
 }
 
+func TestNewWiresIssueScanSourceIssueMarkerClient(t *testing.T) {
+	ctx := context.Background()
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "Operator")
+	client := &fakeIssueScanMarkerClient{}
+	rt, err := New(ctx, Config{
+		Store:                            store.NewInMemoryStore(),
+		Actors:                           actors,
+		HumanID:                          humanID,
+		IssueScanSourceIssueMarkerClient: client,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.issueScanSourceIssueMarkerClient != client {
+		t.Fatal("issueScanSourceIssueMarkerClient was not wired from Config")
+	}
+}
+
 func TestNewWiresIssueScanDraftPRAuthorityRequester(t *testing.T) {
 	ctx := context.Background()
 	actors := actor.NewInMemoryActorStore()
