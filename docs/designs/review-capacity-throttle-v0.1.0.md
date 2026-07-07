@@ -123,6 +123,10 @@ failure to the operator.
 
 The event is a local/store evidence record for the configured Hive context. This
 PR does not execute the daemon and does not write production EventGraph truth.
+While the queue remains at capacity, each scanner tick records a throttle event.
+Operators should keep `--issue-scan-interval` sized for the expected evidence
+volume; a future state-transition-only projection can reduce duplicate events
+without changing the work-start predicate.
 
 ## Non-Authorizations
 

@@ -135,9 +135,9 @@ func parseGitHubReviewQueuePullRequests(repo string, output []byte) ([]issueScan
 		return nil, err
 	}
 	prs := make([]issueScanReviewQueuePullRequest, 0, len(raw))
-	for _, pr := range raw {
+	for i, pr := range raw {
 		if pr.Number <= 0 {
-			continue
+			return nil, fmt.Errorf("pull request entry %d has invalid number %d", i, pr.Number)
 		}
 		prs = append(prs, issueScanReviewQueuePullRequest{
 			Repository:       strings.ToLower(strings.TrimSpace(repo)),

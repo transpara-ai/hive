@@ -2461,6 +2461,15 @@ printf '%s\n' '[{"number":253,"title":"Review capacity throttle","url":"https://
 	}
 }
 
+func TestParseGitHubReviewQueuePullRequestsRejectsInvalidNumber(t *testing.T) {
+	raw := []byte(`[{"title":"missing number","url":"https://github.com/transpara-ai/hive/pull/0"}]`)
+
+	_, err := parseGitHubReviewQueuePullRequests("transpara-ai/hive", raw)
+	if err == nil || !strings.Contains(err.Error(), "invalid number") {
+		t.Fatalf("parseGitHubReviewQueuePullRequests error = %v, want invalid number", err)
+	}
+}
+
 func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
 	raw := []byte(`{
 		"number": 225,
