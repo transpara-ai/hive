@@ -11,7 +11,12 @@ import (
 	"github.com/transpara-ai/hive/pkg/hive"
 )
 
-const issueScanDefaultReviewQueueThreshold = 3
+const (
+	issueScanDefaultReviewQueueThreshold = 3
+	issueScanReviewQueueReadLimit        = 100
+)
+
+var defaultIssueScanReviewQueueInspector issueScanReviewQueueInspector = ghReviewQueueInspector{}
 
 type issueScanReviewQueueInspector interface {
 	ListAwaitingHumanReview(ctx context.Context, repos []string) (issueScanReviewQueueSnapshot, error)
@@ -64,8 +69,11 @@ func issueScanReviewQueueThrottle(ctx context.Context, repos []string, threshold
 	if len(repos) == 0 {
 		return decision, fmt.Errorf("issue-scan review queue repos are required")
 	}
+	if threshold > issueScanReviewQueueReadLimit*len(repos) {
+		return decision, fmt.Errorf("issue-scan review queue threshold %d exceeds readable PR cap %d for %d repo(s)", threshold, issueScanReviewQueueReadLimit*len(repos), len(repos))
+	}
 	if inspector == nil {
-		inspector = ghReviewQueueInspector{}
+		inspector = defaultIssueScanReviewQueueInspector
 	}
 	snapshot, err := inspector.ListAwaitingHumanReview(ctx, repos)
 	if err != nil {
@@ -92,7 +100,7 @@ func scanGitHubReviewQueuePullRequests(ctx context.Context, repo string) ([]issu
 		"pr", "list",
 		"--repo", repo,
 		"--state", "open",
-		"--limit", "100",
+		"--limit", fmt.Sprintf("%d", issueScanReviewQueueReadLimit),
 		"--json", "number,title,url,headRefOid,isDraft,reviewDecision,mergeStateStatus,author",
 	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
@@ -188,7 +196,7 @@ func issueScanReviewQueueThrottleError(decision issueScanReviewQueueDecision, ev
 	if strings.TrimSpace(eventRef) != "" {
 		detail += fmt.Sprintf(" (throttle event %s)", strings.TrimSpace(eventRef))
 	}
-	return fmt.Errorf("review-capacity throttle refused issue-scan work-start: %d open PR(s) awaiting exact-head human review meets threshold %d%s", decision.OpenPRCount, decision.Threshold, detail)
+	return fmt.Errorf("review-capacity throttle refused issue-scan work-start: %d open PR(s) counted as unproven exact-head review load meets threshold %d%s", decision.OpenPRCount, decision.Threshold, detail)
 }
 
 func issueScanReviewQueueEventRefs(prs []issueScanReviewQueuePullRequest) []hive.IssueScanReviewCapacityPullRequestRef {

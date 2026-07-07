@@ -37,8 +37,9 @@ allowlist, and stale-claim release contract are recorded in
 [change-control-label-plane-invariants-v0.1.0.md](designs/change-control-label-plane-invariants-v0.1.0.md).
 
 Before starting new issue-scan work, Hive's review-capacity throttle can refuse
-work-start when the scoped repos already have too many open PRs awaiting
-exact-head human review. The proposal-status throttle contract is recorded in
+work-start when the scoped repos already have too many open PRs counted as
+unproven exact-head review load. The default threshold is 3 and the contract is
+recorded in
 [review-capacity-throttle-v0.1.0.md](designs/review-capacity-throttle-v0.1.0.md).
 
 ### What to Approve

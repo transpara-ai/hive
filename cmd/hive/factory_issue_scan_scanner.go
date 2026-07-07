@@ -120,7 +120,7 @@ func runIssueScanScannerLoop(ctx context.Context, fc *factoryContext, config iss
 			if result.ReviewQueueEventID != "" {
 				eventSuffix = fmt.Sprintf(" (event %s)", result.ReviewQueueEventID)
 			}
-			fmt.Fprintf(os.Stderr, "Issue-scan scanner: review-capacity throttle skipped work-start while %d open PR(s) await exact-head human review (threshold %d)%s\n", result.SkippedReviewQueue, result.ReviewQueueThreshold, eventSuffix)
+			fmt.Fprintf(os.Stderr, "Issue-scan scanner: review-capacity throttle skipped work-start while %d open PR(s) are counted as unproven exact-head review load (threshold %d)%s\n", result.SkippedReviewQueue, result.ReviewQueueThreshold, eventSuffix)
 			return true
 		}
 		fmt.Fprintf(os.Stderr, "Issue-scan scanner: scanned %d issue(s); skipped %d non-PR-ready issue(s); no new issue-scan FactoryOrder queued\n", result.ScannedIssues, result.SkippedNotPRReady)
@@ -176,6 +176,10 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	if config.ReviewQueueThreshold < 0 {
 		return result, fmt.Errorf("issue-scan review queue threshold must be zero or greater")
 	}
+	reviewQueueThreshold := config.ReviewQueueThreshold
+	if reviewQueueThreshold == 0 {
+		reviewQueueThreshold = issueScanDefaultReviewQueueThreshold
+	}
 	if err := issueScanKillSwitchError(config.KillSwitchPath); err != nil {
 		return result, err
 	}
@@ -189,8 +193,8 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 			return result, nil
 		}
 	}
-	if config.ReviewQueueThreshold > 0 {
-		decision, err := issueScanReviewQueueThrottle(ctx, config.Repos, config.ReviewQueueThreshold, config.ReviewQueueInspector)
+	if reviewQueueThreshold > 0 {
+		decision, err := issueScanReviewQueueThrottle(ctx, config.Repos, reviewQueueThreshold, config.ReviewQueueInspector)
 		if err != nil {
 			return result, err
 		}

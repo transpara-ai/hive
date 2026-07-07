@@ -29,7 +29,7 @@ func cmdFactoryScanIssues(args []string) error {
 	limit := fs.Int("limit", 10, "Maximum open issues to read per repo")
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
-	reviewQueueThreshold := fs.Int("review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs awaiting exact-head human review before issue-scan work-start refuses new work")
+	reviewQueueThreshold := fs.Int("review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs counted as unproven exact-head review load before issue-scan work-start refuses new work")
 	dispatch := fs.Bool("dispatch", false, "Immediately dispatch queued run into a FactoryOrder task")
 	useRegistry := fs.Bool("registry", false, "Scan every Transpara-AI GitHub repo in repos.json when --repo is omitted")
 	repos := repeatedStringFlag{}

@@ -188,7 +188,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 	issueScanMaxDuration := fs.Duration("issue-scan-max-duration", 0, "Hard wall-clock cap for this daemon issue-scan scanner process; 0 disables")
 	issueScanKillSwitch := fs.String("issue-scan-kill-switch", "", "Path whose existence permanently halts daemon issue scanning for this process before queueing work")
 	issueScanOneActive := fs.Bool("issue-scan-one-active", false, "Refuse to queue a new issue-scan run while any existing unparked issue-scan run lacks terminal ready evidence")
-	issueScanReviewQueueThreshold := fs.Int("issue-scan-review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs awaiting exact-head human review before daemon issue scanning refuses new work-start")
+	issueScanReviewQueueThreshold := fs.Int("issue-scan-review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs counted as unproven exact-head review load before daemon issue scanning refuses new work-start")
 	issueScanRegistry := fs.Bool("issue-scan-registry", false, "Scan every Transpara-AI GitHub repo in repos.json when no --issue-scan-repo is supplied")
 	issueScanRequireFullChain := fs.Bool("issue-scan-require-full-chain", false, "Fail startup unless the issue-scan daemon is configured through ready-for-Human PR evidence")
 	issueScanRepos := repeatedStringFlag{}
@@ -316,6 +316,9 @@ func cmdGovernedDaemon(name string, args []string) error {
 		normalizedRepos, err := resolveIssueScanRepos(issueScanRepos, *issueScanRegistry, registryPath)
 		if err != nil {
 			return err
+		}
+		if *issueScanReviewQueueThreshold > issueScanReviewQueueReadLimit*len(normalizedRepos) {
+			return fmt.Errorf("--issue-scan-review-queue-threshold exceeds readable PR cap %d for %d repo(s)", issueScanReviewQueueReadLimit*len(normalizedRepos), len(normalizedRepos))
 		}
 		issueScanScanner = &issueScanScannerConfig{
 			OperatorID:           hive.IssueScanOperatorID(*human),

@@ -34,6 +34,10 @@ var testIssueScanOpenTargetStateResolverOption factoryRuntimeOption = func(cfg *
 	}
 }
 
+func init() {
+	defaultIssueScanReviewQueueInspector = fakeIssueScanReviewQueueInspector{}
+}
+
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
 // when invoked with no subcommand, returns a usage error that names it.
 func TestFactoryVerbIsRegistered(t *testing.T) {
@@ -1288,6 +1292,13 @@ func TestFactoryDaemonIssueScanIntervalRequiresPositiveReviewQueueThreshold(t *t
 	}
 }
 
+func TestFactoryDaemonIssueScanIntervalRejectsReviewQueueThresholdAboveReadableCap(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-review-queue-threshold", strconv.Itoa(issueScanReviewQueueReadLimit + 1)})
+	if err == nil || !strings.Contains(err.Error(), "readable PR cap") {
+		t.Fatalf("expected review queue readable cap error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonIssueScanIntervalRejectsNegativeMaxDuration(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-max-duration", "-1s"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-max-duration") {
@@ -2139,8 +2150,8 @@ func TestRunIssueScanScannerCycleReviewCapacityThrottleBoundary(t *testing.T) {
 			if result.SkippedReviewQueue != tt.wantSkippedPR {
 				t.Fatalf("skipped review queue = %d, want %d; result = %+v", result.SkippedReviewQueue, tt.wantSkippedPR, result)
 			}
-			if result.ReviewQueueThreshold != 0 && result.ReviewQueueThreshold != 3 {
-				t.Fatalf("review queue threshold = %d, want 0 or 3", result.ReviewQueueThreshold)
+			if result.ReviewQueueThreshold != 3 {
+				t.Fatalf("review queue threshold = %d, want 3", result.ReviewQueueThreshold)
 			}
 
 			page, err := fc.store.ByType(hive.EventTypeIssueScanReviewCapacityThrottled, 10, types.None[types.Cursor]())
@@ -2385,6 +2396,18 @@ func TestParseGitHubReviewQueuePullRequestsMapsFields(t *testing.T) {
 	}
 }
 
+func TestIssueScanReviewQueueThrottleRejectsThresholdAboveReadableCap(t *testing.T) {
+	_, err := issueScanReviewQueueThrottle(
+		context.Background(),
+		[]string{"transpara-ai/hive"},
+		issueScanReviewQueueReadLimit+1,
+		fakeIssueScanReviewQueueInspector{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeds readable PR cap") {
+		t.Fatalf("issueScanReviewQueueThrottle error = %v, want readable cap rejection", err)
+	}
+}
+
 func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
 	raw := []byte(`{
 		"number": 225,
@@ -2440,6 +2463,31 @@ esac
 	}
 	if !strings.Contains(err.Error(), "skipped 1 non-PR-ready") {
 		t.Fatalf("expected skipped count in error, got %v", err)
+	}
+}
+
+func TestFactoryScanIssuesReviewCapacityAtThresholdRefusesBeforeIssueListing(t *testing.T) {
+	previous := defaultIssueScanReviewQueueInspector
+	defaultIssueScanReviewQueueInspector = fakeIssueScanReviewQueueInspector{prs: reviewQueuePullRequestsForTest(issueScanDefaultReviewQueueThreshold)}
+	t.Cleanup(func() { defaultIssueScanReviewQueueInspector = previous })
+
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' 'factory scan-issues must not call gh when review queue is at capacity' >&2
+exit 9
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael", "--repo", "transpara-ai/hive"})
+	if err == nil || !strings.Contains(err.Error(), "review-capacity throttle refused issue-scan work-start") {
+		t.Fatalf("expected review-capacity throttle refusal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "throttle event") {
+		t.Fatalf("expected throttle event reference in error, got %v", err)
 	}
 }
 
