@@ -119,6 +119,9 @@ func scanGitHubReviewQueuePullRequests(ctx context.Context, repo string) ([]issu
 }
 
 func parseGitHubReviewQueuePullRequests(repo string, output []byte) ([]issueScanReviewQueuePullRequest, error) {
+	if trimmed := strings.TrimSpace(string(output)); trimmed == "" || !strings.HasPrefix(trimmed, "[") {
+		return nil, fmt.Errorf("pull request list must be a JSON array")
+	}
 	var raw []struct {
 		Number           int    `json:"number"`
 		Title            string `json:"title"`

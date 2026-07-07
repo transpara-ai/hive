@@ -2470,6 +2470,13 @@ func TestParseGitHubReviewQueuePullRequestsRejectsInvalidNumber(t *testing.T) {
 	}
 }
 
+func TestParseGitHubReviewQueuePullRequestsRejectsNull(t *testing.T) {
+	_, err := parseGitHubReviewQueuePullRequests("transpara-ai/hive", []byte(`null`))
+	if err == nil || !strings.Contains(err.Error(), "JSON array") {
+		t.Fatalf("parseGitHubReviewQueuePullRequests error = %v, want JSON array rejection", err)
+	}
+}
+
 func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
 	raw := []byte(`{
 		"number": 225,
