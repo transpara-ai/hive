@@ -28,28 +28,33 @@ func (ghIssueLister) ListIssues(ctx context.Context, repo string, limit int, lab
 }
 
 type issueScanScannerConfig struct {
-	OperatorID     string
-	Repos          []string
-	Labels         []string
-	Limit          int
-	MaxIterations  int
-	MaxCostUSD     float64
-	MaxNewRuns     int
-	MaxDuration    time.Duration
-	KillSwitchPath string
-	OneActive      bool
-	Interval       time.Duration
-	AuthorityScope string
+	OperatorID           string
+	Repos                []string
+	Labels               []string
+	Limit                int
+	MaxIterations        int
+	MaxCostUSD           float64
+	MaxNewRuns           int
+	MaxDuration          time.Duration
+	KillSwitchPath       string
+	OneActive            bool
+	ReviewQueueThreshold int
+	ReviewQueueInspector issueScanReviewQueueInspector
+	Interval             time.Duration
+	AuthorityScope       string
 }
 
 type issueScanScannerCycleResult struct {
-	ScannedIssues     int
-	SkippedExisting   int
-	SkippedNotPRReady int
-	SkippedActive     int
-	Queued            bool
-	QueuedRunID       string
-	QueuedIssue       hive.GitHubIssueCandidate
+	ScannedIssues        int
+	SkippedExisting      int
+	SkippedNotPRReady    int
+	SkippedActive        int
+	SkippedReviewQueue   int
+	ReviewQueueThreshold int
+	ReviewQueueEventID   string
+	Queued               bool
+	QueuedRunID          string
+	QueuedIssue          hive.GitHubIssueCandidate
 }
 
 var errIssueScanKillSwitchActive = errors.New("issue-scan kill switch active")
@@ -110,6 +115,14 @@ func runIssueScanScannerLoop(ctx context.Context, fc *factoryContext, config iss
 			fmt.Fprintf(os.Stderr, "Issue-scan scanner: one-active guard skipped scan while %d issue-scan run(s) remain active\n", result.SkippedActive)
 			return true
 		}
+		if result.SkippedReviewQueue > 0 {
+			eventSuffix := ""
+			if result.ReviewQueueEventID != "" {
+				eventSuffix = fmt.Sprintf(" (event %s)", result.ReviewQueueEventID)
+			}
+			fmt.Fprintf(os.Stderr, "Issue-scan scanner: review-capacity throttle skipped work-start while %d open PR(s) are counted as unproven exact-head review load (threshold %d)%s\n", result.SkippedReviewQueue, result.ReviewQueueThreshold, eventSuffix)
+			return true
+		}
 		fmt.Fprintf(os.Stderr, "Issue-scan scanner: scanned %d issue(s); skipped %d non-PR-ready issue(s); no new issue-scan FactoryOrder queued\n", result.ScannedIssues, result.SkippedNotPRReady)
 		return true
 	}
@@ -160,6 +173,13 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	if config.MaxDuration < 0 {
 		return result, fmt.Errorf("issue-scan max_duration must be zero or greater")
 	}
+	if config.ReviewQueueThreshold < 0 {
+		return result, fmt.Errorf("issue-scan review queue threshold must be zero or greater")
+	}
+	reviewQueueThreshold := config.ReviewQueueThreshold
+	if reviewQueueThreshold == 0 {
+		reviewQueueThreshold = issueScanDefaultReviewQueueThreshold
+	}
 	if err := issueScanKillSwitchError(config.KillSwitchPath); err != nil {
 		return result, err
 	}
@@ -170,6 +190,22 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 		}
 		if len(active) > 0 {
 			result.SkippedActive = len(active)
+			return result, nil
+		}
+	}
+	if reviewQueueThreshold > 0 {
+		decision, err := issueScanReviewQueueThrottle(ctx, config.Repos, reviewQueueThreshold, config.ReviewQueueInspector)
+		if err != nil {
+			return result, err
+		}
+		result.ReviewQueueThreshold = decision.Threshold
+		if decision.Throttled {
+			result.SkippedReviewQueue = decision.OpenPRCount
+			eventID, err := recordIssueScanReviewCapacityThrottled(fc, config.OperatorID, config.Repos, decision)
+			if err != nil {
+				return result, err
+			}
+			result.ReviewQueueEventID = eventID.Value()
 			return result, nil
 		}
 	}
@@ -224,6 +260,31 @@ func runIssueScanScannerCycle(ctx context.Context, fc *factoryContext, config is
 	result.QueuedRunID = queued.RunID
 	result.QueuedIssue = queued.Selected
 	return result, nil
+}
+
+func recordIssueScanReviewCapacityThrottled(fc *factoryContext, operatorID string, repos []string, decision issueScanReviewQueueDecision) (types.EventID, error) {
+	if fc == nil || fc.store == nil || fc.factory == nil || fc.signer == nil {
+		return types.EventID{}, fmt.Errorf("factory context is required")
+	}
+	content := hive.IssueScanReviewCapacityThrottledContent{
+		OperatorID:   strings.TrimSpace(operatorID),
+		Repos:        append([]string(nil), repos...),
+		Threshold:    decision.Threshold,
+		OpenPRCount:  decision.OpenPRCount,
+		Reason:       "review capacity is full; refusing new issue-scan work-start until exact-head human review queue drops below threshold",
+		SourceRefs:   append([]string(nil), decision.SourceRefs...),
+		PullRequests: issueScanReviewQueueEventRefs(decision.PullRequests),
+		ThrottledBy:  fc.humanID,
+	}
+	ev, err := fc.factory.Create(hive.EventTypeIssueScanReviewCapacityThrottled, fc.humanID, content, fc.headCauses(), factoryOrderConversation("issue_scan_review_capacity_throttle"), fc.store, fc.signer)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("create issue-scan review-capacity throttle event: %w", err)
+	}
+	stored, err := fc.store.Append(ev)
+	if err != nil {
+		return types.EventID{}, fmt.Errorf("append issue-scan review-capacity throttle event: %w", err)
+	}
+	return stored.ID(), nil
 }
 
 func issueScanKillSwitchError(path string) error {

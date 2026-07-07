@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +32,10 @@ var testIssueScanOpenTargetStateResolverOption factoryRuntimeOption = func(cfg *
 			Labels:     []string{hive.IssueScanPRReadyLabel},
 		}, nil
 	}
+}
+
+func init() {
+	defaultIssueScanReviewQueueInspector = fakeIssueScanReviewQueueInspector{}
 }
 
 // TestFactoryVerbIsRegistered asserts the router knows the "factory" verb and,
@@ -62,6 +68,18 @@ func TestFactoryScanIssuesRequiresRepoBeforeGitHub(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael"})
 	if err == nil || !strings.Contains(err.Error(), "repo") {
 		t.Fatalf("expected missing --repo error, got %v", err)
+	}
+}
+
+func TestFactoryScanIssuesRejectsReviewQueueThresholdBeforeGitHub(t *testing.T) {
+	err := routeAndDispatch([]string{
+		"factory", "scan-issues",
+		"--human", "Michael",
+		"--repo", "transpara-ai/hive",
+		"--review-queue-threshold", "0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--review-queue-threshold") {
+		t.Fatalf("expected review queue threshold error, got %v", err)
 	}
 }
 
@@ -1267,6 +1285,20 @@ func TestFactoryDaemonIssueScanIntervalRequiresPositiveMaxNewRuns(t *testing.T) 
 	}
 }
 
+func TestFactoryDaemonIssueScanIntervalRequiresPositiveReviewQueueThreshold(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-review-queue-threshold", "0"})
+	if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-queue-threshold") {
+		t.Fatalf("expected review queue threshold guard error, got %v", err)
+	}
+}
+
+func TestFactoryDaemonIssueScanIntervalRejectsReviewQueueThresholdAboveReadableCap(t *testing.T) {
+	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-review-queue-threshold", strconv.Itoa(issueScanReviewQueueReadLimit + 1)})
+	if err == nil || !strings.Contains(err.Error(), "readable PR cap") {
+		t.Fatalf("expected review queue readable cap error, got %v", err)
+	}
+}
+
 func TestFactoryDaemonIssueScanIntervalRejectsNegativeMaxDuration(t *testing.T) {
 	err := routeAndDispatch([]string{"factory", "daemon", "--human", "Michael", "--issue-scan-interval", "1m", "--issue-scan-repo", "transpara-ai/hive", "--issue-scan-max-duration", "-1s"})
 	if err == nil || !strings.Contains(err.Error(), "--issue-scan-max-duration") {
@@ -2056,6 +2088,157 @@ func TestRunIssueScanScannerCycleOneActiveAllowsReadyEvidenceRun(t *testing.T) {
 	}
 }
 
+func TestRunIssueScanScannerCycleReviewCapacityThrottleBoundary(t *testing.T) {
+	tests := []struct {
+		name          string
+		threshold     int
+		openPRCount   int
+		wantQueued    bool
+		wantListed    bool
+		wantEvent     bool
+		wantSkippedPR int
+		wantThreshold int
+		wantErr       string
+	}{
+		{name: "below threshold queues", threshold: 3, openPRCount: 2, wantQueued: true, wantListed: true, wantThreshold: 3},
+		{name: "at threshold throttles", threshold: 3, openPRCount: 3, wantSkippedPR: 3, wantEvent: true, wantThreshold: 3},
+		{name: "above threshold throttles", threshold: 3, openPRCount: 4, wantSkippedPR: 4, wantEvent: true, wantThreshold: 3},
+		{name: "zero threshold defaults and throttles", threshold: 0, openPRCount: 3, wantSkippedPR: 3, wantEvent: true, wantThreshold: 3},
+		{name: "negative threshold fails closed", threshold: -1, openPRCount: 0, wantErr: "zero or greater"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+			if err != nil {
+				t.Fatalf("openFactoryRuntime: %v", err)
+			}
+			defer fc.close()
+			scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+			lister := &countingIssueScanLister{
+				first: make(chan struct{}),
+				issues: map[string][]hive.GitHubIssueCandidate{
+					"transpara-ai/hive": {{
+						Repo:   "transpara-ai/hive",
+						Number: 250,
+						Title:  "Review capacity throttle implementation",
+						URL:    "https://github.com/transpara-ai/hive/issues/250",
+						Labels: []string{"cc:pr-ready"},
+					}},
+				},
+			}
+			config := issueScanScannerConfig{
+				OperatorID:           hive.IssueScanOperatorID("Michael"),
+				Repos:                []string{"transpara-ai/hive"},
+				Limit:                10,
+				MaxIterations:        30,
+				MaxCostUSD:           25,
+				ReviewQueueThreshold: tt.threshold,
+				ReviewQueueInspector: fakeIssueScanReviewQueueInspector{prs: reviewQueuePullRequestsForTest(tt.openPRCount)},
+			}
+
+			result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("runIssueScanScannerCycle error = %v, want %q", err, tt.wantErr)
+				}
+				if calls := lister.Calls(); calls != 0 {
+					t.Fatalf("issue lister calls = %d, want 0 after config refusal", calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runIssueScanScannerCycle: %v", err)
+			}
+			if result.Queued != tt.wantQueued {
+				t.Fatalf("queued = %v, want %v; result = %+v", result.Queued, tt.wantQueued, result)
+			}
+			wantCalls := 0
+			if tt.wantListed {
+				wantCalls = 1
+			}
+			if calls := lister.Calls(); calls != wantCalls {
+				t.Fatalf("issue lister calls = %d, want %d", calls, wantCalls)
+			}
+			if result.SkippedReviewQueue != tt.wantSkippedPR {
+				t.Fatalf("skipped review queue = %d, want %d; result = %+v", result.SkippedReviewQueue, tt.wantSkippedPR, result)
+			}
+			if result.ReviewQueueThreshold != tt.wantThreshold {
+				t.Fatalf("review queue threshold = %d, want %d", result.ReviewQueueThreshold, tt.wantThreshold)
+			}
+
+			page, err := fc.store.ByType(hive.EventTypeIssueScanReviewCapacityThrottled, 10, types.None[types.Cursor]())
+			if err != nil {
+				t.Fatalf("query throttle events: %v", err)
+			}
+			items := page.Items()
+			if !tt.wantEvent {
+				if len(items) != 0 {
+					t.Fatalf("throttle events = %d, want none", len(items))
+				}
+				return
+			}
+			if result.ReviewQueueEventID == "" {
+				t.Fatalf("result missing throttle event id: %+v", result)
+			}
+			if len(items) != 1 {
+				t.Fatalf("throttle events = %d, want one", len(items))
+			}
+			content, ok := items[0].Content().(hive.IssueScanReviewCapacityThrottledContent)
+			if !ok {
+				t.Fatalf("throttle content type = %T", items[0].Content())
+			}
+			if content.OpenPRCount != tt.openPRCount || content.Threshold != 3 {
+				t.Fatalf("throttle content = %+v, want count %d threshold 3", content, tt.openPRCount)
+			}
+			if len(content.PullRequests) != tt.openPRCount || len(content.SourceRefs) != tt.openPRCount {
+				t.Fatalf("throttle content refs = %+v source_refs=%v, want %d", content.PullRequests, content.SourceRefs, tt.openPRCount)
+			}
+		})
+	}
+}
+
+func TestRunIssueScanScannerCycleReviewCapacityUnreadableFailsClosedBeforeListing(t *testing.T) {
+	ctx := context.Background()
+	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
+	if err != nil {
+		t.Fatalf("openFactoryRuntime: %v", err)
+	}
+	defer fc.close()
+	scannerContext := newIssueScanScannerContext(fc.store, fc.actors, fc.humanID)
+
+	lister := &countingIssueScanLister{
+		first: make(chan struct{}),
+		issues: map[string][]hive.GitHubIssueCandidate{
+			"transpara-ai/hive": {{
+				Repo:   "transpara-ai/hive",
+				Number: 250,
+				Title:  "Review capacity throttle implementation",
+				URL:    "https://github.com/transpara-ai/hive/issues/250",
+				Labels: []string{"cc:pr-ready"},
+			}},
+		},
+	}
+	config := issueScanScannerConfig{
+		OperatorID:           hive.IssueScanOperatorID("Michael"),
+		Repos:                []string{"transpara-ai/hive"},
+		Limit:                10,
+		MaxIterations:        30,
+		MaxCostUSD:           25,
+		ReviewQueueThreshold: 3,
+		ReviewQueueInspector: fakeIssueScanReviewQueueInspector{err: errors.New("github unavailable")},
+	}
+
+	result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+	if err == nil || !strings.Contains(err.Error(), "review-capacity throttle could not read review queue") {
+		t.Fatalf("runIssueScanScannerCycle error = %v, result = %+v; want review queue read failure", err, result)
+	}
+	if calls := lister.Calls(); calls != 0 {
+		t.Fatalf("issue lister calls = %d, want 0 when review queue is unreadable", calls)
+	}
+}
+
 func TestRunIssueScanScannerCycleSkipsNonPRReadyIssues(t *testing.T) {
 	ctx := context.Background()
 	_, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "")
@@ -2197,6 +2380,103 @@ func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
 	}
 }
 
+func TestParseGitHubReviewQueuePullRequestsMapsFields(t *testing.T) {
+	raw := []byte(`[
+		{
+			"number": 52,
+			"title": "Design-only TLC integration record",
+			"url": "https://github.com/transpara-ai/platform/pull/52",
+			"headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"isDraft": true,
+			"reviewDecision": "REVIEW_REQUIRED",
+			"mergeStateStatus": "BLOCKED",
+			"author": {"login": "codex"}
+		}
+	]`)
+
+	prs, err := parseGitHubReviewQueuePullRequests("transpara-ai/platform", raw)
+	if err != nil {
+		t.Fatalf("parseGitHubReviewQueuePullRequests: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("prs length = %d, want 1", len(prs))
+	}
+	pr := prs[0]
+	if pr.Repository != "transpara-ai/platform" || pr.Number != 52 || pr.URL == "" || pr.HeadSHA == "" {
+		t.Fatalf("parsed pr identity = %+v", pr)
+	}
+	if !pr.Draft || pr.ReviewDecision != "REVIEW_REQUIRED" || pr.MergeStateStatus != "BLOCKED" || pr.Author != "codex" {
+		t.Fatalf("parsed pr fields = %+v", pr)
+	}
+}
+
+func TestIssueScanReviewQueueThrottleRejectsThresholdAboveReadableCap(t *testing.T) {
+	_, err := issueScanReviewQueueThrottle(
+		context.Background(),
+		[]string{"transpara-ai/hive"},
+		issueScanReviewQueueReadLimit+1,
+		fakeIssueScanReviewQueueInspector{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeds readable PR cap") {
+		t.Fatalf("issueScanReviewQueueThrottle error = %v, want readable cap rejection", err)
+	}
+}
+
+func TestGHReviewQueueInspectorListsOpenPullRequestsWithReadLimit(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "gh.args")
+	ghPath := filepath.Join(dir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" > "$GH_ARGS_PATH"
+printf '%s\n' '[{"number":253,"title":"Review capacity throttle","url":"https://github.com/transpara-ai/hive/pull/253","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","isDraft":true,"reviewDecision":"REVIEW_REQUIRED","mergeStateStatus":"BLOCKED","author":{"login":"MichaelSaucier"}}]'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_PATH", argsPath)
+
+	snapshot, err := (ghReviewQueueInspector{}).ListOpenPullRequests(context.Background(), []string{"transpara-ai/hive"})
+	if err != nil {
+		t.Fatalf("ListOpenPullRequests: %v", err)
+	}
+	if len(snapshot.PullRequests) != 1 || snapshot.PullRequests[0].Number != 253 || !snapshot.PullRequests[0].Draft {
+		t.Fatalf("snapshot = %+v, want one draft PR 253", snapshot)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake gh args: %v", err)
+	}
+	got := strings.TrimSpace(string(args))
+	for _, want := range []string{
+		"pr list",
+		"--repo transpara-ai/hive",
+		"--state open",
+		"--limit " + strconv.Itoa(issueScanReviewQueueReadLimit),
+		"--json number,title,url,headRefOid,isDraft,reviewDecision,mergeStateStatus,author",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("gh args = %q, missing %q", got, want)
+		}
+	}
+}
+
+func TestParseGitHubReviewQueuePullRequestsRejectsInvalidNumber(t *testing.T) {
+	raw := []byte(`[{"title":"missing number","url":"https://github.com/transpara-ai/hive/pull/0"}]`)
+
+	_, err := parseGitHubReviewQueuePullRequests("transpara-ai/hive", raw)
+	if err == nil || !strings.Contains(err.Error(), "invalid number") {
+		t.Fatalf("parseGitHubReviewQueuePullRequests error = %v, want invalid number", err)
+	}
+}
+
+func TestParseGitHubReviewQueuePullRequestsRejectsNull(t *testing.T) {
+	_, err := parseGitHubReviewQueuePullRequests("transpara-ai/hive", []byte(`null`))
+	if err == nil || !strings.Contains(err.Error(), "JSON array") {
+		t.Fatalf("parseGitHubReviewQueuePullRequests error = %v, want JSON array rejection", err)
+	}
+}
+
 func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
 	raw := []byte(`{
 		"number": 225,
@@ -2228,7 +2508,18 @@ func TestFactoryScanIssuesRejectsNonPRReadyGitHubIssueBeforeFactoryOpen(t *testi
 	dir := t.TempDir()
 	ghPath := filepath.Join(dir, "gh")
 	script := `#!/bin/sh
-printf '%s\n' '[{"number":204,"title":"Human-required value-allocation surface candidate","url":"https://github.com/transpara-ai/hive/issues/204","body":"needs human scope","labels":[{"name":"cc:intake"},{"name":"cc:needs-human-scope"},{"name":"cc:protected-action"}]}]'
+case "$1 $2" in
+"pr list")
+  printf '%s\n' '[]'
+  ;;
+"issue list")
+  printf '%s\n' '[{"number":204,"title":"Human-required value-allocation surface candidate","url":"https://github.com/transpara-ai/hive/issues/204","body":"needs human scope","labels":[{"name":"cc:intake"},{"name":"cc:needs-human-scope"},{"name":"cc:protected-action"}]}]'
+  ;;
+*)
+  printf '%s\n' 'unexpected gh invocation' >&2
+  exit 1
+  ;;
+esac
 `
 	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
@@ -2241,6 +2532,31 @@ printf '%s\n' '[{"number":204,"title":"Human-required value-allocation surface c
 	}
 	if !strings.Contains(err.Error(), "skipped 1 non-PR-ready") {
 		t.Fatalf("expected skipped count in error, got %v", err)
+	}
+}
+
+func TestFactoryScanIssuesReviewCapacityAtThresholdRefusesBeforeIssueListing(t *testing.T) {
+	previous := defaultIssueScanReviewQueueInspector
+	defaultIssueScanReviewQueueInspector = fakeIssueScanReviewQueueInspector{prs: reviewQueuePullRequestsForTest(issueScanDefaultReviewQueueThreshold)}
+	t.Cleanup(func() { defaultIssueScanReviewQueueInspector = previous })
+
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' 'factory scan-issues must not call gh when review queue is at capacity' >&2
+exit 9
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := routeAndDispatch([]string{"factory", "scan-issues", "--human", "Michael", "--repo", "transpara-ai/hive"})
+	if err == nil || !strings.Contains(err.Error(), "review-capacity throttle refused issue-scan work-start") {
+		t.Fatalf("expected review-capacity throttle refusal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "throttle event") {
+		t.Fatalf("expected throttle event reference in error, got %v", err)
 	}
 }
 
@@ -2847,4 +3163,32 @@ func (l *countingIssueScanLister) Calls() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.calls
+}
+
+type fakeIssueScanReviewQueueInspector struct {
+	prs []issueScanReviewQueuePullRequest
+	err error
+}
+
+func (i fakeIssueScanReviewQueueInspector) ListOpenPullRequests(context.Context, []string) (issueScanReviewQueueSnapshot, error) {
+	if i.err != nil {
+		return issueScanReviewQueueSnapshot{}, i.err
+	}
+	return issueScanReviewQueueSnapshot{PullRequests: append([]issueScanReviewQueuePullRequest(nil), i.prs...)}, nil
+}
+
+func reviewQueuePullRequestsForTest(count int) []issueScanReviewQueuePullRequest {
+	prs := make([]issueScanReviewQueuePullRequest, 0, count)
+	for i := 0; i < count; i++ {
+		number := 100 + i
+		prs = append(prs, issueScanReviewQueuePullRequest{
+			Repository:     "transpara-ai/hive",
+			Number:         number,
+			Title:          "Pending exact-head review",
+			URL:            "https://github.com/transpara-ai/hive/pull/" + strconv.Itoa(number),
+			HeadSHA:        strings.Repeat("a", 39) + strconv.Itoa(i%10),
+			ReviewDecision: "REVIEW_REQUIRED",
+		})
+	}
+	return prs
 }
