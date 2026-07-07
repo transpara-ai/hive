@@ -29,6 +29,13 @@ The pipeline runs: Research → Design → Simplify → Build → Review → Tes
 3. **Guardian alerts** — integrity violations, policy concerns, HALT conditions
 4. **Agent evaluations** — CTO assessments, Reviewer findings
 
+### Change-Control Labels
+
+Hive treats GitHub `cc:*` labels as change-control intake signals, not runtime
+truth or authority. The proposal-status label-plane invariant record, mover
+allowlist, and stale-claim release contract are recorded in
+[change-control-label-plane-invariants-v0.1.0.md](designs/change-control-label-plane-invariants-v0.1.0.md).
+
 ### What to Approve
 
 Everything starts as Required. You'll be asked to approve:
