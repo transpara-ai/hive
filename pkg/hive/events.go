@@ -11,19 +11,20 @@ import (
 
 // Hive event types — runtime lifecycle and agent coordination.
 var (
-	EventTypeRunStarted              = types.MustEventType("hive.run.started")
-	EventTypeRunCompleted            = types.MustEventType("hive.run.completed")
-	EventTypeAgentSpawned            = types.MustEventType("hive.agent.spawned")
-	EventTypeAgentStopped            = types.MustEventType("hive.agent.stopped")
-	EventTypeProgress                = types.MustEventType("hive.progress")
-	EventTypeRoleDefinition          = types.MustEventType("hive.role.definition")
-	EventTypeAgentIdentityRegistered = types.MustEventType("agent.identity.registered")
-	EventTypeSourceIngested          = types.MustEventType("source.ingested")
-	EventTypeBriefDerived            = types.MustEventType("brief.derived")
-	EventTypeFactoryRunRequested     = types.MustEventType("factory.run.requested")
-	EventTypeFactoryArtifactCreated  = types.MustEventType("factory.artifact.created")
-	EventTypeIssueScanRunParked      = types.MustEventType("hive.issuescan.run.parked")
-	EventTypeModelRolePolicyUpdated  = types.MustEventType("hive.model.role.policy.updated")
+	EventTypeRunStarted                       = types.MustEventType("hive.run.started")
+	EventTypeRunCompleted                     = types.MustEventType("hive.run.completed")
+	EventTypeAgentSpawned                     = types.MustEventType("hive.agent.spawned")
+	EventTypeAgentStopped                     = types.MustEventType("hive.agent.stopped")
+	EventTypeProgress                         = types.MustEventType("hive.progress")
+	EventTypeRoleDefinition                   = types.MustEventType("hive.role.definition")
+	EventTypeAgentIdentityRegistered          = types.MustEventType("agent.identity.registered")
+	EventTypeSourceIngested                   = types.MustEventType("source.ingested")
+	EventTypeBriefDerived                     = types.MustEventType("brief.derived")
+	EventTypeFactoryRunRequested              = types.MustEventType("factory.run.requested")
+	EventTypeFactoryArtifactCreated           = types.MustEventType("factory.artifact.created")
+	EventTypeIssueScanRunParked               = types.MustEventType("hive.issuescan.run.parked")
+	EventTypeIssueScanReviewCapacityThrottled = types.MustEventType("hive.issuescan.review.capacity.throttled")
+	EventTypeModelRolePolicyUpdated           = types.MustEventType("hive.model.role.policy.updated")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -33,7 +34,8 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeProgress, EventTypeRoleDefinition,
 		EventTypeAgentIdentityRegistered,
 		EventTypeSourceIngested, EventTypeBriefDerived,
-		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated, EventTypeIssueScanRunParked,
+		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated,
+		EventTypeIssueScanRunParked, EventTypeIssueScanReviewCapacityThrottled,
 		EventTypeModelRolePolicyUpdated,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
@@ -234,6 +236,38 @@ type IssueScanRunParkedContent struct {
 
 func (c IssueScanRunParkedContent) EventTypeName() string { return "hive.issuescan.run.parked" }
 
+// IssueScanReviewCapacityPullRequestRef records a bounded public GitHub PR
+// reference that contributed to a review-capacity throttle decision.
+type IssueScanReviewCapacityPullRequestRef struct {
+	Repository       string `json:"repository"`
+	Number           int    `json:"number"`
+	URL              string `json:"url,omitempty"`
+	Title            string `json:"title,omitempty"`
+	HeadSHA          string `json:"head_sha,omitempty"`
+	Author           string `json:"author,omitempty"`
+	Draft            bool   `json:"draft,omitempty"`
+	ReviewDecision   string `json:"review_decision,omitempty"`
+	MergeStateStatus string `json:"merge_state_status,omitempty"`
+}
+
+// IssueScanReviewCapacityThrottledContent records a fail-closed refusal to
+// start new issue-scan work while the human review queue is at capacity.
+type IssueScanReviewCapacityThrottledContent struct {
+	hiveContent
+	OperatorID   string                                  `json:"operator_id,omitempty"`
+	Repos        []string                                `json:"repos,omitempty"`
+	Threshold    int                                     `json:"threshold"`
+	OpenPRCount  int                                     `json:"open_pr_count"`
+	Reason       string                                  `json:"reason"`
+	SourceRefs   []string                                `json:"source_refs,omitempty"`
+	PullRequests []IssueScanReviewCapacityPullRequestRef `json:"pull_requests,omitempty"`
+	ThrottledBy  types.ActorID                           `json:"throttled_by"`
+}
+
+func (c IssueScanReviewCapacityThrottledContent) EventTypeName() string {
+	return "hive.issuescan.review.capacity.throttled"
+}
+
 // ModelRolePolicyUpdatedContent records Hive-owned durable model policy for one
 // civic role. Site may request this write through Hive's ops API, but Hive
 // validates, resolves, records, and later projects the policy.
@@ -308,6 +342,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("factory.run.requested", event.Unmarshal[FactoryRunRequestedContent])
 	event.RegisterContentUnmarshaler("factory.artifact.created", event.Unmarshal[FactoryArtifactCreatedContent])
 	event.RegisterContentUnmarshaler("hive.issuescan.run.parked", event.Unmarshal[IssueScanRunParkedContent])
+	event.RegisterContentUnmarshaler("hive.issuescan.review.capacity.throttled", event.Unmarshal[IssueScanReviewCapacityThrottledContent])
 	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])

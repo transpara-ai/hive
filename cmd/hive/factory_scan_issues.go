@@ -29,6 +29,7 @@ func cmdFactoryScanIssues(args []string) error {
 	limit := fs.Int("limit", 10, "Maximum open issues to read per repo")
 	maxIterations := fs.Int("max-iterations", 30, "Queued run iteration budget")
 	maxCostUSD := fs.Float64("max-cost-usd", 25, "Queued run cost budget in USD")
+	reviewQueueThreshold := fs.Int("review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs awaiting exact-head human review before issue-scan work-start refuses new work")
 	dispatch := fs.Bool("dispatch", false, "Immediately dispatch queued run into a FactoryOrder task")
 	useRegistry := fs.Bool("registry", false, "Scan every Transpara-AI GitHub repo in repos.json when --repo is omitted")
 	repos := repeatedStringFlag{}
@@ -57,6 +58,9 @@ func cmdFactoryScanIssues(args []string) error {
 	}
 	if *maxCostUSD < 0 {
 		return fmt.Errorf("--max-cost-usd must be zero or greater")
+	}
+	if *reviewQueueThreshold <= 0 {
+		return fmt.Errorf("--review-queue-threshold must be greater than zero")
 	}
 	modelOverrides, err := parseFactoryOrderModelOverrideFlags(modelOverrideFlags)
 	if err != nil {
@@ -89,6 +93,23 @@ func cmdFactoryScanIssues(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	reviewQueueDecision, err := issueScanReviewQueueThrottle(ctx, normalizedRepos, *reviewQueueThreshold, nil)
+	if err != nil {
+		return err
+	}
+	if reviewQueueDecision.Throttled {
+		fc, openErr := openFactoryContext(ctx, *storeDSN, *human)
+		if openErr != nil {
+			return fmt.Errorf("%w; additionally could not open factory context to record throttle event: %v", issueScanReviewQueueThrottleError(reviewQueueDecision, ""), openErr)
+		}
+		defer fc.close()
+		eventID, recordErr := recordIssueScanReviewCapacityThrottled(fc, opID, normalizedRepos, reviewQueueDecision)
+		if recordErr != nil {
+			return fmt.Errorf("%w; additionally could not record throttle event: %v", issueScanReviewQueueThrottleError(reviewQueueDecision, ""), recordErr)
+		}
+		return issueScanReviewQueueThrottleError(reviewQueueDecision, eventID.Value())
+	}
 
 	issues, err := scanGitHubIssues(ctx, normalizedRepos, *limit, labels)
 	if err != nil {
