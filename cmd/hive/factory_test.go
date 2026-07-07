@@ -2091,15 +2091,20 @@ func TestRunIssueScanScannerCycleOneActiveAllowsReadyEvidenceRun(t *testing.T) {
 func TestRunIssueScanScannerCycleReviewCapacityThrottleBoundary(t *testing.T) {
 	tests := []struct {
 		name          string
+		threshold     int
 		openPRCount   int
 		wantQueued    bool
 		wantListed    bool
 		wantEvent     bool
 		wantSkippedPR int
+		wantThreshold int
+		wantErr       string
 	}{
-		{name: "below threshold queues", openPRCount: 2, wantQueued: true, wantListed: true},
-		{name: "at threshold throttles", openPRCount: 3, wantSkippedPR: 3, wantEvent: true},
-		{name: "above threshold throttles", openPRCount: 4, wantSkippedPR: 4, wantEvent: true},
+		{name: "below threshold queues", threshold: 3, openPRCount: 2, wantQueued: true, wantListed: true, wantThreshold: 3},
+		{name: "at threshold throttles", threshold: 3, openPRCount: 3, wantSkippedPR: 3, wantEvent: true, wantThreshold: 3},
+		{name: "above threshold throttles", threshold: 3, openPRCount: 4, wantSkippedPR: 4, wantEvent: true, wantThreshold: 3},
+		{name: "zero threshold defaults and throttles", threshold: 0, openPRCount: 3, wantSkippedPR: 3, wantEvent: true, wantThreshold: 3},
+		{name: "negative threshold fails closed", threshold: -1, openPRCount: 0, wantErr: "zero or greater"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2129,11 +2134,20 @@ func TestRunIssueScanScannerCycleReviewCapacityThrottleBoundary(t *testing.T) {
 				Limit:                10,
 				MaxIterations:        30,
 				MaxCostUSD:           25,
-				ReviewQueueThreshold: 3,
+				ReviewQueueThreshold: tt.threshold,
 				ReviewQueueInspector: fakeIssueScanReviewQueueInspector{prs: reviewQueuePullRequestsForTest(tt.openPRCount)},
 			}
 
 			result, err := runIssueScanScannerCycle(ctx, scannerContext, config, lister)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("runIssueScanScannerCycle error = %v, want %q", err, tt.wantErr)
+				}
+				if calls := lister.Calls(); calls != 0 {
+					t.Fatalf("issue lister calls = %d, want 0 after config refusal", calls)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("runIssueScanScannerCycle: %v", err)
 			}
@@ -2150,8 +2164,8 @@ func TestRunIssueScanScannerCycleReviewCapacityThrottleBoundary(t *testing.T) {
 			if result.SkippedReviewQueue != tt.wantSkippedPR {
 				t.Fatalf("skipped review queue = %d, want %d; result = %+v", result.SkippedReviewQueue, tt.wantSkippedPR, result)
 			}
-			if result.ReviewQueueThreshold != 3 {
-				t.Fatalf("review queue threshold = %d, want 3", result.ReviewQueueThreshold)
+			if result.ReviewQueueThreshold != tt.wantThreshold {
+				t.Fatalf("review queue threshold = %d, want %d", result.ReviewQueueThreshold, tt.wantThreshold)
 			}
 
 			page, err := fc.store.ByType(hive.EventTypeIssueScanReviewCapacityThrottled, 10, types.None[types.Cursor]())
@@ -2405,6 +2419,45 @@ func TestIssueScanReviewQueueThrottleRejectsThresholdAboveReadableCap(t *testing
 	)
 	if err == nil || !strings.Contains(err.Error(), "exceeds readable PR cap") {
 		t.Fatalf("issueScanReviewQueueThrottle error = %v, want readable cap rejection", err)
+	}
+}
+
+func TestGHReviewQueueInspectorListsOpenPullRequestsWithReadLimit(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "gh.args")
+	ghPath := filepath.Join(dir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" > "$GH_ARGS_PATH"
+printf '%s\n' '[{"number":253,"title":"Review capacity throttle","url":"https://github.com/transpara-ai/hive/pull/253","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","isDraft":true,"reviewDecision":"REVIEW_REQUIRED","mergeStateStatus":"BLOCKED","author":{"login":"MichaelSaucier"}}]'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_PATH", argsPath)
+
+	snapshot, err := (ghReviewQueueInspector{}).ListOpenPullRequests(context.Background(), []string{"transpara-ai/hive"})
+	if err != nil {
+		t.Fatalf("ListOpenPullRequests: %v", err)
+	}
+	if len(snapshot.PullRequests) != 1 || snapshot.PullRequests[0].Number != 253 || !snapshot.PullRequests[0].Draft {
+		t.Fatalf("snapshot = %+v, want one draft PR 253", snapshot)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake gh args: %v", err)
+	}
+	got := strings.TrimSpace(string(args))
+	for _, want := range []string{
+		"pr list",
+		"--repo transpara-ai/hive",
+		"--state open",
+		"--limit " + strconv.Itoa(issueScanReviewQueueReadLimit),
+		"--json number,title,url,headRefOid,isDraft,reviewDecision,mergeStateStatus,author",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("gh args = %q, missing %q", got, want)
+		}
 	}
 }
 
@@ -3101,7 +3154,7 @@ type fakeIssueScanReviewQueueInspector struct {
 	err error
 }
 
-func (i fakeIssueScanReviewQueueInspector) ListAwaitingHumanReview(context.Context, []string) (issueScanReviewQueueSnapshot, error) {
+func (i fakeIssueScanReviewQueueInspector) ListOpenPullRequests(context.Context, []string) (issueScanReviewQueueSnapshot, error) {
 	if i.err != nil {
 		return issueScanReviewQueueSnapshot{}, i.err
 	}

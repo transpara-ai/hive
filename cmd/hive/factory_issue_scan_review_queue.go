@@ -19,7 +19,7 @@ const (
 var defaultIssueScanReviewQueueInspector issueScanReviewQueueInspector = ghReviewQueueInspector{}
 
 type issueScanReviewQueueInspector interface {
-	ListAwaitingHumanReview(ctx context.Context, repos []string) (issueScanReviewQueueSnapshot, error)
+	ListOpenPullRequests(ctx context.Context, repos []string) (issueScanReviewQueueSnapshot, error)
 }
 
 type issueScanReviewQueueSnapshot struct {
@@ -48,7 +48,7 @@ type issueScanReviewQueueDecision struct {
 
 type ghReviewQueueInspector struct{}
 
-func (ghReviewQueueInspector) ListAwaitingHumanReview(ctx context.Context, repos []string) (issueScanReviewQueueSnapshot, error) {
+func (ghReviewQueueInspector) ListOpenPullRequests(ctx context.Context, repos []string) (issueScanReviewQueueSnapshot, error) {
 	var out []issueScanReviewQueuePullRequest
 	for _, repo := range repos {
 		prs, err := scanGitHubReviewQueuePullRequests(ctx, repo)
@@ -69,13 +69,13 @@ func issueScanReviewQueueThrottle(ctx context.Context, repos []string, threshold
 	if len(repos) == 0 {
 		return decision, fmt.Errorf("issue-scan review queue repos are required")
 	}
-	if threshold > issueScanReviewQueueReadLimit*len(repos) {
-		return decision, fmt.Errorf("issue-scan review queue threshold %d exceeds readable PR cap %d for %d repo(s)", threshold, issueScanReviewQueueReadLimit*len(repos), len(repos))
+	if threshold > issueScanReviewQueueReadLimit {
+		return decision, fmt.Errorf("issue-scan review queue threshold %d exceeds readable PR cap %d", threshold, issueScanReviewQueueReadLimit)
 	}
 	if inspector == nil {
 		inspector = defaultIssueScanReviewQueueInspector
 	}
-	snapshot, err := inspector.ListAwaitingHumanReview(ctx, repos)
+	snapshot, err := inspector.ListOpenPullRequests(ctx, repos)
 	if err != nil {
 		return decision, fmt.Errorf("issue-scan review-capacity throttle could not read review queue: %w", err)
 	}

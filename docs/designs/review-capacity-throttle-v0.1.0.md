@@ -51,8 +51,8 @@ default before evaluating the work-start predicate.
 
 ## Conservative Queue Semantics
 
-The throttle counts all open pull requests in the scanned repos as awaiting
-exact-head human review. This is intentionally conservative.
+The throttle counts all open pull requests in the scanned repos as unproven
+exact-head review load. This is intentionally conservative.
 
 The governed Transpara exact-head approval record is commonly a PR comment, not
 only GitHub's review-decision field. A read-only `gh pr list` response can prove
@@ -62,8 +62,10 @@ This can over-throttle, but over-throttling is the safe direction because the
 guard only prevents new work-start.
 
 The read-only inspector currently reads up to `100` open PRs per scoped repo.
-Thresholds above `100 * repo_count` are rejected as configuration errors because
-they would exceed the readable cap and could otherwise undercount.
+Thresholds above `100` are rejected as configuration errors. This keeps the
+threshold inside the per-repo readable cap even in multi-repo and registry-mode
+scans, preventing a single saturated repo from being undercounted below an
+operator-selected threshold.
 
 Registry-mode scanning applies the same threshold to the aggregate open PR count
 across every scoped repo. With the default threshold, registry scans may remain
@@ -84,7 +86,7 @@ read-only count of open pull requests in the scoped repos.
 |---|---|
 | Operator input `threshold <= 0` | Configuration error; no work-start. |
 | Internal unset threshold `0` | Normalize to default `3` before evaluating this predicate. |
-| `threshold > 100 * repo_count` | Configuration error; no work-start. |
+| `threshold > 100` | Configuration error; no work-start. |
 | Review queue unreadable | Fail closed; no issue listing and no work-start. |
 | `open_pr_count < threshold` | Continue to issue listing and existing PR-ready gates. |
 | `open_pr_count >= threshold` | Record `hive.issuescan.review.capacity.throttled`; no issue listing and no work-start. |
@@ -99,7 +101,7 @@ The throttle stops before any issue-scan FactoryOrder can be queued when:
 
 - `gh pr list` fails or returns unreadable JSON;
 - the configured threshold is not positive;
-- the configured threshold exceeds the readable `100 * repo_count` cap;
+- the configured threshold exceeds the readable cap of `100`;
 - the conservative open PR count is at or above threshold;
 - the store cannot record the throttle event for an at-capacity decision.
 

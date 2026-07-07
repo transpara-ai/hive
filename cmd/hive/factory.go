@@ -317,8 +317,8 @@ func cmdGovernedDaemon(name string, args []string) error {
 		if err != nil {
 			return err
 		}
-		if *issueScanReviewQueueThreshold > issueScanReviewQueueReadLimit*len(normalizedRepos) {
-			return fmt.Errorf("--issue-scan-review-queue-threshold exceeds readable PR cap %d for %d repo(s)", issueScanReviewQueueReadLimit*len(normalizedRepos), len(normalizedRepos))
+		if *issueScanReviewQueueThreshold > issueScanReviewQueueReadLimit {
+			return fmt.Errorf("--issue-scan-review-queue-threshold exceeds readable PR cap %d", issueScanReviewQueueReadLimit)
 		}
 		issueScanScanner = &issueScanScannerConfig{
 			OperatorID:           hive.IssueScanOperatorID(*human),
