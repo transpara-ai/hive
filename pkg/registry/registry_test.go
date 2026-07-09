@@ -3,6 +3,8 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +95,7 @@ func TestRepoMap(t *testing.T) {
 		{Name: "a", AbsPath: "/path/a"},
 		{Name: "b", AbsPath: "/path/b"},
 		{Name: "c"}, // no AbsPath — excluded
+		{Name: "scan-only", AbsPath: "/path/scan-only", IssueScanOnly: true},
 	}}
 	m := reg.RepoMap()
 	if len(m) != 2 {
@@ -101,6 +104,86 @@ func TestRepoMap(t *testing.T) {
 	if m["a"] != "/path/a" {
 		t.Errorf("a = %q", m["a"])
 	}
+}
+
+func TestIssueScanOnlyReposAreExcludedFromWorkspaceAvailability(t *testing.T) {
+	available := t.TempDir()
+	scanOnly := t.TempDir()
+	if err := os.WriteFile(filepath.Join(scanOnly, "CLAUDE.md"), []byte("# Private context"), 0o600); err != nil {
+		t.Fatalf("write private CLAUDE.md: %v", err)
+	}
+	reg := &Registry{Repos: []Repo{
+		{Name: "available", LocalPath: available, AbsPath: available},
+		{Name: "scan-only", LocalPath: scanOnly, AbsPath: scanOnly, IssueScanOnly: true},
+	}}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	avail := reg.Available()
+	if len(avail) != 1 || avail[0].Name != "available" {
+		t.Fatalf("available repos = %#v, want only available", avail)
+	}
+	if _, ok := reg.RepoMap()["scan-only"]; ok {
+		t.Fatal("issue-scan-only repo appeared in workspace repo map")
+	}
+	if _, ok := reg.ForPath(scanOnly); ok {
+		t.Fatal("issue-scan-only repo matched workspace path")
+	}
+	repo, ok := reg.Get("scan-only")
+	if !ok {
+		t.Fatal("scan-only repo missing")
+	}
+	if repo.AbsPath != "" {
+		t.Fatalf("issue-scan-only repo AbsPath = %q, want empty", repo.AbsPath)
+	}
+	if repo.ClaudeMD != "" {
+		t.Fatalf("issue-scan-only repo loaded ClaudeMD: %q", repo.ClaudeMD)
+	}
+}
+
+func TestEnsureClonedSkipsIssueScanOnlyRepos(t *testing.T) {
+	marker := installGitRecorderForTest(t)
+
+	reg := &Registry{Repos: []Repo{{
+		Name:          "scan-only",
+		URL:           "https://github.com/transpara-ai/private-scan-only",
+		LocalPath:     filepath.Join(t.TempDir(), "scan-only"),
+		IssueScanOnly: true,
+	}}}
+
+	if cloned := reg.EnsureCloned(); cloned != 0 {
+		t.Fatalf("cloned = %d, want 0", cloned)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("git recorder marker exists after EnsureCloned skip: %v", err)
+	}
+}
+
+func TestPullAllSkipsIssueScanOnlyRepos(t *testing.T) {
+	marker := installGitRecorderForTest(t)
+	reg := &Registry{Repos: []Repo{{
+		Name:          "scan-only",
+		AbsPath:       t.TempDir(),
+		IssueScanOnly: true,
+	}}}
+
+	reg.PullAll()
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("git recorder marker exists after PullAll skip: %v", err)
+	}
+}
+
+func installGitRecorderForTest(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "git-called")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + strconv.Quote(marker) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return marker
 }
 
 func TestFromMap(t *testing.T) {
@@ -114,6 +197,65 @@ func TestFromMap(t *testing.T) {
 	}
 	if reg.Repos[0].BuildCmd == "" {
 		t.Error("BuildCmd empty")
+	}
+}
+
+func TestCanonicalReposJSONEntriesAreValid(t *testing.T) {
+	reg, err := Load(filepath.Join("..", "..", "repos.json"))
+	if err != nil {
+		t.Fatalf("Load repos.json: %v", err)
+	}
+	if len(reg.Repos) == 0 {
+		t.Fatal("repos.json has no repos")
+	}
+
+	knownLanguages := map[string]bool{
+		"go":     true,
+		"matlab": true,
+	}
+	seen := map[string]bool{}
+
+	for _, repo := range reg.Repos {
+		if strings.TrimSpace(repo.Name) == "" {
+			t.Fatal("repo entry has empty name")
+		}
+		if seen[repo.Name] {
+			t.Fatalf("duplicate repo name %q", repo.Name)
+		}
+		seen[repo.Name] = true
+
+		if !strings.HasPrefix(repo.URL, "https://github.com/transpara-ai/") {
+			t.Fatalf("%s URL = %q, want transpara-ai GitHub URL", repo.Name, repo.URL)
+		}
+		if strings.TrimSpace(repo.LocalPath) == "" {
+			t.Fatalf("%s local_path is empty", repo.Name)
+		}
+		if !knownLanguages[repo.Language] {
+			t.Fatalf("%s language = %q, want known language", repo.Name, repo.Language)
+		}
+		if strings.TrimSpace(repo.BuildCmd) == "" {
+			t.Fatalf("%s build_cmd is empty", repo.Name)
+		}
+		if strings.TrimSpace(repo.TestCmd) == "" {
+			t.Fatalf("%s test_cmd is empty", repo.Name)
+		}
+	}
+
+	matlabClient, ok := reg.Get("matlab-client")
+	if !ok {
+		t.Fatal("matlab-client registry entry missing")
+	}
+	if matlabClient.Language != "matlab" {
+		t.Fatalf("matlab-client language = %q, want matlab", matlabClient.Language)
+	}
+	if !matlabClient.IssueScanOnly {
+		t.Fatal("matlab-client must remain issue_scan_only")
+	}
+	if matlabClient.BuildCmd != "true" {
+		t.Fatalf("matlab-client build_cmd = %q, want true", matlabClient.BuildCmd)
+	}
+	if !strings.Contains(matlabClient.TestCmd, "runtests('tests')") {
+		t.Fatalf("matlab-client test_cmd does not run tests/: %q", matlabClient.TestCmd)
 	}
 }
 

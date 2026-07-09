@@ -15,13 +15,14 @@ import (
 
 // Repo describes a single git repository the hive can work on.
 type Repo struct {
-	Name         string `json:"name"`          // short name: "site", "hive"
-	URL          string `json:"url"`           // clone URL
-	LocalPath    string `json:"local_path"`    // absolute or relative to repos.json dir
-	Language     string `json:"language"`      // "go", "typescript", etc.
-	BuildCmd     string `json:"build_cmd"`     // e.g. "go build -buildvcs=false ./..."
-	TestCmd      string `json:"test_cmd"`      // e.g. "go test ./..."
-	DeployTarget string `json:"deploy_target"` // "npm", "" (none)
+	Name          string `json:"name"`                      // short name: "site", "hive"
+	URL           string `json:"url"`                       // clone URL
+	LocalPath     string `json:"local_path"`                // absolute or relative to repos.json dir
+	Language      string `json:"language"`                  // "go", "typescript", etc.
+	IssueScanOnly bool   `json:"issue_scan_only,omitempty"` // exclude from generic workspace sync/dispatch/context
+	BuildCmd      string `json:"build_cmd"`                 // e.g. "go build -buildvcs=false ./..."
+	TestCmd       string `json:"test_cmd"`                  // e.g. "go test ./..."
+	DeployTarget  string `json:"deploy_target"`             // "npm", "" (none)
 
 	// Resolved at load time, not persisted.
 	AbsPath  string `json:"-"` // absolute path after Resolve()
@@ -69,6 +70,11 @@ func FromMap(repoMap map[string]string) *Registry {
 func (r *Registry) Resolve() error {
 	for i := range r.Repos {
 		repo := &r.Repos[i]
+		if repo.IssueScanOnly {
+			repo.AbsPath = ""
+			repo.ClaudeMD = ""
+			continue
+		}
 
 		// Resolve path relative to the registry file's directory.
 		p := repo.LocalPath
@@ -108,6 +114,9 @@ func (r *Registry) Get(name string) (*Repo, bool) {
 func (r *Registry) ForPath(dir string) (*Repo, bool) {
 	abs, _ := filepath.Abs(dir)
 	for i := range r.Repos {
+		if r.Repos[i].IssueScanOnly {
+			continue
+		}
 		if r.Repos[i].AbsPath == abs {
 			return &r.Repos[i], true
 		}
@@ -119,6 +128,9 @@ func (r *Registry) ForPath(dir string) (*Repo, bool) {
 func (r *Registry) Available() []Repo {
 	var out []Repo
 	for _, repo := range r.Repos {
+		if repo.IssueScanOnly {
+			continue
+		}
 		if repo.AbsPath != "" {
 			if _, err := os.Stat(repo.AbsPath); err == nil {
 				out = append(out, repo)
@@ -132,6 +144,9 @@ func (r *Registry) Available() []Repo {
 func (r *Registry) RepoMap() map[string]string {
 	m := make(map[string]string, len(r.Repos))
 	for _, repo := range r.Repos {
+		if repo.IssueScanOnly {
+			continue
+		}
 		if repo.AbsPath != "" {
 			m[repo.Name] = repo.AbsPath
 		}
@@ -172,6 +187,9 @@ func (r *Registry) EnsureCloned() int {
 	cloned := 0
 	for i := range r.Repos {
 		repo := &r.Repos[i]
+		if repo.IssueScanOnly {
+			continue
+		}
 		if repo.URL == "" {
 			continue
 		}
@@ -213,6 +231,9 @@ func (r *Registry) EnsureCloned() int {
 // no repo.
 func (r *Registry) PullAll() {
 	for _, repo := range r.Repos {
+		if repo.IssueScanOnly {
+			continue
+		}
 		if repo.AbsPath == "" {
 			continue
 		}
