@@ -187,7 +187,7 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
 - **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm with `systemctl --user show hive-ops-api -p Environment`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
-Only `catalog-mixed.yaml` is checked into `repos/hive`. ⚠ The `hive.service` `ExecStart` references `catalog-codex.yaml`, which is **not** committed — so when starting the runtime manually, pass `--catalog ./catalog-mixed.yaml`; if `hive.service` itself fails to start, a missing `catalog-codex.yaml` is the likely cause.
+Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
 
 ## On-demand Runtime (`cmd/hive` verbs)
 
