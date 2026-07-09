@@ -64,9 +64,9 @@ systemctl --user is-active work-server hive-ops-api   # expect: active / active
 #    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
 #    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
 #    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys).
-#    catalog-mixed.yaml (what the packaged hive.service uses) routes some roles to Ollama +
-#    OpenRouter; add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a
-#    local Ollama model is running AND OPENROUTER_API_KEY is set.
+#    catalog-mixed.yaml is a mixed-provider catalog (some roles → Ollama + OpenRouter);
+#    add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a local
+#    Ollama model is running AND OPENROUTER_API_KEY is set.
 cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization daemon \
     --human Michael \
@@ -82,8 +82,8 @@ go run ./cmd/hive civilization daemon \
 ```bash
 # Stop the runtime first, then the API services.
 systemctl --user stop hive 2>/dev/null                    # if started as the unit
-pkill -INT -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
-sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
+sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
 # port (a blind port-kill could hit pgadmin or a dev server):
@@ -106,13 +106,11 @@ systemctl --user restart work-server hive-ops-api
 # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
 if systemctl --user is-active --quiet hive; then
   systemctl --user restart hive
-elif pgrep -f 'hive (civilization|pipeline|role|council|factory)' >/dev/null; then
-  echo "bouncing the MANUAL (go run) runtime → background (logs: /tmp/hive.log); relaunches the civilization daemon"
-  pkill -INT -f 'hive (civilization|pipeline|role|council|factory)'; sleep 3
-  pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null
-  ( cd /Transpara/transpara-ai/repos/hive && nohup go run ./cmd/hive civilization daemon \
-      --human Michael --store postgres://hive:hive@localhost:5432/hive > /tmp/hive.log 2>&1 & )
-  echo "restarted in the background (if you were running a different verb, relaunch that one instead)"
+elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+  echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
+  pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
+  pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'; sleep 3
+  pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
 else
   echo "hive runtime not running (on-demand) — left stopped"
 fi
@@ -128,7 +126,7 @@ systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|M
 
 echo "=== hive runtime (systemd unit OR manual go-run) ==="
 if systemctl --user is-active --quiet hive; then echo "hive.service: active"
-elif pgrep -f 'hive (civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
+elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
 else echo "runtime: stopped"; fi
 ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 
@@ -205,7 +203,7 @@ go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
-go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
+go run ./cmd/hive council --topic "…"                                       # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 
@@ -237,7 +235,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-pkill -INT -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
@@ -249,7 +247,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
-pkill -INT -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 cd /Transpara/transpara-ai/repos/hive
 docker compose down -v && docker compose up -d postgres
