@@ -9,6 +9,10 @@ Start, stop, restart, and inspect the transpara-ai hive stack on **nucbuntu**. T
 
 > On-prem / private (no public URLs). The Claude CLI path needs no key; the default mixed catalog also routes some roles to OpenRouter — see **Authentication**.
 
+## Hive Help
+
+For **"hive help" / "hive commands"**: print the section list below — Stack Components, Authentication, Hive Up / Down / Restart / Status, Endpoint Reference, Model Catalog, On-demand Runtime, Operator Actions, Logs, Common Problems — and **stop** (do not start/stop/restart anything). For CLI usage: `go run ./cmd/hive --help` or `go run ./cmd/hive <verb> --help`.
+
 ## Stack Components
 
 | Component | Unit / process | Bind | Notes |
@@ -122,7 +126,7 @@ curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H 
 
 ```bash
 journalctl --user -u hive-ops-api -n 20 --no-pager   # look for: dial tcp 127.0.0.1:5432: connect: connection refused
-docker start hive-postgres-1                          # bring the DB back; the services self-heal on their next restart tick
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring the DB back (recreates it if it was `compose down`-ed); services self-heal on their next restart tick
 ```
 
 ## Endpoint Reference
@@ -134,7 +138,7 @@ docker start hive-postgres-1                          # bring the DB back; the s
 | `GET /health` | liveness (no auth) |
 | `GET /api/hive/operator-projection` | pending approvals, authority decisions, lifecycle, key traces |
 | `GET /api/hive/civilization/assembly-projection` | role/agent topology, org tiers, model selection |
-| `POST /api/hive/operator-decision` † | record a human authority decision (`approved` \| `denied`) on an `authority.request` (e.g. a draft-PR-create action) |
+| `POST /api/hive/operator-decision` † | decide a **draft-PR-create** authority request (`approved` \| `denied`) — other request types are rejected |
 | `POST /api/hive/runs` † | launch an operator-initiated run |
 | `POST /api/hive/model-selection/role-policy` † | update a role's model policy |
 
@@ -189,7 +193,7 @@ Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--sp
 
 ## Operator Actions
 
-- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` decides `authority.request` items and does **not** approve role proposals.
+- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` only decides **draft-PR-create** authority requests — not role proposals.
 - **Inject a spec/file as a task**: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
 
 ## Local / Offline
@@ -235,7 +239,7 @@ docker compose down -v && docker compose up -d postgres
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Service `activating (auto-restart)` | Postgres down — DB connection fails on start | `docker start hive-postgres-1`; services self-heal |
+| Service `activating (auto-restart)` | Postgres down — DB connection fails on start | `docker compose up -d postgres` (from `repos/hive`); services self-heal |
 | `curl :8085` / `:8080` connection refused | that service not running / crash-looping | `systemctl --user status <svc>`; see crash-loop diagnosis |
 | `401 unauthorized` from `:8085` | missing/wrong bearer | add `-H "Authorization: Bearer $HIVE_OPS_API_KEY"` (default `dev`) |
 | "Invalid API key" on all agents | `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` set | `unset` them; remove from shell profile |
