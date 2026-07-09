@@ -37,7 +37,7 @@ pull requests ready, approve, merge, deploy, or write production truth.
 
 | Source | Role | Material decision |
 |---|---|---|
-| `transpara-ai/hive#260` | Issue-source intent | Requests one governed runner-suite design/packaging packet for a working Hive issue-scan factory path. |
+| `transpara-ai/hive#260` | Issue-source intent | Requests one governed runner-suite design/packaging packet for a working Hive issue-scan factory path. The issue's first PR-ready scope is design/docs only; executable runner implementation is deferred to future child issues. |
 | `cmd/hive/factory.go` | Operator command spine | Defines the issue-scan command family, full-chain daemon flags, named progress flags, and `--issue-scan-require-full-chain` admission guard. |
 | `cmd/hive/factory_issue_scan_runner_contracts.go` | Machine-readable runner contract | Emits the external runner, managed boundary, and ready-PR finalizer contracts for lifecycle version `civilization_issue_to_human_ready_pr_v0.9`. |
 | `cmd/hive/factory_issue_scan_runner_contexts.go` | Rehearsal probe | Builds ready/not-ready context probes for one stored run; may dispatch/scaffold the run but does not invoke external runners. |
@@ -80,9 +80,9 @@ recording evidence.
 | Blocker repair runner | Yes | `issue_scan_blocker_repair_runner_context` -> `hive.IssueScanBlockerRepairRunnerResult` | May repair only after review blockers reopen implementation work; no PR creation, readying, approval, merge, or deploy. |
 | Draft PR authority requester | Yes, managed by Hive | `issue_scan_draft_pr_authority_request_runner_context` -> `hive.IssueScanDraftPRAuthorityRequestRunnerResult` | Raises a Human approval request only; does not create a PR. |
 | Draft PR creator | Yes, managed by Hive | `issue_scan_draft_pr_creation_runner_context` -> `hive.IssueScanDraftPRCreationResult` | Creates a draft PR only after matching Human approval; no readying, approval, merge, or deploy. |
-| Ready-state review runner | Yes in managed finalizer posture | `issue_scan_ready_state_review_context` -> `hive.IssueScanReadyStateReviewReceipt` | Reviews exact PR head after mark-ready; no approval, merge, or deploy. |
-| Ready PR finalizer | Yes, managed by Hive | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Marks only the approved draft PR ready and records evidence after passing ready-state review; no Human approval, merge, or deploy. |
-| Generic ready PR evidence runner | Alternative terminal path only | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Mutually exclusive with the managed finalizer; records ready evidence only. |
+| Ready-state review runner | Yes in managed finalizer posture | `issue_scan_ready_state_review_context` -> `hive.IssueScanReadyStateReviewReceipt` | Reviews the exact PR head after the managed finalizer performs the draft-to-ready transition; no approval, merge, or deploy. |
+| Ready PR finalizer | Yes, managed by Hive through `--issue-scan-ready-pr-mark-ready` | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Transitions only the approved draft PR to ready, invokes ready-state review on that exact head, and records ready-for-Human evidence only after review passes; no Human approval, merge, or deploy. |
+| Generic ready PR evidence runner | Alternative terminal adapter through `--issue-scan-ready-pr-runner` only | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Mutually exclusive with the managed finalizer; records externally supplied ready evidence only. |
 
 The recommended v1 package uses the managed ready-PR finalizer. The generic
 ready-PR evidence runner remains an adapter escape hatch for a separately
@@ -168,6 +168,13 @@ Daemon admission proves executable availability and flag completeness. It does
 not prove that a run should start, that a PR should be created, that a PR should
 be marked ready, or that a merge is authorized.
 
+The managed terminal sequence is deliberately ordered: Hive consumes the
+approved draft PR receipt, transitions that draft PR to ready, obtains the exact
+post-transition head, runs ready-state review on that head, and records
+ready-for-Human evidence only after the review passes. During the gap between
+GitHub draft-to-ready mutation and recorded ready-for-Human evidence, the PR is
+not represented by Hive as Human-ready.
+
 ## Evidence Outputs
 
 The suite must leave evidence at every handoff:
@@ -243,8 +250,8 @@ Minimum implementation criteria:
 This packet does not authorize executable runner implementation, Hive wake/start
 or action API use, live issue scanning, route fetch, private fetch,
 authentication, runtime execution, RuntimeBroker execution, production
-EventGraph reads/queries/writes, Work writes, GitHub mutation beyond this
-issue/PR flow, draft PR creation, PR readying, PR approval, PR merge, deploy,
-service restart, protected settings changes, Test 001 GREEN, operation#26
-closure, operation#57 closure, production go-live, value allocation, autonomy
-increase, or wiki work.
+EventGraph reads/queries/writes, Work writes, GitHub mutation beyond this PR
+flow, draft PR creation, PR readying, PR approval, PR merge, deploy, service
+restart, protected settings changes, Test 001 GREEN, operation#26 closure,
+operation#57 closure, production go-live, value allocation, autonomy increase,
+or wiki work.
