@@ -18,6 +18,14 @@ import (
 	"github.com/transpara-ai/hive/pkg/hive"
 )
 
+const (
+	issueScanIntakeLabel                = "cc:intake"
+	issueScanCivilizationPresenceLabel  = "cc:civilization-presence"
+	issueScanFidelityStateNeedsFidelity = "needs_change_control_fidelity"
+	issueScanFidelityStateReadyForHuman = "ready_for_human_pr_ready_label"
+	issueScanReadyPromotionHint         = "human may apply " + hive.IssueScanPRReadyLabel + " only after PR-Ready-When is satisfied"
+)
+
 type level1CanaryReport struct {
 	Kind           string                    `json:"kind"`
 	GeneratedAt    string                    `json:"generated_at"`
@@ -36,18 +44,34 @@ type level1CanaryReport struct {
 }
 
 type level1CanaryIssueResult struct {
-	Repo           string   `json:"repo"`
-	Number         int      `json:"number"`
-	URL            string   `json:"url,omitempty"`
-	Title          string   `json:"title,omitempty"`
-	State          string   `json:"state,omitempty"`
-	Labels         []string `json:"labels,omitempty"`
-	Classification string   `json:"classification"`
-	BlockerType    string   `json:"blocker_type,omitempty"`
-	RequiredAction string   `json:"required_action,omitempty"`
-	RunID          string   `json:"run_id,omitempty"`
-	EventRef       string   `json:"event_ref,omitempty"`
-	AlreadyParked  bool     `json:"already_parked,omitempty"`
+	Repo             string                        `json:"repo"`
+	Number           int                           `json:"number"`
+	URL              string                        `json:"url,omitempty"`
+	Title            string                        `json:"title,omitempty"`
+	State            string                        `json:"state,omitempty"`
+	Labels           []string                      `json:"labels,omitempty"`
+	Classification   string                        `json:"classification"`
+	BlockerType      string                        `json:"blocker_type,omitempty"`
+	RequiredAction   string                        `json:"required_action,omitempty"`
+	FidelityGuidance *level1CanaryFidelityGuidance `json:"fidelity_guidance,omitempty"`
+	RunID            string                        `json:"run_id,omitempty"`
+	EventRef         string                        `json:"event_ref,omitempty"`
+	AlreadyParked    bool                          `json:"already_parked,omitempty"`
+}
+
+type level1CanaryFidelityGuidance struct {
+	State           string   `json:"state"`
+	PresentFields   []string `json:"present_fields,omitempty"`
+	MissingFields   []string `json:"missing_fields,omitempty"`
+	NextQuestions   []string `json:"next_questions,omitempty"`
+	RequiredLabels  []string `json:"required_labels,omitempty"`
+	BlockedByLabels []string `json:"blocked_by_labels,omitempty"`
+	// HumanPromotionLabel is advisory only. Consumers must never mutate GitHub
+	// or dispatch FactoryOrders from this value.
+	HumanPromotionLabel string   `json:"human_promotion_label,omitempty"`
+	PromotionHint       string   `json:"promotion_hint,omitempty"`
+	ReadyWhen           []string `json:"ready_when,omitempty"`
+	Boundary            []string `json:"boundary,omitempty"`
 }
 
 type level1CanaryReportOptions struct {
@@ -183,6 +207,12 @@ func buildLevel1CanaryReport(ctx context.Context, fc *factoryContext, issues []h
 		result.Classification = "parked"
 		result.BlockerType = blockerType
 		result.RequiredAction = requiredAction
+		guidance := canaryIssueFidelityGuidance(issue, blockerType)
+		if guidance.State == issueScanFidelityStateReadyForHuman {
+			requiredAction = fmt.Sprintf("human may apply %s after confirming PR-Ready-When; Hive must not create a FactoryOrder until the label is applied by a human", hive.IssueScanPRReadyLabel)
+			result.RequiredAction = requiredAction
+		}
+		result.FidelityGuidance = &guidance
 		result.RunID = canaryIssueRunID(issue)
 		existing, eventID, err := canaryIssueParkedEvent(fc, result.RunID, issue.Repo, issue.Number)
 		if err != nil {
@@ -300,10 +330,7 @@ func canaryParkedContentIsLevel1Canary(content hive.IssueScanRunParkedContent) b
 }
 
 func canaryIssueBlocker(issue hive.GitHubIssueCandidate) (string, string, string) {
-	labels := map[string]bool{}
-	for _, label := range issue.Labels {
-		labels[strings.ToLower(strings.TrimSpace(label))] = true
-	}
+	labels := issueScanLabelSetCLI(issue.Labels)
 	switch {
 	case labels[hive.IssueScanProtectedActionLabel]:
 		return hive.IssueScanParkBlockerProtectedAction,
@@ -320,8 +347,198 @@ func canaryIssueBlocker(issue hive.GitHubIssueCandidate) (string, string, string
 	default:
 		return hive.IssueScanParkBlockerNotPRReady,
 			fmt.Sprintf("%s#%d lacks %s", issue.Repo, issue.Number, hive.IssueScanPRReadyLabel),
-			"human must mark the issue PR-ready before Hive may continue"
+			fmt.Sprintf("human must complete missing change-control fidelity fields, then apply %s only when PR-Ready-When is satisfied", hive.IssueScanPRReadyLabel)
 	}
+}
+
+type canaryIssueFidelityRequirement struct {
+	Field     string
+	Question  string
+	BodyHints []string
+	LabelAny  []string
+}
+
+var canaryIssueFidelityRequirements = []canaryIssueFidelityRequirement{
+	{
+		Field:     "problem",
+		Question:  "What problem should the FactoryOrder solve?",
+		BodyHints: []string{"problem", "why this matters", "current behavior"},
+	},
+	{
+		Field:     "goal",
+		Question:  "What concrete end state should the PR deliver?",
+		BodyHints: []string{"goal", "desired behavior", "target state"},
+	},
+	{
+		Field:     "affected repos",
+		Question:  "Which repositories are affected?",
+		BodyHints: []string{"affected repo", "affected repos", "affected repository", "affected repositories", "repos affected"},
+	},
+	{
+		Field:     "primary repo",
+		Question:  "Which repository owns the primary PR?",
+		BodyHints: []string{"primary repo", "primary repository", "implementation repo", "owner repo"},
+	},
+	{
+		Field:     "scope boundaries",
+		Question:  "What is explicitly in scope and out of scope?",
+		BodyHints: []string{"scope boundary", "scope boundaries", "in scope", "out of scope", "non-authorizations"},
+	},
+	{
+		Field:     "acceptance criteria",
+		Question:  "What observable criteria prove the work is done?",
+		BodyHints: []string{"acceptance criteria", "done when", "definition of done"},
+	},
+	{
+		Field:     "evidence and test plan",
+		Question:  "What validation, evidence, or tests must the PR show?",
+		BodyHints: []string{"evidence and test plan", "test plan", "validation", "evidence"},
+	},
+	{
+		Field:     "PR-Ready-When",
+		Question:  "Exactly when may a human or intake process apply cc:pr-ready?",
+		BodyHints: []string{"pr-ready-when", "pr ready when", "pr-ready when", "ready when"},
+	},
+	{
+		Field:     "touched substrate",
+		Question:  "Which substrate is touched: docs, code, runtime, authority, EventGraph, Work, Site, Hive, or another surface?",
+		BodyHints: []string{"touched substrate", "substrate", "surface"},
+	},
+	{
+		Field:     "aggregation guidance",
+		Question:  "May this be grouped with related issues, or must it remain standalone?",
+		BodyHints: []string{"aggregation guidance", "aggregate", "grouping", "standalone"},
+	},
+	{
+		Field:     "Civilization Presence",
+		Question:  "Should this issue be visible to Civilization intake or aggregation surfaces?",
+		BodyHints: []string{"civilization presence", "civilization intake", "civilization"},
+		LabelAny:  []string{issueScanCivilizationPresenceLabel},
+	},
+	{
+		Field:     "authority/protected-action boundary",
+		Question:  "Does the work touch protected actions, and what is not authorized?",
+		BodyHints: []string{"authority/protected-action boundary", "authority boundary", "protected-action boundary", "protected action", "not authorized", "non-authorizations"},
+	},
+}
+
+func canaryIssueFidelityGuidance(issue hive.GitHubIssueCandidate, blockerType string) level1CanaryFidelityGuidance {
+	body := strings.ToLower(issue.Body)
+	labels := issueScanLabelSetCLI(issue.Labels)
+	guidance := level1CanaryFidelityGuidance{
+		State:               issueScanFidelityStateNeedsFidelity,
+		HumanPromotionLabel: hive.IssueScanPRReadyLabel,
+		Boundary: []string{
+			"this guidance does not create a FactoryOrder",
+			"do not apply cc:pr-ready until PR-Ready-When is satisfied",
+			"remove blocker labels only after the blocker is actually resolved",
+		},
+	}
+	for _, label := range []string{
+		hive.IssueScanProtectedActionLabel,
+		hive.IssueScanNeedsHumanScopeLabel,
+		hive.IssueScanPRDeferredLabel,
+	} {
+		if labels[label] {
+			guidance.BlockedByLabels = append(guidance.BlockedByLabels, label)
+		}
+	}
+	missingRequiredLabels := 0
+	if !labels[issueScanIntakeLabel] {
+		guidance.RequiredLabels = append(guidance.RequiredLabels, issueScanIntakeLabel)
+		missingRequiredLabels++
+	}
+	if !labels[hive.IssueScanPRReadyLabel] {
+		guidance.PromotionHint = issueScanReadyPromotionHint
+	}
+	for _, req := range canaryIssueFidelityRequirements {
+		if canaryIssueFidelityRequirementPresent(body, labels, req) {
+			guidance.PresentFields = append(guidance.PresentFields, req.Field)
+			continue
+		}
+		guidance.MissingFields = append(guidance.MissingFields, req.Field)
+		guidance.NextQuestions = append(guidance.NextQuestions, req.Question)
+	}
+	if len(guidance.MissingFields) == 0 && missingRequiredLabels == 0 && len(guidance.BlockedByLabels) == 0 && blockerType == hive.IssueScanParkBlockerNotPRReady {
+		// Advisory only: this state tells a human the label may now be applied;
+		// it is never authorization for automation to mutate GitHub or dispatch work.
+		guidance.State = issueScanFidelityStateReadyForHuman
+		guidance.ReadyWhen = []string{
+			"issue body carries the full change-control checklist",
+			"cc:intake label is present",
+			"human confirms the PR-Ready-When condition is satisfied",
+			fmt.Sprintf("apply %s without cc:pr-deferred, cc:needs-human-scope, or cc:protected-action", hive.IssueScanPRReadyLabel),
+		}
+		return guidance
+	}
+	guidance.ReadyWhen = []string{
+		"all missing_fields are answered in the issue body",
+		"blocked_by_labels is empty or explicitly resolved by human authority",
+		"PR-Ready-When is satisfied before applying cc:pr-ready",
+	}
+	return guidance
+}
+
+func canaryIssueFidelityRequirementPresent(body string, labels map[string]bool, req canaryIssueFidelityRequirement) bool {
+	for _, label := range req.LabelAny {
+		if labels[strings.ToLower(strings.TrimSpace(label))] {
+			return true
+		}
+	}
+	for _, hint := range req.BodyHints {
+		if canaryIssueBodyHasField(body, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func canaryIssueBodyHasField(body, hint string) bool {
+	body = strings.ToLower(body)
+	hint = strings.ToLower(strings.TrimSpace(hint))
+	if body == "" || hint == "" {
+		return false
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if canaryIssueBodyLineHasField(line, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func canaryIssueBodyLineHasField(line, hint string) bool {
+	line = strings.TrimSpace(strings.ToLower(line))
+	fieldMarker := false
+	line = strings.TrimPrefix(line, "- ")
+	line = strings.TrimPrefix(line, "* ")
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "### ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "### "))
+		fieldMarker = true
+	} else if strings.HasPrefix(line, "## ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+		fieldMarker = true
+	}
+	if strings.HasPrefix(line, "**") {
+		fieldMarker = true
+	}
+	line = strings.TrimSpace(line)
+	line = strings.Trim(line, "*")
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, hint+":") ||
+		(fieldMarker && (line == hint || strings.HasPrefix(line, hint+" ")))
+}
+
+func issueScanLabelSetCLI(labels []string) map[string]bool {
+	out := map[string]bool{}
+	for _, label := range labels {
+		label = strings.ToLower(strings.TrimSpace(label))
+		if label != "" {
+			out[label] = true
+		}
+	}
+	return out
 }
 
 func canaryIssueRunID(issue hive.GitHubIssueCandidate) string {

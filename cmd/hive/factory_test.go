@@ -2399,6 +2399,9 @@ func TestParseGitHubIssueCandidatesMapsLabels(t *testing.T) {
 	if got != "cc:intake,cc:pr-ready" {
 		t.Fatalf("labels = %q, want cc:intake,cc:pr-ready", got)
 	}
+	if issues[0].Body != "ready to implement" {
+		t.Fatalf("body = %q, want discovery body preserved", issues[0].Body)
+	}
 	if !hive.IssueScanCandidatePRReady(issues[0]) {
 		t.Fatalf("parsed issue should be PR-ready: %+v", issues[0])
 	}
