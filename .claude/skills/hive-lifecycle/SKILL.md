@@ -81,9 +81,13 @@ systemctl --user stop hive-ops-api work-server
 ```bash
 systemctl --user restart work-server hive-ops-api
 # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
-# unit and launch the daemon unexpectedly — so bounce it ONLY if already running:
-systemctl --user is-active --quiet hive && systemctl --user restart hive \
-  || echo "hive runtime not running (on-demand) — left stopped"
+# unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
+# Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
+if systemctl --user is-active --quiet hive; then
+  systemctl --user restart hive
+else
+  echo "hive runtime not running (on-demand) — left stopped"
+fi
 ```
 
 ## Hive Status
@@ -161,13 +165,14 @@ Only `catalog-mixed.yaml` is checked into `repos/hive`. ⚠ The `hive.service` `
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/hive civilization run    --human Michael --idea "…"            # one-shot multi-agent (seed via --idea/--spec)
+go run ./cmd/hive civilization run    --human Michael --idea "…" \
+       --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
 go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
-go run ./cmd/hive ingest --priority normal <file.md>                        # post a spec as a task (flags BEFORE the file — parsing stops at the first positional)
+go run ./cmd/hive ingest --api http://localhost:8082 --priority normal <file.md>   # post a spec to the LOCAL API (flags BEFORE the file; needs localapi up — default --api is the public site)
 ```
 
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
