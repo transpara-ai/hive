@@ -1629,6 +1629,30 @@ func TestResolveIssueScanReposRequiresRepoOrRegistry(t *testing.T) {
 	}
 }
 
+func TestResolveIssueScanReposIncludesIssueScanOnlyOnlyWithRegistryFlag(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "repos.json")
+	if err := os.WriteFile(registryPath, []byte(`{
+		"repos": [
+			{"name": "matlab-client", "url": "https://github.com/transpara-ai/matlab-client", "issue_scan_only": true}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write repos.json: %v", err)
+	}
+
+	if repos, err := resolveIssueScanRepos(nil, false, registryPath); err == nil || len(repos) != 0 || !strings.Contains(err.Error(), "--registry") {
+		t.Fatalf("resolve without registry = repos %#v, err %v; want explicit --registry refusal", repos, err)
+	}
+
+	repos, err := resolveIssueScanRepos(nil, true, registryPath)
+	if err != nil {
+		t.Fatalf("resolve with registry: %v", err)
+	}
+	if got := strings.Join(repos, ","); got != "transpara-ai/matlab-client" {
+		t.Fatalf("repos = %q, want transpara-ai/matlab-client", got)
+	}
+}
+
 func TestRunIssueScanScannerCycleQueuesOnceAndSkipsExistingIntake(t *testing.T) {
 	ctx := context.Background()
 	rt, fc, err := openFactoryRuntime(ctx, "", "Michael", ".", "", testIssueScanOpenTargetStateResolverOption)

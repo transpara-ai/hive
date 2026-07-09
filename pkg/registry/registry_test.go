@@ -94,6 +94,7 @@ func TestRepoMap(t *testing.T) {
 		{Name: "a", AbsPath: "/path/a"},
 		{Name: "b", AbsPath: "/path/b"},
 		{Name: "c"}, // no AbsPath — excluded
+		{Name: "scan-only", AbsPath: "/path/scan-only", IssueScanOnly: true},
 	}}
 	m := reg.RepoMap()
 	if len(m) != 2 {
@@ -101,6 +102,36 @@ func TestRepoMap(t *testing.T) {
 	}
 	if m["a"] != "/path/a" {
 		t.Errorf("a = %q", m["a"])
+	}
+}
+
+func TestIssueScanOnlyReposAreExcludedFromWorkspaceAvailability(t *testing.T) {
+	available := t.TempDir()
+	scanOnly := t.TempDir()
+	reg := &Registry{Repos: []Repo{
+		{Name: "available", AbsPath: available},
+		{Name: "scan-only", AbsPath: scanOnly, IssueScanOnly: true},
+	}}
+
+	avail := reg.Available()
+	if len(avail) != 1 || avail[0].Name != "available" {
+		t.Fatalf("available repos = %#v, want only available", avail)
+	}
+	if _, ok := reg.RepoMap()["scan-only"]; ok {
+		t.Fatal("issue-scan-only repo appeared in workspace repo map")
+	}
+}
+
+func TestEnsureClonedSkipsIssueScanOnlyRepos(t *testing.T) {
+	reg := &Registry{Repos: []Repo{{
+		Name:          "scan-only",
+		URL:           "https://github.com/transpara-ai/private-scan-only",
+		LocalPath:     filepath.Join(t.TempDir(), "scan-only"),
+		IssueScanOnly: true,
+	}}}
+
+	if cloned := reg.EnsureCloned(); cloned != 0 {
+		t.Fatalf("cloned = %d, want 0", cloned)
 	}
 }
 
@@ -165,6 +196,9 @@ func TestCanonicalReposJSONEntriesAreValid(t *testing.T) {
 	}
 	if matlabClient.Language != "matlab" {
 		t.Fatalf("matlab-client language = %q, want matlab", matlabClient.Language)
+	}
+	if !matlabClient.IssueScanOnly {
+		t.Fatal("matlab-client must remain issue_scan_only")
 	}
 	if matlabClient.BuildCmd != "true" {
 		t.Fatalf("matlab-client build_cmd = %q, want true", matlabClient.BuildCmd)
