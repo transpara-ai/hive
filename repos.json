@@ -45,7 +45,7 @@
       "url": "https://github.com/transpara-ai/matlab-client",
       "local_path": "../matlab-client",
       "language": "matlab",
-      "build_cmd": "",
+      "build_cmd": "true",
       "test_cmd": "matlab -batch \"addpath(pwd); results = runtests('tests'); assertSuccess(results)\""
     }
   ]

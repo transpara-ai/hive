@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,62 @@ func TestFromMap(t *testing.T) {
 	}
 	if reg.Repos[0].BuildCmd == "" {
 		t.Error("BuildCmd empty")
+	}
+}
+
+func TestCanonicalReposJSONEntriesAreValid(t *testing.T) {
+	reg, err := Load(filepath.Join("..", "..", "repos.json"))
+	if err != nil {
+		t.Fatalf("Load repos.json: %v", err)
+	}
+	if len(reg.Repos) == 0 {
+		t.Fatal("repos.json has no repos")
+	}
+
+	knownLanguages := map[string]bool{
+		"go":     true,
+		"matlab": true,
+	}
+	seen := map[string]bool{}
+
+	for _, repo := range reg.Repos {
+		if strings.TrimSpace(repo.Name) == "" {
+			t.Fatal("repo entry has empty name")
+		}
+		if seen[repo.Name] {
+			t.Fatalf("duplicate repo name %q", repo.Name)
+		}
+		seen[repo.Name] = true
+
+		if !strings.HasPrefix(repo.URL, "https://github.com/transpara-ai/") {
+			t.Fatalf("%s URL = %q, want transpara-ai GitHub URL", repo.Name, repo.URL)
+		}
+		if strings.TrimSpace(repo.LocalPath) == "" {
+			t.Fatalf("%s local_path is empty", repo.Name)
+		}
+		if !knownLanguages[repo.Language] {
+			t.Fatalf("%s language = %q, want known language", repo.Name, repo.Language)
+		}
+		if strings.TrimSpace(repo.BuildCmd) == "" {
+			t.Fatalf("%s build_cmd is empty", repo.Name)
+		}
+		if strings.TrimSpace(repo.TestCmd) == "" {
+			t.Fatalf("%s test_cmd is empty", repo.Name)
+		}
+	}
+
+	matlabClient, ok := reg.Get("matlab-client")
+	if !ok {
+		t.Fatal("matlab-client registry entry missing")
+	}
+	if matlabClient.Language != "matlab" {
+		t.Fatalf("matlab-client language = %q, want matlab", matlabClient.Language)
+	}
+	if matlabClient.BuildCmd != "true" {
+		t.Fatalf("matlab-client build_cmd = %q, want true", matlabClient.BuildCmd)
+	}
+	if !strings.Contains(matlabClient.TestCmd, "runtests('tests')") {
+		t.Fatalf("matlab-client test_cmd does not run tests/: %q", matlabClient.TestCmd)
 	}
 }
 
