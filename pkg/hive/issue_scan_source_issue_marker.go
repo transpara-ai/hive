@@ -22,6 +22,48 @@ const (
 	issueScanSourceIssueMarkerAuthority     = "This marker does not authorize protected actions, issue closure, PR creation, merge, deploy, production EventGraph writes, Hive wake/start/re-enable, Test 001 GREEN, value allocation, or autonomy increase."
 )
 
+// IssueScanSourceIssueMarkerActivationMode controls whether the Runtime-owned
+// marker bridge may cross from projection planning into a client-side apply.
+type IssueScanSourceIssueMarkerActivationMode string
+
+const (
+	IssueScanSourceIssueMarkerActivationDryRunOnly           IssueScanSourceIssueMarkerActivationMode = "dry_run"
+	IssueScanSourceIssueMarkerActivationMockedImplementation IssueScanSourceIssueMarkerActivationMode = "mocked_implementation"
+	IssueScanSourceIssueMarkerActivationLive                 IssueScanSourceIssueMarkerActivationMode = "live_activation"
+)
+
+type IssueScanSourceIssueMarkerClientKind string
+
+const (
+	IssueScanSourceIssueMarkerMockClient       IssueScanSourceIssueMarkerClientKind = "mock"
+	IssueScanSourceIssueMarkerLiveGitHubClient IssueScanSourceIssueMarkerClientKind = "live_github"
+)
+
+// IssueScanSourceIssueMarkerIssueScope is an exact source issue allowed by a
+// marker activation packet. Wildcard source issue mutation is intentionally not
+// modeled here.
+type IssueScanSourceIssueMarkerIssueScope struct {
+	Repo   string
+	Number int
+}
+
+// IssueScanSourceIssueMarkerActivation is the explicit authority packet shape
+// for applying marker projections. The zero value is dry-run-only. This PR
+// supports mocked implementation evidence only; live GitHub activation remains
+// fail-closed until a future authority packet and client are added.
+type IssueScanSourceIssueMarkerActivation struct {
+	Mode                IssueScanSourceIssueMarkerActivationMode
+	AuthorityRef        string
+	Actor               string
+	Environment         string
+	CredentialSource    string
+	AllowedIssues       []IssueScanSourceIssueMarkerIssueScope
+	AllowComments       bool
+	AllowLabels         bool
+	StopConditions      []string
+	LiveEvidenceAllowed bool
+}
+
 // IssueScanSourceIssueMarkerTransition names the semantic source-issue marker
 // transition. These values are intentionally narrower than the Work/EventGraph
 // lifecycle: only human-visible source issue status changes get a marker.
@@ -76,10 +118,16 @@ type IssueScanSourceIssueMarkerPlan struct {
 // existing comment bodies for the issue, across all pages, so hidden
 // idempotency keys cannot be missed.
 type IssueScanSourceIssueMarkerClient interface {
+	SourceIssueMarkerClientKind() IssueScanSourceIssueMarkerClientKind
 	AddLabels(ctx context.Context, repo string, number int, labels []string) error
 	RemoveLabels(ctx context.Context, repo string, number int, labels []string) error
 	ListCommentBodies(ctx context.Context, repo string, number int) ([]string, error)
 	CreateComment(ctx context.Context, repo string, number int, body string) error
+}
+
+type issueScanSourceIssueMarkerMockClient interface {
+	IssueScanSourceIssueMarkerClient
+	issueScanSourceIssueMarkerMockClient()
 }
 
 type IssueScanSourceIssueMarkerApplyResult struct {
@@ -101,6 +149,11 @@ type IssueScanSourceIssueMarkerBridgeResult struct {
 	Transition        IssueScanSourceIssueMarkerTransition
 	StageID           string
 	IdempotencyKey    string
+	ActivationMode    IssueScanSourceIssueMarkerActivationMode
+	AuthorityRef      string
+	ClientKind        IssueScanSourceIssueMarkerClientKind
+	Refused           bool
+	RefusalReason     string
 	DryRun            bool
 	Applied           bool
 	CommentCreated    bool
@@ -117,13 +170,15 @@ type IssueScanSourceIssueMarkerBridgeResult struct {
 
 // BridgeIssueScanSourceIssueMarker is the single Runtime-owned bridge from
 // canonical issue-scan state into source GitHub issue marker projection. It
-// plans on every call, but it applies only when an explicit marker client is
-// configured; nil client keeps the bridge dry-run-only.
+// plans on every call, but it applies only when an explicit mocked activation
+// packet and marker client are configured. Missing or live activation remains
+// dry-run/refused so adding a client cannot silently enable GitHub mutation.
 func (r *Runtime) BridgeIssueScanSourceIssueMarker(ctx context.Context, input IssueScanSourceIssueMarkerInput) (IssueScanSourceIssueMarkerBridgeResult, error) {
 	plan, err := PlanIssueScanSourceIssueMarker(input)
 	if err != nil {
 		return IssueScanSourceIssueMarkerBridgeResult{}, err
 	}
+	decision := r.issueScanSourceIssueMarkerActivationDecision(plan)
 	result := IssueScanSourceIssueMarkerBridgeResult{
 		RunID:             strings.TrimSpace(input.RunID),
 		FactoryOrderID:    strings.TrimSpace(input.FactoryOrderID),
@@ -132,7 +187,12 @@ func (r *Runtime) BridgeIssueScanSourceIssueMarker(ctx context.Context, input Is
 		Transition:        plan.Transition,
 		StageID:           strings.TrimSpace(input.StageID),
 		IdempotencyKey:    plan.IdempotencyKey,
-		DryRun:            r == nil || r.issueScanSourceIssueMarkerClient == nil,
+		ActivationMode:    decision.Mode,
+		AuthorityRef:      decision.AuthorityRef,
+		ClientKind:        decision.ClientKind,
+		Refused:           !decision.Apply,
+		RefusalReason:     decision.RefusalReason,
+		DryRun:            !decision.Apply,
 		CanonicalRefs:     append([]string(nil), plan.CanonicalRefs...),
 		WorkRefs:          compactStrings(input.WorkRefs),
 		EventGraphRefs:    compactStrings(input.EventGraphRefs),
@@ -140,19 +200,111 @@ func (r *Runtime) BridgeIssueScanSourceIssueMarker(ctx context.Context, input Is
 		TruthBoundary:     plan.TruthBoundary,
 		AuthorityBoundary: plan.AuthorityBoundary,
 	}
-	if result.DryRun {
+	if !decision.Apply {
 		return result, nil
 	}
-	applied, err := ApplyIssueScanSourceIssueMarker(ctx, r.issueScanSourceIssueMarkerClient, plan)
+	applied, err := ApplyIssueScanSourceIssueMarker(ctx, decision.Client, plan)
 	if err != nil {
 		return result, err
 	}
+	result.Refused = false
+	result.RefusalReason = ""
+	result.DryRun = false
 	result.Applied = true
 	result.CommentCreated = applied.CommentCreated
 	result.CommentSkipped = applied.CommentSkipped
 	result.LabelsAdded = append([]string(nil), applied.LabelsAdded...)
 	result.LabelsRemoved = append([]string(nil), applied.LabelsRemoved...)
 	return result, nil
+}
+
+type issueScanSourceIssueMarkerActivationDecision struct {
+	Apply         bool
+	Mode          IssueScanSourceIssueMarkerActivationMode
+	AuthorityRef  string
+	Client        IssueScanSourceIssueMarkerClient
+	ClientKind    IssueScanSourceIssueMarkerClientKind
+	RefusalReason string
+}
+
+func (r *Runtime) issueScanSourceIssueMarkerActivationDecision(plan IssueScanSourceIssueMarkerPlan) issueScanSourceIssueMarkerActivationDecision {
+	decision := issueScanSourceIssueMarkerActivationDecision{
+		Mode:          IssueScanSourceIssueMarkerActivationDryRunOnly,
+		RefusalReason: "source issue marker activation is dry-run-only",
+	}
+	if r == nil {
+		decision.RefusalReason = "runtime is required for source issue marker activation"
+		return decision
+	}
+	activation := normalizeIssueScanSourceIssueMarkerActivation(r.issueScanSourceIssueMarkerActivation)
+	decision.Mode = activation.Mode
+	decision.AuthorityRef = activation.AuthorityRef
+	if r.issueScanSourceIssueMarkerClient != nil {
+		decision.Client = r.issueScanSourceIssueMarkerClient
+		decision.ClientKind = r.issueScanSourceIssueMarkerClient.SourceIssueMarkerClientKind()
+	}
+	if activation.Mode == IssueScanSourceIssueMarkerActivationDryRunOnly {
+		return decision
+	}
+	if activation.Mode == IssueScanSourceIssueMarkerActivationLive {
+		decision.RefusalReason = "live source issue marker activation is not implemented or authorized"
+		return decision
+	}
+	if activation.Mode != IssueScanSourceIssueMarkerActivationMockedImplementation {
+		decision.RefusalReason = fmt.Sprintf("unknown source issue marker activation mode %q", activation.Mode)
+		return decision
+	}
+	if strings.TrimSpace(activation.AuthorityRef) == "" {
+		decision.RefusalReason = "source issue marker mocked activation requires authority_ref"
+		return decision
+	}
+	if strings.TrimSpace(activation.Actor) == "" {
+		decision.RefusalReason = "source issue marker mocked activation requires actor"
+		return decision
+	}
+	if strings.TrimSpace(activation.Environment) == "" {
+		decision.RefusalReason = "source issue marker mocked activation requires environment"
+		return decision
+	}
+	if credential := strings.TrimSpace(activation.CredentialSource); !strings.EqualFold(credential, "none") {
+		decision.RefusalReason = "source issue marker mocked activation requires credential_source none"
+		return decision
+	}
+	if activation.LiveEvidenceAllowed {
+		decision.RefusalReason = "source issue marker mocked activation cannot allow live evidence"
+		return decision
+	}
+	if len(activation.StopConditions) == 0 {
+		decision.RefusalReason = "source issue marker mocked activation requires stop conditions"
+		return decision
+	}
+	if !issueScanSourceIssueMarkerPlanAllowedByScope(plan, activation.AllowedIssues) {
+		decision.RefusalReason = "source issue marker target is outside activation scope"
+		return decision
+	}
+	if strings.TrimSpace(plan.CommentBody) != "" && !activation.AllowComments {
+		decision.RefusalReason = "source issue marker comment mutation is not allowed by activation"
+		return decision
+	}
+	if (len(plan.AddLabels) > 0 || len(plan.RemoveLabels) > 0) && !activation.AllowLabels {
+		decision.RefusalReason = "source issue marker label mutation is not allowed by activation"
+		return decision
+	}
+	if decision.Client == nil {
+		decision.RefusalReason = "source issue marker client is not configured"
+		return decision
+	}
+	if decision.ClientKind != IssueScanSourceIssueMarkerMockClient {
+		decision.RefusalReason = "source issue marker mocked activation requires a mock client"
+		return decision
+	}
+	if _, ok := decision.Client.(issueScanSourceIssueMarkerMockClient); !ok {
+		decision.RefusalReason = "source issue marker mocked activation requires package-local mock client evidence"
+		return decision
+	}
+	decision.Apply = true
+	decision.RefusalReason = ""
+	return decision
 }
 
 // PlanIssueScanSourceIssueMarker returns the idempotent label/comment payload
@@ -265,6 +417,41 @@ func validateIssueScanSourceIssueMarkerPlan(plan IssueScanSourceIssueMarkerPlan)
 	default:
 		return nil
 	}
+}
+
+func normalizeIssueScanSourceIssueMarkerActivation(activation IssueScanSourceIssueMarkerActivation) IssueScanSourceIssueMarkerActivation {
+	activation.Mode = IssueScanSourceIssueMarkerActivationMode(strings.TrimSpace(string(activation.Mode)))
+	if activation.Mode == "" {
+		activation.Mode = IssueScanSourceIssueMarkerActivationDryRunOnly
+	}
+	activation.AuthorityRef = strings.TrimSpace(activation.AuthorityRef)
+	activation.Actor = strings.TrimSpace(activation.Actor)
+	activation.Environment = strings.TrimSpace(activation.Environment)
+	activation.CredentialSource = strings.TrimSpace(activation.CredentialSource)
+	activation.StopConditions = compactStrings(activation.StopConditions)
+	allowed := make([]IssueScanSourceIssueMarkerIssueScope, 0, len(activation.AllowedIssues))
+	for _, issue := range activation.AllowedIssues {
+		repo := strings.ToLower(strings.TrimSpace(issue.Repo))
+		if repo == "" || issue.Number <= 0 {
+			continue
+		}
+		allowed = append(allowed, IssueScanSourceIssueMarkerIssueScope{Repo: repo, Number: issue.Number})
+	}
+	activation.AllowedIssues = allowed
+	return activation
+}
+
+func issueScanSourceIssueMarkerPlanAllowedByScope(plan IssueScanSourceIssueMarkerPlan, allowed []IssueScanSourceIssueMarkerIssueScope) bool {
+	if len(allowed) == 0 {
+		return false
+	}
+	repo := strings.ToLower(strings.TrimSpace(plan.Repo))
+	for _, issue := range allowed {
+		if strings.EqualFold(strings.TrimSpace(issue.Repo), repo) && issue.Number == plan.IssueNumber {
+			return true
+		}
+	}
+	return false
 }
 
 func (t IssueScanSourceIssueMarkerTransition) factoryStatusLabel() (string, error) {

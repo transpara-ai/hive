@@ -143,11 +143,13 @@ func TestNewWiresIssueScanSourceIssueMarkerClient(t *testing.T) {
 	actors := actor.NewInMemoryActorStore()
 	humanID := registerTestHuman(t, actors, "Operator")
 	client := &fakeIssueScanMarkerClient{}
+	activation := mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 249)
 	rt, err := New(ctx, Config{
-		Store:                            store.NewInMemoryStore(),
-		Actors:                           actors,
-		HumanID:                          humanID,
-		IssueScanSourceIssueMarkerClient: client,
+		Store:                                store.NewInMemoryStore(),
+		Actors:                               actors,
+		HumanID:                              humanID,
+		IssueScanSourceIssueMarkerClient:     client,
+		IssueScanSourceIssueMarkerActivation: activation,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -155,6 +157,12 @@ func TestNewWiresIssueScanSourceIssueMarkerClient(t *testing.T) {
 	t.Cleanup(func() { _ = rt.graph.Close() })
 	if rt.issueScanSourceIssueMarkerClient != client {
 		t.Fatal("issueScanSourceIssueMarkerClient was not wired from Config")
+	}
+	if rt.issueScanSourceIssueMarkerActivation.Mode != IssueScanSourceIssueMarkerActivationMockedImplementation {
+		t.Fatalf("activation mode = %q, want mocked implementation", rt.issueScanSourceIssueMarkerActivation.Mode)
+	}
+	if len(rt.issueScanSourceIssueMarkerActivation.AllowedIssues) != 1 || rt.issueScanSourceIssueMarkerActivation.AllowedIssues[0].Number != 249 {
+		t.Fatalf("activation scope = %+v, want hive#249", rt.issueScanSourceIssueMarkerActivation.AllowedIssues)
 	}
 }
 

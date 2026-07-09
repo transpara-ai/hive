@@ -15,6 +15,7 @@ func TestProgressIssueScanLifecycleParksClosedTargetBeforeConfiguredRunners(t *t
 	queued := queueIssueScanParkingRun(t, rt, writer, 225)
 	client := &fakeIssueScanMarkerClient{}
 	rt.issueScanSourceIssueMarkerClient = client
+	rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 225)
 	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
 		return IssueScanTargetState{
 			Repository:  "transpara-ai/hive",
@@ -140,6 +141,7 @@ func TestProgressIssueScanLifecycleParksWhenSourceIssueMarkerClientFails(t *test
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	queued := queueIssueScanParkingRun(t, rt, writer, 225)
 	rt.issueScanSourceIssueMarkerClient = &failingIssueScanMarkerClient{err: errors.New("github marker unavailable")}
+	rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 225)
 	rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
 		return IssueScanTargetState{
 			Repository:  "transpara-ai/hive",
@@ -241,6 +243,7 @@ func TestProgressIssueScanLifecycleParksHumanScopeAndProtectedLabels(t *testing.
 			queued := queueIssueScanParkingRun(t, rt, writer, 225)
 			client := &fakeIssueScanMarkerClient{}
 			rt.issueScanSourceIssueMarkerClient = client
+			rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 225)
 			rt.issueScanTargetStateResolver = func(context.Context, string, int) (IssueScanTargetState, error) {
 				return IssueScanTargetState{
 					Repository: "transpara-ai/hive",

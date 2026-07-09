@@ -444,6 +444,7 @@ func TestDispatchQueuedRunLaunchAppliesAcquiredSourceIssueMarker(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	client := &fakeIssueScanMarkerClient{}
 	rt.issueScanSourceIssueMarkerClient = client
+	rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 247)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
 		OperatorID: "operator_michael",
 		Issues: []GitHubIssueCandidate{{
@@ -540,6 +541,7 @@ func TestDispatchQueuedRunLaunchDryRunsAcquiredSourceIssueMarkerWithoutClient(t 
 func TestDispatchQueuedRunLaunchContinuesWhenSourceIssueMarkerClientFails(t *testing.T) {
 	rt, writer := newRunLaunchDispatchRuntime(t)
 	rt.issueScanSourceIssueMarkerClient = &failingIssueScanMarkerClient{err: errors.New("github marker unavailable")}
+	rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 247)
 	queued, err := QueueIssueScanRunLaunch(rt.store, writer.factory, writer.signer, writer.human, writer.conv, IssueScanRunLaunchRequest{
 		OperatorID: "operator_michael",
 		Issues: []GitHubIssueCandidate{{
@@ -595,6 +597,7 @@ func TestDispatchQueuedRunLaunchSkipsAcquiredMarkerForAlreadyParkedRun(t *testin
 
 	client := &fakeIssueScanMarkerClient{}
 	rt.issueScanSourceIssueMarkerClient = client
+	rt.issueScanSourceIssueMarkerActivation = mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 247)
 	markerPass, err := rt.ProgressIssueScanRunLifecycleWithConfiguredRunners(context.Background(), queued.RunID)
 	if err != nil {
 		t.Fatalf("marker ProgressIssueScanRunLifecycleWithConfiguredRunners: %v", err)
