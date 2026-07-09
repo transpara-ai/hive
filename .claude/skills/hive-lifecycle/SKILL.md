@@ -49,9 +49,11 @@ set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populate
 ## Hive Up
 
 ```bash
-# 1. Postgres (Docker) — everything else depends on it
+# 1. Postgres (Docker) — everything else depends on it. WAIT until it accepts connections
+#    (compose returns while the container may still be "health: starting").
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
-docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'   # expect "Up"
+until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do echo "waiting for postgres…"; sleep 1; done
+echo "postgres ready"
 
 # 2. The API services (systemd --user). Dirty start? Run "Hive Down" first to clear
 #    any stale manual go-run process still holding :8080/:8085.
@@ -83,10 +85,11 @@ systemctl --user stop hive 2>/dev/null                    # if started as the un
 pkill -INT -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
 sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
-# Sweep stray MANUAL runtimes from the old non-systemd flow that may hold the ports —
-# fuser -k kills whatever holds the TCP port (the go wrapper AND its compiled child):
-for p in 8080 8081 8085; do fuser -k -n tcp "$p" 2>/dev/null; done
-lsof -i :8080 -i :8081 -i :8085 2>/dev/null || echo "ports clear"
+# Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
+# port (a blind port-kill could hit pgadmin or a dev server):
+pkill -f 'cmd/work-server|exe/work-server' 2>/dev/null
+pkill -f 'cmd/hive-ops-api|exe/hive-ops-api' 2>/dev/null
+lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
 ```
@@ -94,6 +97,9 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null || echo "ports clear"
 ## Hive Restart
 
 ```bash
+# Ensure Postgres is up + accepting connections first (restart = a true down→up):
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
+until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do sleep 1; done
 systemctl --user restart work-server hive-ops-api
 # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
 # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
