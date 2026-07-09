@@ -72,6 +72,9 @@ systemctl --user stop hive 2>/dev/null                    # if started as the un
 pkill -INT -f 'hive civilization' 2>/dev/null             # graceful; matches both `go run` and its compiled child
 sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
+# Sweep stray MANUAL runtimes from the old non-systemd flow (they can hold :8080/:8081):
+pkill -f 'cmd/work-server' 2>/dev/null; pkill -f 'cmd/hive-ops-api' 2>/dev/null
+lsof -i :8080 -i :8081 -i :8085 2>/dev/null || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
 ```
@@ -157,7 +160,7 @@ curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry
 
 The operator API and the runtime select models from a catalog YAML (hot-reloaded):
 - **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm with `systemctl --user show hive-ops-api -p Environment`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
-- **hive runtime / council**: `--catalog <path> --catalog-reload-interval 1m` (e.g. `council --catalog ./catalog-mixed.yaml`).
+- **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
 Only `catalog-mixed.yaml` is checked into `repos/hive`. ⚠ The `hive.service` `ExecStart` references `catalog-codex.yaml`, which is **not** committed — so when starting the runtime manually, pass `--catalog ./catalog-mixed.yaml`; if `hive.service` itself fails to start, a missing `catalog-codex.yaml` is the likely cause.
 
@@ -172,7 +175,7 @@ go run ./cmd/hive civilization daemon --human Michael \
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
-go run ./cmd/hive ingest --api http://localhost:8082 --priority normal <file.md>   # post a spec to the LOCAL API (flags BEFORE the file; needs localapi up — default --api is the public site)
+go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow (needs LOVYOU_API_KEY; set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap). For simple LOCAL task injection prefer cmd/inject-file (see Operator Actions)
 ```
 
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
