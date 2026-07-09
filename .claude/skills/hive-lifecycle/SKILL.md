@@ -62,8 +62,9 @@ go run ./cmd/hive civilization daemon \
 
 ```bash
 # Stop the runtime first, then the API services.
-systemctl --user stop hive 2>/dev/null              # if started as the unit
-pkill -INT -f 'cmd/hive civilization' 2>/dev/null    # if started via go run (graceful SIGINT)
+systemctl --user stop hive 2>/dev/null                    # if started as the unit
+pkill -INT -f 'hive civilization' 2>/dev/null             # graceful; matches both `go run` and its compiled child
+sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -156,13 +157,13 @@ cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization run    --human Michael --idea "…"            # one-shot multi-agent (seed via --idea/--spec)
 go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
-go run ./cmd/hive pipeline run        --repo . --store postgres://hive:hive@localhost:5432/hive   # Scout → Builder → Critic (works from tasks; no --idea)
-go run ./cmd/hive role <name> run     --repo .                              # single agent
+go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
+go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
-go run ./cmd/hive ingest <file.md>    --priority normal                     # post a spec as a task
+go run ./cmd/hive ingest --priority normal <file.md>                        # post a spec as a task (flags BEFORE the file — parsing stops at the first positional)
 ```
 
-Flags are **per-verb**. `civilization run|daemon`: `--human` (required), `--idea`/`--spec` (seed), `--store <dsn>` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `pipeline`/`role`: `--space --api --repo --agent-id` (no `--human`/`--idea` — they work from existing tasks). Always confirm with `go run ./cmd/hive <verb> --help`.
+Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
 
 ## Operator Actions
 
@@ -190,7 +191,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-pkill -INT -f 'cmd/hive civilization' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3
+pkill -INT -f 'hive civilization' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
