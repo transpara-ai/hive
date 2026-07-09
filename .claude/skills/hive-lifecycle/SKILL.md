@@ -1,6 +1,6 @@
 ---
 name: hive-lifecycle
-description: "Manage the transpara-ai hive stack lifecycle on nucbuntu — the systemd --user services (work-server, hive-ops-api), the Dockerized Postgres, and the on-demand civilization runtime. Use whenever the user says 'hive up', 'hive down', 'hive status', 'hive restart', 'start/stop/restart the hive', 'run the hive', 'run agents on', 'hive idea', 'is the hive running', 'kill the hive', 'bounce the hive', or mentions stuck agents, a frozen hive, or needing a clean slate."
+description: "Manage the transpara-ai hive stack lifecycle on nucbuntu — the systemd --user services (work-server, hive-ops-api), the Dockerized Postgres, and the on-demand civilization runtime. Use whenever the user says 'hive up', 'hive down', 'hive status', 'hive restart', 'hive run', 'hive help', 'start/stop/restart the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or mentions stuck agents, a frozen hive, or needing a clean slate."
 ---
 
 # Hive Lifecycle Management
@@ -32,7 +32,13 @@ env | grep -i anthropic   # must print nothing
 
 API bearer tokens (for the endpoints below):
 - **hive-ops-api**: `HIVE_OPS_API_KEY` (default `dev`).
-- **work-server**: `WORK_API_KEY` (from `~/.config/hive/hive.env`).
+- **work-server**: `WORK_API_KEY` (lives in `~/.config/hive/hive.env`, not exported to your shell).
+
+To run the `curl` examples below from a plain shell, load the tokens first:
+
+```bash
+set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populates WORK_API_KEY (HIVE_OPS_API_KEY defaults to `dev`)
+```
 
 ## Hive Up
 
@@ -83,6 +89,7 @@ systemctl --user is-active --quiet hive && systemctl --user restart hive \
 ## Hive Status
 
 ```bash
+set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
 echo "=== services ==="
 systemctl --user is-active work-server hive-ops-api hive
 systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|Main PID:'
@@ -145,10 +152,10 @@ curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry
 ## Model Catalog
 
 The operator API and the runtime select models from a catalog YAML (hot-reloaded):
-- **hive-ops-api**: `HIVE_OPS_CATALOG` (service uses `repos/hive/catalog-mixed.yaml`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
+- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm with `systemctl --user show hive-ops-api -p Environment`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
 - **hive runtime / council**: `--catalog <path> --catalog-reload-interval 1m` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
-`catalog-mixed.yaml` is the catalog checked into `repos/hive`. (The `hive.service` unit references `catalog-codex.yaml`; if it is absent, point `--catalog` at `catalog-mixed.yaml`.)
+Only `catalog-mixed.yaml` is checked into `repos/hive`. ⚠ The `hive.service` `ExecStart` references `catalog-codex.yaml`, which is **not** committed — so when starting the runtime manually, pass `--catalog ./catalog-mixed.yaml`; if `hive.service` itself fails to start, a missing `catalog-codex.yaml` is the likely cause.
 
 ## On-demand Runtime (`cmd/hive` verbs)
 
@@ -203,6 +210,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
+pkill -INT -f 'hive civilization' 2>/dev/null; sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null   # kill any manual go-run runtime first
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 cd /Transpara/transpara-ai/repos/hive
 docker compose down -v && docker compose up -d postgres
