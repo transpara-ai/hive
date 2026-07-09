@@ -101,8 +101,12 @@ systemctl --user restart work-server hive-ops-api
 if systemctl --user is-active --quiet hive; then
   systemctl --user restart hive
 elif pgrep -f 'hive (civilization|pipeline|role|council|factory)' >/dev/null; then
-  echo "stopping the MANUAL (go run) runtime; re-run the Hive Up runtime command to bring it back with reloaded code/catalog:"
-  pkill -INT -f 'hive (civilization|pipeline|role|council|factory)'; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null
+  echo "bouncing the MANUAL (go run) runtime → background (logs: /tmp/hive.log); relaunches the civilization daemon"
+  pkill -INT -f 'hive (civilization|pipeline|role|council|factory)'; sleep 3
+  pkill -KILL -f 'hive (civilization|pipeline|role|council|factory)' 2>/dev/null
+  ( cd /Transpara/transpara-ai/repos/hive && nohup go run ./cmd/hive civilization daemon \
+      --human Michael --store postgres://hive:hive@localhost:5432/hive > /tmp/hive.log 2>&1 & )
+  echo "restarted in the background (if you were running a different verb, relaunch that one instead)"
 else
   echo "hive runtime not running (on-demand) — left stopped"
 fi
