@@ -10,11 +10,11 @@ owner: Michael Saucier
 steward: codex
 primary_repo: transpara-ai/hive
 source_issue: transpara-ai/hive#260
-authority: documentation-only; no executable runner implementation, Hive wake/start/action API use, live issue-scan dispatch, runtime execution, production EventGraph write, Work write, deploy, service restart, protected settings change, Test 001 GREEN, production go-live, value allocation, autonomy increase, or wiki work
+authority: documentation-only; no executable runner implementation, Hive wake/start/action API use, live issue-scan dispatch, route fetch, private fetch, authentication, runtime execution, RuntimeBroker execution, production EventGraph reads/queries/writes, Work write, draft PR creation, PR readying, PR approval, PR merge, deploy, service restart, protected settings change, Test 001 GREEN, operation#26 closure, operation#57 closure, production go-live, value allocation, autonomy increase, or wiki work
 ---
 
 <!-- df:artifact id=HIVE-ISSUE-SCAN-RUNNER-SUITE-PACKAGING type=design version=0.1.0 status=proposal -->
-<!-- df:scope project=dark-factory v4.0 hive-260 issue-scan runner-suite packaging design-only no-runtime-execution no-hive-action-api no-production-eventgraph-write no-work-write no-deploy no-autonomy-increase no-wiki-work -->
+<!-- df:scope project=dark-factory v4.0 hive-260 issue-scan runner-suite packaging design-only no-route-fetch no-private-fetch no-authentication no-runtime-execution no-runtimebroker no-hive-action-api no-production-eventgraph-read no-production-eventgraph-query no-production-eventgraph-write no-work-write no-draft-pr-create no-pr-readying no-pr-approval no-pr-merge no-deploy no-service-restart no-protected-settings-change no-test-001-green no-operation-26-closure no-operation-57-closure no-production-go-live no-value-allocation no-autonomy-increase no-wiki-work -->
 <!-- df:ingest mcp=true chunking=heading hidden_headers=true -->
 
 # Hive Issue-Scan Runner Suite Design and Packaging Contract
@@ -46,6 +46,22 @@ pull requests ready, approve, merge, deploy, or write production truth.
 | `pkg/hive/issue_intake.go` | Change-control intake contract | Requires `cc:pr-ready` and treats `cc:pr-deferred`, `cc:needs-human-scope`, and `cc:protected-action` as work-start blockers. |
 | `docs/designs/review-capacity-throttle-v0.1.0.md` | Review-load guard | Records that open PRs are conservative unproven exact-head review load and that the throttle only prevents new issue-scan work-start. |
 | `docs/designs/change-control-label-plane-invariants-v0.1.0.md` | Label-plane invariant | Records human-owned `cc:*` state movement and future stale-claim-release prerequisites. |
+
+## Source Verification
+
+The contract strings, result/receipt types, lifecycle version, terminal
+mutual-exclusion guard, and referenced design paths were spot-checked against
+the current head while preparing this packet. Evidence checked:
+
+- all named `issue_scan_*_context` strings and `hive.IssueScan*Result` /
+  `hive.IssueScan*Receipt` types appear in `cmd/hive` or `pkg/hive`;
+- `cmd/hive/factory_issue_scan_runner_contracts.go` emits lifecycle version
+  `civilization_issue_to_human_ready_pr_v0.9`;
+- `cmd/hive/factory.go` and `cmd/hive/factory_progress_issue_scan.go` reject
+  conflicting managed-finalizer and generic-ready-runner flag combinations;
+- `docs/designs/review-capacity-throttle-v0.1.0.md` and
+  `docs/designs/change-control-label-plane-invariants-v0.1.0.md` exist at the
+  cited paths.
 
 ## Packaging Problem
 
@@ -81,7 +97,7 @@ recording evidence.
 | Draft PR authority requester | Yes, managed by Hive | `issue_scan_draft_pr_authority_request_runner_context` -> `hive.IssueScanDraftPRAuthorityRequestRunnerResult` | Raises a Human approval request only; does not create a PR. |
 | Draft PR creator | Yes, managed by Hive | `issue_scan_draft_pr_creation_runner_context` -> `hive.IssueScanDraftPRCreationResult` | Creates a draft PR only after matching Human approval; no readying, approval, merge, or deploy. |
 | Ready-state review runner | Yes in managed finalizer posture | `issue_scan_ready_state_review_context` -> `hive.IssueScanReadyStateReviewReceipt` | Reviews the exact PR head after the managed finalizer performs the draft-to-ready transition; no approval, merge, or deploy. |
-| Ready PR finalizer | Yes, managed by Hive through `--issue-scan-ready-pr-mark-ready` | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Transitions only the approved draft PR to ready, invokes ready-state review on that exact head, and records ready-for-Human evidence only after review passes; no Human approval, merge, or deploy. |
+| Ready PR finalizer | Yes, managed by Hive through `--issue-scan-ready-pr-mark-ready` | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Transitions only the approved draft PR to ready when readying is inside the recorded Human approval scope, invokes ready-state review on that exact head, and records ready-for-Human evidence only after review passes; no Human approval, merge, or deploy. |
 | Generic ready PR evidence runner | Alternative terminal adapter through `--issue-scan-ready-pr-runner` only | `issue_scan_ready_pr_runner_context` -> `hive.IssueScanReadyPRRunnerResult` | Mutually exclusive with the managed finalizer; records externally supplied ready evidence only. |
 
 The recommended v1 package uses the managed ready-PR finalizer. The generic
@@ -142,7 +158,7 @@ Before daemonizing a suite, the operator should rehearse one stored run:
 
 1. Probe context readiness with `hive factory issue-scan-runner-contexts --run
    <run_id>`. Use `--include-payload` only for local debugging and PR-visible
-   redacted evidence when appropriate.
+   evidence after explicit redaction review; omit payloads by default.
 2. Invoke standalone `hive factory run-issue-scan-*` commands against the named
    run to validate one runner at a time.
 3. Use `hive factory progress-issue-scan --run-configured-runners --run <run_id>`
@@ -169,11 +185,28 @@ not prove that a run should start, that a PR should be created, that a PR should
 be marked ready, or that a merge is authorized.
 
 The managed terminal sequence is deliberately ordered: Hive consumes the
-approved draft PR receipt, transitions that draft PR to ready, obtains the exact
+approved draft PR receipt, transitions that draft PR to ready only when the
+recorded Human approval scope includes managed readying, obtains the exact
 post-transition head, runs ready-state review on that head, and records
-ready-for-Human evidence only after the review passes. During the gap between
-GitHub draft-to-ready mutation and recorded ready-for-Human evidence, the PR is
-not represented by Hive as Human-ready.
+ready-for-Human evidence only after the review passes. A draft PR creation
+approval that does not explicitly include managed readying is insufficient for
+the finalizer; a distinct readying approval or expanded approval scope is then
+required.
+
+During the gap between GitHub draft-to-ready mutation and recorded
+ready-for-Human evidence, the PR is not represented by Hive as Human-ready. If
+ready-state review fails or cannot run after the ready transition, the runner
+suite must stop without recording ready-for-Human evidence, surface the blocker
+to the operator, and follow a future implementation child issue's remediation
+contract. The preferred remediation is to return the PR to draft when the GitHub
+API and recorded authority allow it; otherwise the PR must remain visibly
+blocked and unmergeable by Hive. This packet does not implement that remediation.
+
+The generic terminal evidence runner is not selected implicitly. A future suite
+must enforce managed-finalizer versus generic-terminal mutual exclusivity
+fail-closed at daemon admission and named-run progress. Any use of the generic
+terminal path needs a separately reviewed configuration/authority packet because
+it supplies ready evidence from outside the managed finalizer.
 
 ## Evidence Outputs
 
@@ -226,6 +259,11 @@ Minimum implementation criteria:
 - package manifest schema and tests;
 - fixture-based parser tests for every runner stdin/stdout contract;
 - executable availability checks that fail closed before daemon entry;
+- explicit Human approval-scope checks before managed draft-to-ready mutation;
+- ready-state-review failure remediation covering re-draft when allowed or
+  visible blocked-state evidence when re-draft is unavailable;
+- fail-closed tests for managed-finalizer and generic-terminal mutual
+  exclusivity in both daemon and named-run progress paths;
 - no embedded secrets or production connection strings;
 - no literal private network addresses in package docs or fixtures;
 - no automatic merge, approval, deploy, protected settings mutation, or value
