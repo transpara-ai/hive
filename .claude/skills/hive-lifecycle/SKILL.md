@@ -61,11 +61,13 @@ systemctl --user is-active work-server hive-ops-api   # expect: active / active
 # 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
 #    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
 #    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
-#    (see Authentication); for a subscription-only run, OMIT --catalog (built-in Claude defaults).
+#    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys).
+#    catalog-mixed.yaml (what the packaged hive.service uses) routes some roles to Ollama +
+#    OpenRouter; add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a
+#    local Ollama model is running AND OPENROUTER_API_KEY is set.
 cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization daemon \
     --human Michael \
-    --catalog ./catalog-mixed.yaml --catalog-reload-interval 1m \
     --store postgres://hive:hive@localhost:5432/hive
 #   Full autonomy (auto-approve everything) is an EXPLICIT opt-in: add
 #       --approve-requests --approve-roles
@@ -194,7 +196,7 @@ go run ./cmd/hive civilization daemon --human Michael \
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
-go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow (needs LOVYOU_API_KEY; set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap). For simple LOCAL task injection prefer cmd/inject-file (see Operator Actions)
+go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
@@ -202,7 +204,7 @@ Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--sp
 ## Operator Actions
 
 - **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` only decides **draft-PR-create** authority requests — not role proposals.
-- **Inject a spec/file as a task**: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
+- **Inject a spec/file as a task** — posts to the civilization daemon **webhook** (`:8081/event`), so the runtime must be running: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
 
 ## Local / Offline
 
