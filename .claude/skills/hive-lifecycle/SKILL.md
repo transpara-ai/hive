@@ -45,13 +45,17 @@ docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'   # ex
 systemctl --user start work-server hive-ops-api
 systemctl --user is-active work-server hive-ops-api   # expect: active / active
 
-# 3. (Optional) the multi-agent runtime — on demand, foreground for visibility
+# 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
+#    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
 cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization daemon \
-    --human Michael --approve-requests --approve-roles \
+    --human Michael \
     --catalog ./catalog-mixed.yaml --catalog-reload-interval 1m \
     --store postgres://hive:hive@localhost:5432/hive
-#   …or run the packaged unit:  systemctl --user start hive
+#   Full autonomy (auto-approve everything) is an EXPLICIT opt-in: add
+#       --approve-requests --approve-roles
+#   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
+#   its ExecStart already includes --approve-requests --approve-roles.
 ```
 
 ## Hive Down
@@ -69,7 +73,10 @@ systemctl --user stop hive-ops-api work-server
 
 ```bash
 systemctl --user restart work-server hive-ops-api
-systemctl --user restart hive 2>/dev/null   # only if you run the runtime as a unit
+# The hive runtime is on-demand (unit disabled). `restart` would START the disabled
+# unit and launch the daemon unexpectedly — so bounce it ONLY if already running:
+systemctl --user is-active --quiet hive && systemctl --user restart hive \
+  || echo "hive runtime not running (on-demand) — left stopped"
 ```
 
 ## Hive Status
@@ -86,7 +93,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://127.0.0.1:8085/health
-curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' http://localhost:8080/telemetry/status
+curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
 **Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Confirm and fix:
@@ -105,9 +112,11 @@ docker start hive-postgres-1                          # bring the DB back; the s
 | `GET /health` | liveness (no auth) |
 | `GET /api/hive/operator-projection` | pending approvals, authority decisions, lifecycle, key traces |
 | `GET /api/hive/civilization/assembly-projection` | role/agent topology, org tiers, model selection |
-| `POST /api/hive/operator-decision` | record a human authority decision (`approved` \| `denied`) |
-| `POST /api/hive/runs` | launch an operator-initiated run |
-| `POST /api/hive/model-selection/role-policy` | update a role's model policy |
+| `POST /api/hive/operator-decision` † | record a human authority decision (`approved` \| `denied`) on an `authority.request` (e.g. a draft-PR-create action) |
+| `POST /api/hive/runs` † | launch an operator-initiated run |
+| `POST /api/hive/model-selection/role-policy` † | update a role's model policy |
+
+> **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it, so the deployed API is **read-only** (GET routes only).
 
 ```bash
 curl -s -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
@@ -144,20 +153,20 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/hive civilization run    --human Michael --idea "…"            # one-shot multi-agent
-go run ./cmd/hive civilization daemon --human Michael --approve-requests --approve-roles \
-       --store postgres://hive:hive@localhost:5432/hive                      # long-running
-go run ./cmd/hive pipeline run        --human Michael --idea "…"            # Scout → Builder → Critic
-go run ./cmd/hive role <name> run     --human Michael                       # single agent
+go run ./cmd/hive civilization run    --human Michael --idea "…"            # one-shot multi-agent (seed via --idea/--spec)
+go run ./cmd/hive civilization daemon --human Michael \
+       --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
+go run ./cmd/hive pipeline run        --repo . --store postgres://hive:hive@localhost:5432/hive   # Scout → Builder → Critic (works from tasks; no --idea)
+go run ./cmd/hive role <name> run     --repo .                              # single agent
 go run ./cmd/hive council --topic "…" --catalog ./catalog-mixed.yaml        # one deliberation
-go run ./cmd/hive ingest <file.md>                                          # post a spec as a task
+go run ./cmd/hive ingest <file.md>    --priority normal                     # post a spec as a task
 ```
 
-Core flags: `--human` (required), `--idea` / `--spec` (seed), `--store <dsn>` (or `DATABASE_URL`), `--repo <path>`, `--approve-requests`, `--approve-roles`. Per-verb flags: `go run ./cmd/hive <verb> --help`.
+Flags are **per-verb**. `civilization run|daemon`: `--human` (required), `--idea`/`--spec` (seed), `--store <dsn>` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `pipeline`/`role`: `--space --api --repo --agent-id` (no `--human`/`--idea` — they work from existing tasks). Always confirm with `go run ./cmd/hive <verb> --help`.
 
 ## Operator Actions
 
-- **Approve a proposed role** — via the API (preferred): `POST /api/hive/operator-decision`. Or the CLI: `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`.
+- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` decides `authority.request` items and does **not** approve role proposals.
 - **Inject a spec/file as a task**: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
 
 ## Local / Offline
