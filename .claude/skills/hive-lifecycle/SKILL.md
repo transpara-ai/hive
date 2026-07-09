@@ -55,6 +55,8 @@ systemctl --user is-active work-server hive-ops-api   # expect: active / active
 
 # 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
 #    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
+#    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
+#    (see Authentication); for a subscription-only run use a Claude-only --catalog.
 cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization daemon \
     --human Michael \
@@ -74,8 +76,9 @@ systemctl --user stop hive 2>/dev/null                    # if started as the un
 pkill -INT -f 'hive (civilization|pipeline|role|council)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
 sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council)' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
-# Sweep stray MANUAL runtimes from the old non-systemd flow (they can hold :8080/:8081):
-pkill -f 'cmd/work-server' 2>/dev/null; pkill -f 'cmd/hive-ops-api' 2>/dev/null
+# Sweep stray MANUAL runtimes from the old non-systemd flow that may hold the ports —
+# fuser -k kills whatever holds the TCP port (the go wrapper AND its compiled child):
+for p in 8080 8081 8085; do fuser -k -n tcp "$p" 2>/dev/null; done
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -90,6 +93,8 @@ systemctl --user restart work-server hive-ops-api
 # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
 if systemctl --user is-active --quiet hive; then
   systemctl --user restart hive
+elif pgrep -f 'hive (civilization|pipeline|role|council)' >/dev/null; then
+  echo "a MANUAL (go run) runtime is active — stop it (Ctrl+C, or pkill -f 'hive (civilization|pipeline|role|council)') and re-run the Hive Up runtime command to reload code/catalog"
 else
   echo "hive runtime not running (on-demand) — left stopped"
 fi
