@@ -108,10 +108,16 @@ func TestRepoMap(t *testing.T) {
 func TestIssueScanOnlyReposAreExcludedFromWorkspaceAvailability(t *testing.T) {
 	available := t.TempDir()
 	scanOnly := t.TempDir()
+	if err := os.WriteFile(filepath.Join(scanOnly, "CLAUDE.md"), []byte("# Private context"), 0o600); err != nil {
+		t.Fatalf("write private CLAUDE.md: %v", err)
+	}
 	reg := &Registry{Repos: []Repo{
-		{Name: "available", AbsPath: available},
-		{Name: "scan-only", AbsPath: scanOnly, IssueScanOnly: true},
+		{Name: "available", LocalPath: available, AbsPath: available},
+		{Name: "scan-only", LocalPath: scanOnly, AbsPath: scanOnly, IssueScanOnly: true},
 	}}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
 
 	avail := reg.Available()
 	if len(avail) != 1 || avail[0].Name != "available" {
@@ -119,6 +125,19 @@ func TestIssueScanOnlyReposAreExcludedFromWorkspaceAvailability(t *testing.T) {
 	}
 	if _, ok := reg.RepoMap()["scan-only"]; ok {
 		t.Fatal("issue-scan-only repo appeared in workspace repo map")
+	}
+	if _, ok := reg.ForPath(scanOnly); ok {
+		t.Fatal("issue-scan-only repo matched workspace path")
+	}
+	repo, ok := reg.Get("scan-only")
+	if !ok {
+		t.Fatal("scan-only repo missing")
+	}
+	if repo.AbsPath != "" {
+		t.Fatalf("issue-scan-only repo AbsPath = %q, want empty", repo.AbsPath)
+	}
+	if repo.ClaudeMD != "" {
+		t.Fatalf("issue-scan-only repo loaded ClaudeMD: %q", repo.ClaudeMD)
 	}
 }
 

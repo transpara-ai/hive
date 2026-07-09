@@ -19,7 +19,7 @@ type Repo struct {
 	URL           string `json:"url"`                       // clone URL
 	LocalPath     string `json:"local_path"`                // absolute or relative to repos.json dir
 	Language      string `json:"language"`                  // "go", "typescript", etc.
-	IssueScanOnly bool   `json:"issue_scan_only,omitempty"` // exclude from generic workspace sync/dispatch
+	IssueScanOnly bool   `json:"issue_scan_only,omitempty"` // exclude from generic workspace sync/dispatch/context
 	BuildCmd      string `json:"build_cmd"`                 // e.g. "go build -buildvcs=false ./..."
 	TestCmd       string `json:"test_cmd"`                  // e.g. "go test ./..."
 	DeployTarget  string `json:"deploy_target"`             // "npm", "" (none)
@@ -70,6 +70,11 @@ func FromMap(repoMap map[string]string) *Registry {
 func (r *Registry) Resolve() error {
 	for i := range r.Repos {
 		repo := &r.Repos[i]
+		if repo.IssueScanOnly {
+			repo.AbsPath = ""
+			repo.ClaudeMD = ""
+			continue
+		}
 
 		// Resolve path relative to the registry file's directory.
 		p := repo.LocalPath
@@ -109,6 +114,9 @@ func (r *Registry) Get(name string) (*Repo, bool) {
 func (r *Registry) ForPath(dir string) (*Repo, bool) {
 	abs, _ := filepath.Abs(dir)
 	for i := range r.Repos {
+		if r.Repos[i].IssueScanOnly {
+			continue
+		}
 		if r.Repos[i].AbsPath == abs {
 			return &r.Repos[i], true
 		}
