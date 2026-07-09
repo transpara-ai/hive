@@ -100,6 +100,38 @@ func TestPlanIssueScanSourceIssueMarkerHumanActionUsesParkedStatus(t *testing.T)
 	}
 }
 
+func TestPlanIssueScanSourceIssueMarkerTransitionsUseExpectedLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		transition IssueScanSourceIssueMarkerTransition
+		wantLabel  string
+	}{
+		{name: "parked", transition: IssueScanSourceIssueMarkerParked, wantLabel: IssueScanFactoryStatusLabelParked},
+		{name: "ready_for_human", transition: IssueScanSourceIssueMarkerReadyForHuman, wantLabel: IssueScanFactoryStatusLabelReadyForHuman},
+		{name: "completed", transition: IssueScanSourceIssueMarkerCompleted, wantLabel: IssueScanFactoryStatusLabelCompleted},
+		{name: "abandoned", transition: IssueScanSourceIssueMarkerAbandoned, wantLabel: IssueScanFactoryStatusLabelAbandoned},
+		{name: "superseded", transition: IssueScanSourceIssueMarkerSuperseded, wantLabel: IssueScanFactoryStatusLabelSuperseded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := markerTestInput()
+			input.Transition = tc.transition
+			plan, err := PlanIssueScanSourceIssueMarker(input)
+			if err != nil {
+				t.Fatalf("PlanIssueScanSourceIssueMarker: %v", err)
+			}
+			if len(plan.AddLabels) != 1 || plan.AddLabels[0] != tc.wantLabel {
+				t.Fatalf("add labels = %+v, want %s", plan.AddLabels, tc.wantLabel)
+			}
+			if containsIssueScanValue(plan.RemoveLabels, tc.wantLabel) {
+				t.Fatalf("remove labels = %+v, must not remove current label %s", plan.RemoveLabels, tc.wantLabel)
+			}
+			if !strings.Contains(plan.CommentBody, "Factory issue-scan marker: "+string(tc.transition)) {
+				t.Fatalf("comment body missing transition %q:\n%s", tc.transition, plan.CommentBody)
+			}
+		})
+	}
+}
+
 func TestPlanIssueScanSourceIssueMarkerRejectsIncompleteCanonicalRefs(t *testing.T) {
 	_, err := PlanIssueScanSourceIssueMarker(IssueScanSourceIssueMarkerInput{
 		Transition: IssueScanSourceIssueMarkerAcquired,
@@ -196,6 +228,249 @@ func TestApplyIssueScanSourceIssueMarkerIgnoresHostileMarkerLookalike(t *testing
 	}
 }
 
+func TestBridgeIssueScanSourceIssueMarkerDryRunsWithoutActivationEvenWithClient(t *testing.T) {
+	client := &fakeIssueScanMarkerClient{}
+	rt := &Runtime{issueScanSourceIssueMarkerClient: client}
+	result, err := rt.BridgeIssueScanSourceIssueMarker(context.Background(), markerTestInput())
+	if err != nil {
+		t.Fatalf("BridgeIssueScanSourceIssueMarker: %v", err)
+	}
+	if !result.DryRun || result.Applied || !result.Refused {
+		t.Fatalf("bridge result = %+v, want refused dry-run without activation", result)
+	}
+	if !strings.Contains(result.RefusalReason, "dry-run-only") {
+		t.Fatalf("refusal = %q, want dry-run-only boundary", result.RefusalReason)
+	}
+	if len(client.comments) != 0 || len(client.addedLabels) != 0 || len(client.removedLabels) != 0 {
+		t.Fatalf("client mutations = comments=%d add=%d remove=%d, want none", len(client.comments), len(client.addedLabels), len(client.removedLabels))
+	}
+}
+
+func TestBridgeIssueScanSourceIssueMarkerAppliesOnlyWithMockedActivation(t *testing.T) {
+	client := &fakeIssueScanMarkerClient{}
+	rt := &Runtime{
+		issueScanSourceIssueMarkerClient:     client,
+		issueScanSourceIssueMarkerActivation: mockedIssueScanSourceIssueMarkerActivation("transpara-ai/docs", 256),
+	}
+	result, err := rt.BridgeIssueScanSourceIssueMarker(context.Background(), markerTestInput())
+	if err != nil {
+		t.Fatalf("BridgeIssueScanSourceIssueMarker: %v", err)
+	}
+	if result.DryRun || result.Refused || !result.Applied || !result.CommentCreated {
+		t.Fatalf("bridge result = %+v, want mocked apply", result)
+	}
+	if result.ActivationMode != IssueScanSourceIssueMarkerActivationMockedImplementation || result.ClientKind != IssueScanSourceIssueMarkerMockClient {
+		t.Fatalf("activation/client = %s/%s, want mocked activation with mock client", result.ActivationMode, result.ClientKind)
+	}
+	if result.AuthorityRef == "" {
+		t.Fatalf("authority ref missing from result: %+v", result)
+	}
+	if len(client.comments) != 1 || !strings.Contains(client.comments[0], "Factory issue-scan marker: acquired") {
+		t.Fatalf("client comments = %+v, want acquired marker", client.comments)
+	}
+}
+
+func TestBridgeIssueScanSourceIssueMarkerRefusesLiveActivation(t *testing.T) {
+	client := &fakeIssueScanMarkerClient{}
+	rt := &Runtime{
+		issueScanSourceIssueMarkerClient: client,
+		issueScanSourceIssueMarkerActivation: IssueScanSourceIssueMarkerActivation{
+			Mode:             IssueScanSourceIssueMarkerActivationLive,
+			AuthorityRef:     "hive#249-live-activation-not-authorized",
+			Actor:            "Codex",
+			Environment:      "test",
+			CredentialSource: "none",
+			AllowedIssues:    []IssueScanSourceIssueMarkerIssueScope{{Repo: "transpara-ai/docs", Number: 256}},
+			AllowComments:    true,
+			AllowLabels:      true,
+			StopConditions:   []string{"any live activation request requires future human authority"},
+		},
+	}
+	result, err := rt.BridgeIssueScanSourceIssueMarker(context.Background(), markerTestInput())
+	if err != nil {
+		t.Fatalf("BridgeIssueScanSourceIssueMarker: %v", err)
+	}
+	if !result.DryRun || !result.Refused || result.Applied {
+		t.Fatalf("bridge result = %+v, want refused dry-run for live activation", result)
+	}
+	if !strings.Contains(result.RefusalReason, "live source issue marker activation is not implemented or authorized") {
+		t.Fatalf("refusal = %q, want live activation refusal", result.RefusalReason)
+	}
+	if len(client.comments) != 0 || len(client.addedLabels) != 0 || len(client.removedLabels) != 0 {
+		t.Fatalf("client mutations = comments=%d add=%d remove=%d, want none", len(client.comments), len(client.addedLabels), len(client.removedLabels))
+	}
+}
+
+func TestBridgeIssueScanSourceIssueMarkerRefusesOutOfScopeMockedActivation(t *testing.T) {
+	client := &fakeIssueScanMarkerClient{}
+	rt := &Runtime{
+		issueScanSourceIssueMarkerClient:     client,
+		issueScanSourceIssueMarkerActivation: mockedIssueScanSourceIssueMarkerActivation("transpara-ai/hive", 249),
+	}
+	result, err := rt.BridgeIssueScanSourceIssueMarker(context.Background(), markerTestInput())
+	if err != nil {
+		t.Fatalf("BridgeIssueScanSourceIssueMarker: %v", err)
+	}
+	if !result.DryRun || !result.Refused || result.Applied {
+		t.Fatalf("bridge result = %+v, want refused dry-run for out-of-scope issue", result)
+	}
+	if !strings.Contains(result.RefusalReason, "outside activation scope") {
+		t.Fatalf("refusal = %q, want scope refusal", result.RefusalReason)
+	}
+	if len(client.comments) != 0 || len(client.addedLabels) != 0 || len(client.removedLabels) != 0 {
+		t.Fatalf("client mutations = comments=%d add=%d remove=%d, want none", len(client.comments), len(client.addedLabels), len(client.removedLabels))
+	}
+}
+
+func TestBridgeIssueScanSourceIssueMarkerRefusesInvalidMockedActivationPackets(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutate     func(*IssueScanSourceIssueMarkerActivation)
+		client     IssueScanSourceIssueMarkerClient
+		wantReason string
+	}{
+		{
+			name: "unknown_mode",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.Mode = IssueScanSourceIssueMarkerActivationMode("auto_apply")
+			},
+			wantReason: "unknown source issue marker activation mode",
+		},
+		{
+			name: "missing_authority_ref",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.AuthorityRef = ""
+			},
+			wantReason: "requires authority_ref",
+		},
+		{
+			name: "missing_actor",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.Actor = ""
+			},
+			wantReason: "requires actor",
+		},
+		{
+			name: "missing_environment",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.Environment = ""
+			},
+			wantReason: "requires environment",
+		},
+		{
+			name: "empty_credential_source",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.CredentialSource = ""
+			},
+			wantReason: "requires credential_source none",
+		},
+		{
+			name: "token_credential_source",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.CredentialSource = "GITHUB_TOKEN"
+			},
+			wantReason: "requires credential_source none",
+		},
+		{
+			name: "live_evidence_allowed",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.LiveEvidenceAllowed = true
+			},
+			wantReason: "cannot allow live evidence",
+		},
+		{
+			name: "missing_stop_conditions",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.StopConditions = nil
+			},
+			wantReason: "requires stop conditions",
+		},
+		{
+			name: "comments_not_allowed",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.AllowComments = false
+			},
+			wantReason: "comment mutation is not allowed",
+		},
+		{
+			name: "labels_not_allowed",
+			mutate: func(a *IssueScanSourceIssueMarkerActivation) {
+				a.AllowLabels = false
+			},
+			wantReason: "label mutation is not allowed",
+		},
+		{
+			name:       "missing_client",
+			client:     nil,
+			wantReason: "client is not configured",
+		},
+		{
+			name:       "live_client_kind",
+			client:     &liveIssueScanMarkerClient{},
+			wantReason: "requires a mock client",
+		},
+		{
+			name:       "external_mock_claim_without_package_marker",
+			client:     &selfAttestingIssueScanMarkerClient{},
+			wantReason: "requires package-local mock client evidence",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := tc.client
+			if client == nil && tc.name != "missing_client" {
+				client = &fakeIssueScanMarkerClient{}
+			}
+			activation := mockedIssueScanSourceIssueMarkerActivation("transpara-ai/docs", 256)
+			if tc.mutate != nil {
+				tc.mutate(&activation)
+			}
+			rt := &Runtime{
+				issueScanSourceIssueMarkerClient:     client,
+				issueScanSourceIssueMarkerActivation: activation,
+			}
+			result, err := rt.BridgeIssueScanSourceIssueMarker(context.Background(), markerTestInput())
+			if err != nil {
+				t.Fatalf("BridgeIssueScanSourceIssueMarker: %v", err)
+			}
+			if !result.DryRun || !result.Refused || result.Applied {
+				t.Fatalf("bridge result = %+v, want refused dry-run", result)
+			}
+			if !strings.Contains(result.RefusalReason, tc.wantReason) {
+				t.Fatalf("refusal = %q, want %q", result.RefusalReason, tc.wantReason)
+			}
+			switch c := client.(type) {
+			case *fakeIssueScanMarkerClient:
+				if len(c.comments) != 0 || len(c.addedLabels) != 0 || len(c.removedLabels) != 0 {
+					t.Fatalf("fake client mutated on refusal: comments=%d add=%d remove=%d", len(c.comments), len(c.addedLabels), len(c.removedLabels))
+				}
+			case *liveIssueScanMarkerClient:
+				if c.calls != 0 {
+					t.Fatalf("live client received %d calls on refusal, want none", c.calls)
+				}
+			case *selfAttestingIssueScanMarkerClient:
+				if c.calls != 0 {
+					t.Fatalf("self-attesting client received %d calls on refusal, want none", c.calls)
+				}
+			}
+		})
+	}
+}
+
+func markerTestInput() IssueScanSourceIssueMarkerInput {
+	return IssueScanSourceIssueMarkerInput{
+		Transition:     IssueScanSourceIssueMarkerAcquired,
+		Issue:          markerTestIssue(),
+		RunID:          "issue-scan-docs-256",
+		FactoryOrderID: "fo_issue_scan_docs_256",
+		StageID:        "research_issue_and_repo_context",
+		WorkRefs:       []string{"work:task:tsk_issue_scan_docs_256_research"},
+		EventGraphRefs: []string{"eventgraph:issuescan.run.projected:run_docs_256"},
+		EvidenceRefs:   []string{"github:https://github.com/transpara-ai/docs/issues/256"},
+		GeneratedAt:    time.Date(2026, 7, 3, 10, 45, 0, 0, time.UTC),
+	}
+}
+
 func markerTestIssue() GitHubIssueCandidate {
 	return GitHubIssueCandidate{
 		Repo:   "transpara-ai/docs",
@@ -206,11 +481,34 @@ func markerTestIssue() GitHubIssueCandidate {
 	}
 }
 
+func mockedIssueScanSourceIssueMarkerActivation(repo string, number int) IssueScanSourceIssueMarkerActivation {
+	return IssueScanSourceIssueMarkerActivation{
+		Mode:             IssueScanSourceIssueMarkerActivationMockedImplementation,
+		AuthorityRef:     "hive#249 mocked implementation authority, Codex thread 2026-07-09",
+		Actor:            "Codex under Michael supervision",
+		Environment:      "local unit test",
+		CredentialSource: "none",
+		AllowedIssues: []IssueScanSourceIssueMarkerIssueScope{{
+			Repo:   repo,
+			Number: number,
+		}},
+		AllowComments:  true,
+		AllowLabels:    true,
+		StopConditions: []string{"no live GitHub marker mutation is authorized by mocked activation"},
+	}
+}
+
 type fakeIssueScanMarkerClient struct {
 	addedLabels   []string
 	removedLabels []string
 	comments      []string
 }
+
+func (c *fakeIssueScanMarkerClient) SourceIssueMarkerClientKind() IssueScanSourceIssueMarkerClientKind {
+	return IssueScanSourceIssueMarkerMockClient
+}
+
+func (c *fakeIssueScanMarkerClient) issueScanSourceIssueMarkerMockClient() {}
 
 func (c *fakeIssueScanMarkerClient) AddLabels(_ context.Context, _ string, _ int, labels []string) error {
 	c.addedLabels = append(c.addedLabels, labels...)
@@ -235,6 +533,12 @@ type failingIssueScanMarkerClient struct {
 	err error
 }
 
+func (c *failingIssueScanMarkerClient) SourceIssueMarkerClientKind() IssueScanSourceIssueMarkerClientKind {
+	return IssueScanSourceIssueMarkerMockClient
+}
+
+func (c *failingIssueScanMarkerClient) issueScanSourceIssueMarkerMockClient() {}
+
 func (c *failingIssueScanMarkerClient) AddLabels(context.Context, string, int, []string) error {
 	return c.err
 }
@@ -249,4 +553,60 @@ func (c *failingIssueScanMarkerClient) ListCommentBodies(context.Context, string
 
 func (c *failingIssueScanMarkerClient) CreateComment(context.Context, string, int, string) error {
 	return c.err
+}
+
+type liveIssueScanMarkerClient struct {
+	calls int
+}
+
+func (c *liveIssueScanMarkerClient) SourceIssueMarkerClientKind() IssueScanSourceIssueMarkerClientKind {
+	return IssueScanSourceIssueMarkerLiveGitHubClient
+}
+
+func (c *liveIssueScanMarkerClient) AddLabels(context.Context, string, int, []string) error {
+	c.calls++
+	return nil
+}
+
+func (c *liveIssueScanMarkerClient) RemoveLabels(context.Context, string, int, []string) error {
+	c.calls++
+	return nil
+}
+
+func (c *liveIssueScanMarkerClient) ListCommentBodies(context.Context, string, int) ([]string, error) {
+	c.calls++
+	return nil, nil
+}
+
+func (c *liveIssueScanMarkerClient) CreateComment(context.Context, string, int, string) error {
+	c.calls++
+	return nil
+}
+
+type selfAttestingIssueScanMarkerClient struct {
+	calls int
+}
+
+func (c *selfAttestingIssueScanMarkerClient) SourceIssueMarkerClientKind() IssueScanSourceIssueMarkerClientKind {
+	return IssueScanSourceIssueMarkerMockClient
+}
+
+func (c *selfAttestingIssueScanMarkerClient) AddLabels(context.Context, string, int, []string) error {
+	c.calls++
+	return nil
+}
+
+func (c *selfAttestingIssueScanMarkerClient) RemoveLabels(context.Context, string, int, []string) error {
+	c.calls++
+	return nil
+}
+
+func (c *selfAttestingIssueScanMarkerClient) ListCommentBodies(context.Context, string, int) ([]string, error) {
+	c.calls++
+	return nil, nil
+}
+
+func (c *selfAttestingIssueScanMarkerClient) CreateComment(context.Context, string, int, string) error {
+	c.calls++
+	return nil
 }

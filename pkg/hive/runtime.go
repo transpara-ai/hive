@@ -75,22 +75,23 @@ type Runtime struct {
 	// Model resolver for agent provider/model selection. Runtime catalog reloads
 	// replace this resolver for future spawns/reads; already-created providers are
 	// not silently swapped mid-loop.
-	resolverMu                         sync.RWMutex
-	resolver                           *modelconfig.Resolver
-	modelSelectionManager              *OperatorModelSelectionManager
-	runLaunchDispatchMu                sync.Mutex
-	issueScanLifecycleMu               sync.Mutex
-	runLaunchDispatchInterval          time.Duration
-	providerFactory                    func(intelligence.Config) (intelligence.Provider, error)
-	issueScanStageRoleOutputRunner     IssueScanStageRoleOutputRunner
-	issueScanImplementationRunner      IssueScanImplementationRunner
-	issueScanAdversarialReviewRunner   IssueScanAdversarialReviewRunner
-	issueScanBlockerRepairRunner       IssueScanBlockerRepairRunner
-	issueScanDraftPRAuthorityRequester IssueScanDraftPRAuthorityRequester
-	issueScanDraftPRCreator            work.Epic11PullRequestCreator
-	issueScanReadyPRRunner             IssueScanReadyPRRunner
-	issueScanTargetStateResolver       IssueScanTargetStateResolver
-	issueScanSourceIssueMarkerClient   IssueScanSourceIssueMarkerClient
+	resolverMu                           sync.RWMutex
+	resolver                             *modelconfig.Resolver
+	modelSelectionManager                *OperatorModelSelectionManager
+	runLaunchDispatchMu                  sync.Mutex
+	issueScanLifecycleMu                 sync.Mutex
+	runLaunchDispatchInterval            time.Duration
+	providerFactory                      func(intelligence.Config) (intelligence.Provider, error)
+	issueScanStageRoleOutputRunner       IssueScanStageRoleOutputRunner
+	issueScanImplementationRunner        IssueScanImplementationRunner
+	issueScanAdversarialReviewRunner     IssueScanAdversarialReviewRunner
+	issueScanBlockerRepairRunner         IssueScanBlockerRepairRunner
+	issueScanDraftPRAuthorityRequester   IssueScanDraftPRAuthorityRequester
+	issueScanDraftPRCreator              work.Epic11PullRequestCreator
+	issueScanReadyPRRunner               IssueScanReadyPRRunner
+	issueScanTargetStateResolver         IssueScanTargetStateResolver
+	issueScanSourceIssueMarkerClient     IssueScanSourceIssueMarkerClient
+	issueScanSourceIssueMarkerActivation IssueScanSourceIssueMarkerActivation
 
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
@@ -115,26 +116,27 @@ type Runtime struct {
 
 // Config holds the configuration needed to create a Runtime.
 type Config struct {
-	Store                              store.Store
-	Actors                             actor.IActorStore
-	HumanID                            types.ActorID
-	ApproveRequests                    bool                               // --approve-requests: auto-approve authority requests
-	ApproveRoles                       bool                               // --approve-roles: auto-approve role proposals
-	RepoPath                           string                             // --repo: path to repo for Operate
-	RepoWorkspaceRoot                  string                             // parent directory containing Transpara-AI repo checkouts for issue-scan targets
-	Loop                               bool                               // --loop: agents block on bus instead of quiescing
-	CatalogPath                        string                             // --catalog: custom YAML catalog file (merged with defaults)
-	CatalogReloadInterval              time.Duration                      // reload --catalog for future spawns; 0 disables
-	RunLaunchDispatchInterval          time.Duration                      // dispatch queued run-launch requests; <0 disables
-	IssueScanStageRoleOutputRunner     IssueScanStageRoleOutputRunner     // optional planning-stage issue-scan role-output runner
-	IssueScanImplementationRunner      IssueScanImplementationRunner      // optional concrete issue-scan implementation runner
-	IssueScanAdversarialReviewRunner   IssueScanAdversarialReviewRunner   // optional exact-head issue-scan review runner
-	IssueScanBlockerRepairRunner       IssueScanBlockerRepairRunner       // optional request_changes blocker repair runner
-	IssueScanDraftPRAuthorityRequester IssueScanDraftPRAuthorityRequester // optional zero-blocker issue-scan draft-PR request raiser
-	IssueScanDraftPRCreator            work.Epic11PullRequestCreator      // optional approved issue-scan draft-PR creator
-	IssueScanReadyPRRunner             IssueScanReadyPRRunner             // optional terminal ready-PR evidence runner
-	IssueScanTargetStateResolver       IssueScanTargetStateResolver       // optional live target issue state resolver used to park stale/protected runs
-	IssueScanSourceIssueMarkerClient   IssueScanSourceIssueMarkerClient   // optional source GitHub issue marker client; nil keeps marker bridge dry-run only
+	Store                                store.Store
+	Actors                               actor.IActorStore
+	HumanID                              types.ActorID
+	ApproveRequests                      bool                                 // --approve-requests: auto-approve authority requests
+	ApproveRoles                         bool                                 // --approve-roles: auto-approve role proposals
+	RepoPath                             string                               // --repo: path to repo for Operate
+	RepoWorkspaceRoot                    string                               // parent directory containing Transpara-AI repo checkouts for issue-scan targets
+	Loop                                 bool                                 // --loop: agents block on bus instead of quiescing
+	CatalogPath                          string                               // --catalog: custom YAML catalog file (merged with defaults)
+	CatalogReloadInterval                time.Duration                        // reload --catalog for future spawns; 0 disables
+	RunLaunchDispatchInterval            time.Duration                        // dispatch queued run-launch requests; <0 disables
+	IssueScanStageRoleOutputRunner       IssueScanStageRoleOutputRunner       // optional planning-stage issue-scan role-output runner
+	IssueScanImplementationRunner        IssueScanImplementationRunner        // optional concrete issue-scan implementation runner
+	IssueScanAdversarialReviewRunner     IssueScanAdversarialReviewRunner     // optional exact-head issue-scan review runner
+	IssueScanBlockerRepairRunner         IssueScanBlockerRepairRunner         // optional request_changes blocker repair runner
+	IssueScanDraftPRAuthorityRequester   IssueScanDraftPRAuthorityRequester   // optional zero-blocker issue-scan draft-PR request raiser
+	IssueScanDraftPRCreator              work.Epic11PullRequestCreator        // optional approved issue-scan draft-PR creator
+	IssueScanReadyPRRunner               IssueScanReadyPRRunner               // optional terminal ready-PR evidence runner
+	IssueScanTargetStateResolver         IssueScanTargetStateResolver         // optional live target issue state resolver used to park stale/protected runs
+	IssueScanSourceIssueMarkerClient     IssueScanSourceIssueMarkerClient     // optional source GitHub issue marker client; inert unless activation permits mocked apply
+	IssueScanSourceIssueMarkerActivation IssueScanSourceIssueMarkerActivation // explicit source issue marker activation packet; zero value is dry-run-only
 
 	// TelemetryWriter snapshots agent and hive state to postgres. Optional.
 	TelemetryWriter *telemetry.Writer
@@ -188,36 +190,37 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	phaseGates := work.NewPhaseGateStore(cfg.Store, factory, signer)
 
 	return &Runtime{
-		store:                              cfg.Store,
-		actors:                             cfg.Actors,
-		graph:                              g,
-		humanID:                            cfg.HumanID,
-		systemID:                           systemID,
-		signer:                             signer,
-		factory:                            factory,
-		convID:                             convID,
-		tasks:                              tasks,
-		phaseGates:                         phaseGates,
-		approveRequests:                    cfg.ApproveRequests,
-		approveRoles:                       cfg.ApproveRoles,
-		repoPath:                           cfg.RepoPath,
-		repoWorkspaceRoot:                  cfg.RepoWorkspaceRoot,
-		loop:                               cfg.Loop,
-		catalogPath:                        cfg.CatalogPath,
-		catalogReloadInterval:              cfg.CatalogReloadInterval,
-		runLaunchDispatchInterval:          cfg.RunLaunchDispatchInterval,
-		issueScanStageRoleOutputRunner:     cfg.IssueScanStageRoleOutputRunner,
-		issueScanImplementationRunner:      cfg.IssueScanImplementationRunner,
-		issueScanAdversarialReviewRunner:   cfg.IssueScanAdversarialReviewRunner,
-		issueScanBlockerRepairRunner:       cfg.IssueScanBlockerRepairRunner,
-		issueScanDraftPRAuthorityRequester: cfg.IssueScanDraftPRAuthorityRequester,
-		issueScanDraftPRCreator:            cfg.IssueScanDraftPRCreator,
-		issueScanReadyPRRunner:             cfg.IssueScanReadyPRRunner,
-		issueScanTargetStateResolver:       cfg.IssueScanTargetStateResolver,
-		issueScanSourceIssueMarkerClient:   cfg.IssueScanSourceIssueMarkerClient,
-		telemetryWriter:                    cfg.TelemetryWriter,
-		apiClient:                          cfg.APIClient,
-		providerFactory:                    intelligence.New,
+		store:                                cfg.Store,
+		actors:                               cfg.Actors,
+		graph:                                g,
+		humanID:                              cfg.HumanID,
+		systemID:                             systemID,
+		signer:                               signer,
+		factory:                              factory,
+		convID:                               convID,
+		tasks:                                tasks,
+		phaseGates:                           phaseGates,
+		approveRequests:                      cfg.ApproveRequests,
+		approveRoles:                         cfg.ApproveRoles,
+		repoPath:                             cfg.RepoPath,
+		repoWorkspaceRoot:                    cfg.RepoWorkspaceRoot,
+		loop:                                 cfg.Loop,
+		catalogPath:                          cfg.CatalogPath,
+		catalogReloadInterval:                cfg.CatalogReloadInterval,
+		runLaunchDispatchInterval:            cfg.RunLaunchDispatchInterval,
+		issueScanStageRoleOutputRunner:       cfg.IssueScanStageRoleOutputRunner,
+		issueScanImplementationRunner:        cfg.IssueScanImplementationRunner,
+		issueScanAdversarialReviewRunner:     cfg.IssueScanAdversarialReviewRunner,
+		issueScanBlockerRepairRunner:         cfg.IssueScanBlockerRepairRunner,
+		issueScanDraftPRAuthorityRequester:   cfg.IssueScanDraftPRAuthorityRequester,
+		issueScanDraftPRCreator:              cfg.IssueScanDraftPRCreator,
+		issueScanReadyPRRunner:               cfg.IssueScanReadyPRRunner,
+		issueScanTargetStateResolver:         cfg.IssueScanTargetStateResolver,
+		issueScanSourceIssueMarkerClient:     cfg.IssueScanSourceIssueMarkerClient,
+		issueScanSourceIssueMarkerActivation: normalizeIssueScanSourceIssueMarkerActivation(cfg.IssueScanSourceIssueMarkerActivation),
+		telemetryWriter:                      cfg.TelemetryWriter,
+		apiClient:                            cfg.APIClient,
+		providerFactory:                      intelligence.New,
 	}, nil
 }
 
