@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -142,6 +143,8 @@ func TestIssueScanOnlyReposAreExcludedFromWorkspaceAvailability(t *testing.T) {
 }
 
 func TestEnsureClonedSkipsIssueScanOnlyRepos(t *testing.T) {
+	marker := installGitRecorderForTest(t)
+
 	reg := &Registry{Repos: []Repo{{
 		Name:          "scan-only",
 		URL:           "https://github.com/transpara-ai/private-scan-only",
@@ -152,6 +155,35 @@ func TestEnsureClonedSkipsIssueScanOnlyRepos(t *testing.T) {
 	if cloned := reg.EnsureCloned(); cloned != 0 {
 		t.Fatalf("cloned = %d, want 0", cloned)
 	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("git recorder marker exists after EnsureCloned skip: %v", err)
+	}
+}
+
+func TestPullAllSkipsIssueScanOnlyRepos(t *testing.T) {
+	marker := installGitRecorderForTest(t)
+	reg := &Registry{Repos: []Repo{{
+		Name:          "scan-only",
+		AbsPath:       t.TempDir(),
+		IssueScanOnly: true,
+	}}}
+
+	reg.PullAll()
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("git recorder marker exists after PullAll skip: %v", err)
+	}
+}
+
+func installGitRecorderForTest(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "git-called")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + strconv.Quote(marker) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return marker
 }
 
 func TestFromMap(t *testing.T) {
