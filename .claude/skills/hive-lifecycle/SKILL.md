@@ -99,7 +99,8 @@ systemctl --user restart work-server hive-ops-api
 if systemctl --user is-active --quiet hive; then
   systemctl --user restart hive
 elif pgrep -f 'hive (civilization|pipeline|role|council)' >/dev/null; then
-  echo "a MANUAL (go run) runtime is active — stop it (Ctrl+C, or pkill -f 'hive (civilization|pipeline|role|council)') and re-run the Hive Up runtime command to reload code/catalog"
+  echo "stopping the MANUAL (go run) runtime; re-run the Hive Up runtime command to bring it back with reloaded code/catalog:"
+  pkill -INT -f 'hive (civilization|pipeline|role|council)'; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council)' 2>/dev/null
 else
   echo "hive runtime not running (on-demand) — left stopped"
 fi
@@ -117,7 +118,7 @@ echo "=== hive runtime (systemd unit OR manual go-run) ==="
 if systemctl --user is-active --quiet hive; then echo "hive.service: active"
 elif pgrep -f 'hive (civilization|pipeline|role|council)' >/dev/null; then echo "manual runtime: RUNNING"
 else echo "runtime: stopped"; fi
-curl -s -o /dev/null -w 'hive webhook /event          HTTP %{http_code}\n' http://localhost:8081/event 2>/dev/null || echo "  (:8081 webhook not listening)"
+ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 
 echo "=== postgres ==="
 docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'
