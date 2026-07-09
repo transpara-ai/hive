@@ -7,7 +7,7 @@ description: "Manage the transpara-ai hive stack lifecycle on nucbuntu — the s
 
 Start, stop, restart, and inspect the transpara-ai hive stack on **nucbuntu**. The APIs run as **systemd `--user` services** over a Dockerized Postgres; the multi-agent runtime is started on demand.
 
-> On-prem / private (no public URLs). Intelligence runs through the Claude CLI (Max plan) — no API keys.
+> On-prem / private (no public URLs). The Claude CLI path needs no key; the default mixed catalog also routes some roles to OpenRouter — see **Authentication**.
 
 ## Stack Components
 
@@ -22,13 +22,15 @@ Paths: `HIVE_REPO=/Transpara/transpara-ai/repos/hive`, `WORK_REPO=/Transpara/tra
 
 ## Authentication
 
-Intelligence runs through the **Claude CLI** (Max plan) via `~/.claude/.credentials.json`. **No Anthropic API key is used.**
+The **Claude CLI** path (Max plan, `~/.claude/.credentials.json`) needs **no Anthropic API key** — and setting one breaks it.
 
-**CRITICAL — never set these:** `ANTHROPIC_API_KEY`, `HIVE_ANTHROPIC_API_KEY`. They override the working CLI auth and cause "Invalid API key" on every agent. Verify clean:
+**CRITICAL — never set these:** `ANTHROPIC_API_KEY`, `HIVE_ANTHROPIC_API_KEY`. They override the working CLI auth and cause "Invalid API key" on every Claude agent. Verify clean:
 
 ```bash
 env | grep -i anthropic   # must print nothing
 ```
+
+⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, point `--catalog` at a Claude-only catalog instead of `catalog-mixed.yaml`.
 
 API bearer tokens (for the endpoints below):
 - **hive-ops-api**: `HIVE_OPS_API_KEY` (default `dev`).
@@ -69,8 +71,8 @@ go run ./cmd/hive civilization daemon \
 ```bash
 # Stop the runtime first, then the API services.
 systemctl --user stop hive 2>/dev/null                    # if started as the unit
-pkill -INT -f 'hive civilization' 2>/dev/null             # graceful; matches both `go run` and its compiled child
-sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null    # sweep any survivor
+pkill -INT -f 'hive (civilization|pipeline|role|council)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
+sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council)' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL runtimes from the old non-systemd flow (they can hold :8080/:8081):
 pkill -f 'cmd/work-server' 2>/dev/null; pkill -f 'cmd/hive-ops-api' 2>/dev/null
@@ -206,7 +208,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-pkill -INT -f 'hive civilization' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null
+pkill -INT -f 'hive (civilization|pipeline|role|council)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council)' 2>/dev/null
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
@@ -218,7 +220,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
-pkill -INT -f 'hive civilization' 2>/dev/null; sleep 3; pkill -KILL -f 'hive civilization' 2>/dev/null   # kill any manual go-run runtime first
+pkill -INT -f 'hive (civilization|pipeline|role|council)' 2>/dev/null; sleep 3; pkill -KILL -f 'hive (civilization|pipeline|role|council)' 2>/dev/null   # kill any manual go-run runtime first
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 cd /Transpara/transpara-ai/repos/hive
 docker compose down -v && docker compose up -d postgres
