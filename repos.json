@@ -39,6 +39,14 @@
       "language": "go",
       "build_cmd": "go build -buildvcs=false ./...",
       "test_cmd": "go test -buildvcs=false ./..."
+    },
+    {
+      "name": "matlab-client",
+      "url": "https://github.com/transpara-ai/matlab-client",
+      "local_path": "../matlab-client",
+      "language": "matlab",
+      "build_cmd": "",
+      "test_cmd": "matlab -batch \"addpath(pwd); results = runtests('tests'); assertSuccess(results)\""
     }
   ]
 }
