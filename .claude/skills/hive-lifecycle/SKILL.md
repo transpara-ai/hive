@@ -53,7 +53,8 @@ set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populate
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'   # expect "Up"
 
-# 2. The API services (systemd --user)
+# 2. The API services (systemd --user). Dirty start? Run "Hive Down" first to clear
+#    any stale manual go-run process still holding :8080/:8085.
 systemctl --user start work-server hive-ops-api
 systemctl --user is-active work-server hive-ops-api   # expect: active / active
 
@@ -109,8 +110,14 @@ fi
 ```bash
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
 echo "=== services ==="
-systemctl --user is-active work-server hive-ops-api hive
+systemctl --user is-active work-server hive-ops-api
 systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|Main PID:'
+
+echo "=== hive runtime (systemd unit OR manual go-run) ==="
+if systemctl --user is-active --quiet hive; then echo "hive.service: active"
+elif pgrep -f 'hive (civilization|pipeline|role|council)' >/dev/null; then echo "manual runtime: RUNNING"
+else echo "runtime: stopped"; fi
+curl -s -o /dev/null -w 'hive webhook /event          HTTP %{http_code}\n' http://localhost:8081/event 2>/dev/null || echo "  (:8081 webhook not listening)"
 
 echo "=== postgres ==="
 docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'
