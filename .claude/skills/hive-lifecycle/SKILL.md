@@ -1,623 +1,265 @@
 ---
 name: hive-lifecycle
-description: "Manage the transpara-ai hive stack lifecycle on nucbuntu. Use whenever the user says 'hive up', 'hive down', 'hive run', 'hive status', 'hive restart', 'hive help', 'start the hive', 'stop the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or any variation of starting, stopping, restarting, running, or checking the status of the hive runtime, work-server, or postgres. Also trigger when the user mentions stuck agents, frozen hive, or needs a clean slate."
+description: "Manage the transpara-ai hive stack lifecycle on nucbuntu — the systemd --user services (work-server, hive-ops-api), the Dockerized Postgres, and the on-demand civilization runtime. Use whenever the user says 'hive up', 'hive down', 'hive status', 'hive restart', 'hive run', 'hive help', 'start/stop/restart the hive', 'run the hive', 'run agents on', 'hive idea', 'run pipeline', 'run builder', 'run scout', 'is the hive running', 'kill the hive', 'bounce the hive', or mentions stuck agents, a frozen hive, or needing a clean slate."
 ---
 
 # Hive Lifecycle Management
 
-Commands for starting, stopping, restarting, running, and monitoring the transpara-ai hive stack on nucbuntu.
+Start, stop, restart, and inspect the transpara-ai hive stack on **nucbuntu**. The APIs run as **systemd `--user` services** over a Dockerized Postgres; the multi-agent runtime is started on demand.
+
+> On-prem / private (no public URLs). The Claude CLI path needs no key; the default mixed catalog also routes some roles to OpenRouter — see **Authentication**.
 
 ## Hive Help
 
-When the user says `hive help`, `hive --help`, or `hive commands`, print this summary and stop — do not execute anything:
-
-```
-Hive Lifecycle Commands:
-
-  hive up                  Start postgres + work-server + hive runtime
-  hive down                Graceful shutdown (SIGINT → force kill → verify)
-  hive restart             Down then up
-  hive status              Check all components (docker, processes, ports, auth)
-  hive run <idea>          Start civilization run with an idea (multi-agent mode)
-  hive run pipeline        Scout → Builder → Critic pipeline daemon (loops at --interval, default 30m)
-  hive run role <role>     Single agent mode (builder/scout/critic/monitor)
-  hive run council         Convene all agents for deliberation
-
-  hive ingest <file>       Ingest a spec markdown file as a board task
-  hive tasks               List open tasks on the board
-  hive agents              Show agent roster with models and session state
-  hive budget <agent> <n>  Override an agent's iteration budget at runtime
-  hive council [<topic>]   Convene all agents for deliberation on a topic
-
-  hive monitor             Live telemetry, phases, event stream
-  hive logs                Tail hive + work-server logs
-  hive approve <role>      Manually approve a pending role proposal
-  hive inject <task>       Send work to running hive via webhook
-
-  hive clean               Nuke telemetry, keep event chain
-  hive nuke                Full reset (destroys chain — use with caution)
-
-  hive help                This message
-
-Environment (not CLI flags):
-  OPEN_BRAIN_URL           Checkpoint recovery via Open Brain
-  OPEN_BRAIN_KEY           Open Brain MCP access key
-  CHECKPOINT_STALENESS     Max thought age before cold-start (default: 2h)
-  CHECKPOINT_HEARTBEAT_INTERVAL  Iterations between heartbeats (default: 10)
-```
+For **"hive help" / "hive commands"**: print the section list below — Stack Components, Authentication, Hive Up / Down / Restart / Status, Endpoint Reference, Model Catalog, On-demand Runtime, Operator Actions, Logs, Common Problems — and **stop** (do not start/stop/restart anything). For CLI usage: `go run ./cmd/hive --help` or `go run ./cmd/hive <verb> --help`.
 
 ## Stack Components
 
-| Component | Process | Repo | How It Runs |
-|-----------|---------|------|-------------|
-| **postgres** | Docker container `hive-postgres-1` | docker-compose.yml | `docker compose up -d postgres` |
-| **pgadmin** | Docker container | docker-compose.yml | `docker compose up -d pgadmin` |
-| **hive** | Go binary (foreground or background) | hive | `go run ./cmd/hive` |
-| **work-server** | Go binary (foreground or background) | work | `go run ./cmd/work-server` |
-| **localapi** | Go binary (background) | hive | `go run ./cmd/localapi` |
-| **dashboard** | Static HTML (no process) | summary | Served via GitHub Pages or file server |
+| Component | Unit / process | Bind | Notes |
+|---|---|---|---|
+| **Postgres** | docker container `hive-postgres-1` | `:5432` | `docker compose up -d postgres` (compose file in `repos/hive`); DSN `postgres://hive:hive@localhost:5432/hive` |
+| **work-server** | `work-server.service` (enabled) | `:8080` | builds + runs `repos/work/work-server`; serves the telemetry API, task API, and dashboard |
+| **hive-ops-api** | `hive-ops-api.service` (enabled) | `127.0.0.1:8085` | runs `repos/hive/hive-ops-api`; serves the operator projection API; loads a model catalog |
+| **hive runtime** | `hive.service` (**disabled** — on-demand) | — | `hive civilization daemon …`; the multi-agent civilization loop |
 
-## Paths
-
-```
-HIVE_REPO=~/transpara-ai/repos/hive
-WORK_REPO=~/transpara-ai/repos/work
-COMPOSE_DIR=~/transpara-ai/repos/hive   # or wherever docker-compose.yml lives
-```
-
-Verify these paths before running commands. If they differ, adjust accordingly.
+Paths: `HIVE_REPO=/Transpara/transpara-ai/repos/hive`, `WORK_REPO=/Transpara/transpara-ai/repos/work`.
 
 ## Authentication
 
-The hive uses the `claude-cli` provider, which authenticates via the Claude Max subscription stored in `~/.claude/`. **No API key is needed.**
+The **Claude CLI** path (Max plan, `~/.claude/.credentials.json`) needs **no Anthropic API key** — and setting one breaks it.
 
-**CRITICAL — DO NOT set any of these environment variables:**
-- `ANTHROPIC_API_KEY` — poisons both Claude Code and the hive
-- `HIVE_ANTHROPIC_API_KEY` — legacy variable, no longer used
-
-If either is set in `.bashrc`, `.profile`, or `.env`, **remove it**. The `claude` CLI binary handles authentication automatically using the Max subscription. Setting any API key overrides the working auth and causes "Invalid API key" errors for every agent.
-
-Before starting the hive, verify the environment is clean:
+**CRITICAL — never set these:** `ANTHROPIC_API_KEY`, `HIVE_ANTHROPIC_API_KEY`. They override the working CLI auth and cause "Invalid API key" on every Claude agent. Verify clean:
 
 ```bash
-env | grep -i anthropic
-# Should return NOTHING. If it returns anything, unset it.
+env | grep -i anthropic   # must print nothing
 ```
 
----
+⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, **omit `--catalog`** — the runtime falls back to its built-in Claude defaults (there is no checked-in Claude-only catalog).
+
+API bearer tokens (for the endpoints below):
+- **hive-ops-api**: `HIVE_OPS_API_KEY` (default `dev`).
+- **work-server**: `WORK_API_KEY` (lives in `~/.config/hive/hive.env`, not exported to your shell).
+
+To run the `curl` examples below from a plain shell, load the tokens first:
+
+```bash
+set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populates WORK_API_KEY (HIVE_OPS_API_KEY defaults to `dev`)
+```
 
 ## Hive Up
 
-Start the full stack in dependency order. **Always kill zombies first** — previous runs
-may leave orphaned processes holding ports 8080/8081.
-
 ```bash
-# 0. Kill zombies from previous runs
-pkill -f "cmd/hive" 2>/dev/null
-# Matches both old --human form and new "civilization" form via cmd/hive
-pkill -f "/hive --human" 2>/dev/null
-pkill -f "cmd/work-server" 2>/dev/null
-pkill -f "work-server-fre" 2>/dev/null
-sleep 2
-# Verify ports are free
-ss -tlnp 2>/dev/null | grep -E "8080|8081" && echo "WARNING: ports still held" || echo "Ports clear"
+# 1. Postgres (Docker) — everything else depends on it. WAIT until it accepts connections
+#    (compose returns while the container may still be "health: starting").
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
+until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do echo "waiting for postgres…"; sleep 1; done
+echo "postgres ready"
 
-# 1. Verify no API keys are set (CRITICAL)
-if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${HIVE_ANTHROPIC_API_KEY:-}" ]; then
-    echo "ERROR: Anthropic API key detected in environment. Unset it first."
-    echo "  unset ANTHROPIC_API_KEY HIVE_ANTHROPIC_API_KEY"
-    return 1 2>/dev/null || exit 1
-fi
+# 2. The API services (systemd --user). Dirty start? Run "Hive Down" first to clear
+#    any stale manual go-run process still holding :8080/:8085.
+systemctl --user start work-server hive-ops-api
+systemctl --user is-active work-server hive-ops-api   # expect: active / active
 
-# 2. Postgres (if not already running)
-cd $COMPOSE_DIR
-docker compose up -d postgres
-# Wait for healthy
-docker compose ps  # should show "healthy"
-
-# 3. Work-server (background, logs to file)
-# DATABASE_URL connects it to the same postgres as the hive (required for telemetry).
-# WORK_API_KEY=dev is a stable key so the dashboard can connect with a known token.
-cd $WORK_REPO
-WORK_HUMAN=Michael WORK_API_KEY=dev DATABASE_URL=postgres://hive:hive@localhost:5432/hive nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
-echo $! > /tmp/work-server.pid
-echo "Work-server started (PID: $(cat /tmp/work-server.pid))"
-
-# 4. Hive (foreground — so you can see output and Ctrl+C to stop)
-cd $HIVE_REPO
-go run ./cmd/hive civilization run \
-    --human Michael \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --idea "your task description here"
-```
-
-To run the hive in the background instead:
-
-```bash
-cd $HIVE_REPO
-nohup go run ./cmd/hive civilization run \
-    --human Michael \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --idea "your task description here" \
-    > /tmp/hive.log 2>&1 &
-echo $! > /tmp/hive.pid
-echo "Hive started (PID: $(cat /tmp/hive.pid))"
-```
-
-### Hive Up with Auto-Approve
-
-Pass `--approve-requests` to auto-approve authority requests (file writes, git ops).
-Pass `--approve-roles` to auto-approve role proposals (bypasses Guardian `/approve`).
-
-```bash
-go run ./cmd/hive civilization run \
-    --human Michael \
-    --approve-requests \
-    --approve-roles \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --idea "your task description here"
-```
-
-When `--approve-roles` is set, the watcher automatically emits `hive.role.approved` and
-`agent.budget.adjusted` for each `hive.role.proposed` event — no Guardian or Allocator
-involvement needed. New agents spawn within 5 seconds of being proposed.
-
-### Hive Up with Loop
-
-Use `civilization daemon` to keep agents alive when idle — they block on the bus instead of
-quiescing. Useful for long-running hives where work arrives via the webhook.
-
-```bash
+# 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
+#    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
+#    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
+#    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys).
+#    catalog-mixed.yaml is a mixed-provider catalog (some roles → Ollama + OpenRouter);
+#    add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a local
+#    Ollama model is running AND OPENROUTER_API_KEY is set.
+cd /Transpara/transpara-ai/repos/hive
 go run ./cmd/hive civilization daemon \
     --human Michael \
     --store postgres://hive:hive@localhost:5432/hive
+#   Full autonomy (auto-approve everything) is an EXPLICIT opt-in: add
+#       --approve-requests --approve-roles
+#   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
+#   its ExecStart already includes --approve-requests --approve-roles.
 ```
-
-### Full Autonomy (growth + daemon + approve)
-
-All flags combined for maximum autonomy:
-
-```bash
-go run ./cmd/hive civilization daemon \
-    --human Michael \
-    --approve-requests \
-    --approve-roles \
-    --store postgres://hive:hive@localhost:5432/hive
-```
-
-Then inject work via curl:
-
-```bash
-curl -X POST http://localhost:8081/event \
-  -H "Content-Type: application/json" \
-  -d '{"id":"seed-001","node_title":"Build X","op":"intend","actor":"Michael","actor_kind":"human","payload":{"description":"details"}}'
-```
-
-### Verification After Up
-
-```bash
-# Postgres
-docker exec hive-postgres-1 psql -U hive -d hive -c "SELECT COUNT(*) FROM events"
-
-# Work-server
-curl -s http://localhost:8080/health | jq .
-
-# Telemetry API
-curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/phases | jq .
-
-# Dashboard
-echo "Open: http://nucbuntu:8080/telemetry/"
-```
-
----
-
-## Hive Run (Runner / Pipeline Mode)
-
-Run individual agents or the Scout-Builder-Critic pipeline against transpara.ai tasks.
-This is an alternative to the legacy multi-agent runtime above.
-
-```bash
-# Single agent — works one task matching its role
-go run ./cmd/hive role builder run --space hive
-
-# Full pipeline — loops at --interval (default 30m)
-go run ./cmd/hive pipeline daemon --space hive
-
-# Pipeline with custom interval
-go run ./cmd/hive pipeline daemon --interval 15m --space hive
-
-# Single pipeline cycle (no loop)
-go run ./cmd/hive pipeline run --space hive
-
-# Council — deliberation session
-go run ./cmd/hive council --topic "Should we add a caching layer?"
-```
-
-### Local Pipeline (no transpara.ai dependency)
-
-Requires the local API server (`cmd/localapi`) running alongside postgres.
-
-```bash
-# 1. Start localapi (if not already running)
-cd $HIVE_REPO
-nohup go run ./cmd/localapi/ > /tmp/localapi.log 2>&1 &
-echo $! > /tmp/localapi.pid
-echo "localapi started (PID: $(cat /tmp/localapi.pid))"
-
-# Verify
-curl -s http://localhost:8082/health  # → "ok"
-
-# 2. Seed a task for the pipeline to work on
-curl -s -X POST http://localhost:8082/app/hive/op \
-  -H "Authorization: Bearer ${WORK_API_KEY:-dev}" \
-  -H "Content-Type: application/json" \
-  -d '{"op":"intend","kind":"task","title":"Build a habit tracker CLI","description":"Go CLI: habit add, habit check, habit streak. SQLite storage. Include tests.","priority":"high"}'
-
-# 3. Run the pipeline against local API
-go run ./cmd/hive pipeline daemon \
-    --api http://localhost:8082 \
-    --space hive \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --pr
-```
-
-No `LOVYOU_API_KEY` needed — defaults to "dev" for localhost.
-
----
 
 ## Hive Down
 
-Graceful shutdown in reverse dependency order. **Always verify zombies are dead** —
-`go run` spawns child processes that survive parent kills.
-
 ```bash
-# 1. Stop hive (graceful — sends SIGINT, agents run retirement ceremonies)
-pkill -INT -f "cmd/hive" 2>/dev/null
-# Matches both old --human form and new "civilization" form via cmd/hive
-pkill -INT -f "/hive --human" 2>/dev/null
-sleep 5
-
-# 2. Kill any zombies (go run children that survived SIGINT)
-pkill -9 -f "cmd/hive" 2>/dev/null
-# Matches both old --human form and new "civilization" form via cmd/hive
-pkill -9 -f "/hive --human" 2>/dev/null
-sleep 2
-
-# 3. Stop work-server
-pkill -f "cmd/work-server" 2>/dev/null
-pkill -f "work-server-fre" 2>/dev/null
-sleep 2
-
-# 4. Verify everything is dead and ports are free
-pgrep -a -f "cmd/hive\|/hive --human" 2>/dev/null | grep -v pgrep && echo "WARNING: hive zombies remain" || echo "Hive: stopped"
-pgrep -a -f "cmd/work-server\|work-server-fre" 2>/dev/null | grep -v pgrep && echo "WARNING: work-server zombies remain" || echo "Work-server: stopped"
-ss -tlnp 2>/dev/null | grep -E "8080|8081" && echo "WARNING: ports still held — kill PIDs shown above" || echo "Ports 8080/8081: clear"
-rm -f /tmp/hive.pid /tmp/work-server.pid
-
-# 5. Postgres — usually leave running (data persists)
-# Only stop if you want a full shutdown:
-# cd $COMPOSE_DIR && docker compose down
+# Stop the runtime first, then the API services.
+systemctl --user stop hive 2>/dev/null                    # if started as the unit
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
+sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
+systemctl --user stop hive-ops-api work-server
+# Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
+# port (a blind port-kill could hit pgadmin or a dev server):
+pkill -f 'cmd/work-server|exe/work-server' 2>/dev/null
+pkill -f 'cmd/hive-ops-api|exe/hive-ops-api' 2>/dev/null
+lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
+# Postgres usually stays up (data persists). Full stop:
+#   cd /Transpara/transpara-ai/repos/hive && docker compose down
 ```
-
-### Force Kill (if graceful fails)
-
-If zombie processes survive, kill by PID from `ss -tlnp` output:
-
-```bash
-# Find PIDs holding the ports
-ss -tlnp | grep -E "8080|8081"
-# Kill them directly
-kill -9 <PID> <PID>
-```
-
----
 
 ## Hive Restart
 
-Full Hive Down then Hive Up. Always kill zombies between.
-
 ```bash
-# 1. Kill everything (graceful then force)
-pkill -INT -f "cmd/hive" 2>/dev/null; pkill -INT -f "/hive --human" 2>/dev/null
-sleep 5
-pkill -9 -f "cmd/hive" 2>/dev/null; pkill -9 -f "/hive --human" 2>/dev/null
-pkill -f "cmd/work-server" 2>/dev/null; pkill -f "work-server-fre" 2>/dev/null
-sleep 2
-
-# 2. Verify clean
-ss -tlnp 2>/dev/null | grep -E "8080|8081" && echo "WARNING: ports held" || echo "Clean"
-
-# 3. Start fresh (same commands as Hive Up steps 3-4)
-cd $WORK_REPO
-WORK_HUMAN=Michael WORK_API_KEY=dev DATABASE_URL=postgres://hive:hive@localhost:5432/hive nohup go run ./cmd/work-server > /tmp/work-server.log 2>&1 &
-echo $! > /tmp/work-server.pid
-
-cd $HIVE_REPO
-go run ./cmd/hive civilization run \
-    --human Michael \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --idea "your task description here"
+# Ensure Postgres is up + accepting connections first (restart = a true down→up):
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
+until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do sleep 1; done
+systemctl --user restart work-server hive-ops-api
+# The hive runtime is on-demand (unit disabled). `restart` would START the disabled
+# unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
+# Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
+if systemctl --user is-active --quiet hive; then
+  systemctl --user restart hive
+elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+  echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
+  pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
+  pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'; sleep 3
+  pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+else
+  echo "hive runtime not running (on-demand) — left stopped"
+fi
 ```
-
----
 
 ## Hive Status
 
 ```bash
-echo "=== Docker ==="
-docker compose ps 2>/dev/null || echo "Docker compose not found"
+set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
+echo "=== services ==="
+systemctl --user is-active work-server hive-ops-api
+systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|Main PID:'
 
-echo ""
-echo "=== Hive Process ==="
-pgrep -a -f "cmd/hive" || echo "Not running"
+echo "=== hive runtime (systemd unit OR manual go-run) ==="
+if systemctl --user is-active --quiet hive; then echo "hive.service: active"
+elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
+else echo "runtime: stopped"; fi
+ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 
-echo ""
-echo "=== Work-Server Process ==="
-pgrep -a -f "cmd/work-server" || echo "Not running"
+echo "=== postgres ==="
+docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'
+docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events' 2>/dev/null || echo "DB unreachable"
 
-echo ""
-echo "=== Postgres Connection ==="
-docker exec hive-postgres-1 psql -U hive -d hive -c "SELECT COUNT(*) as events FROM events" 2>/dev/null || echo "Cannot connect"
-
-echo ""
-echo "=== Telemetry API ==="
-curl -s -o /dev/null -w "HTTP %{http_code}" -H "Authorization: Bearer ${WORK_API_KEY:-dev}" http://localhost:8080/telemetry/health 2>/dev/null || echo "Not responding"
-
-echo ""
-echo "=== Agent Count ==="
-docker exec hive-postgres-1 psql -U hive -d hive -t -c "SELECT COUNT(DISTINCT agent_role) FROM telemetry_agent_snapshots WHERE recorded_at > now() - interval '5 minutes'" 2>/dev/null || echo "No recent snapshots"
-
-echo ""
-echo "=== Local API ==="
-curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:8082/health 2>/dev/null || echo "Not running"
-
-echo ""
-echo "=== Auth Check ==="
-if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${HIVE_ANTHROPIC_API_KEY:-}" ]; then
-    echo "WARNING: API key in environment — will override Max subscription auth!"
-else
-    echo "Clean — using Claude Max subscription via claude-cli"
-fi
+echo "=== endpoint health ==="
+curl -s -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
+curl -s -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://127.0.0.1:8085/health
+curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
----
-
-## Monitoring a Run
-
-While the hive is running:
+**Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Confirm and fix:
 
 ```bash
-# Live telemetry (agent states, iterations, cost)
-curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/agents | jq .
-
-# Phase progress
-curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/phases | jq .
-
-# Event stream (last 20 events)
-curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/events | jq '.[-20:]'
-
-# Dashboard
-echo "Open: http://nucbuntu:8080/telemetry/"
+journalctl --user -u hive-ops-api -n 20 --no-pager   # look for: dial tcp 127.0.0.1:5432: connect: connection refused
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring the DB back (recreates it if it was `compose down`-ed); services self-heal on their next restart tick
 ```
 
-### After a Run
+## Endpoint Reference
+
+### hive-ops-api — `http://127.0.0.1:8085` (Bearer `HIVE_OPS_API_KEY`, default `dev`)
+
+| Method · Path | Purpose |
+|---|---|
+| `GET /health` | liveness (no auth) |
+| `GET /api/hive/operator-projection` | pending approvals, authority decisions, lifecycle, key traces |
+| `GET /api/hive/civilization/assembly-projection` | role/agent topology, org tiers, model selection |
+| `POST /api/hive/operator-decision` † | decide a **draft-PR-create** authority request (`approved` \| `denied`) — other request types are rejected |
+| `POST /api/hive/runs` † | launch an operator-initiated run |
+| `POST /api/hive/model-selection/role-policy` † | update a role's model policy |
+
+> **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it, so the deployed API is **read-only** (GET routes only).
 
 ```bash
-# Check what was built
-cd $HIVE_REPO
-git log --oneline -10
-
-# Check task completion
-docker exec hive-postgres-1 psql -U hive -d hive -t -c \
-    "SELECT status, COUNT(*) FROM tasks GROUP BY status"
-
-# Total cost
-docker exec hive-postgres-1 psql -U hive -d hive -t -c \
-    "SELECT SUM(cost_usd) FROM telemetry_agent_snapshots WHERE recorded_at > now() - interval '1 hour'"
+curl -s -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
+     http://127.0.0.1:8085/api/hive/operator-projection | jq .
 ```
 
----
+### work-server — `http://localhost:8080` (Bearer `WORK_API_KEY`)
 
-## Flag Reference
-
-### `civilization run` (multi-agent, one-shot)
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--human` | (required) | Human operator name — always `Michael` |
-| `--idea` | "" | Freeform seed |
-| `--spec` | "" | Path to markdown spec file (POSTed via ingest channel) |
-| `--store` | in-memory | Postgres DSN for persistence |
-| `--repo` | current dir | Path to repo for Implementer's Operate |
-| `--approve-requests` | false | Auto-approve authority requests |
-| `--approve-roles` | false | Auto-approve role proposals |
-| `--space`, `--api` | `hive`, `https://transpara.ai` | transpara.ai targeting |
-
-### `civilization daemon` (multi-agent, long-running)
-
-Same flags as `civilization run` except `--idea` becomes `--seed-spec PATH` (optional initial spec; daemon survives past quiescence regardless).
-
-### `pipeline run` / `pipeline daemon`
-
-| Flag | Default | Purpose | Where |
-|------|---------|---------|-------|
-| `--space` | `hive` | transpara.ai space slug | both |
-| `--api` | `https://transpara.ai` | transpara.ai API base URL | both |
-| `--repo` | current dir | Path to repo | both |
-| `--repos` | "" | Named repos: `name=path,...` | both |
-| `--budget` | 10.0 | Daily budget in USD | both |
-| `--agent-id` | "" | Agent's transpara.ai user ID | both |
-| `--store` | in-memory | Postgres DSN | both |
-| `--pr` | false | Branch + PR instead of pushing to main | both |
-| `--worktrees` | false | Per-task worktrees | both |
-| `--auto-clone` | false | Clone missing repos | both |
-| `--interval` | 30m | Cycle interval | `daemon` only |
-
-### `role <name> run` / `role <name> daemon`
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--space`, `--api`, `--repo`, `--agent-id`, `--budget`, `--pr` | (as above) | Same as pipeline |
-
-`run` runs a single task with throttling disabled. `daemon` runs continuously with throttled phases.
-
-### `council`
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--topic` | "" | Focus question |
-| `--space`, `--api`, `--repo`, `--budget` | (as pipeline) | |
-
-### `ingest <file>`
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--space`, `--api` | (as pipeline) | |
-| `--priority` | `high` | Task priority: low\|medium\|high\|critical |
-
-### Environment Variables (not CLI flags)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `OPEN_BRAIN_URL` | (none) | Open Brain MCP endpoint for checkpoint recovery |
-| `OPEN_BRAIN_KEY` | (none) | Open Brain MCP access key |
-| `CHECKPOINT_STALENESS` | 2h | Max thought age before cold-start |
-| `CHECKPOINT_HEARTBEAT_INTERVAL` | 10 | Iterations between heartbeat events on chain |
-| `DATABASE_URL` | (none) | Alternative to `--store` |
-
----
-
-## Clean Slate (nuke telemetry, keep chain)
-
-When telemetry data from a stuck or zombie run is polluting the dashboard:
+| Path | Purpose |
+|---|---|
+| `GET /health` | liveness (no auth) |
+| `GET /telemetry/status` | full snapshot: agents + hive health + phases + recent events |
+| `GET /telemetry/health` · `GET /telemetry/overview` | hive health / architecture overview |
+| `GET /telemetry/agents` · `/agents/{role}` · `/agents/history` | agent snapshots + 24h history |
+| `GET /telemetry/roles` · `/roles/{name}` · `/actors` · `/layers` | roster / actors / layer view |
+| `GET /telemetry/phases` · `POST /telemetry/phases/{phase}` | phase status / update |
+| `GET /telemetry/pipeline/report` | compact pipeline status line + phase rows |
+| `GET /telemetry/stream` · `GET /telemetry/sse` | recent events (JSON) / live event stream |
+| `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-# Stop the hive first
-pkill -INT -f "cmd/hive" 2>/dev/null
-sleep 5
-
-# Clear telemetry tables (event chain is untouched)
-docker exec hive-postgres-1 psql -U hive -d hive -c "
-    DELETE FROM telemetry_agent_snapshots;
-    DELETE FROM telemetry_hive_snapshots;
-    DELETE FROM telemetry_event_stream;
-"
-echo "Telemetry cleared. Chain intact."
-
-# Restart hive — fresh telemetry will populate
+curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
 ```
 
-## Nuclear Option (full reset including chain)
+## Model Catalog
 
-**WARNING: This destroys the entire event history. All agent events, all work tasks, all audit trail. Only use if the chain is corrupted or you want a genuinely fresh start.**
+The operator API and the runtime select models from a catalog YAML (hot-reloaded):
+- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm with `systemctl --user show hive-ops-api -p Environment`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
+- **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
+
+Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
+
+## On-demand Runtime (`cmd/hive` verbs)
 
 ```bash
-pkill -INT -f "cmd/hive" 2>/dev/null
-pkill -f "cmd/work-server" 2>/dev/null
-sleep 5
-
-cd $COMPOSE_DIR
-docker compose down -v   # -v removes the postgres volume
-docker compose up -d postgres
-# Wait for healthy, then restart hive + work-server
+cd /Transpara/transpara-ai/repos/hive
+go run ./cmd/hive civilization run    --human Michael --idea "…" \
+       --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
+go run ./cmd/hive civilization daemon --human Michael \
+       --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
+go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
+go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
+go run ./cmd/hive council --topic "…"                                       # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 
----
+Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
+
+## Operator Actions
+
+- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` only decides **draft-PR-create** authority requests — not role proposals.
+- **Inject a spec/file as a task** — posts to the civilization daemon **webhook** (`:8081/event`), so the runtime must be running: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
+
+## Local / Offline
+
+Run the pipeline against a local API with no external dependency:
+
+```bash
+cd /Transpara/transpara-ai/repos/hive
+go run ./cmd/localapi --addr :8082 --api-key dev   # add --site-db to read the site DB instead of hive
+```
 
 ## Logs
 
 ```bash
-# Hive (if backgrounded)
-tail -f /tmp/hive.log
-
-# Work-server (if backgrounded)
-tail -f /tmp/work-server.log
-
-# Postgres
-docker compose logs -f postgres
+journalctl --user -u work-server  -f
+journalctl --user -u hive-ops-api -f
+journalctl --user -u hive -f            # if the runtime runs as the unit
+cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ```
 
----
-
-## Approve Role
-
-When the Spawner proposes a new role, it requires three events before the agent spawns:
-1. `hive.role.proposed` — emitted by Spawner (automatic)
-2. `hive.role.approved` — emitted by Guardian (`/approve` command) or human via CLI
-3. `agent.budget.adjusted` — emitted by Allocator or human via CLI
-
-The Guardian's prompt includes role governance instructions and will `/approve` or `/reject`
-proposals automatically. If the Guardian doesn't act (budget exhausted, missed event), approve
-manually with the `approve-role` CLI tool:
+## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-cd $HIVE_REPO
-go run ./cmd/approve-role \
-    --role researcher \
-    --store postgres://hive:hive@localhost:5432/hive \
-    --reason "Human operator approved: filling CTO-identified gap"
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+docker exec hive-postgres-1 psql -U hive -d hive -c "
+    DELETE FROM telemetry_agent_snapshots;
+    DELETE FROM telemetry_hive_snapshots;
+    DELETE FROM telemetry_event_stream;"
 ```
 
-This emits both `hive.role.approved` and `agent.budget.adjusted` (budget=200) in one shot.
-The watcher polls every 5 seconds — the new agent spawns on the next poll cycle.
+## Nuclear Option (destroys the event chain)
 
-To check pending proposals:
+**WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
-docker exec hive-postgres-1 psql -U hive -d hive -t -c \
-    "SELECT content_json->>'name' as role, content_json->>'reason' as reason
-     FROM events WHERE event_type = 'hive.role.proposed'
-     AND content_json->>'name' NOT IN (
-       SELECT content_json->>'name' FROM events WHERE event_type = 'hive.role.approved'
-     )"
+pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
+systemctl --user stop hive hive-ops-api work-server 2>/dev/null
+cd /Transpara/transpara-ai/repos/hive
+docker compose down -v && docker compose up -d postgres
 ```
-
----
-
-## Inject Work
-
-Send tasks to a running hive via the webhook listener on `:8081`.
-The `op: "intend"` creates a task that agents discover and claim.
-
-```bash
-curl -X POST http://localhost:8081/event \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "task-001",
-    "node_title": "Build a CLI tool that tracks daily habits",
-    "op": "intend",
-    "actor": "Michael",
-    "actor_kind": "human",
-    "payload": {
-      "description": "A Go CLI: habit add, habit check, habit streak. SQLite storage. Include tests."
-    }
-  }'
-```
-
-Supported ops: `intend` (creates task), `respond`, `express`, `assert`, `progress` (emitted as `hive.site.*` events). The `assign` and `complete` ops are stubbed.
-
-Verify the listener is up first:
-
-```bash
-curl -s http://localhost:8081/health
-# Should return: ok
-```
-
----
 
 ## Common Problems
 
 | Symptom | Cause | Fix |
-|---------|-------|-----|
-| "Invalid API key" on all agents | `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY` set in environment | `unset ANTHROPIC_API_KEY HIVE_ANTHROPIC_API_KEY` and remove from `.bashrc` |
-| "connection refused" on :8080 | Work-server not running | Start it (Hive Up step 3) |
-| Dashboard shows "57m ago" everywhere | Hive died but telemetry data persists | Clean Slate, then restart |
-| All agents show $0.000 cost | Hive just started, no iterations yet | Wait 2-3 minutes |
-| "database unavailable" in API | Postgres not running | `docker compose up -d postgres` |
-| Hive won't start — port conflict | pgadmin or another process on :8080 | Check `lsof -i :8080`, kill the conflict |
-| Agent stuck in Processing state | LLM call hanging or rate limited | Restart hive (graceful) |
-| Hive won't start — "unmarshal content" | Corrupted head event in chain | Check `SELECT content_json FROM events ORDER BY seq DESC LIMIT 1` — fix or Nuclear Option |
-| Zombie processes after hive down | `go run` child processes survive parent kill | `ss -tlnp \| grep 8081` to find PID, then `kill -9 <PID>` |
-| Role proposed but never spawns | Missing `hive.role.approved` or `agent.budget.adjusted` | Run `go run ./cmd/approve-role --role <name> --store postgres://...` |
-| Webhook returns "connection refused" on :8081 | Event listener not started or zombie holding port | Kill zombies, restart hive |
-| All agents cold-start on reboot | `OPEN_BRAIN_URL` not set | Export `OPEN_BRAIN_URL` and `OPEN_BRAIN_KEY` in environment |
+|---|---|---|
+| Service `activating (auto-restart)` | Postgres down — DB connection fails on start | `docker compose up -d postgres` (from `repos/hive`); services self-heal |
+| `curl :8085` / `:8080` connection refused | that service not running / crash-looping | `systemctl --user status <svc>`; see crash-loop diagnosis |
+| `401 unauthorized` from `:8085` | missing/wrong bearer | add `-H "Authorization: Bearer $HIVE_OPS_API_KEY"` (default `dev`) |
+| "Invalid API key" on all agents | `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` set | `unset` them; remove from shell profile |
+| All agents `$0.000` cost | runtime just started, no iterations yet | wait 2–3 min |
+| Port `:8080` conflict on start | another process bound it | `lsof -i :8080`; stop the conflict |
