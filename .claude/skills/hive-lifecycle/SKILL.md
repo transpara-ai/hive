@@ -129,6 +129,15 @@ fi
 if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); then
   printf '%s\n' "$execstart" | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
   printf '%s\n' "$execstart" | grep -q 'LOVYOU_API_KEY=' && { echo "ExecStart itself injects LOVYOU_API_KEY (env/shell wrapper) — the clearing drop-in CANNOT remove this"; execcred=1; }
+  # Launcher allowlist: only direct, argv-transparent launchers are analyzable.
+  # A wrapper script (bash/sh/env/custom) can source hive.env or add flags in
+  # its BODY, invisible to every property check — treat as opaque, fail closed.
+  launcher=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
+  case "$launcher" in
+    */go|*/hive) : ;;
+    "") echo "cannot determine ExecStart launcher"; unknown=1 ;;
+    *) echo "ExecStart launcher $launcher is not a recognized direct launcher — an opaque wrapper can inject credentials/flags; inspect its body manually"; unknown=1 ;;
+  esac
 else
   echo "cannot read ExecStart property"; unknown=1
 fi
