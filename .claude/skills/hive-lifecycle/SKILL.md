@@ -34,7 +34,7 @@ The **Claude CLI** path (Max plan, `~/.claude/.credentials.json`) needs **no Ant
 env | cut -d= -f1 | grep -i anthropic   # names only — never print values; must print nothing
 ```
 
-⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, **omit `--catalog`** — the runtime falls back to its built-in Claude defaults (there is no checked-in Claude-only catalog).
+⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, **omit `--catalog`** — the runtime falls back to its built-in Claude defaults (there is no checked-in Claude-only catalog). ⚠ This is DEFAULT ROUTING ONLY: a durable role-model policy stored in Postgres (set via the role-policy endpoint) still overrides the built-in defaults and can route roles to Codex or API-key models — for strict provider isolation, inspect the assembly projection's model selection first and clear or repoint stored role policies.
 
 API bearer tokens (for the endpoints below):
 - **hive-ops-api**: `HIVE_OPS_API_KEY` (default `dev`).
@@ -127,13 +127,16 @@ fi
 ```bash
 # Stop the runtime first, then the API services.
 systemctl --user stop hive 2>/dev/null                    # if started as the unit
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
-sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
+# Identity-verified kills: comm must be hive|go, so a stray argv match (an
+# editor, grep, or agent session mentioning the pattern) is never signaled.
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done   # graceful; matches `go run` parent and compiled child
+sleep 3
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done   # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
 # port (a blind port-kill could hit pgadmin or a dev server):
-pkill -f '[c]md/work-server|[e]xe/work-server' 2>/dev/null
-pkill -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' 2>/dev/null
+pgrep -f '[c]md/work-server|[e]xe/work-server' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
+pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -164,7 +167,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     # governance flags with nothing to relaunch. Get the user's original
     # command (argv is never echoed: it may contain sensitive --idea text or
     # credential assignments) or explicit stop-without-restore authorization,
-    # THEN stop with the pkill pair from "Hive Down" and relaunch their command.
+    # THEN stop with the identity-verified kill loops from "Hive Down" and relaunch their command.
     echo "MANUAL (go run) runtime detected — restart needs the user's original command first:"
     pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
   else
@@ -286,7 +289,7 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
   ```
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
-Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
+Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults — default routing only; durable role-model policies stored in Postgres still override it); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
 
 ## On-demand Runtime (`cmd/hive` verbs)
 
@@ -338,7 +341,9 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
+systemctl --user stop hive 2>/dev/null; sleep 3
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
@@ -350,10 +355,14 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done   # kill any manual go-run runtime first (comm-verified)
+sleep 3
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
-cd /Transpara/transpara-ai/repos/hive
-docker compose down -v && docker compose up -d postgres
+# The && chain is load-bearing: if the repo path is missing or unmounted, a
+# bare cd would leave the shell in the CALLER's directory and `docker compose
+# down -v` would destroy an unrelated project's volumes.
+cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
 ```
 
 ## Common Problems

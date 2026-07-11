@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.31.0
+version: 0.32.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -289,6 +289,30 @@ authority: repository documentation/skill-source preservation only; no Hive star
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
   (`skills/README.md`, `skills/hive-lifecycle/README.md`).
+
+## Fresh-Head CFAR Repairs (v0.32.0)
+
+The strict up-to-date branch protection forced a branch update before merge
+(new head), stranding the a90b1bde exact-head credit; the fresh Codex CFAR at
+the new head surfaced three operational defects, repaired in both dialects:
+
+- **bf — cd chained before mutating Compose commands.** A bare `cd` line
+  before `docker compose down -v` (Nuclear Option) or `docker compose
+  up/down` would, on a missing or unmounted repo path, leave the shell in the
+  CALLER's directory and mutate an unrelated Compose project's containers or
+  volumes. Every mutating Compose invocation is now `cd … && docker compose
+  …` (class sweep across both dialects).
+- **bg — identity-verified process kills.** `pkill -f` matches any process
+  whose argv merely CONTAINS the pattern (an editor, grep, or agent session),
+  and the `[h]ive` spelling only prevents self-match. All runtime kill and
+  identity-sweep sites now resolve candidate PIDs with `pgrep -f` and signal
+  only processes whose `comm` is in an allowlist (`hive|go`,
+  `work-server|go`, `hive-ops-api|go`).
+- **bh — Claude-only routing trued to default-routing-only.** Omitting
+  `--catalog` selects built-in Claude defaults, but a durable role-model
+  policy stored in Postgres still overrides them and can route roles to
+  Codex or API-key models; both dialects now say so and direct the operator
+  to inspect/clear stored role policies for strict provider isolation.
 
 ## Non-Goals
 

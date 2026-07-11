@@ -49,7 +49,7 @@ Check names only — never print environment values into the transcript. The com
 unset ANTHROPIC_API_KEY HIVE_ANTHROPIC_API_KEY
 ```
 
-The checked-in `catalog-mixed.yaml` is a mixed-provider catalog. Claude/Codex use subscription auth and Ollama is local, but OpenRouter roles require `OPENROUTER_API_KEY`. For a Claude-CLI-only run with no provider keys, omit `--catalog` so Hive uses built-in Claude defaults.
+The checked-in `catalog-mixed.yaml` is a mixed-provider catalog. Claude/Codex use subscription auth and Ollama is local, but OpenRouter roles require `OPENROUTER_API_KEY`. For a Claude-CLI-only run with no provider keys, omit `--catalog` so Hive uses built-in Claude defaults. This is DEFAULT ROUTING ONLY: a durable role-model policy stored in Postgres (set via the role-policy endpoint) still overrides the built-in defaults and can route roles to Codex or API-key models. For strict provider isolation, inspect the assembly projection's model selection first and clear or repoint stored role policies.
 
 API tokens:
 
@@ -134,8 +134,7 @@ journalctl --user -u hive-ops-api -n 40 --no-pager
 Starting Postgres is a mutating recovery action, not part of status — run it only after the user explicitly confirms:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-docker compose up -d postgres
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 ```
 
@@ -144,8 +143,7 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 Start only when the user explicitly asks to bring Hive up. Start Postgres first and wait until it accepts connections:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-docker compose up -d postgres
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do
   tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }
   echo "waiting for postgres..."
@@ -168,14 +166,16 @@ Stop the runtime first, then API services. Do not stop Postgres unless the user 
 
 ```bash
 systemctl --user stop hive 2>/dev/null || true
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+# Identity-verified kills: comm must be hive|go, so a stray argv match (an
+# editor, grep, or agent session mentioning the pattern) is never signaled.
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 sleep 3
-pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 
 systemctl --user stop hive-ops-api work-server
 
-pkill -f '[c]md/work-server|[e]xe/work-server' 2>/dev/null || true
-pkill -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' 2>/dev/null || true
+pgrep -f '[c]md/work-server|[e]xe/work-server' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
+pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
 
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound; inspect before clearing it" || echo "ports clear"
 ```
@@ -183,8 +183,7 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound; in
 Full Postgres stop, only when explicitly requested:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-docker compose down
+cd /Transpara/transpara-ai/repos/hive && docker compose down
 ```
 
 ## Hive Restart
@@ -192,8 +191,7 @@ docker compose down
 Restart means true down-to-up for APIs after Postgres is available. Preserve manual runtime command flags instead of guessing them.
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-docker compose up -d postgres
+cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
 # Everything below is gated on Postgres readiness — restarting services or the
@@ -212,7 +210,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     # governance flags with nothing to relaunch. Get the user's original
     # command (argv is never echoed: it may contain sensitive --idea text or
     # credential assignments) or explicit stop-without-restore authorization,
-    # THEN stop with the pkill pair from Hive Down and relaunch their command.
+    # THEN stop with the identity-verified kill loops from Hive Down and relaunch their command.
     echo "manual runtime detected — restart needs the user's original command first:"
     pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
   else
@@ -293,7 +291,7 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
   ```
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
 - `council` accepts `--catalog <path>` only; do not pass `--catalog-reload-interval` to `council`.
-- If avoiding provider keys, omit `--catalog` for built-in Claude defaults.
+- If avoiding provider keys, omit `--catalog` for built-in Claude defaults — default routing only; durable role-model policies stored in Postgres still override it.
 
 ## On-demand Runtime
 
@@ -393,10 +391,10 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 This removes telemetry snapshots but keeps the event chain. Use only when explicitly requested.
 
 ```bash
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive 2>/dev/null || true
 sleep 3
-pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 
 docker exec hive-postgres-1 psql -U hive -d hive -c "
   DELETE FROM telemetry_agent_snapshots;
@@ -409,13 +407,14 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 This destroys the event chain. Do not run it unless the user explicitly asks for a destructive database reset and acknowledges that events, tasks, and audit trail are erased.
 
 ```bash
-pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 sleep 3
-pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
-cd /Transpara/transpara-ai/repos/hive
-docker compose down -v
-docker compose up -d postgres
+# The && chain is load-bearing: if the repo path is missing or unmounted, a
+# bare cd would leave the shell in the CALLER's directory and `docker compose
+# down -v` would destroy an unrelated project's volumes.
+cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
 ```
 
 ## Common Problems
