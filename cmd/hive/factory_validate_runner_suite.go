@@ -311,6 +311,10 @@ func validateIssueScanRunnerSuiteStdinFixture(document issueScanRunnerContractsD
 		fail("parse fixture: %v", err)
 		return problems
 	}
+	if generic == nil {
+		fail("fixture is JSON null")
+		return problems
+	}
 	kind, _ := generic["kind"].(string)
 	if kind != contract.StdinContextKind {
 		fail("kind %q does not match contract stdin context kind %q", kind, contract.StdinContextKind)
@@ -333,6 +337,10 @@ func validateIssueScanRunnerSuiteStdoutFixture(contract issueScanRunnerContract,
 	var generic map[string]any
 	if err := json.Unmarshal(body, &generic); err != nil {
 		fail("parse fixture: %v", err)
+		return problems
+	}
+	if generic == nil {
+		fail("fixture is JSON null")
 		return problems
 	}
 	if err := strictDecodeIssueScanRunnerSuiteFixture(component.ID, issueScanRunnerSuiteFixtureStdout, body); err != nil {

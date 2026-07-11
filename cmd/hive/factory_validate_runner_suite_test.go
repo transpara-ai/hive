@@ -370,6 +370,28 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			wantErr: "fixture",
 		},
 		{
+			name: "null stdout fixture",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "stage_role_output_runner", "stdout.json")
+				if err := os.WriteFile(path, []byte("null\n"), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "JSON null",
+		},
+		{
+			name: "null stdin fixture",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "stage_role_output_runner", "stdin.json")
+				if err := os.WriteFile(path, []byte("null\n"), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "JSON null",
+		},
+		{
 			name: "unknown field in fixture",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				path := filepath.Join(dir, "examples", "implementation_runner", "stdout.json")
