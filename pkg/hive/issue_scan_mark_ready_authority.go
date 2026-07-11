@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -114,6 +115,11 @@ func FindApprovedMarkReadyTarget(s store.Store, repository string, prNumber int,
 			// Newest-first scan: the first matching decision is latest-wins.
 			if content.Outcome != draftPRApprovedOutcome {
 				return MarkReadyTarget{}, fmt.Errorf("latest mark-ready decision for %s#%d@%s has outcome %q, not %q: refusing to mark ready", repository, prNumber, headSHA, content.Outcome, draftPRApprovedOutcome)
+			}
+			// A finite expiry that has passed ends the authority: stale human
+			// approval never marks a PR ready. Zero ExpiresAt means unbounded.
+			if !content.ExpiresAt.IsZero() && !time.Now().Before(content.ExpiresAt.Value()) {
+				return MarkReadyTarget{}, fmt.Errorf("latest mark-ready approval for %s#%d@%s expired at %s: refusing to mark ready", repository, prNumber, headSHA, content.ExpiresAt.String())
 			}
 			return target, nil
 		}

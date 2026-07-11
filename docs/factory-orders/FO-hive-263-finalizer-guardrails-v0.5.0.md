@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.4.0
+version: 0.5.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -36,7 +36,9 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   refuse). Only HUMAN-decided records carry mark-ready authority in either
   direction, mirroring the draft-PR path: non-human decisions are skipped —
   they can neither authorize nor shadow a human decision. (v0.4.0, from CFAR
-  round 2.)
+  round 2.) A finite `ExpiresAt` that has passed ends the authority: an
+  expired approval refuses; zero means unbounded. (v0.5.0, from CFAR round
+  3.)
 - **R2 — Fail-closed approval gate with durable single-use consumption.**
   `RunIssueScanReadyPRFinalizer` refuses to call `MarkReadyForReview` unless a
   recorded, **approved**, non-stale mark-ready decision exactly matches the
@@ -67,7 +69,11 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   openness only — never ready-state health (CI, merge state, exact head),
   which is failing in exactly the states re-draft remediates — and a re-draft
   is reported successful only when the returned live state proves the same PR
-  is draft again. Either way the run surfaces a durable blocked state.
+  is draft again. The re-draft fetch itself reads only the pull-request
+  endpoint (never commit-status or check-runs), so a CI-endpoint outage — a
+  verification-failure state the remediation exists for — can never prevent
+  returning the PR to draft (v0.5.0, from CFAR round 3). Either way the run
+  surfaces a durable blocked state.
 - **R4 — Blocked-state evidence as Work artifacts.** A structured
   `issue_scan_ready_pr_blocked` evidence artifact (kind, lifecycle version,
   run/order ids, PR identity, failure reason, remediation taken:
@@ -92,8 +98,9 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   re-draft returning unproven state, review failure before/after mutation,
   evidence-append failure, nonce reuse (same run, cross-task/cross-run, and
   buried beyond one artifact page), unreadable consumption record, claim
-  total-ordering, non-human decider, blocked-terminal refusal (including
-  buried blocked evidence), and mutation-error classification (proven
+  total-ordering, non-human decider, expired vs finite-unexpired approval,
+  blocked-terminal refusal (including buried blocked evidence), re-draft
+  during CI-endpoint outage, and mutation-error classification (proven
   un-mutated vs indeterminate). The class-sweep audit runs BEFORE the first
   cross-family review round.
 - **R7 — Blocked evidence is terminal (v0.3.0, from CFAR round 1).** Once an
@@ -108,7 +115,7 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
   reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.4.0)
+## Implementation Notes (v0.5.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary

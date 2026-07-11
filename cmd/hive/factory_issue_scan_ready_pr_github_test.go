@@ -271,6 +271,50 @@ func TestIssueScanReadyPRGitHubClientReDraftsDespiteFailingChecks(t *testing.T) 
 	}
 }
 
+// TestIssueScanReadyPRGitHubClientReDraftsDuringCIEndpointOutage proves the
+// re-draft path has no dependency on the commit-status or check-runs
+// endpoints at all: a verification outage on those endpoints is a state the
+// remediation must survive, so it never queries them (CFAR hive#272 round 3,
+// finding 2).
+func TestIssueScanReadyPRGitHubClientReDraftsDuringCIEndpointOutage(t *testing.T) {
+	mutation := readyPRGitHubMutationForTest()
+	getPRCalls := 0
+	graphQLCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+			getPRCalls++
+			writeJSON(t, w, map[string]any{
+				"number":          321,
+				"html_url":        mutation.PRURL,
+				"node_id":         "PR_kwDOtest",
+				"state":           "open",
+				"draft":           getPRCalls > 1,
+				"mergeable_state": "unknown",
+				"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+				"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
+			})
+		case r.Method == http.MethodGet && (strings.HasSuffix(r.URL.Path, "/status") || strings.HasSuffix(r.URL.Path, "/check-runs")):
+			t.Fatalf("re-draft must not depend on CI endpoints (queried %s)", r.URL.Path)
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			graphQLCalls++
+			writeJSON(t, w, map[string]any{"data": map[string]any{"convertPullRequestToDraft": map[string]any{"pullRequest": map[string]any{"id": "PR_kwDOtest", "isDraft": true}}}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+	state, err := client.ConvertToDraft(context.Background(), mutation)
+	if err != nil {
+		t.Fatalf("ConvertToDraft during CI endpoint outage: %v", err)
+	}
+	if graphQLCalls != 1 || !state.Draft {
+		t.Fatalf("graphql calls = %d, state = %+v; want one conversion to draft", graphQLCalls, state)
+	}
+}
+
 // TestIssueScanReadyPRGitHubClientReconcilesFailedMutation proves the
 // fail-safe classification of mark-ready mutation errors: only a successful
 // reconcile fetch showing the PR still draft proves not-mutated; a failed

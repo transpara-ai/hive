@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
@@ -60,6 +61,11 @@ func seedMarkReadyDecision(t *testing.T, s store.Store, factory *event.EventFact
 
 func seedMarkReadyDecisionWithRole(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, requestID types.EventID, outcome string, target MarkReadyTarget, deciderRole string) {
 	t.Helper()
+	seedMarkReadyDecisionWithRoleAndExpiry(t, s, factory, signer, human, conv, requestID, outcome, target, deciderRole, types.ZeroTimestamp())
+}
+
+func seedMarkReadyDecisionWithRoleAndExpiry(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, requestID types.EventID, outcome string, target MarkReadyTarget, deciderRole string, expiresAt types.Timestamp) {
+	t.Helper()
 	content := AuthorityDecisionRecordedContent{
 		DecisionID:     requestID.Value(),
 		RequestID:      requestID,
@@ -69,6 +75,7 @@ func seedMarkReadyDecisionWithRole(t *testing.T, s store.Store, factory *event.E
 		ApprovedTarget: target.Repository + " #41",
 		ApprovedAction: string(safety.ActionRepoPullRequestMarkReady),
 		Scope:          target.Scope(),
+		ExpiresAt:      expiresAt,
 		Rationale:      "reviewed the draft PR",
 	}
 	if _, err := appendAuthorityDecisionRecorded(s, factory, signer, human, conv, requestID, content); err != nil {
@@ -184,6 +191,24 @@ func TestFindApprovedMarkReadyTarget(t *testing.T) {
 		s := seed(t, "approved", target)
 		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, strings.ToUpper(target.HeadSHA)); err != nil {
 			t.Fatalf("expected case-insensitive head match, got %v", err)
+		}
+	})
+
+	t.Run("expired approval refuses", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecisionWithRoleAndExpiry(t, s, factory, signer, human, conv, requestID, "approved", target, "human", types.NewTimestamp(time.Now().Add(-time.Hour)))
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err == nil {
+			t.Fatal("an expired approval must never authorize readying")
+		}
+	})
+
+	t.Run("unexpired finite approval authorizes", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecisionWithRoleAndExpiry(t, s, factory, signer, human, conv, requestID, "approved", target, "human", types.NewTimestamp(time.Now().Add(time.Hour)))
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err != nil {
+			t.Fatalf("a finite but unexpired approval must authorize, got %v", err)
 		}
 	})
 

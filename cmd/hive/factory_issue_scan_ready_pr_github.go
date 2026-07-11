@@ -147,6 +147,27 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestReviewDecision(ctx contex
 }
 
 func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {
+	state, nodeID, err := c.fetchPullRequestIdentity(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	ciStatus, err := c.fetchCIStatus(ctx, owner, repo, state.HeadSHA)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	state.CIStatus = ciStatus
+	return state, nodeID, nil
+}
+
+// fetchPullRequestIdentity reads PR identity and open/draft state from the
+// pull-request endpoint ONLY — no commit-status or check-runs calls. The
+// re-draft remediation rides this fetch so a CI-endpoint outage (a state it
+// exists to remediate) can never prevent returning the PR to draft.
+func (c *issueScanReadyPRGitHubClient) fetchPullRequestIdentity(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {
 	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
 	if err != nil {
 		return hive.IssueScanReadyPRLiveState{}, "", err
@@ -170,10 +191,6 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context
 	if err := c.getJSON(ctx, fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, mutation.PRNumber), &gh); err != nil {
 		return hive.IssueScanReadyPRLiveState{}, "", fmt.Errorf("github ready PR client: pull request: %w", err)
 	}
-	ciStatus, err := c.fetchCIStatus(ctx, owner, repo, gh.Head.SHA)
-	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, "", err
-	}
 	mergeState := strings.TrimSpace(gh.MergeableState)
 	if mergeState == "" {
 		mergeState = "unknown"
@@ -190,7 +207,6 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context
 		Draft:            gh.Draft,
 		ReadyForReview:   !gh.Draft,
 		MergeStateStatus: mergeState,
-		CIStatus:         ciStatus,
 		SourceRefs:       []string{strings.TrimSpace(gh.HTMLURL)},
 	}
 	return state, strings.TrimSpace(gh.NodeID), nil
@@ -294,7 +310,7 @@ func (c *issueScanReadyPRGitHubClient) ConvertToDraft(ctx context.Context, mutat
 	if c == nil || strings.TrimSpace(c.token) == "" {
 		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
 	}
-	state, nodeID, err := c.fetchPullRequestState(ctx, mutation)
+	state, nodeID, err := c.fetchPullRequestIdentity(ctx, mutation)
 	if err != nil {
 		return hive.IssueScanReadyPRLiveState{}, err
 	}
@@ -307,7 +323,7 @@ func (c *issueScanReadyPRGitHubClient) ConvertToDraft(ctx context.Context, mutat
 	if err := c.convertPullRequestToDraft(ctx, nodeID); err != nil {
 		return hive.IssueScanReadyPRLiveState{}, err
 	}
-	state, _, err = c.fetchPullRequestState(ctx, mutation)
+	state, _, err = c.fetchPullRequestIdentity(ctx, mutation)
 	return state, err
 }
 

@@ -377,7 +377,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			},
 			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
-				"recorded approved human-decided pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying; non-human decisions neither authorize nor shadow human ones)",
+				"recorded approved human-decided unexpired pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying; non-human decisions neither authorize nor shadow human ones; a past finite expires_at refuses)",
 				"the approval's single-use nonce has no recorded consumption anywhere in the store (mark_ready_approval_consumed artifact, cross-run, full pagination); consumption is recorded durably before the mutation with append-then-verify-winner claim ordering",
 				"no issue_scan_ready_pr_blocked artifact is recorded on the ready stage (blocked evidence is terminal until explicit human remediation; the check pages through all artifact events)",
 				"ready_state_review_runner returns passing exact-head receipt",
@@ -396,6 +396,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				"re-drafts after a failed ready-state review only when the recorded mark-ready approval carries re_draft_on_failure; otherwise records blocked evidence and stops",
 				"treats a mark-ready client failure as a possible mutation unless the client proves the PR un-mutated; unproven failures record blocked evidence",
 				"reports a re-draft successful only when the returned live state proves the same PR is draft again",
+				"re-draft reads only the pull-request endpoint (never commit-status or check-runs), so a CI-endpoint outage cannot prevent returning the PR to draft",
 			},
 		},
 		OperatorNotes: []string{
