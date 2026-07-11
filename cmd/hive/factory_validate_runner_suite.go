@@ -100,8 +100,8 @@ func validateIssueScanRunnerSuitePackage(dir string) (issueScanRunnerSuiteValida
 	if manifest.LifecycleVersion != document.LifecycleVersion {
 		problems = append(problems, fmt.Errorf("lifecycle_version %q does not match contracts document %q", manifest.LifecycleVersion, document.LifecycleVersion))
 	}
-	if strings.TrimSpace(manifest.ValidationCommand) == "" {
-		problems = append(problems, errors.New("validation_command is required"))
+	if err := validateIssueScanRunnerSuiteValidationCommand(manifest.ValidationCommand); err != nil {
+		problems = append(problems, err)
 	}
 
 	requiredComponents, err := issueScanRunnerSuiteRequiredComponents(document, manifest.TerminalStagePath)
@@ -146,6 +146,17 @@ func validateIssueScanRunnerSuitePackage(dir string) (issueScanRunnerSuiteValida
 		return issueScanRunnerSuiteValidationReport{}, joined
 	}
 	return report, nil
+}
+
+// validateIssueScanRunnerSuiteValidationCommand checks the declared operator
+// command as inert argv. It never executes the command; it requires exactly the
+// R6 surface so a no-op such as `true` cannot masquerade as package validation.
+func validateIssueScanRunnerSuiteValidationCommand(command string) error {
+	args := strings.Fields(command)
+	if len(args) != 5 || args[0] != "hive" || args[1] != "factory" || args[2] != "validate-issue-scan-runner-suite" || args[3] != "--package" || strings.TrimSpace(args[4]) == "" {
+		return fmt.Errorf("validation_command must be exactly %q with a non-empty package path", "hive factory validate-issue-scan-runner-suite --package <dir>")
+	}
+	return nil
 }
 
 func loadIssueScanRunnerSuiteManifest(path string) (issueScanRunnerSuiteManifest, error) {
@@ -361,12 +372,8 @@ func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteCompo
 		if err := json.Unmarshal(stdoutBody, &receipt); err != nil {
 			return nil
 		}
-		operateCommit := strings.TrimSpace(context.OperateCommit)
-		if operateCommit == "" {
-			return fail("stdin operate_commit is required")
-		}
-		if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), operateCommit) {
-			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
+		if err := hive.ValidateIssueScanAdversarialReviewReceiptForContext(context, receipt); err != nil {
+			return fail("stdout receipt does not match stdin context: %v", err)
 		}
 	case "ready_state_review_runner":
 		var context hive.IssueScanReadyStateReviewContext
@@ -383,6 +390,18 @@ func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteCompo
 		}
 		if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), operateCommit) {
 			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
+		}
+	case "ready_pr_evidence_runner":
+		var context hive.IssueScanReadyPRRunnerContext
+		if err := json.Unmarshal(stdinBody, &context); err != nil {
+			return nil
+		}
+		var result hive.IssueScanReadyPRRunnerResult
+		if err := json.Unmarshal(stdoutBody, &result); err != nil {
+			return nil
+		}
+		if err := hive.ValidateIssueScanReadyPRRunnerResultForContext(context, result); err != nil {
+			return fail("stdout result does not match stdin context or runtime record rules: %v", err)
 		}
 	}
 	return nil

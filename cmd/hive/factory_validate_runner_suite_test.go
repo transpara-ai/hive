@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/transpara-ai/hive/pkg/hive"
 )
 
 // runnerSuiteTestManifest returns the canonical valid manifest for the managed
@@ -94,6 +96,127 @@ func runnerSuiteTestFixtures() map[string]map[string]string {
 			"stdout": `{"review_ref":"synthetic-review-0002","reviewed_head_sha":"0000000000000000000000000000000000000001","status":"pass"}`,
 		},
 	}
+}
+
+func runnerSuiteExternalReadyPRTestManifest() map[string]any {
+	manifest := runnerSuiteTestManifest()
+	manifest["terminal_stage_path"] = "external_ready_pr_evidence_runner"
+	components := manifest["components"].([]any)
+	components[4] = map[string]any{
+		"id":                   "ready_pr_evidence_runner",
+		"command":              "runners/ready_pr_evidence_runner.placeholder",
+		"argv":                 []any{"--stdin-json"},
+		"timeout":              "10m",
+		"stdin_kind":           "issue_scan_ready_pr_runner_context",
+		"stdout_kind":          "hive.IssueScanReadyPRRunnerResult",
+		"required_env":         []any{},
+		"forbidden_env":        []any{"ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"},
+		"authority_boundaries": []any{"generic ready PR runner cannot be combined with --issue-scan-ready-pr-mark-ready", "does not approve, merge, deploy, or perform production migrations"},
+		"fixtures": map[string]any{
+			"stdin":  "examples/ready_pr_evidence_runner/stdin.json",
+			"stdout": "examples/ready_pr_evidence_runner/stdout.json",
+		},
+	}
+	manifest["components"] = components
+	return manifest
+}
+
+func runnerSuiteExternalReadyPRTestFixtures() map[string]map[string]string {
+	const (
+		lifecycle = "civilization_issue_to_human_ready_pr_v0.9"
+		repo      = "transpara-ai/synthetic-example"
+		head      = "0000000000000000000000000000000000000001"
+	)
+	fixtures := runnerSuiteTestFixtures()
+	delete(fixtures, "ready_state_review_runner")
+	context := hive.IssueScanReadyPRRunnerContext{
+		Kind:                 "issue_scan_ready_pr_runner_context",
+		LifecycleVersion:     lifecycle,
+		RunID:                "run-synthetic-0001",
+		FactoryOrderID:       "fo-synthetic-0001",
+		Repository:           repo,
+		ReadyStageTaskID:     "task-synthetic-0007",
+		BlockerStageTaskID:   "task-synthetic-0006",
+		ImplementationTaskID: "task-synthetic-0002",
+		OperateBranch:        "feat/synthetic-change",
+		OperateCommit:        head,
+		ChangedFilesSummary:  "1 file changed (synthetic)",
+		ExpectedReadyPREvidence: hive.IssueScanReadyPREvidence{
+			Kind:                  "issue_scan_ready_pr_evidence",
+			LifecycleVersion:      lifecycle,
+			RunID:                 "run-synthetic-0001",
+			FactoryOrderID:        "fo-synthetic-0001",
+			Repository:            repo,
+			HeadSHA:               head,
+			State:                 "open",
+			Draft:                 false,
+			ReadyForReview:        true,
+			HumanApprovalRequired: true,
+		},
+	}
+	result := hive.IssueScanReadyPRRunnerResult{
+		DraftPRReceipt: hive.TransparaAIDraftPRReceipt{
+			Kind:                   "transpara_ai_draft_pr_receipt",
+			Repository:             repo,
+			PRNumber:               1,
+			PRURL:                  "https://github.com/transpara-ai/synthetic-example/pull/1",
+			BaseRef:                "main",
+			BaseSHA:                "0000000000000000000000000000000000000000",
+			HeadRef:                "feat/synthetic-change",
+			HeadSHA:                head,
+			RemoteHeadSHA:          head,
+			ChangedFiles:           []string{"synthetic.txt"},
+			Draft:                  true,
+			State:                  "open",
+			PolicyBundleID:         hive.TransparaAIDraftPRPolicyBundleID,
+			PolicyBundleHash:       hive.TransparaAIDraftPRPolicyBundleHash(),
+			AuthorityNonce:         "nonce-synthetic-0001",
+			HumanApprovalRequired:  true,
+			NoMergeOrDeployClaim:   true,
+			ReadyForReviewRequired: true,
+		},
+		ReadyPREvidence: hive.IssueScanReadyPREvidence{
+			Kind:                   "issue_scan_ready_pr_evidence",
+			LifecycleVersion:       lifecycle,
+			RunID:                  "run-synthetic-0001",
+			FactoryOrderID:         "fo-synthetic-0001",
+			Repository:             repo,
+			PRNumber:               1,
+			PRURL:                  "https://github.com/transpara-ai/synthetic-example/pull/1",
+			BaseRef:                "main",
+			BaseSHA:                "0000000000000000000000000000000000000000",
+			HeadRef:                "feat/synthetic-change",
+			HeadSHA:                head,
+			State:                  "open",
+			Draft:                  false,
+			ReadyForReview:         true,
+			MergeStateStatus:       "clean",
+			CIStatus:               "success",
+			ReadyStateReviewRef:    "synthetic-ready-review-0001",
+			ReadyStateReviewStatus: "pass",
+			HumanApprovalRequired:  true,
+		},
+	}
+	fixtures["ready_pr_evidence_runner"] = map[string]string{
+		"stdin":  mustMarshalRunnerSuiteFixture(context),
+		"stdout": mustMarshalRunnerSuiteFixture(result),
+	}
+	return fixtures
+}
+
+func mustMarshalRunnerSuiteFixture(value any) string {
+	body, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(body)
+}
+
+func writeValidExternalReadyPRRunnerSuiteTestPackage(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeRunnerSuiteTestPackage(t, dir, runnerSuiteExternalReadyPRTestManifest(), runnerSuiteExternalReadyPRTestFixtures())
+	return dir
 }
 
 // writeRunnerSuiteTestPackage materialises a manifest + fixtures into dir.
@@ -225,6 +348,14 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			name: "missing validation command",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				delete(m, "validation_command")
+				return m
+			},
+			wantErr: "validation_command",
+		},
+		{
+			name: "validation command is a no-op",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				m["validation_command"] = "true"
 				return m
 			},
 			wantErr: "validation_command",
@@ -648,6 +779,154 @@ func TestValidateIssueScanRunnerSuitePackageAcceptsCaseInsensitiveReviewHead(t *
 	}
 	if _, err := validateIssueScanRunnerSuitePackage(dir); err != nil {
 		t.Fatalf("expected case-insensitive reviewed head to validate, got %v", err)
+	}
+}
+
+func TestValidateIssueScanRunnerSuitePackageRejectsAdversarialReceiptIdentityMismatch(t *testing.T) {
+	cases := []struct {
+		field   string
+		value   any
+		wantErr string
+	}{
+		{field: "kind", value: "wrong_receipt_kind", wantErr: "kind"},
+		{field: "lifecycle_version", value: "civilization_issue_to_human_ready_pr_v0.1", wantErr: "lifecycle_version"},
+		{field: "run_id", value: "run-other", wantErr: "run_id"},
+		{field: "factory_order_id", value: "fo-other", wantErr: "factory_order_id"},
+		{field: "repository", value: "transpara-ai/other-repo", wantErr: "repository"},
+		{field: "task_id", value: "task-other", wantErr: "task_id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.field, func(t *testing.T) {
+			dir := writeValidRunnerSuiteTestPackage(t)
+			path := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
+			var receipt map[string]any
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read receipt: %v", err)
+			}
+			if err := json.Unmarshal(body, &receipt); err != nil {
+				t.Fatalf("decode receipt: %v", err)
+			}
+			receipt[tc.field] = tc.value
+			body, err = json.Marshal(receipt)
+			if err != nil {
+				t.Fatalf("encode receipt: %v", err)
+			}
+			if err := os.WriteFile(path, body, 0o644); err != nil {
+				t.Fatalf("write receipt: %v", err)
+			}
+			_, err = validateIssueScanRunnerSuitePackage(dir)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected %s mismatch error, got %v", tc.field, err)
+			}
+		})
+	}
+}
+
+func TestValidateIssueScanRunnerSuitePackageValidatesExternalReadyPRRunnerFixtures(t *testing.T) {
+	dir := writeValidExternalReadyPRRunnerSuiteTestPackage(t)
+	report, err := validateIssueScanRunnerSuitePackage(dir)
+	if err != nil {
+		t.Fatalf("expected valid external ready-PR runner package, got %v", err)
+	}
+	if report.TerminalStagePath != "external_ready_pr_evidence_runner" {
+		t.Fatalf("unexpected terminal path %q", report.TerminalStagePath)
+	}
+}
+
+func TestValidateIssueScanRunnerSuitePackageRejectsRuntimeInvalidExternalReadyPRFixtures(t *testing.T) {
+	type mutation func(result map[string]any)
+	cases := []struct {
+		name    string
+		mutate  mutation
+		wantErr string
+	}{
+		{
+			name: "minimal nested kinds only",
+			mutate: func(result map[string]any) {
+				for key := range result {
+					delete(result, key)
+				}
+				result["draft_pr_receipt"] = map[string]any{"kind": "transpara_ai_draft_pr_receipt"}
+				result["ready_pr_evidence"] = map[string]any{"kind": "issue_scan_ready_pr_evidence"}
+			},
+			wantErr: "repository",
+		},
+		{
+			name: "draft receipt authority boundary missing",
+			mutate: func(result map[string]any) {
+				result["draft_pr_receipt"].(map[string]any)["no_merge_or_deploy_claim"] = false
+			},
+			wantErr: "authority boundary",
+		},
+		{
+			name: "ready evidence PR identity missing",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["pr_number"] = float64(0)
+			},
+			wantErr: "pr_number",
+		},
+		{
+			name: "ready evidence exact head mismatch",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["head_sha"] = "0000000000000000000000000000000000000999"
+			},
+			wantErr: "operate_commit",
+		},
+		{
+			name: "ready evidence CI not successful",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["ci_status"] = "failure"
+			},
+			wantErr: "ci_status",
+		},
+		{
+			name: "ready evidence review not passing",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["ready_state_review_status"] = "failure"
+			},
+			wantErr: "ready_state_review_status",
+		},
+		{
+			name: "ready evidence Human approval boundary missing",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["human_approval_required"] = false
+			},
+			wantErr: "human_approval_required",
+		},
+		{
+			name: "ready evidence does not match draft PR number",
+			mutate: func(result map[string]any) {
+				result["ready_pr_evidence"].(map[string]any)["pr_number"] = float64(2)
+			},
+			wantErr: "does not match",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeValidExternalReadyPRRunnerSuiteTestPackage(t)
+			path := filepath.Join(dir, "examples", "ready_pr_evidence_runner", "stdout.json")
+			var result map[string]any
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read result: %v", err)
+			}
+			if err := json.Unmarshal(body, &result); err != nil {
+				t.Fatalf("decode result: %v", err)
+			}
+			tc.mutate(result)
+			body, err = json.Marshal(result)
+			if err != nil {
+				t.Fatalf("encode result: %v", err)
+			}
+			if err := os.WriteFile(path, body, 0o644); err != nil {
+				t.Fatalf("write result: %v", err)
+			}
+			_, err = validateIssueScanRunnerSuitePackage(dir)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 

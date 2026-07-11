@@ -134,6 +134,55 @@ func ValidateIssueScanAdversarialReviewReceiptShape(receipt IssueScanAdversarial
 	return nil
 }
 
+// ValidateIssueScanAdversarialReviewReceiptForContext checks every
+// deterministic identity relation between an external review context and its
+// returned receipt. Runtime recording performs additional store-backed checks,
+// but a runner-suite fixture must at least prove that the packet it declares
+// would not be rejected for contradicting the context it was given.
+func ValidateIssueScanAdversarialReviewReceiptForContext(context IssueScanAdversarialReviewContext, receipt IssueScanAdversarialReviewReceipt) error {
+	if strings.TrimSpace(context.Kind) != issueScanAdversarialReviewContextKind {
+		return fmt.Errorf("context kind %q does not match %q", context.Kind, issueScanAdversarialReviewContextKind)
+	}
+	if strings.TrimSpace(context.LifecycleVersion) != issueScanLifecycleVersion {
+		return fmt.Errorf("context lifecycle_version %q does not match %q", context.LifecycleVersion, issueScanLifecycleVersion)
+	}
+	for field, value := range map[string]string{
+		"run_id":                 context.RunID,
+		"factory_order_id":       context.FactoryOrderID,
+		"repository":             context.Repository,
+		"implementation_task_id": context.ImplementationTaskID,
+		"review_stage_task_id":   context.ReviewStageTaskID,
+		"operate_commit":         context.OperateCommit,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("context %s is required", field)
+		}
+	}
+	contextRepo := strings.ToLower(strings.TrimSpace(context.Repository))
+	if !ValidTransparaAIRepo(contextRepo) {
+		return fmt.Errorf("context repository %q is not a Transpara-AI repo", context.Repository)
+	}
+	for field, values := range map[string][2]string{
+		"kind":              {strings.TrimSpace(receipt.Kind), issueScanAdversarialReviewReceiptArtifactKind},
+		"lifecycle_version": {strings.TrimSpace(receipt.LifecycleVersion), strings.TrimSpace(context.LifecycleVersion)},
+		"run_id":            {strings.TrimSpace(receipt.RunID), strings.TrimSpace(context.RunID)},
+		"factory_order_id":  {strings.TrimSpace(receipt.FactoryOrderID), strings.TrimSpace(context.FactoryOrderID)},
+		"task_id":           {strings.TrimSpace(receipt.TaskID), strings.TrimSpace(context.ImplementationTaskID)},
+	} {
+		if values[0] != "" && values[0] != values[1] {
+			return fmt.Errorf("receipt %s %q does not match context %q", field, values[0], values[1])
+		}
+	}
+	receiptRepo := strings.ToLower(strings.TrimSpace(receipt.Repository))
+	if receiptRepo != contextRepo {
+		return fmt.Errorf("receipt repository %q does not match context %q", receipt.Repository, context.Repository)
+	}
+	if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), strings.TrimSpace(context.OperateCommit)) {
+		return fmt.Errorf("receipt reviewed_head_sha %q must match context operate_commit %q", receipt.ReviewedHeadSHA, context.OperateCommit)
+	}
+	return ValidateIssueScanAdversarialReviewReceiptShape(receipt)
+}
+
 // IssueScanAdversarialReviewReceiptBody serializes a receipt for durable Work
 // artifact storage.
 func IssueScanAdversarialReviewReceiptBody(receipt IssueScanAdversarialReviewReceipt) (string, error) {
