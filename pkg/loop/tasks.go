@@ -102,12 +102,32 @@ func executeTaskCommands(
 	convID types.ConversationID,
 	canOperate bool,
 ) int {
+	return executeTaskCommandsScoped(commands, tasks, agentID, causes, convID, canOperate, nil, "")
+}
+
+// executeTaskCommandsScoped applies the optional one-shot run boundary before
+// any command that targets an existing task. Create remains allowed and, when
+// taskWorkspace is non-empty, stamps the derived task with that repository.
+func executeTaskCommandsScoped(
+	commands []TaskCommand,
+	tasks *work.TaskStore,
+	agentID types.ActorID,
+	causes []types.EventID,
+	convID types.ConversationID,
+	canOperate bool,
+	taskScope func(types.EventID) bool,
+	taskWorkspace string,
+) int {
 	executed := 0
 	for _, cmd := range commands {
 		var err error
+		if err = taskCommandScopeError(cmd, taskScope); err != nil {
+			fmt.Printf("warning: /task %s failed: %v\n", cmd.Action, err)
+			continue
+		}
 		switch cmd.Action {
 		case "create":
-			err = execTaskCreate(cmd.Payload, tasks, agentID, causes, convID)
+			err = execTaskCreateInWorkspace(cmd.Payload, tasks, agentID, causes, convID, taskWorkspace)
 		case "assign":
 			err = execTaskAssign(cmd.Payload, tasks, agentID, causes, convID, canOperate)
 		case "complete":
@@ -126,6 +146,69 @@ func executeTaskCommands(
 		}
 	}
 	return executed
+}
+
+func taskCommandScopeError(cmd TaskCommand, taskScope func(types.EventID) bool) error {
+	if taskScope == nil || cmd.Action == "create" {
+		return nil
+	}
+	ids, err := taskCommandTargetIDs(cmd)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if !taskScope(id) {
+			return fmt.Errorf("task %s is outside the current run boundary", id.Value())
+		}
+	}
+	return nil
+}
+
+func taskCommandTargetIDs(cmd TaskCommand) ([]types.EventID, error) {
+	var rawIDs []string
+	switch cmd.Action {
+	case "assign":
+		var p taskAssignPayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		rawIDs = []string{p.TaskID}
+	case "complete":
+		var p taskCompletePayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		rawIDs = []string{p.TaskID}
+	case "comment":
+		var p taskCommentPayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		rawIDs = []string{p.TaskID}
+	case "artifact":
+		var p taskArtifactPayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		rawIDs = []string{p.TaskID}
+	case "depend":
+		var p taskDependPayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		rawIDs = []string{p.TaskID, p.DependsOn}
+	default:
+		return nil, nil
+	}
+	ids := make([]types.EventID, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		id, err := types.NewEventID(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid task_id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // metaTaskPatterns are phrases that indicate a /task create is actually trying
@@ -157,6 +240,17 @@ func execTaskCreate(
 	causes []types.EventID,
 	convID types.ConversationID,
 ) error {
+	return execTaskCreateInWorkspace(payload, tasks, agentID, causes, convID, "")
+}
+
+func execTaskCreateInWorkspace(
+	payload json.RawMessage,
+	tasks *work.TaskStore,
+	agentID types.ActorID,
+	causes []types.EventID,
+	convID types.ConversationID,
+	workspace string,
+) error {
 	var p taskCreatePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("parse: %w", err)
@@ -172,7 +266,13 @@ func execTaskCreate(
 	if priority == "" {
 		priority = work.DefaultPriority
 	}
-	task, err := tasks.Create(agentID, p.Title, p.Description, causes, convID, priority)
+	var task work.Task
+	var err error
+	if strings.TrimSpace(workspace) != "" {
+		task, err = tasks.CreateInWorkspace(agentID, p.Title, p.Description, workspace, causes, convID, priority)
+	} else {
+		task, err = tasks.Create(agentID, p.Title, p.Description, causes, convID, priority)
+	}
 	if err != nil {
 		return err
 	}

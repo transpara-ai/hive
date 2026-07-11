@@ -303,6 +303,9 @@ func (r *Runtime) hasAuthorityRequest(action safety.ProtectedAction, target stri
 		return false
 	}
 	for _, ev := range events {
+		if !r.eventInCurrentRun(ev) {
+			continue
+		}
 		content, ok := ev.Content().(AuthorityRequestRecordedContent)
 		if ok && content.ActionName == string(action) && content.Target == target {
 			return true

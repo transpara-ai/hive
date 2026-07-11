@@ -2,6 +2,8 @@ package hive
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,22 +103,28 @@ type IssueScanReadyPREvidenceRecordResult struct {
 type IssueScanReadyPRRunner func(context.Context, IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error)
 
 type IssueScanReadyPRRunnerContext struct {
-	Kind                    string                     `json:"kind"`
-	LifecycleVersion        string                     `json:"lifecycle_version"`
-	RunID                   string                     `json:"run_id"`
-	FactoryOrderID          string                     `json:"factory_order_id"`
-	Repository              string                     `json:"repository"`
-	DraftPRReceiptRef       string                     `json:"draft_pr_receipt_ref,omitempty"`
-	DraftPRReceipt          *TransparaAIDraftPRReceipt `json:"-"`
-	ReadyStageTaskID        string                     `json:"ready_stage_task_id"`
-	BlockerStageTaskID      string                     `json:"blocker_stage_task_id"`
-	ImplementationTaskID    string                     `json:"implementation_task_id"`
-	OperateBranch           string                     `json:"operate_branch"`
-	OperateCommit           string                     `json:"operate_commit"`
-	OperateRange            string                     `json:"operate_range,omitempty"`
-	ChangedFilesSummary     string                     `json:"changed_files_summary,omitempty"`
-	ExpectedReadyPREvidence IssueScanReadyPREvidence   `json:"expected_ready_pr_evidence"`
-	BoundaryDisclaimers     []string                   `json:"boundary_disclaimers,omitempty"`
+	Kind              string                     `json:"kind"`
+	LifecycleVersion  string                     `json:"lifecycle_version"`
+	RunID             string                     `json:"run_id"`
+	FactoryOrderID    string                     `json:"factory_order_id"`
+	Repository        string                     `json:"repository"`
+	DraftPRReceiptRef string                     `json:"draft_pr_receipt_ref,omitempty"`
+	DraftPRReceipt    *TransparaAIDraftPRReceipt `json:"-"`
+	// MarkReadyApprovalLookup and ConsumeMarkReadyApproval are injected by the
+	// runtime (bound to its stores) and never serialized: external runners can
+	// neither supply nor observe them. The managed finalizer refuses when
+	// either is absent (fail closed).
+	MarkReadyApprovalLookup  MarkReadyApprovalLookup   `json:"-"`
+	ConsumeMarkReadyApproval MarkReadyApprovalConsumer `json:"-"`
+	ReadyStageTaskID         string                    `json:"ready_stage_task_id"`
+	BlockerStageTaskID       string                    `json:"blocker_stage_task_id"`
+	ImplementationTaskID     string                    `json:"implementation_task_id"`
+	OperateBranch            string                    `json:"operate_branch"`
+	OperateCommit            string                    `json:"operate_commit"`
+	OperateRange             string                    `json:"operate_range,omitempty"`
+	ChangedFilesSummary      string                    `json:"changed_files_summary,omitempty"`
+	ExpectedReadyPREvidence  IssueScanReadyPREvidence  `json:"expected_ready_pr_evidence"`
+	BoundaryDisclaimers      []string                  `json:"boundary_disclaimers,omitempty"`
 }
 
 type IssueScanReadyPRRunnerResult struct {
@@ -301,6 +309,15 @@ func (r *Runtime) RunConfiguredIssueScanReadyPRRunner(ctx context.Context, runID
 	if err != nil {
 		if errors.Is(err, errIssueScanReadyPRFinalizerAwaitingDraftReceipt) {
 			return result, false, nil
+		}
+		var blocked *IssueScanReadyPRBlockedError
+		if errors.As(err, &blocked) {
+			// The PR was mutated and then failed ready-state verification:
+			// record the durable blocked evidence, then still surface the
+			// error — the chain stops here and the PR is not Human-ready.
+			if _, recordErr := r.RecordIssueScanReadyPRBlocked(runID, blocked.Evidence); recordErr != nil {
+				return result, true, errors.Join(err, fmt.Errorf("record blocked evidence: %w", recordErr))
+			}
 		}
 		return result, true, err
 	}
@@ -647,6 +664,16 @@ func (r *Runtime) issueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRR
 	if stageCompleted {
 		return IssueScanReadyPRRunnerContext{}, false, nil
 	}
+	// Blocked evidence is terminal for the managed chain: once recorded, the
+	// finalizer never re-runs (and so can never reuse a recorded approval)
+	// until a human remediates. Fail closed on unreadable artifacts.
+	blockedID, blocked, err := r.findIssueScanReadyStageArtifactLabel(readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel)
+	if err != nil {
+		return IssueScanReadyPRRunnerContext{}, false, err
+	}
+	if blocked {
+		return IssueScanReadyPRRunnerContext{}, false, fmt.Errorf("%w (run %q, evidence artifact %s)", ErrIssueScanReadyPRBlockedPendingHuman, runID, blockedID.Value())
+	}
 	order := factoryOrderFromRunLaunch(content, orderID)
 	drafts, err := issueScanLifecycleStageTaskDrafts(content, order)
 	if err != nil {
@@ -704,21 +731,23 @@ func (r *Runtime) issueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRR
 		HumanApprovalRequired: true,
 	}
 	return IssueScanReadyPRRunnerContext{
-		Kind:                    issueScanReadyPRRunnerContextKind,
-		LifecycleVersion:        issueScanLifecycleVersion,
-		RunID:                   strings.TrimSpace(content.RunID),
-		FactoryOrderID:          orderID,
-		Repository:              repo,
-		DraftPRReceiptRef:       draftReceiptRef,
-		DraftPRReceipt:          draftReceipt,
-		ReadyStageTaskID:        readyStage.TaskID.Value(),
-		BlockerStageTaskID:      blockerStage.TaskID.Value(),
-		ImplementationTaskID:    implementationTaskID.Value(),
-		OperateBranch:           implementation.OperateBranch,
-		OperateCommit:           implementation.OperateCommit,
-		OperateRange:            implementation.OperateRange,
-		ChangedFilesSummary:     implementation.ChangedFilesSummary,
-		ExpectedReadyPREvidence: expected,
+		Kind:                     issueScanReadyPRRunnerContextKind,
+		LifecycleVersion:         issueScanLifecycleVersion,
+		RunID:                    strings.TrimSpace(content.RunID),
+		FactoryOrderID:           orderID,
+		Repository:               repo,
+		DraftPRReceiptRef:        draftReceiptRef,
+		DraftPRReceipt:           draftReceipt,
+		MarkReadyApprovalLookup:  NewStoreMarkReadyApprovalLookup(r.store),
+		ConsumeMarkReadyApproval: r.issueScanMarkReadyApprovalConsumer(runID),
+		ReadyStageTaskID:         readyStage.TaskID.Value(),
+		BlockerStageTaskID:       blockerStage.TaskID.Value(),
+		ImplementationTaskID:     implementationTaskID.Value(),
+		OperateBranch:            implementation.OperateBranch,
+		OperateCommit:            implementation.OperateCommit,
+		OperateRange:             implementation.OperateRange,
+		ChangedFilesSummary:      implementation.ChangedFilesSummary,
+		ExpectedReadyPREvidence:  expected,
 		BoundaryDisclaimers: compactStrings([]string{
 			"ready PR evidence is not Human approval",
 			"ready PR evidence is not merge or deploy authorization",
@@ -1308,4 +1337,227 @@ func issueScanReadySourceRefs(evidence issueScanReadyStageEvidence) []string {
 	}
 	refs = append(refs, evidence.ReadyPR.SourceRefs...)
 	return compactStrings(refs)
+}
+
+// ErrIssueScanReadyPRBlockedPendingHuman is returned by the managed chain
+// when the ready stage already carries blocked ready-PR evidence: the
+// finalizer will not re-run until a human remediates. Terminal by design —
+// automatic retry after a blocked mutation could reuse authority the human
+// granted once.
+var ErrIssueScanReadyPRBlockedPendingHuman = errors.New("issue-scan ready stage carries blocked ready-PR evidence; the managed finalizer will not re-run until a human remediates")
+
+// IssueScanMarkReadyConsumptionArtifactLabel labels the durable Work artifact
+// recording single-use consumption of a mark-ready approval nonce.
+const IssueScanMarkReadyConsumptionArtifactLabel = "mark_ready_approval_consumed"
+
+const issueScanMarkReadyConsumptionKind = "issue_scan_mark_ready_approval_consumed"
+
+// issueScanMarkReadyConsumptionRecord is the durable single-use consumption
+// record; the nonce is the identity the consumer scans on, and the claim id
+// disambiguates concurrent claimants of the same nonce.
+type issueScanMarkReadyConsumptionRecord struct {
+	Kind             string `json:"kind"`
+	LifecycleVersion string `json:"lifecycle_version"`
+	RunID            string `json:"run_id"`
+	FactoryOrderID   string `json:"factory_order_id,omitempty"`
+	Repository       string `json:"repository,omitempty"`
+	PRNumber         int    `json:"pr_number,omitempty"`
+	PRURL            string `json:"pr_url,omitempty"`
+	HeadSHA          string `json:"head_sha,omitempty"`
+	SingleUseNonce   string `json:"single_use_nonce"`
+	ClaimID          string `json:"claim_id"`
+}
+
+// issueScanMarkReadyApprovalConsumer binds the runtime's durable single-use
+// consumption record to a run, for injection into the runner context.
+func (r *Runtime) issueScanMarkReadyApprovalConsumer(runID string) MarkReadyApprovalConsumer {
+	return func(_ context.Context, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget) error {
+		return r.consumeIssueScanMarkReadyApproval(runID, mutation, approval)
+	}
+}
+
+// consumeIssueScanMarkReadyApproval durably records single-use consumption of
+// the approval nonce BEFORE the ready mutation. The nonce is global: one
+// human approval is ONE transition, regardless of which run consumes it. It
+// refuses when any run has already consumed the nonce, when any recorded
+// consumption artifact is unreadable, or when this claim does not win the
+// post-append total-order verification (fail closed on every path).
+//
+// Concurrency: check-then-append alone races itself, so the claim is
+// resolved append-then-verify-winner — the event chain totally orders all
+// claims, exactly one concurrent claimant observes its own claim as the
+// OLDEST for the nonce, and every other claimant refuses.
+func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget) error {
+	if r == nil || r.store == nil || r.tasks == nil {
+		return fmt.Errorf("runtime store and task store are required")
+	}
+	nonce := strings.TrimSpace(approval.SingleUseNonce)
+	if nonce == "" {
+		return fmt.Errorf("mark-ready approval carries no single-use nonce")
+	}
+	content, orderID, requestID, readyStage, err := r.issueScanReadyStageTarget(runID)
+	if err != nil {
+		return err
+	}
+	claims, err := r.issueScanMarkReadyNonceClaims(nonce)
+	if err != nil {
+		return err
+	}
+	if len(claims) > 0 {
+		// A consumed nonce NEVER authorizes again — not for another run, not
+		// for another target, and not for the same run retrying: after a
+		// re-draft, a retry would flip the PR a SECOND time on one approval.
+		// A stalled run is remediated by a fresh human approval with a new
+		// nonce. (The round-4 same-run re-entry allowance was withdrawn in
+		// CFAR round 6 for exactly this reuse hole.)
+		return fmt.Errorf("mark-ready approval nonce %q was already consumed by run %q: a single-use approval never authorizes twice (a stalled run needs a fresh human approval with a new nonce)", nonce, claims[0].RunID)
+	}
+	claimID, err := issueScanMarkReadyClaimID()
+	if err != nil {
+		return err
+	}
+	record := issueScanMarkReadyConsumptionRecord{
+		Kind:             issueScanMarkReadyConsumptionKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            strings.TrimSpace(runID),
+		FactoryOrderID:   orderID,
+		Repository:       mutation.Repository,
+		PRNumber:         mutation.PRNumber,
+		PRURL:            mutation.PRURL,
+		HeadSHA:          mutation.HeadSHA,
+		SingleUseNonce:   nonce,
+		ClaimID:          claimID,
+	}
+	body, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal mark-ready consumption record: %w", err)
+	}
+	causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID})
+	if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, IssueScanMarkReadyConsumptionArtifactLabel, "application/json", string(body), causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+		return fmt.Errorf("record mark-ready approval consumption: %w", err)
+	}
+	claims, err = r.issueScanMarkReadyNonceClaims(nonce)
+	if err != nil {
+		return err
+	}
+	if len(claims) == 0 {
+		return fmt.Errorf("mark-ready approval consumption record was not found after append")
+	}
+	if claims[0].ClaimID != claimID {
+		return fmt.Errorf("mark-ready approval nonce %q was claimed concurrently (winning run %q): refusing the losing claim", nonce, claims[0].RunID)
+	}
+	return nil
+}
+
+// issueScanMarkReadyClaimID mints a unique claimant identity so concurrent
+// claims of the same nonce (even for the same run) are distinguishable.
+func issueScanMarkReadyClaimID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("mint mark-ready claim id: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// issueScanMarkReadyNonceClaims returns every recorded consumption claim for
+// the nonce ANYWHERE in the store, oldest first, paging through ALL artifact
+// events (a single bounded page could hide an old claim under newer events).
+// An unreadable consumption record can never prove the nonce unconsumed, so
+// it errors instead of skipping.
+func (r *Runtime) issueScanMarkReadyNonceClaims(nonce string) ([]issueScanMarkReadyConsumptionRecord, error) {
+	events, err := eventsByTypePaginated(r.store, work.EventTypeTaskArtifact, defaultOperatorProjectionLimit)
+	if err != nil {
+		return nil, fmt.Errorf("scan artifact events for mark-ready consumption: %w", err)
+	}
+	var claims []issueScanMarkReadyConsumptionRecord
+	// eventsByTypePaginated returns newest-first; walk backwards so claims
+	// come out oldest-first (the winner order the consumer relies on).
+	for i := len(events) - 1; i >= 0; i-- {
+		content, ok := events[i].Content().(work.TaskArtifactContent)
+		if !ok || strings.TrimSpace(content.Label) != IssueScanMarkReadyConsumptionArtifactLabel {
+			continue
+		}
+		var record issueScanMarkReadyConsumptionRecord
+		if err := json.Unmarshal([]byte(content.Body), &record); err != nil {
+			return nil, fmt.Errorf("unreadable mark-ready consumption record %s: %w", events[i].ID().Value(), err)
+		}
+		if strings.TrimSpace(record.SingleUseNonce) == nonce {
+			claims = append(claims, record)
+		}
+	}
+	return claims, nil
+}
+
+// findIssueScanReadyStageArtifactLabel reports whether any artifact with the
+// label exists on the stage, regardless of body, paging through ALL artifact
+// events — a single bounded page could hide terminal evidence under newer
+// events.
+func (r *Runtime) findIssueScanReadyStageArtifactLabel(stageTaskID types.EventID, label string) (types.EventID, bool, error) {
+	events, err := eventsByTypePaginated(r.store, work.EventTypeTaskArtifact, defaultOperatorProjectionLimit)
+	if err != nil {
+		return types.EventID{}, false, fmt.Errorf("scan ready stage artifacts: %w", err)
+	}
+	for _, ev := range events {
+		content, ok := ev.Content().(work.TaskArtifactContent)
+		if !ok || content.TaskID != stageTaskID {
+			continue
+		}
+		if strings.TrimSpace(content.Label) == strings.TrimSpace(label) {
+			return ev.ID(), true, nil
+		}
+	}
+	return types.EventID{}, false, nil
+}
+
+// IssueScanReadyPRBlockedEvidenceBody serializes blocked evidence for durable
+// Work artifact storage.
+func IssueScanReadyPRBlockedEvidenceBody(evidence IssueScanReadyPRBlockedEvidence) (string, error) {
+	evidence.Kind = valueOr(evidence.Kind, issueScanReadyPRBlockedEvidenceKind)
+	evidence.LifecycleVersion = valueOr(evidence.LifecycleVersion, issueScanLifecycleVersion)
+	encoded, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal issue-scan ready PR blocked evidence: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// RecordIssueScanReadyPRBlocked records blocked-transition evidence as a Work
+// artifact on the run's ready stage. Idempotent on identical evidence bodies.
+// Absence of evidence is never success: callers surface the blocking error
+// regardless; this only makes the blocked state durable and operator-visible.
+func (r *Runtime) RecordIssueScanReadyPRBlocked(runID string, evidence IssueScanReadyPRBlockedEvidence) (bool, error) {
+	if r == nil || r.store == nil || r.tasks == nil {
+		return false, fmt.Errorf("runtime store and task store are required")
+	}
+	content, orderID, requestID, readyStage, err := r.issueScanReadyStageTarget(runID)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(evidence.RunID) == "" {
+		evidence.RunID = strings.TrimSpace(runID)
+	}
+	if strings.TrimSpace(evidence.FactoryOrderID) == "" {
+		evidence.FactoryOrderID = orderID
+	}
+	body, err := IssueScanReadyPRBlockedEvidenceBody(evidence)
+	if err != nil {
+		return false, err
+	}
+	_, exists, err := r.findIssueScanReadyStageArtifactID(readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, body)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID})
+	if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, "application/json", body, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+		return false, fmt.Errorf("record issue-scan ready PR blocked evidence: %w", err)
+	}
+	if _, exists, err = r.findIssueScanReadyStageArtifactID(readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, body); err != nil {
+		return false, err
+	} else if !exists {
+		return false, fmt.Errorf("issue-scan ready PR blocked evidence artifact was not found after append")
+	}
+	return true, nil
 }
