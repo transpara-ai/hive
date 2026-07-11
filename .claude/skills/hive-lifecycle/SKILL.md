@@ -184,7 +184,18 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 | `POST /api/hive/runs` † | launch an operator-initiated run |
 | `POST /api/hive/model-selection/role-policy` † | update a role's model policy |
 
-> **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it, so the deployed API is **read-only** (GET routes only).
+> **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it — but do **not** assume read-only from the unit file: variables inherited from the systemd `--user` manager don't appear in unit `Environment=` lines. Verify from the running process's effective environment (names only, never values) before treating the API as read-only:
+>
+> ```bash
+> pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+> if [ "${pid:-0}" -gt 0 ] 2>/dev/null; then
+>   tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+> else
+>   echo "service not running — mode UNKNOWN"
+> fi
+> ```
+>
+> `0` = read-only; non-zero = **writer mode**; service down = mode unknown (fail closed).
 
 ```bash
 curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
