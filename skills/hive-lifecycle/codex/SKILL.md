@@ -277,10 +277,16 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
 
   ```bash
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envnames=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
-    printf '%s\n' "$envnames" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset (built-in defaults)"
+  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
+    # the --catalog flag OVERRIDES the env var (the flag's default is the env value)
+    flagval=$(printf '%s\n' "$args" | grep -A1 -x -- '--catalog' | tail -1; printf '%s\n' "$args" | grep -- '^--catalog=' | cut -d= -f2-)
+    if [ -n "$flagval" ]; then
+      echo "catalog (from --catalog flag): $flagval"
+    else
+      printf '%s\n' "$envlines" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset and no --catalog flag (built-in defaults)"
+    fi
   else
-    echo "cannot read process environment — catalog UNKNOWN"
+    echo "cannot read process cmdline/environment — catalog UNKNOWN"
   fi
   ```
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
@@ -350,7 +356,9 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
   argvline=$(printf '%s\n' "$execstart" | grep -o 'argv\[\]=[^;]*' | head -1)
   case "$launcher" in
     /Transpara/transpara-ai/repos/hive/hive) : ;;   # the canonical built binary, exact path (a wrapper merely NAMED hive elsewhere is rejected)
-    */go)
+    /snap/bin/go|/usr/bin/go|/usr/local/go/bin/go)
+      # trusted Go toolchain paths only — /tmp/go or version-manager shims are
+      # opaque wrappers even with canonical-looking arguments
       if [ "$wd" = "/Transpara/transpara-ai/repos/hive" ] && printf '%s\n' "$argvline" | grep -q 'go run \./cmd/hive '; then
         :   # canonical `go run ./cmd/hive …` from the hive repo — argv-transparent
       else
@@ -366,16 +374,17 @@ cleared=0
 case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " in
   *" LOVYOU_API_KEY "*) cleared=1;;
 esac
-if [ "$unknown" -ne 0 ]; then
-  echo "VERDICT: a source is unreadable — do NOT start"
-elif [ "$execcred" -ne 0 ]; then
-  echo "VERDICT: ExecStart injects the credential — the clearing drop-in cannot help; do NOT start without explicit production authorization"
-elif [ "$cred" -ne 0 ] && [ "$cleared" -eq 0 ]; then
-  echo "VERDICT: credential present and not cleared — do NOT start without explicit production authorization (or apply the clearing drop-in)"
-elif [ "$auto" -ne 0 ]; then
-  echo "VERDICT: full-autonomy flags in ExecStart — starting RESUMES FULL AUTONOMY; start ONLY with explicit current-turn approval"
-else
+blocked=0
+[ "$unknown" -ne 0 ] && { echo "BLOCKER: a source is unreadable"; blocked=1; }
+[ "$execcred" -ne 0 ] && { echo "BLOCKER: ExecStart injects the credential — the clearing drop-in cannot help; needs explicit production authorization"; blocked=1; }
+if [ "$cred" -ne 0 ] && [ "$cleared" -eq 0 ]; then
+  echo "BLOCKER: credential present and not cleared — needs explicit production authorization (or apply the clearing drop-in)"; blocked=1
+fi
+[ "$auto" -ne 0 ] && { echo "BLOCKER: full-autonomy flags in ExecStart — starting RESUMES FULL AUTONOMY; needs explicit current-turn approval"; blocked=1; }
+if [ "$blocked" -eq 0 ]; then
   echo "VERDICT: OK to start"
+else
+  echo "VERDICT: do NOT start — EVERY blocker above must be individually resolved or explicitly authorized"
 fi
 ```
 
