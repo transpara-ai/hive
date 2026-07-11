@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.5.0
+version: 0.6.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -51,7 +51,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
 - **R5 — No private addresses or secrets.** No literal private-network
   addresses (hostnames/`localhost` only) and no credentials anywhere under
   `skills/`.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.5.0, CFAR rounds 1–3 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.6.0, CFAR rounds 1–4 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -81,6 +81,13 @@ authority: repository documentation/skill-source preservation only; no Hive star
   steps — the optional runtime daemon launch (Hive Up step 3) and the hive
   unit bounce in both restart sections run only inside the `pg_isready`
   success branch (round-2's gate covered only the API services).
+  Round 4 (v0.6.0): (j) both Common Problems tables keep crash-loop
+  diagnosis read-only and require explicit user confirmation before proposing
+  the separate mutating Postgres recovery action. Code inspection also
+  confirmed that `buildCouncilOperateInstruction` is reachable only from the
+  standalone `council` verb, not from `civilization run` or `civilization
+  daemon`; those examples are therefore outside the council credential-prompt
+  path repaired in (h).
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

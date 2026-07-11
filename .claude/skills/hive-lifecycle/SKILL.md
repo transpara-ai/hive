@@ -95,13 +95,13 @@ fi
 ```bash
 # Stop the runtime first, then the API services.
 systemctl --user stop hive 2>/dev/null                    # if started as the unit
-pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
-sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
+pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null             # graceful; matches both `go run` and its compiled child
+sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null    # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
 # port (a blind port-kill could hit pgadmin or a dev server):
-pkill -f 'cmd/work-server|exe/work-server' 2>/dev/null
-pkill -f 'cmd/hive-ops-api|exe/hive-ops-api' 2>/dev/null
+pkill -f '[c]md/work-server|[e]xe/work-server' 2>/dev/null
+pkill -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' 2>/dev/null
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -122,11 +122,11 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
   if systemctl --user is-active --quiet hive; then
     systemctl --user restart hive
-  elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+  elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
-    pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
-    pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'; sleep 3
-    pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+    pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'
+    pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)'; sleep 3
+    pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
   else
     echo "hive runtime not running (on-demand) — left stopped"
   fi
@@ -145,7 +145,7 @@ systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|M
 
 echo "=== hive runtime (systemd unit OR manual go-run) ==="
 if systemctl --user is-active --quiet hive; then echo "hive.service: active"
-elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
+elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
 else echo "runtime: stopped"; fi
 ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 
@@ -154,9 +154,9 @@ docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'
 docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events' 2>/dev/null || echo "DB unreachable"
 
 echo "=== endpoint health ==="
-curl -s -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
-curl -s -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://127.0.0.1:8085/health
-curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
+curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
+curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://127.0.0.1:8085/health
+curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
 **Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Diagnose read-only:
@@ -187,7 +187,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it, so the deployed API is **read-only** (GET routes only).
 
 ```bash
-curl -s -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
+curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
      http://127.0.0.1:8085/api/hive/operator-projection | jq .
 ```
 
@@ -206,7 +206,7 @@ curl -s -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
+curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
 ```
 
 ## Model Catalog
@@ -227,7 +227,7 @@ go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
-LOVYOU_API_KEY= go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 # ⚠ council's --api DEFAULTS to https://transpara.ai and, when LOVYOU_API_KEY is set,
 #   POSTS up to 2000 chars of the deliberation report to the remote social feed —
 #   AND interpolates that key into every council agent's prompt (exposing the bearer
@@ -265,7 +265,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
-pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; systemctl --user stop hive 2>/dev/null; sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
@@ -277,7 +277,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
-pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
+pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null; sleep 3; pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null   # kill any manual go-run runtime first
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 cd /Transpara/transpara-ai/repos/hive
 docker compose down -v && docker compose up -d postgres
@@ -287,7 +287,7 @@ docker compose down -v && docker compose up -d postgres
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Service `activating (auto-restart)` | Postgres down — DB connection fails on start | `docker compose up -d postgres` (from `repos/hive`); services self-heal |
+| Service `activating (auto-restart)` | Postgres down — DB connection fails on start | inspect `journalctl --user -u hive-ops-api`; propose starting Postgres and wait for explicit user confirmation |
 | `curl :8085` / `:8080` connection refused | that service not running / crash-looping | `systemctl --user status <svc>`; see crash-loop diagnosis |
 | `401 unauthorized` from `:8085` | missing/wrong bearer | add `-H "Authorization: Bearer $HIVE_OPS_API_KEY"` (default `dev`) |
 | "Invalid API key" on all agents | `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` set | `unset` them; remove from shell profile |
