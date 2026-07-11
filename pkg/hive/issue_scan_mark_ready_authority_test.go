@@ -2,6 +2,9 @@ package hive
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -52,11 +55,16 @@ func seedMarkReadyAnchor(t *testing.T, s store.Store, factory *event.EventFactor
 // seedMarkReadyDecision mirrors seedDraftPRDecision for the mark-ready action.
 func seedMarkReadyDecision(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, requestID types.EventID, outcome string, target MarkReadyTarget) {
 	t.Helper()
+	seedMarkReadyDecisionWithRole(t, s, factory, signer, human, conv, requestID, outcome, target, "human")
+}
+
+func seedMarkReadyDecisionWithRole(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, requestID types.EventID, outcome string, target MarkReadyTarget, deciderRole string) {
+	t.Helper()
 	content := AuthorityDecisionRecordedContent{
 		DecisionID:     requestID.Value(),
 		RequestID:      requestID,
 		ApproverActor:  human,
-		DeciderRole:    "human",
+		DeciderRole:    deciderRole,
 		Outcome:        outcome,
 		ApprovedTarget: target.Repository + " #41",
 		ApprovedAction: string(safety.ActionRepoPullRequestMarkReady),
@@ -179,6 +187,25 @@ func TestFindApprovedMarkReadyTarget(t *testing.T) {
 		}
 	})
 
+	t.Run("non-human decider never authorizes", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecisionWithRole(t, s, factory, signer, human, conv, requestID, "approved", target, "operator")
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err == nil {
+			t.Fatal("a non-human decision must never satisfy the human mark-ready boundary")
+		}
+	})
+
+	t.Run("non-human decision never shadows a human decision", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecision(t, s, factory, signer, human, conv, requestID, "approved", target)
+		seedMarkReadyDecisionWithRole(t, s, factory, signer, human, conv, requestID, "denied", target, "operator")
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err != nil {
+			t.Fatalf("only human decisions carry mark-ready authority in either direction, got %v", err)
+		}
+	})
+
 	t.Run("draft-pr-create approval never authorizes readying", func(t *testing.T) {
 		s, factory, signer, human, conv := newDecisionTestStore(t)
 		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
@@ -264,5 +291,101 @@ func TestIssueScanMarkReadyApprovalConsumerFailsClosedOnUnreadableRecord(t *test
 	consume := rt.issueScanMarkReadyApprovalConsumer(runID)
 	if err := consume(context.Background(), mutation, target); err == nil {
 		t.Fatal("an unreadable consumption record must refuse consumption (fail closed)")
+	}
+}
+
+func appendMarkReadyConsumptionRecordForTest(t *testing.T, rt *Runtime, writer *operatorRunLaunchWriter, taskID types.EventID, nonce, claimID string) {
+	t.Helper()
+	record := issueScanMarkReadyConsumptionRecord{
+		Kind:             issueScanMarkReadyConsumptionKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            "run-foreign-0001",
+		SingleUseNonce:   nonce,
+		ClaimID:          claimID,
+	}
+	body, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal foreign consumption record: %v", err)
+	}
+	if err := rt.tasks.AddArtifact(writer.human, taskID, IssueScanMarkReadyConsumptionArtifactLabel, "application/json", string(body), []types.EventID{taskID}, writer.conv); err != nil {
+		t.Fatalf("append foreign consumption record: %v", err)
+	}
+}
+
+// TestIssueScanMarkReadyConsumptionIsGlobalAcrossTasks proves one human
+// approval is ONE transition regardless of which run consumes it: a
+// consumption record on any other task still refuses this run's consumer
+// (CFAR hive#272 round 2, finding 2).
+func TestIssueScanMarkReadyConsumptionIsGlobalAcrossTasks(t *testing.T) {
+	rt, writer, runID, orderID, implementationTask, _ := issueScanReadyStageFixtureForTest(t)
+	appendMarkReadyConsumptionRecordForTest(t, rt, writer, implementationTask.ID, "nonce-single-use-1", "claim-foreign")
+	evidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	mutation, target := markReadyConsumptionFixturesForTest(runID, orderID, evidence, "nonce-single-use-1")
+	consume := rt.issueScanMarkReadyApprovalConsumer(runID)
+	if err := consume(context.Background(), mutation, target); err == nil {
+		t.Fatal("a consumption record on another task must still refuse the nonce (global single-use)")
+	}
+}
+
+// TestIssueScanMarkReadyNonceClaimsAreOrderedOldestFirst proves the total
+// order the concurrent-claim resolution relies on: the chain's event order
+// makes exactly one claimant the oldest, so append-then-verify-winner is
+// race-safe without store-level compare-and-set (CFAR hive#272 round 2,
+// finding 3).
+func TestIssueScanMarkReadyNonceClaimsAreOrderedOldestFirst(t *testing.T) {
+	rt, writer, _, _, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
+	appendMarkReadyConsumptionRecordForTest(t, rt, writer, readyStage.ID, "nonce-race-1", "claim-a")
+	appendMarkReadyConsumptionRecordForTest(t, rt, writer, implementationTask.ID, "nonce-race-1", "claim-b")
+	claims, err := rt.issueScanMarkReadyNonceClaims("nonce-race-1")
+	if err != nil {
+		t.Fatalf("issueScanMarkReadyNonceClaims: %v", err)
+	}
+	if len(claims) != 2 || claims[0].ClaimID != "claim-a" || claims[1].ClaimID != "claim-b" {
+		t.Fatalf("claims = %+v, want oldest-first [claim-a claim-b]", claims)
+	}
+}
+
+// TestIssueScanMarkReadyChecksSurviveArtifactPagination proves the
+// authorization reads page through the WHOLE store: a consumption record and
+// blocked evidence buried under more than one page of newer artifact events
+// still refuse reuse and re-runs (CFAR hive#272 round 2, finding 4).
+func TestIssueScanMarkReadyChecksSurviveArtifactPagination(t *testing.T) {
+	if testing.Short() {
+		t.Skip("appends >1000 events")
+	}
+	rt, writer, runID, orderID, implementationTask, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	mutation, target := markReadyConsumptionFixturesForTest(runID, orderID, readyEvidence, "nonce-buried-1")
+	consume := rt.issueScanMarkReadyApprovalConsumer(runID)
+	if err := consume(context.Background(), mutation, target); err != nil {
+		t.Fatalf("first consumption: %v", err)
+	}
+	if _, err := rt.RecordIssueScanReadyPRBlocked(runID, IssueScanReadyPRBlockedEvidence{
+		RunID:          runID,
+		FactoryOrderID: orderID,
+		Repository:     readyEvidence.Repository,
+		PRNumber:       readyEvidence.PRNumber,
+		PRURL:          readyEvidence.PRURL,
+		HeadSHA:        readyEvidence.HeadSHA,
+		FailureReason:  "ready-state review failed after the mutation",
+		Remediation:    IssueScanReadyPRRemediationReDraftUnauthorized,
+		SingleUseNonce: "nonce-buried-1",
+	}); err != nil {
+		t.Fatalf("record blocked evidence: %v", err)
+	}
+	for i := 0; i < 1050; i++ {
+		if err := rt.tasks.AddArtifact(writer.human, implementationTask.ID, "pagination-noise", "text/plain", fmt.Sprintf("noise %d", i), []types.EventID{implementationTask.ID}, writer.conv); err != nil {
+			t.Fatalf("append noise artifact %d: %v", i, err)
+		}
+	}
+	if err := consume(context.Background(), mutation, target); err == nil {
+		t.Fatal("a consumption record buried beyond one artifact page must still refuse reuse")
+	}
+	_, _, err := rt.issueScanReadyPRRunnerContext(runID)
+	if err == nil || !errors.Is(err, ErrIssueScanReadyPRBlockedPendingHuman) {
+		t.Fatalf("blocked evidence buried beyond one artifact page must still be terminal, got %v", err)
 	}
 }

@@ -377,9 +377,9 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			},
 			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
-				"recorded approved pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying)",
-				"the approval's single-use nonce has no recorded consumption (mark_ready_approval_consumed artifact); consumption is recorded durably before the mutation",
-				"no issue_scan_ready_pr_blocked artifact is recorded on the ready stage (blocked evidence is terminal until explicit human remediation)",
+				"recorded approved human-decided pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying; non-human decisions neither authorize nor shadow human ones)",
+				"the approval's single-use nonce has no recorded consumption anywhere in the store (mark_ready_approval_consumed artifact, cross-run, full pagination); consumption is recorded durably before the mutation with append-then-verify-winner claim ordering",
+				"no issue_scan_ready_pr_blocked artifact is recorded on the ready stage (blocked evidence is terminal until explicit human remediation; the check pages through all artifact events)",
 				"ready_state_review_runner returns passing exact-head receipt",
 			},
 			RecordedArtifacts: []string{

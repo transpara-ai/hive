@@ -73,12 +73,14 @@ func ParseMarkReadyScope(scope []string) (MarkReadyTarget, error) {
 
 // FindApprovedMarkReadyTarget is the GOVERNANCE gate lookup for the managed
 // draft→ready transition. It scans recorded authority decisions (newest
-// first, latest-wins like findAuthorityDecisionByRequestID) for an APPROVED
-// pull_request.mark_ready decision whose scope exactly matches the
-// run-derived target: repository (case-insensitive), PR number, and head SHA
-// (case-insensitive, matching the runtime's EqualFold semantics). It refuses
-// — no target — when no such decision exists, when the newest matching
-// decision is not approved, or when the store is unreadable. It never writes.
+// first, latest-wins like findAuthorityDecisionByRequestID) for an APPROVED,
+// HUMAN-decided pull_request.mark_ready decision whose scope exactly matches
+// the run-derived target: repository (case-insensitive), PR number, and head
+// SHA (case-insensitive, matching the runtime's EqualFold semantics). It
+// refuses — no target — when no such decision exists, when the newest
+// matching human decision is not approved, or when the store is unreadable.
+// Non-human decisions are skipped entirely: they can neither authorize nor
+// shadow a human decision. It never writes.
 func FindApprovedMarkReadyTarget(s store.Store, repository string, prNumber int, headSHA string) (MarkReadyTarget, error) {
 	repository = strings.ToLower(strings.TrimSpace(repository))
 	headSHA = strings.TrimSpace(headSHA)
@@ -94,6 +96,12 @@ func FindApprovedMarkReadyTarget(s store.Store, repository string, prNumber int,
 		for _, ev := range page.Items() {
 			content, ok := ev.Content().(AuthorityDecisionRecordedContent)
 			if !ok || content.ApprovedAction != string(safety.ActionRepoPullRequestMarkReady) {
+				continue
+			}
+			// Only HUMAN decisions carry mark-ready authority, in either
+			// direction — mirroring the draft-PR authority path. A non-human
+			// record can neither authorize nor shadow a human decision.
+			if !strings.EqualFold(strings.TrimSpace(content.DeciderRole), "human") {
 				continue
 			}
 			target, err := ParseMarkReadyScope(content.Scope)

@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.3.0
+version: 0.4.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -27,13 +27,16 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
 
 ## Requirements
 
-- **R1 — Distinct mark-ready authority.** A new recorded authority action
-  (`pull_request.mark_ready` discriminator alongside the existing
-  `pull_request.create`) carries the exact ready target (repository, PR
-  number, PR URL, head SHA), an explicit `re_draft_on_failure` flag, and a
+- **R1 — Distinct mark-ready authority, human-decided only.** A new recorded
+  authority action (`pull_request.mark_ready` discriminator alongside the
+  existing `pull_request.create`) carries the exact ready target (repository,
+  PR number, PR URL, head SHA), an explicit `re_draft_on_failure` flag, and a
   single-use nonce. Draft-creation approval alone can never authorize
   readying (allowlist: absence of a matching approved mark-ready record ⇒
-  refuse).
+  refuse). Only HUMAN-decided records carry mark-ready authority in either
+  direction, mirroring the draft-PR path: non-human decisions are skipped —
+  they can neither authorize nor shadow a human decision. (v0.4.0, from CFAR
+  round 2.)
 - **R2 — Fail-closed approval gate with durable single-use consumption.**
   `RunIssueScanReadyPRFinalizer` refuses to call `MarkReadyForReview` unless a
   recorded, **approved**, non-stale mark-ready decision exactly matches the
@@ -46,7 +49,15 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   truth-up: the v0.2.0 "structural single-use" deferral was refuted in CFAR
   round 1 — a re-draft returns the PR to draft state, so the pre-mutation
   draft-state requirement does NOT reject a second flip; consumption records
-  are therefore required in this slice, not deferred.)
+  are therefore required in this slice, not deferred.) The nonce is GLOBAL —
+  one human approval is one transition regardless of which run consumes it —
+  and the claim is race-safe without store-level compare-and-set: the
+  consumer resolves append-then-verify-winner over the event chain's total
+  order, so exactly one concurrent claimant observes its claim as the oldest
+  and every other claimant refuses. All consumption and blocked-evidence
+  reads page through the WHOLE store; a single bounded artifact page could
+  hide an old claim or terminal evidence under newer events. (v0.4.0, from
+  CFAR round 2.)
 - **R3 — Failure remediation, re-draft under recorded scope only.** When
   ready-state review fails, errors, or cannot run after the draft→ready
   mutation: never record ready-for-Human evidence; if the matching approval's
@@ -79,8 +90,10 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   undecided, stale/mismatched target (each field), unreadable store, approval
   without re-draft flag, approval with flag + client success, client error,
   re-draft returning unproven state, review failure before/after mutation,
-  evidence-append failure, nonce reuse, unreadable consumption record,
-  blocked-terminal refusal, and mutation-error classification (proven
+  evidence-append failure, nonce reuse (same run, cross-task/cross-run, and
+  buried beyond one artifact page), unreadable consumption record, claim
+  total-ordering, non-human decider, blocked-terminal refusal (including
+  buried blocked evidence), and mutation-error classification (proven
   un-mutated vs indeterminate). The class-sweep audit runs BEFORE the first
   cross-family review round.
 - **R7 — Blocked evidence is terminal (v0.3.0, from CFAR round 1).** Once an
@@ -95,7 +108,7 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
   reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.3.0)
+## Implementation Notes (v0.4.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary

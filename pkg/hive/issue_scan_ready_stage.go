@@ -2,6 +2,8 @@ package hive
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1351,17 +1353,19 @@ const IssueScanMarkReadyConsumptionArtifactLabel = "mark_ready_approval_consumed
 const issueScanMarkReadyConsumptionKind = "issue_scan_mark_ready_approval_consumed"
 
 // issueScanMarkReadyConsumptionRecord is the durable single-use consumption
-// record; the nonce is the identity the consumer scans on.
+// record; the nonce is the identity the consumer scans on, and the claim id
+// disambiguates concurrent claimants of the same nonce.
 type issueScanMarkReadyConsumptionRecord struct {
 	Kind             string `json:"kind"`
 	LifecycleVersion string `json:"lifecycle_version"`
 	RunID            string `json:"run_id"`
-	FactoryOrderID   string `json:"factory_order_id"`
-	Repository       string `json:"repository"`
-	PRNumber         int    `json:"pr_number"`
-	PRURL            string `json:"pr_url"`
-	HeadSHA          string `json:"head_sha"`
+	FactoryOrderID   string `json:"factory_order_id,omitempty"`
+	Repository       string `json:"repository,omitempty"`
+	PRNumber         int    `json:"pr_number,omitempty"`
+	PRURL            string `json:"pr_url,omitempty"`
+	HeadSHA          string `json:"head_sha,omitempty"`
 	SingleUseNonce   string `json:"single_use_nonce"`
+	ClaimID          string `json:"claim_id"`
 }
 
 // issueScanMarkReadyApprovalConsumer binds the runtime's durable single-use
@@ -1373,10 +1377,16 @@ func (r *Runtime) issueScanMarkReadyApprovalConsumer(runID string) MarkReadyAppr
 }
 
 // consumeIssueScanMarkReadyApproval durably records single-use consumption of
-// the approval nonce on the run's ready stage BEFORE the ready mutation. It
-// refuses when the nonce was already consumed, when any recorded consumption
-// artifact is unreadable, or when the record cannot be confirmed by read-back
-// after append (fail closed on every path).
+// the approval nonce BEFORE the ready mutation. The nonce is global: one
+// human approval is ONE transition, regardless of which run consumes it. It
+// refuses when any run has already consumed the nonce, when any recorded
+// consumption artifact is unreadable, or when this claim does not win the
+// post-append total-order verification (fail closed on every path).
+//
+// Concurrency: check-then-append alone races itself, so the claim is
+// resolved append-then-verify-winner — the event chain totally orders all
+// claims, exactly one concurrent claimant observes its own claim as the
+// OLDEST for the nonce, and every other claimant refuses.
 func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget) error {
 	if r == nil || r.store == nil || r.tasks == nil {
 		return fmt.Errorf("runtime store and task store are required")
@@ -1389,12 +1399,16 @@ func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation Issue
 	if err != nil {
 		return err
 	}
-	consumed, err := r.issueScanMarkReadyNonceConsumed(readyStage.TaskID, nonce)
+	claims, err := r.issueScanMarkReadyNonceClaims(nonce)
 	if err != nil {
 		return err
 	}
-	if consumed {
-		return fmt.Errorf("mark-ready approval nonce %q was already consumed: a single-use approval never authorizes twice", nonce)
+	if len(claims) > 0 {
+		return fmt.Errorf("mark-ready approval nonce %q was already consumed by run %q: a single-use approval never authorizes twice", nonce, claims[0].RunID)
+	}
+	claimID, err := issueScanMarkReadyClaimID()
+	if err != nil {
+		return err
 	}
 	record := issueScanMarkReadyConsumptionRecord{
 		Kind:             issueScanMarkReadyConsumptionKind,
@@ -1406,6 +1420,7 @@ func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation Issue
 		PRURL:            mutation.PRURL,
 		HeadSHA:          mutation.HeadSHA,
 		SingleUseNonce:   nonce,
+		ClaimID:          claimID,
 	}
 	body, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
@@ -1415,49 +1430,74 @@ func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation Issue
 	if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, IssueScanMarkReadyConsumptionArtifactLabel, "application/json", string(body), causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
 		return fmt.Errorf("record mark-ready approval consumption: %w", err)
 	}
-	consumed, err = r.issueScanMarkReadyNonceConsumed(readyStage.TaskID, nonce)
+	claims, err = r.issueScanMarkReadyNonceClaims(nonce)
 	if err != nil {
 		return err
 	}
-	if !consumed {
+	if len(claims) == 0 {
 		return fmt.Errorf("mark-ready approval consumption record was not found after append")
+	}
+	if claims[0].ClaimID != claimID {
+		return fmt.Errorf("mark-ready approval nonce %q was claimed concurrently (winning run %q): refusing the losing claim", nonce, claims[0].RunID)
 	}
 	return nil
 }
 
-// issueScanMarkReadyNonceConsumed reports whether a consumption record for
-// the nonce exists on the ready stage. An unreadable consumption record can
-// never prove the nonce unconsumed, so it errors instead of skipping.
-func (r *Runtime) issueScanMarkReadyNonceConsumed(stageTaskID types.EventID, nonce string) (bool, error) {
-	artifacts, err := r.tasks.ListArtifacts(stageTaskID)
-	if err != nil {
-		return false, fmt.Errorf("list ready stage artifacts: %w", err)
+// issueScanMarkReadyClaimID mints a unique claimant identity so concurrent
+// claims of the same nonce (even for the same run) are distinguishable.
+func issueScanMarkReadyClaimID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("mint mark-ready claim id: %w", err)
 	}
-	for _, artifact := range artifacts {
-		if strings.TrimSpace(artifact.Label) != IssueScanMarkReadyConsumptionArtifactLabel {
+	return hex.EncodeToString(buf), nil
+}
+
+// issueScanMarkReadyNonceClaims returns every recorded consumption claim for
+// the nonce ANYWHERE in the store, oldest first, paging through ALL artifact
+// events (a single bounded page could hide an old claim under newer events).
+// An unreadable consumption record can never prove the nonce unconsumed, so
+// it errors instead of skipping.
+func (r *Runtime) issueScanMarkReadyNonceClaims(nonce string) ([]issueScanMarkReadyConsumptionRecord, error) {
+	events, err := eventsByTypePaginated(r.store, work.EventTypeTaskArtifact, defaultOperatorProjectionLimit)
+	if err != nil {
+		return nil, fmt.Errorf("scan artifact events for mark-ready consumption: %w", err)
+	}
+	var claims []issueScanMarkReadyConsumptionRecord
+	// eventsByTypePaginated returns newest-first; walk backwards so claims
+	// come out oldest-first (the winner order the consumer relies on).
+	for i := len(events) - 1; i >= 0; i-- {
+		content, ok := events[i].Content().(work.TaskArtifactContent)
+		if !ok || strings.TrimSpace(content.Label) != IssueScanMarkReadyConsumptionArtifactLabel {
 			continue
 		}
 		var record issueScanMarkReadyConsumptionRecord
-		if err := json.Unmarshal([]byte(artifact.Body), &record); err != nil {
-			return false, fmt.Errorf("unreadable mark-ready consumption record %s: %w", artifact.ID.Value(), err)
+		if err := json.Unmarshal([]byte(content.Body), &record); err != nil {
+			return nil, fmt.Errorf("unreadable mark-ready consumption record %s: %w", events[i].ID().Value(), err)
 		}
 		if strings.TrimSpace(record.SingleUseNonce) == nonce {
-			return true, nil
+			claims = append(claims, record)
 		}
 	}
-	return false, nil
+	return claims, nil
 }
 
 // findIssueScanReadyStageArtifactLabel reports whether any artifact with the
-// label exists on the stage, regardless of body.
+// label exists on the stage, regardless of body, paging through ALL artifact
+// events — a single bounded page could hide terminal evidence under newer
+// events.
 func (r *Runtime) findIssueScanReadyStageArtifactLabel(stageTaskID types.EventID, label string) (types.EventID, bool, error) {
-	artifacts, err := r.tasks.ListArtifacts(stageTaskID)
+	events, err := eventsByTypePaginated(r.store, work.EventTypeTaskArtifact, defaultOperatorProjectionLimit)
 	if err != nil {
-		return types.EventID{}, false, fmt.Errorf("list ready stage artifacts: %w", err)
+		return types.EventID{}, false, fmt.Errorf("scan ready stage artifacts: %w", err)
 	}
-	for _, artifact := range artifacts {
-		if strings.TrimSpace(artifact.Label) == strings.TrimSpace(label) {
-			return artifact.ID, true, nil
+	for _, ev := range events {
+		content, ok := ev.Content().(work.TaskArtifactContent)
+		if !ok || content.TaskID != stageTaskID {
+			continue
+		}
+		if strings.TrimSpace(content.Label) == strings.TrimSpace(label) {
+			return ev.ID(), true, nil
 		}
 	}
 	return types.EventID{}, false, nil
