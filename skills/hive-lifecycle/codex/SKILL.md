@@ -350,6 +350,7 @@ Flag reminders:
 
 - `civilization run`: `--human`, `--idea` or `--spec`, `--store`, `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`.
 - `civilization daemon`: same except the seed flag is `--seed-spec`; there is no `--idea` or `--spec`.
+- Warning: `--spec`/`--seed-spec` are NOT local-only seeds — both call the remote ingest path before the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`); a blank credential fails after possible bootstrap activity and a real one writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); these flags need explicit ingest/production authorization plus a deliberate `--api`/credential pairing.
 - `pipeline` and `role`: `--api`, `--space`, `--repo`, `--agent-id`; no `--human` or `--idea`.
 - Always confirm with `go run ./cmd/hive <verb> --help` when composing a new invocation.
 
