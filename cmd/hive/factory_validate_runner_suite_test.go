@@ -39,23 +39,23 @@ func runnerSuiteTestManifest() map[string]any {
 			component("stage_role_output_runner",
 				"issue_scan_stage_role_output_runner_context",
 				"hive.IssueScanStageRoleOutputRunnerResult",
-				[]string{"does not implement code", "does not create, mark ready, approve, merge, or deploy a PR"}),
+				[]string{"does not implement code", "does not run adversarial review", "does not create, mark ready, approve, merge, or deploy a PR"}),
 			component("implementation_runner",
 				"issue_scan_implementation_runner_context",
 				"hive.IssueScanImplementationRunnerResult",
-				[]string{"may modify only the supplied target repo context", "does not create, mark ready, approve, merge, or deploy a PR"}),
+				[]string{"may modify the target worktree/branch only within the supplied repo context", "does not create, mark ready, approve, merge, or deploy a PR"}),
 			component("adversarial_review_runner",
 				"issue_scan_adversarial_review_context",
 				"hive.IssueScanAdversarialReviewReceipt",
-				[]string{"exact-head review evidence only", "does not approve, merge, or deploy"}),
+				[]string{"does not repair blockers", "does not mark PRs ready", "does not approve, merge, or deploy"}),
 			component("blocker_repair_runner",
 				"issue_scan_blocker_repair_runner_context",
 				"hive.IssueScanBlockerRepairRunnerResult",
-				[]string{"may repair only after review blockers reopen implementation work", "does not create, mark ready, approve, merge, or deploy a PR"}),
+				[]string{"may modify the target worktree/branch only within the supplied repo context", "does not create, mark ready, approve, merge, or deploy a PR"}),
 			component("ready_state_review_runner",
 				"issue_scan_ready_state_review_context",
 				"hive.IssueScanReadyStateReviewReceipt",
-				[]string{"used only with --issue-scan-ready-pr-mark-ready", "does not approve, merge, or deploy"}),
+				[]string{"used only with --issue-scan-ready-pr-mark-ready", "does not approve, merge, deploy, or perform production migrations"}),
 		},
 	}
 }
@@ -347,6 +347,32 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 				return m
 			},
 			wantErr: "authority_boundaries",
+		},
+		{
+			name: "authority boundaries drop a contract boundary",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				manifestComponent(t, m, 0)["authority_boundaries"] = []any{"planning evidence only", "may approve, merge, and deploy"}
+				return m
+			},
+			wantErr: "must include contract boundary",
+		},
+		{
+			name: "fixture symlink escapes package root",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				outside := filepath.Join(dir, "..", "outside-fixture.json")
+				if err := os.WriteFile(outside, []byte(`{"role_outputs":[{"role":"r","summary":"s","outputs":[{"key":"k"}]}]}`), 0o644); err != nil {
+					t.Fatalf("write outside fixture: %v", err)
+				}
+				inside := filepath.Join(dir, "examples", "stage_role_output_runner", "stdout.json")
+				if err := os.Remove(inside); err != nil {
+					t.Fatalf("remove fixture: %v", err)
+				}
+				if err := os.Symlink(outside, inside); err != nil {
+					t.Fatalf("symlink fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "outside the package root",
 		},
 		{
 			name: "missing fixture file",

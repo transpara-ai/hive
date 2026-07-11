@@ -8,12 +8,18 @@
     {
       "id": "stage_role_output_runner",
       "command": "runners/stage_role_output_runner.placeholder",
-      "argv": ["--stdin-json"],
+      "argv": [
+        "--stdin-json"
+      ],
       "timeout": "10m",
       "stdin_kind": "issue_scan_stage_role_output_runner_context",
       "stdout_kind": "hive.IssueScanStageRoleOutputRunnerResult",
       "required_env": [],
-      "forbidden_env": ["ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+      "forbidden_env": [
+        "ANTHROPIC_API_KEY",
+        "HIVE_ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN"
+      ],
       "authority_boundaries": [
         "planning evidence only",
         "does not implement code",
@@ -28,14 +34,20 @@
     {
       "id": "implementation_runner",
       "command": "runners/implementation_runner.placeholder",
-      "argv": ["--stdin-json"],
+      "argv": [
+        "--stdin-json"
+      ],
       "timeout": "30m",
       "stdin_kind": "issue_scan_implementation_runner_context",
       "stdout_kind": "hive.IssueScanImplementationRunnerResult",
       "required_env": [],
-      "forbidden_env": ["ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+      "forbidden_env": [
+        "ANTHROPIC_API_KEY",
+        "HIVE_ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN"
+      ],
       "authority_boundaries": [
-        "may modify only the supplied target repo context",
+        "may modify the target worktree/branch only within the supplied repo context",
         "does not create, mark ready, approve, merge, or deploy a PR"
       ],
       "fixtures": {
@@ -46,12 +58,18 @@
     {
       "id": "adversarial_review_runner",
       "command": "runners/adversarial_review_runner.placeholder",
-      "argv": ["--stdin-json"],
+      "argv": [
+        "--stdin-json"
+      ],
       "timeout": "20m",
       "stdin_kind": "issue_scan_adversarial_review_context",
       "stdout_kind": "hive.IssueScanAdversarialReviewReceipt",
       "required_env": [],
-      "forbidden_env": ["ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+      "forbidden_env": [
+        "ANTHROPIC_API_KEY",
+        "HIVE_ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN"
+      ],
       "authority_boundaries": [
         "exact-head review evidence only",
         "does not repair blockers",
@@ -66,14 +84,21 @@
     {
       "id": "blocker_repair_runner",
       "command": "runners/blocker_repair_runner.placeholder",
-      "argv": ["--stdin-json"],
+      "argv": [
+        "--stdin-json"
+      ],
       "timeout": "30m",
       "stdin_kind": "issue_scan_blocker_repair_runner_context",
       "stdout_kind": "hive.IssueScanBlockerRepairRunnerResult",
       "required_env": [],
-      "forbidden_env": ["ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+      "forbidden_env": [
+        "ANTHROPIC_API_KEY",
+        "HIVE_ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN"
+      ],
       "authority_boundaries": [
         "may repair only after review blockers reopen implementation work",
+        "may modify the target worktree/branch only within the supplied repo context",
         "does not create, mark ready, approve, merge, or deploy a PR"
       ],
       "fixtures": {
@@ -84,16 +109,22 @@
     {
       "id": "ready_state_review_runner",
       "command": "runners/ready_state_review_runner.placeholder",
-      "argv": ["--stdin-json"],
+      "argv": [
+        "--stdin-json"
+      ],
       "timeout": "20m",
       "stdin_kind": "issue_scan_ready_state_review_context",
       "stdout_kind": "hive.IssueScanReadyStateReviewReceipt",
       "required_env": [],
-      "forbidden_env": ["ANTHROPIC_API_KEY", "HIVE_ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+      "forbidden_env": [
+        "ANTHROPIC_API_KEY",
+        "HIVE_ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN"
+      ],
       "authority_boundaries": [
         "used only with --issue-scan-ready-pr-mark-ready",
         "reviews the exact PR head after the managed finalizer performs the draft-to-ready transition",
-        "does not approve, merge, or deploy"
+        "does not approve, merge, deploy, or perform production migrations"
       ],
       "fixtures": {
         "stdin": "examples/ready_state_review_runner/stdin.json",

@@ -32,7 +32,7 @@ the manifest cannot drift from the contracts without failing validation:
 | `components[].id` | `external_runner_contracts[].id` (allowlist; the required set is derived from `full_chain_daemon_flags` minus the terminal path's `mutually_exclusive_with`, plus the path's own flags — for this posture exactly the five external runners) |
 | `components[].stdin_kind` | that contract's `stdin_context_kind` (exact match) |
 | `components[].stdout_kind` | that contract's `stdout_contract_type` (exact match) |
-| `components[].authority_boundaries` | restates that contract's `authority_boundaries` for filesystem auditability |
+| `components[].authority_boundaries` | must include that contract's `authority_boundaries` verbatim (validated; extra tightening entries are allowed, dropping or rewording a contract boundary fails) |
 | `examples/<id>/stdin.json` | strictly decodes into that contract's `stdin_context_type` Go type |
 | `examples/<id>/stdout.json` | strictly decodes into that contract's `stdout_contract_type` Go type and satisfies its `stdout_required_fields` |
 

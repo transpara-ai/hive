@@ -236,6 +236,15 @@ func validateIssueScanRunnerSuiteComponent(dir string, document issueScanRunnerC
 			break
 		}
 	}
+	declared := make(map[string]bool, len(component.AuthorityBoundaries))
+	for _, boundary := range component.AuthorityBoundaries {
+		declared[boundary] = true
+	}
+	for _, boundary := range contract.AuthorityBoundaries {
+		if !declared[boundary] {
+			fail("authority_boundaries must include contract boundary %q", boundary)
+		}
+	}
 	problems = append(problems, validateIssueScanRunnerSuiteFixtures(dir, document, contract, component)...)
 	return problems
 }
@@ -294,11 +303,35 @@ func readIssueScanRunnerSuiteFixture(dir, componentID, fixturePath, field string
 	if !filepath.IsLocal(fixturePath) {
 		return nil, []error{fmt.Errorf("component %q: %s path %q is not package-local", componentID, field, fixturePath)}
 	}
-	body, err := os.ReadFile(filepath.Join(dir, fixturePath))
+	resolved, err := resolveWithinIssueScanRunnerSuiteRoot(dir, fixturePath)
+	if err != nil {
+		return nil, []error{fmt.Errorf("component %q: %s: %w", componentID, field, err)}
+	}
+	body, err := os.ReadFile(resolved)
 	if err != nil {
 		return nil, []error{fmt.Errorf("component %q: read fixture: %w", componentID, err)}
 	}
 	return body, nil
+}
+
+// resolveWithinIssueScanRunnerSuiteRoot resolves symlinks in both the package
+// root and the fixture path and fails closed unless the resolved fixture stays
+// beneath the resolved root — filepath.IsLocal is lexical only, so a
+// package-local-looking symlink could otherwise escape the package.
+func resolveWithinIssueScanRunnerSuiteRoot(dir, fixturePath string) (string, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve package root: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(dir, fixturePath))
+	if err != nil {
+		return "", fmt.Errorf("resolve fixture path: %w", err)
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q resolves outside the package root", fixturePath)
+	}
+	return resolved, nil
 }
 
 func validateIssueScanRunnerSuiteStdinFixture(document issueScanRunnerContractsDocument, contract issueScanRunnerContract, component issueScanRunnerSuiteComponent, body []byte) []error {
