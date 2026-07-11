@@ -20,7 +20,7 @@ For **"hive help" / "hive commands"**: print the section list below — Stack Co
 | **Postgres** | docker container `hive-postgres-1` | ALL interfaces `:5432` (compose publishes `5432:5432`) | dev credentials — network exposure is real; `docker compose up -d postgres` (compose file in `repos/hive`); DSN `postgres://hive:hive@localhost:5432/hive` |
 | **work-server** | `work-server.service` (enabled) | ALL interfaces `:8080` (binds `":"+PORT`) | builds + runs `repos/work/work-server`; serves the telemetry API, task API, and dashboard |
 | **hive-ops-api** | `hive-ops-api.service` (enabled) |  `loopback :8085` | runs `repos/hive/hive-ops-api`; serves the operator projection API; loads a model catalog |
-| **hive runtime** | `hive.service` (**disabled** — on-demand) | — | `hive civilization daemon …`; the multi-agent civilization loop |
+| **hive runtime** | `hive.service` (**disabled** — on-demand) | webhook ALL interfaces `:8081` when running (unauthenticated `POST /event`) | `hive civilization daemon …`; the multi-agent civilization loop |
 
 Paths: `HIVE_REPO=/Transpara/transpara-ai/repos/hive`, `WORK_REPO=/Transpara/transpara-ai/repos/work`.
 
@@ -88,6 +88,10 @@ fi
 #       --approve-requests --approve-roles
 #   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
 #   its ExecStart already includes --approve-requests --approve-roles.
+#   ⚠ the runtime's webhook binds :8081 on ALL interfaces with an
+#   UNAUTHENTICATED event-writing POST /event (bind is not flag-configurable);
+#   launching the runtime on a host reachable by untrusted peers needs the
+#   user's explicit acknowledgment of that exposure or host-level firewalling.
 #   ⚠ civilization run/daemon default their Site API to https://transpara.ai:
 #   an ambient LOVYOU_API_KEY enables a reconciliation loop + task-completion
 #   mirror posts against PRODUCTION. The blank LOVYOU_API_KEY= prefix disables
@@ -387,13 +391,14 @@ LOVYOU_API_KEY= go run ./cmd/hive civilization daemon --human Michael \
 LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
-# ⚠ council's --api DEFAULTS to https://transpara.ai and, when LOVYOU_API_KEY is set,
-#   POSTS up to 2000 chars of the deliberation report to the remote social feed —
-#   AND interpolates that key into every council agent's prompt (exposing the bearer
-#   to model providers). For local runs, always pin --api to the local endpoint AND
-#   replace any ambient remote credential with the non-secret local `dev` credential
-#   as shown; remote publishing requires the user's explicit authorization in the
-#   current turn.
+# ⚠ council ALWAYS attempts to POST up to 2000 chars of the deliberation report
+#   to its --api endpoint (api.New never returns nil — an empty/wrong key merely
+#   fails auth AFTER the report has been transmitted). --api DEFAULTS to
+#   https://transpara.ai, so ONLY the local --api pin keeps the report local.
+#   Replacing any ambient remote credential with the non-secret local `dev`
+#   credential as shown additionally keeps the remote bearer out of every
+#   council agent's prompt (and matches the local API's --api-key dev).
+#   Remote publishing requires the user's explicit authorization in the turn.
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 

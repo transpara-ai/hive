@@ -26,7 +26,7 @@ Default to read-only inspection. Start, stop, restart, clean slate, runtime laun
 | Postgres | Docker container `hive-postgres-1` | ALL interfaces `:5432` (compose publishes `5432:5432`) | Dev credentials — network exposure is real; DSN `postgres://hive:hive@localhost:5432/hive`; compose file in `/Transpara/transpara-ai/repos/hive` |
 | work-server | `work-server.service` | ALL interfaces `:8080` (binds `":"+PORT`) | Built from `/Transpara/transpara-ai/repos/work/work-server`; telemetry, task API, dashboard |
 | hive-ops-api | `hive-ops-api.service` | loopback `:8085` | Operator projection API; normally read-only |
-| hive runtime | `hive.service` or manual `go run` | webhook `:8081` when running | On-demand multi-agent loop; unit may be disabled |
+| hive runtime | `hive.service` or manual `go run` | webhook ALL interfaces `:8081` when running (unauthenticated `POST /event`) | On-demand multi-agent loop; unit may be disabled |
 
 Use these canonical local paths:
 
@@ -316,6 +316,8 @@ LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run --api http://localhost:8082
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
 
+The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated event-writing `POST /event` (the bind address is not flag-configurable); launching the runtime on a host reachable by untrusted peers requires the user's explicit acknowledgment of that exposure or host-level firewalling.
+
 `civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
 
 Before starting or restarting `hive.service` (its environment comes from unit config, `EnvironmentFile`s, and the systemd `--user` manager — not this shell), run this read-only, names-only preflight; any hit or unreadable source means do NOT start without explicit production authorization:
@@ -431,7 +433,7 @@ else
 fi
 ```
 
-Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and replace any ambient remote credential with the non-secret local `dev` credential as shown; remote publishing requires the user's explicit authorization in the current turn.
+Warning: `council` ALWAYS attempts to POST up to 2000 characters of the deliberation report to its `--api` endpoint — `api.New` never returns nil, so an empty or wrong key merely fails authentication AFTER the report has been transmitted. `--api` defaults to `https://transpara.ai`, so only the local `--api` pin keeps the report local. Replacing any ambient remote credential with the non-secret local `dev` credential as shown additionally keeps the remote bearer out of every council agent's prompt (and matches the local API's `--api-key dev`). Remote publishing requires the user's explicit authorization in the current turn.
 
 Full autonomy is an explicit opt-in with `--approve-requests --approve-roles`. Do not add those flags unless the user explicitly authorizes that mode in the current turn.
 
