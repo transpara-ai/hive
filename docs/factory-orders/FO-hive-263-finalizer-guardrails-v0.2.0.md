@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.1.0
+version: 0.2.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -68,6 +68,19 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   client unsupported, review failure before/after mutation, evidence-append
   failure. The class-sweep audit runs BEFORE the first cross-family review
   round.
+
+## Implementation Notes (v0.2.0)
+
+- The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
+  allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary
+  stays untouched; its RiskClass falls to the conservative default
+  ("critical").
+- The machine-readable `issue-scan-runner-contracts` document now names the
+  recorded mark-ready approval as a finalizer precondition and the
+  re-draft-under-recorded-scope boundary.
+- The runtime injects the store-backed approval lookup through the runner
+  context as a `json:"-"` field: external runners can neither supply nor
+  observe it, and a context without it fails closed.
 
 ## Non-Goals
 
