@@ -26,35 +26,48 @@ func newIssueScanReadyPRGitHubClient(token string) *issueScanReadyPRGitHubClient
 	}
 }
 
-func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, bool, error) {
+	// Failures before the GraphQL mutation provably leave the PR un-mutated
+	// and are wrapped in ErrIssueScanMarkReadyNotMutated; anything at or after
+	// the mutation stays unwrapped so the finalizer fails safe toward durable
+	// blocked evidence. The bool result is true only once the managed GraphQL
+	// mutation has been issued — an already-ready early return is NOT a
+	// transition this run performed.
 	if c == nil || strings.TrimSpace(c.token) == "" {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: github ready PR client: empty token", hive.ErrIssueScanMarkReadyNotMutated)
+	}
+	state, _, err := c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+	}
+	if err := validateGitHubReadyPRTarget("preflight", mutation, state); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+	}
+	if !state.Draft {
+		return state, false, nil
 	}
 	state, nodeID, err := c.fetchPullRequestState(ctx, mutation)
 	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, err
-	}
-	if err := validateGitHubReadyPRTarget("preflight", mutation, state); err != nil {
-		return hive.IssueScanReadyPRLiveState{}, err
-	}
-	if !state.Draft {
-		return state, nil
-	}
-	state, nodeID, err = c.fetchPullRequestState(ctx, mutation)
-	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, err
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if err := validateGitHubReadyPRTarget("pre-mutation", mutation, state); err != nil {
-		return hive.IssueScanReadyPRLiveState{}, err
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if !state.Draft {
-		return state, nil
+		return state, false, nil
 	}
 	if err := c.markPullRequestReadyForReview(ctx, nodeID); err != nil {
-		return hive.IssueScanReadyPRLiveState{}, err
+		// The mutation was DISPATCHED and failed: no client-side read can
+		// prove which request produced the observed state (a timed-out
+		// mutation can still commit after a reconcile GET; a third party can
+		// flip the PR inside the window). Preserve the uncertainty: not the
+		// proven-unmutated sentinel (so blocked evidence is recorded) and
+		// not mutated=true (so remediation never re-drafts a transition this
+		// run cannot prove it performed).
+		return hive.IssueScanReadyPRLiveState{}, false, err
 	}
 	state, _, err = c.fetchPullRequestState(ctx, mutation)
-	return state, err
+	return state, true, err
 }
 
 func (c *issueScanReadyPRGitHubClient) FetchReadyPRState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
@@ -137,6 +150,27 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestReviewDecision(ctx contex
 }
 
 func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {
+	state, nodeID, err := c.fetchPullRequestIdentity(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	ciStatus, err := c.fetchCIStatus(ctx, owner, repo, state.HeadSHA)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, "", err
+	}
+	state.CIStatus = ciStatus
+	return state, nodeID, nil
+}
+
+// fetchPullRequestIdentity reads PR identity and open/draft state from the
+// pull-request endpoint ONLY — no commit-status or check-runs calls. The
+// re-draft remediation rides this fetch so a CI-endpoint outage (a state it
+// exists to remediate) can never prevent returning the PR to draft.
+func (c *issueScanReadyPRGitHubClient) fetchPullRequestIdentity(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, string, error) {
 	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
 	if err != nil {
 		return hive.IssueScanReadyPRLiveState{}, "", err
@@ -160,10 +194,6 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context
 	if err := c.getJSON(ctx, fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, mutation.PRNumber), &gh); err != nil {
 		return hive.IssueScanReadyPRLiveState{}, "", fmt.Errorf("github ready PR client: pull request: %w", err)
 	}
-	ciStatus, err := c.fetchCIStatus(ctx, owner, repo, gh.Head.SHA)
-	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, "", err
-	}
 	mergeState := strings.TrimSpace(gh.MergeableState)
 	if mergeState == "" {
 		mergeState = "unknown"
@@ -180,7 +210,6 @@ func (c *issueScanReadyPRGitHubClient) fetchPullRequestState(ctx context.Context
 		Draft:            gh.Draft,
 		ReadyForReview:   !gh.Draft,
 		MergeStateStatus: mergeState,
-		CIStatus:         ciStatus,
 		SourceRefs:       []string{strings.TrimSpace(gh.HTMLURL)},
 	}
 	return state, strings.TrimSpace(gh.NodeID), nil
@@ -277,6 +306,58 @@ func combineGitHubCIStatus(statusState, checkState string) string {
 	return "unknown"
 }
 
+// ConvertToDraft returns the already-mutated PR to draft state. It runs only
+// under a recorded human mark-ready approval whose ReDraftOnFailure flag is
+// set (the finalizer enforces that); it never approves, merges, or deploys.
+func (c *issueScanReadyPRGitHubClient) ConvertToDraft(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+	if c == nil || strings.TrimSpace(c.token) == "" {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
+	}
+	state, nodeID, err := c.fetchPullRequestIdentity(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if err := validateGitHubReadyPRIdentityOpen("re-draft", mutation, state); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if state.Draft {
+		return state, nil
+	}
+	// Human authority is supreme: never convert a human-approved PR back to
+	// draft, on any caller path. The review-decision query is GraphQL-only
+	// (no commit-status/check-runs dependency).
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	decision, err := c.fetchPullRequestReviewDecision(ctx, owner, repo, mutation.PRNumber)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: cannot verify review decision before re-draft: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(decision), "approved") {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: PR #%d is human-approved; refusing to re-draft over human authority", mutation.PRNumber)
+	}
+	if err := c.convertPullRequestToDraft(ctx, nodeID); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	state, _, err = c.fetchPullRequestIdentity(ctx, mutation)
+	return state, err
+}
+
+func (c *issueScanReadyPRGitHubClient) convertPullRequestToDraft(ctx context.Context, nodeID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("github ready PR client: pull request node_id is required")
+	}
+	payload := map[string]any{
+		"query": "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }",
+		"variables": map[string]string{
+			"id": nodeID,
+		},
+	}
+	return c.postGraphQLMutation(ctx, payload)
+}
+
 func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context.Context, nodeID string) error {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
@@ -288,6 +369,12 @@ func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context
 			"id": nodeID,
 		},
 	}
+	return c.postGraphQLMutation(ctx, payload)
+}
+
+// postGraphQLMutation posts one GraphQL mutation payload and fails on any
+// transport, HTTP, or GraphQL-level error.
+func (c *issueScanReadyPRGitHubClient) postGraphQLMutation(ctx context.Context, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -310,7 +397,7 @@ func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context
 		} `json:"errors"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("github ready PR client: decode mark-ready response: %w", err)
+		return fmt.Errorf("github ready PR client: decode graphql mutation response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		msg := ""
@@ -388,6 +475,21 @@ func validateGitHubReadyPRTarget(label string, mutation hive.IssueScanReadyPRFin
 	}
 	if !issueScanReadyStatusOKForCLI(state.CIStatus, []string{"success", "passed", "green"}) {
 		return fmt.Errorf("%s github PR ci_status %q is not successful", label, state.CIStatus)
+	}
+	return nil
+}
+
+// validateGitHubReadyPRIdentityOpen checks only PR identity and openness.
+// Re-draft is failure REMEDIATION: it must work precisely when ready-state
+// health checks (CI, merge state, exact head) are failing — the states it
+// exists to remediate — and draft is the strictly safer PR state, so unlike
+// validateGitHubReadyPRTarget it never requires ready-state success.
+func validateGitHubReadyPRIdentityOpen(label string, mutation hive.IssueScanReadyPRFinalizerMutation, state hive.IssueScanReadyPRLiveState) error {
+	if state.PRNumber != mutation.PRNumber {
+		return fmt.Errorf("%s github PR number %d does not match %d", label, state.PRNumber, mutation.PRNumber)
+	}
+	if strings.ToLower(strings.TrimSpace(state.State)) != "open" {
+		return fmt.Errorf("%s github PR state %q is not open", label, state.State)
 	}
 	return nil
 }
