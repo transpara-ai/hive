@@ -349,8 +349,8 @@ func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteCompo
 		if previous == "" {
 			return fail("stdin previous_operate_commit is required")
 		}
-		if commit == previous {
-			return fail("stdout Operate commit %q must differ from stdin previous_operate_commit (the runtime rejects unchanged repair commits)", commit)
+		if strings.EqualFold(commit, previous) {
+			return fail("stdout Operate commit %q must differ from stdin previous_operate_commit (the runtime rejects unchanged repair commits, comparing case-insensitively)", commit)
 		}
 	case "adversarial_review_runner":
 		var context hive.IssueScanAdversarialReviewContext
@@ -365,7 +365,7 @@ func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteCompo
 		if operateCommit == "" {
 			return fail("stdin operate_commit is required")
 		}
-		if strings.TrimSpace(receipt.ReviewedHeadSHA) != operateCommit {
+		if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), operateCommit) {
 			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
 		}
 	case "ready_state_review_runner":
@@ -381,7 +381,7 @@ func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteCompo
 		if operateCommit == "" {
 			return fail("stdin operate_commit is required")
 		}
-		if strings.TrimSpace(receipt.ReviewedHeadSHA) != operateCommit {
+		if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), operateCommit) {
 			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
 		}
 	}

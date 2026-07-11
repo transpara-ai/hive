@@ -437,6 +437,23 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			wantErr: "must differ",
 		},
 		{
+			name: "blocker repair stdout commit equals previous operate commit ignoring case",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				stdinPath := filepath.Join(dir, "examples", "blocker_repair_runner", "stdin.json")
+				stdinBody := `{"kind":"issue_scan_blocker_repair_runner_context","lifecycle_version":"civilization_issue_to_human_ready_pr_v0.9","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","repo_path":"workspace/synthetic-example","implementation_task_id":"task-synthetic-0002","implementation_stage_task_id":"task-synthetic-0003","review_stage_task_id":"task-synthetic-0005","blocker_stage_task_id":"task-synthetic-0006","request_changes_review_event_id":"event-synthetic-0001","request_changes_review_summary":"Synthetic blocker summary.","request_changes_review_issues":["synthetic blocker"],"request_changes_review_confidence":0.8,"reopen_event_id":"event-synthetic-0002","reopen_reason":"synthetic reopen","previous_operate_branch":"feat/synthetic-change","previous_operate_commit":"00000000000000000000000000000000000000ab","previous_changed_files_summary":"1 file changed (synthetic)"}`
+				if err := os.WriteFile(stdinPath, []byte(stdinBody), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				stdoutPath := filepath.Join(dir, "examples", "blocker_repair_runner", "stdout.json")
+				stdoutBody := `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 00000000000000000000000000000000000000AB\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic blocker repair completion."}`
+				if err := os.WriteFile(stdoutPath, []byte(stdoutBody), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "must differ",
+		},
+		{
 			name: "adversarial review reviewed head does not match operate commit",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				path := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
@@ -574,6 +591,27 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// TestValidateIssueScanRunnerSuitePackageAcceptsCaseInsensitiveReviewHead
+// proves the pair check mirrors the runtime's strings.EqualFold SHA
+// comparison: a receipt citing the operate commit in different hex casing is
+// runtime-valid and must validate.
+func TestValidateIssueScanRunnerSuitePackageAcceptsCaseInsensitiveReviewHead(t *testing.T) {
+	dir := writeValidRunnerSuiteTestPackage(t)
+	stdinPath := filepath.Join(dir, "examples", "adversarial_review_runner", "stdin.json")
+	stdinBody := `{"kind":"issue_scan_adversarial_review_context","lifecycle_version":"civilization_issue_to_human_ready_pr_v0.9","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","implementation_task_id":"task-synthetic-0002","review_stage_task_id":"task-synthetic-0005","operate_branch":"feat/synthetic-change","operate_commit":"00000000000000000000000000000000000000ab","changed_files_summary":"1 file changed (synthetic)"}`
+	if err := os.WriteFile(stdinPath, []byte(stdinBody), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdoutPath := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
+	stdoutBody := `{"repository":"transpara-ai/synthetic-example","review_ref":"synthetic-review-0001","reviewed_head_sha":"00000000000000000000000000000000000000AB","verdict":"approve","summary":"Synthetic exact-head review.","issues":[],"confidence":0.9}`
+	if err := os.WriteFile(stdoutPath, []byte(stdoutBody), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if _, err := validateIssueScanRunnerSuitePackage(dir); err != nil {
+		t.Fatalf("expected case-insensitive reviewed head to validate, got %v", err)
 	}
 }
 
