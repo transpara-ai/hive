@@ -83,6 +83,27 @@ func seedMarkReadyDecisionWithRoleAndExpiry(t *testing.T, s store.Store, factory
 	}
 }
 
+// seedMarkReadyDecisionRawScope records a human mark-ready decision with an
+// arbitrary (possibly malformed) scope slice, for latest-wins revocation
+// tests.
+func seedMarkReadyDecisionRawScope(t *testing.T, s store.Store, factory *event.EventFactory, signer event.Signer, human types.ActorID, conv types.ConversationID, requestID types.EventID, outcome string, scope []string) {
+	t.Helper()
+	content := AuthorityDecisionRecordedContent{
+		DecisionID:     requestID.Value(),
+		RequestID:      requestID,
+		ApproverActor:  human,
+		DeciderRole:    "human",
+		Outcome:        outcome,
+		ApprovedTarget: "raw scope",
+		ApprovedAction: string(safety.ActionRepoPullRequestMarkReady),
+		Scope:          scope,
+		Rationale:      "raw-scope test decision",
+	}
+	if _, err := appendAuthorityDecisionRecorded(s, factory, signer, human, conv, requestID, content); err != nil {
+		t.Fatalf("append raw-scope authority.decision.recorded (%s): %v", outcome, err)
+	}
+}
+
 func TestMarkReadyActionIsProtected(t *testing.T) {
 	if !safety.IsProtectedAction(safety.ActionRepoPullRequestMarkReady) {
 		t.Fatal("pull_request.mark_ready must be a protected action")
@@ -231,6 +252,42 @@ func TestFindApprovedMarkReadyTarget(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed newest matching decision revokes older authority", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecision(t, s, factory, signer, human, conv, requestID, "approved", target)
+		malformed := target.Scope()
+		malformed[5] = "yes" // invalid re-draft boolean; identity fields intact
+		seedMarkReadyDecisionRawScope(t, s, factory, signer, human, conv, requestID, "denied", malformed)
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err == nil {
+			t.Fatal("a malformed newest decision for the same target must fail closed, not expose older authority")
+		}
+	})
+
+	t.Run("malformed decision for a different target does not block", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecision(t, s, factory, signer, human, conv, requestID, "approved", target)
+		otherPR := target
+		otherPR.PRNumber = 99
+		malformed := otherPR.Scope()
+		malformed[6] = "" // empty nonce; identity fields intact and different
+		seedMarkReadyDecisionRawScope(t, s, factory, signer, human, conv, requestID, "approved", malformed)
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err != nil {
+			t.Fatalf("a malformed decision attributable to a DIFFERENT target must not block, got %v", err)
+		}
+	})
+
+	t.Run("unattributable malformed mark-ready decision revokes all", func(t *testing.T) {
+		s, factory, signer, human, conv := newDecisionTestStore(t)
+		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
+		seedMarkReadyDecision(t, s, factory, signer, human, conv, requestID, "approved", target)
+		seedMarkReadyDecisionRawScope(t, s, factory, signer, human, conv, requestID, "approved", []string{string(safety.ActionRepoPullRequestMarkReady), "corrupt"})
+		if _, err := FindApprovedMarkReadyTarget(s, target.Repository, target.PRNumber, target.HeadSHA); err == nil {
+			t.Fatal("a mark-ready decision whose target cannot be identified must fail the whole gate closed")
+		}
+	})
+
 	t.Run("draft-pr-create approval never authorizes readying", func(t *testing.T) {
 		s, factory, signer, human, conv := newDecisionTestStore(t)
 		requestID := seedMarkReadyAnchor(t, s, factory, signer, human, conv)
@@ -283,8 +340,11 @@ func markReadyConsumptionFixturesForTest(runID, orderID string, evidence IssueSc
 }
 
 // TestIssueScanMarkReadyApprovalConsumerIsSingleUse proves the durable
-// consumption record: the same nonce never authorizes twice, even after a
-// re-draft returns the PR to draft state (CFAR hive#272 round 1, finding 1).
+// consumption record: a nonce consumed by one run never authorizes another
+// run or another target, while the SAME run retrying the SAME approved
+// transition re-enters idempotently — so a transient evidence-recording
+// failure after a successful flip cannot strand the stage (CFAR hive#272
+// round 1 finding 1; round 4 finding 2).
 func TestIssueScanMarkReadyApprovalConsumerIsSingleUse(t *testing.T) {
 	rt, _, runID, orderID, _, _ := issueScanReadyStageFixtureForTest(t)
 	evidence := issueScanReadyPREvidenceForTest(runID, orderID)
@@ -293,8 +353,15 @@ func TestIssueScanMarkReadyApprovalConsumerIsSingleUse(t *testing.T) {
 	if err := consume(context.Background(), mutation, target); err != nil {
 		t.Fatalf("first consumption: %v", err)
 	}
-	if err := consume(context.Background(), mutation, target); err == nil {
-		t.Fatal("second consumption of the same nonce must refuse")
+	if err := consume(context.Background(), mutation, target); err != nil {
+		t.Fatalf("same-run same-target re-entry must be idempotent, got %v", err)
+	}
+	differentHead := mutation
+	differentHead.HeadSHA = "some-other-head"
+	differentTarget := target
+	differentTarget.HeadSHA = "some-other-head"
+	if err := consume(context.Background(), differentHead, differentTarget); err == nil {
+		t.Fatal("the same nonce must never authorize a DIFFERENT transition, even for the same run")
 	}
 	other := target
 	other.SingleUseNonce = "nonce-single-use-2"
@@ -406,7 +473,13 @@ func TestIssueScanMarkReadyChecksSurviveArtifactPagination(t *testing.T) {
 			t.Fatalf("append noise artifact %d: %v", i, err)
 		}
 	}
-	if err := consume(context.Background(), mutation, target); err == nil {
+	// Same nonce toward a DIFFERENT transition: if the buried claim were
+	// invisible to a single-page read, this would consume fresh and succeed.
+	differentHead := mutation
+	differentHead.HeadSHA = "some-other-head"
+	differentTarget := target
+	differentTarget.HeadSHA = "some-other-head"
+	if err := consume(context.Background(), differentHead, differentTarget); err == nil {
 		t.Fatal("a consumption record buried beyond one artifact page must still refuse reuse")
 	}
 	_, _, err := rt.issueScanReadyPRRunnerContext(runID)

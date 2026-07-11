@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.5.0
+version: 0.6.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -38,7 +38,11 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   they can neither authorize nor shadow a human decision. (v0.4.0, from CFAR
   round 2.) A finite `ExpiresAt` that has passed ends the authority: an
   expired approval refuses; zero means unbounded. (v0.5.0, from CFAR round
-  3.)
+  3.) Latest-wins holds for malformed records too: a newest human mark-ready
+  decision whose scope is malformed but attributable to the target fails that
+  target closed instead of exposing older authority, and an unattributable
+  malformed mark-ready record fails the whole gate closed until a human
+  repairs it. (v0.6.0, from CFAR round 4.)
 - **R2 — Fail-closed approval gate with durable single-use consumption.**
   `RunIssueScanReadyPRFinalizer` refuses to call `MarkReadyForReview` unless a
   recorded, **approved**, non-stale mark-ready decision exactly matches the
@@ -59,7 +63,14 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   and every other claimant refuses. All consumption and blocked-evidence
   reads page through the WHOLE store; a single bounded artifact page could
   hide an old claim or terminal evidence under newer events. (v0.4.0, from
-  CFAR round 2.)
+  CFAR round 2.) Authority currency is re-checked immediately before the side
+  effect: after consumption the lookup re-resolves and must return EXACTLY
+  the consumed approval, so an expiry lapsing or a newer human decision
+  landing during the consumption scans refuses. The SAME run retrying the
+  SAME approved transition re-enters its own consumption record idempotently
+  (a transient evidence-recording failure after a successful flip must not
+  strand the stage); any other run or target still refuses. (v0.6.0, from
+  CFAR round 4.)
 - **R3 — Failure remediation, re-draft under recorded scope only.** When
   ready-state review fails, errors, or cannot run after the draft→ready
   mutation: never record ready-for-Human evidence; if the matching approval's
@@ -72,8 +83,10 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   is draft again. The re-draft fetch itself reads only the pull-request
   endpoint (never commit-status or check-runs), so a CI-endpoint outage — a
   verification-failure state the remediation exists for — can never prevent
-  returning the PR to draft (v0.5.0, from CFAR round 3). Either way the run
-  surfaces a durable blocked state.
+  returning the PR to draft (v0.5.0, from CFAR round 3). The remediation runs
+  under a detached, bounded context (60s) so caller cancellation after the
+  mutation cannot disable the authorized safety cleanup (v0.6.0, from CFAR
+  round 4). Either way the run surfaces a durable blocked state.
 - **R4 — Blocked-state evidence as Work artifacts.** A structured
   `issue_scan_ready_pr_blocked` evidence artifact (kind, lifecycle version,
   run/order ids, PR identity, failure reason, remediation taken:
@@ -115,7 +128,7 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
   reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.5.0)
+## Implementation Notes (v0.6.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary

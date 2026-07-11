@@ -33,9 +33,12 @@ func (m *finalizerMockClient) FetchReadyPRState(_ context.Context, _ IssueScanRe
 	return m.fetchState, m.fetchErr
 }
 
-func (m *finalizerMockClient) ConvertToDraft(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+func (m *finalizerMockClient) ConvertToDraft(ctx context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
 	m.convertCalls++
 	m.lastConvertInput = mutation
+	if err := ctx.Err(); err != nil {
+		return IssueScanReadyPRLiveState{}, err
+	}
 	return m.convertState, m.convertErr
 }
 
@@ -89,6 +92,17 @@ func finalizerTestContextWithConsumer(consumeCalls *int) IssueScanReadyPRRunnerC
 	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
 		*consumeCalls++
 		return nil
+	}
+	return readyContext
+}
+
+// finalizerTestContextEchoing additionally equips the context with a lookup
+// that keeps returning the given approval, satisfying the pre-mutation
+// authority-currency re-check for tests not aimed at that re-check.
+func finalizerTestContextEchoing(approval MarkReadyTarget, consumeCalls *int) IssueScanReadyPRRunnerContext {
+	readyContext := finalizerTestContextWithConsumer(consumeCalls)
+	readyContext.MarkReadyApprovalLookup = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+		return approval, nil
 	}
 	return readyContext
 }
@@ -151,7 +165,7 @@ func happyMockClient() *finalizerMockClient {
 func TestFinalizerSucceedsWithMatchingApproval(t *testing.T) {
 	client := happyMockClient()
 	consumeCalls := 0
-	result, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(false))
+	result, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(false), &consumeCalls), client, passingReviewer, finalizerApproval(false))
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -172,6 +186,9 @@ func TestFinalizerSucceedsWithMatchingApproval(t *testing.T) {
 func TestFinalizerConsumesApprovalBeforeMutation(t *testing.T) {
 	client := happyMockClient()
 	readyContext := finalizerTestContext()
+	readyContext.MarkReadyApprovalLookup = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+		return finalizerApproval(false), nil
+	}
 	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
 		if client.markReadyCalls != 0 {
 			t.Fatal("approval must be consumed before MarkReadyForReview is called")
@@ -188,7 +205,11 @@ func TestFinalizerConsumesApprovalBeforeMutation(t *testing.T) {
 // refuses before any mutation.
 func TestFinalizerRefusesWithoutConsumer(t *testing.T) {
 	client := happyMockClient()
-	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, passingReviewer, finalizerApproval(false))
+	readyContext := finalizerTestContext()
+	readyContext.MarkReadyApprovalLookup = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+		return finalizerApproval(false), nil
+	}
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), readyContext, client, passingReviewer, finalizerApproval(false))
 	if err == nil || !errors.Is(err, ErrIssueScanMarkReadyNotAuthorized) || client.markReadyCalls != 0 {
 		t.Fatalf("expected fail-closed refusal with no consumer, err=%v markReadyCalls=%d", err, client.markReadyCalls)
 	}
@@ -199,6 +220,9 @@ func TestFinalizerRefusesWithoutConsumer(t *testing.T) {
 func TestFinalizerRefusesWhenConsumptionFails(t *testing.T) {
 	client := happyMockClient()
 	readyContext := finalizerTestContext()
+	readyContext.MarkReadyApprovalLookup = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+		return finalizerApproval(false), nil
+	}
 	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
 		return fmt.Errorf("single-use nonce already consumed")
 	}
@@ -230,7 +254,7 @@ func TestFinalizerRefusesWithoutMatchingApproval(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := happyMockClient()
 			consumeCalls := 0
-			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, tc.approval)
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(tc.approval, &consumeCalls), client, passingReviewer, tc.approval)
 			if err == nil {
 				t.Fatal("expected refusal")
 			}
@@ -350,7 +374,7 @@ func TestFinalizerBlockedRemediation(t *testing.T) {
 				client.convertState = *tc.convertState
 			}
 			consumeCalls := 0
-			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, tc.reviewer, finalizerApproval(tc.reDraft))
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(tc.reDraft), &consumeCalls), client, tc.reviewer, finalizerApproval(tc.reDraft))
 			if err == nil {
 				t.Fatal("expected blocked error")
 			}
@@ -381,6 +405,84 @@ func TestFinalizerBlockedRemediation(t *testing.T) {
 	}
 }
 
+// TestFinalizerRefusesWithoutLookupDirect proves the authority-currency
+// re-check is fail-closed at the core, not just in the runner wrapper: a
+// context with no lookup refuses before any mutation.
+func TestFinalizerRefusesWithoutLookupDirect(t *testing.T) {
+	client := happyMockClient()
+	consumeCalls := 0
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(false))
+	if err == nil || !errors.Is(err, ErrIssueScanMarkReadyNotAuthorized) || client.markReadyCalls != 0 {
+		t.Fatalf("expected fail-closed refusal with no lookup on the context, err=%v markReadyCalls=%d", err, client.markReadyCalls)
+	}
+}
+
+// TestFinalizerRevalidatesApprovalBeforeMutation proves the authority is
+// re-checked immediately before the side effect: an approval that expires or
+// is superseded between consumption and mutation refuses (CFAR hive#272
+// round 4, finding 1).
+func TestFinalizerRevalidatesApprovalBeforeMutation(t *testing.T) {
+	cases := []struct {
+		name   string
+		lookup MarkReadyApprovalLookup
+	}{
+		{
+			name: "authority withdrawn after consumption",
+			lookup: func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+				return MarkReadyTarget{}, fmt.Errorf("latest mark-ready decision is now a denial")
+			},
+		},
+		{
+			name: "authority replaced by a different approval",
+			lookup: func(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error) {
+				replaced := finalizerApproval(false)
+				replaced.SingleUseNonce = "a-newer-different-nonce"
+				return replaced, nil
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := happyMockClient()
+			consumeCalls := 0
+			readyContext := finalizerTestContextWithConsumer(&consumeCalls)
+			readyContext.MarkReadyApprovalLookup = tc.lookup
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), readyContext, client, passingReviewer, finalizerApproval(false))
+			if err == nil || !errors.Is(err, ErrIssueScanMarkReadyNotAuthorized) {
+				t.Fatalf("expected authority-currency refusal, got %v", err)
+			}
+			if client.markReadyCalls != 0 {
+				t.Fatalf("MarkReadyForReview must not run after stale authority (called %d times)", client.markReadyCalls)
+			}
+		})
+	}
+}
+
+// TestFinalizerReDraftSurvivesCallerCancellation proves the authorized
+// remediation runs even when the caller's context was canceled after the
+// mutation: the compensating request must not be disabled by shutdown (CFAR
+// hive#272 round 4, finding 3).
+func TestFinalizerReDraftSurvivesCallerCancellation(t *testing.T) {
+	client := happyMockClient()
+	consumeCalls := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	cancellingReviewer := func(_ context.Context, _ IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		cancel()
+		return IssueScanReadyStateReviewReceipt{}, fmt.Errorf("review interrupted by shutdown")
+	}
+	_, err := RunIssueScanReadyPRFinalizer(ctx, finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, cancellingReviewer, finalizerApproval(true))
+	if err == nil {
+		t.Fatal("expected blocked error")
+	}
+	var blocked *IssueScanReadyPRBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected blocked error, got %v", err)
+	}
+	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDrafted || client.convertCalls != 1 {
+		t.Fatalf("remediation = %q (error %q), convertCalls = %d; the re-draft must run under a detached context", blocked.Evidence.Remediation, blocked.Evidence.RemediationError, client.convertCalls)
+	}
+}
+
 // TestFinalizerProvenNotMutatedErrorIsNotBlocked proves the ONLY path that
 // bypasses blocked evidence on a MarkReadyForReview error: the client proved
 // the PR was never mutated by wrapping ErrIssueScanMarkReadyNotMutated.
@@ -388,7 +490,7 @@ func TestFinalizerProvenNotMutatedErrorIsNotBlocked(t *testing.T) {
 	client := happyMockClient()
 	consumeCalls := 0
 	client.markReadyErr = fmt.Errorf("%w: preflight head mismatch", ErrIssueScanMarkReadyNotMutated)
-	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(true))
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, passingReviewer, finalizerApproval(true))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -409,7 +511,7 @@ func TestFinalizerUnprovenMarkReadyErrorIsBlocked(t *testing.T) {
 	client := happyMockClient()
 	consumeCalls := 0
 	client.markReadyErr = fmt.Errorf("github unavailable while reconciling mutation state")
-	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(true))
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, passingReviewer, finalizerApproval(true))
 	if err == nil {
 		t.Fatal("expected error")
 	}

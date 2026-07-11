@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -18,6 +19,10 @@ const (
 )
 
 var errIssueScanReadyPRFinalizerAwaitingDraftReceipt = errors.New("issue-scan ready PR finalizer awaiting draft PR receipt")
+
+// issueScanReDraftRemediationTimeout bounds the detached re-draft remediation
+// call (BOUNDED invariant: detached from caller cancellation, never unbounded).
+const issueScanReDraftRemediationTimeout = 60 * time.Second
 
 // IssueScanReadyPRFinalizerClient performs the PR-state mutations in the
 // terminal issue-scan stage: marking the already-created draft PR ready for
@@ -199,11 +204,25 @@ func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanRea
 	if err := validateMarkReadyApproval(mutation, approval); err != nil {
 		return IssueScanReadyPRRunnerResult{}, err
 	}
+	if readyContext.MarkReadyApprovalLookup == nil {
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: no mark-ready approval lookup configured on the run context", ErrIssueScanMarkReadyNotAuthorized)
+	}
 	if readyContext.ConsumeMarkReadyApproval == nil {
 		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: no single-use approval consumer configured on the run context", ErrIssueScanMarkReadyNotAuthorized)
 	}
 	if err := readyContext.ConsumeMarkReadyApproval(ctx, mutation, approval); err != nil {
 		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: %v", ErrIssueScanMarkReadyNotAuthorized, err)
+	}
+	// Authority-currency re-check immediately before the side effect: the
+	// approval was resolved before the consumption scans ran, and in that
+	// window a finite expiry can pass or a newer human decision can land.
+	// The freshly-resolved authority must be EXACTLY the consumed approval.
+	current, err := readyContext.MarkReadyApprovalLookup(ctx, mutation)
+	if err != nil {
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: authority no longer current after consumption: %v", ErrIssueScanMarkReadyNotAuthorized, err)
+	}
+	if current != approval {
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: recorded authority changed after consumption (consumed nonce %q, current nonce %q)", ErrIssueScanMarkReadyNotAuthorized, approval.SingleUseNonce, current.SingleUseNonce)
 	}
 	marked, err := client.MarkReadyForReview(ctx, mutation)
 	if err != nil {
@@ -478,7 +497,12 @@ func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinaliz
 		evidence.Remediation = IssueScanReadyPRRemediationReDraftUnauthorized
 		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
 	}
-	state, convertErr := client.ConvertToDraft(ctx, mutation)
+	// The authorized safety remediation must run even when the caller's
+	// context was canceled after the mutation (e.g. shutdown mid-run):
+	// detach from cancellation but stay BOUNDED with a fresh timeout.
+	remediationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), issueScanReDraftRemediationTimeout)
+	defer cancel()
+	state, convertErr := client.ConvertToDraft(remediationCtx, mutation)
 	if convertErr == nil && (!state.Draft || state.PRNumber != mutation.PRNumber || !strings.EqualFold(strings.TrimSpace(state.Repository), mutation.Repository)) {
 		// A "successful" conversion is only successful when the returned live
 		// state proves THIS PR is draft again.

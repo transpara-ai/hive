@@ -107,7 +107,21 @@ func FindApprovedMarkReadyTarget(s store.Store, repository string, prNumber int,
 			}
 			target, err := ParseMarkReadyScope(content.Scope)
 			if err != nil {
-				continue // a malformed mark-ready decision can never authorize anything
+				// A malformed mark-ready decision can never AUTHORIZE — but
+				// under latest-wins it can REVOKE: falling through to older
+				// authority would let a corrupted newest decision (possibly a
+				// denial) be silently ignored. If its identity fields are
+				// readable and match, fail this target closed; if the target
+				// cannot be identified at all, fail the whole gate closed
+				// until a human repairs the record.
+				repoField, prField, headField, identified := markReadyScopeIdentity(content.Scope)
+				if !identified {
+					return MarkReadyTarget{}, fmt.Errorf("mark-ready decision %s has an unattributable malformed scope: refusing all mark-ready authority until a human repairs the record", ev.ID().Value())
+				}
+				if strings.ToLower(repoField) == repository && prField == prNumber && strings.EqualFold(headField, headSHA) {
+					return MarkReadyTarget{}, fmt.Errorf("newest mark-ready decision for %s#%d@%s is malformed (%v): refusing (latest-wins, fail closed)", repository, prNumber, headSHA, err)
+				}
+				continue // attributable to a different target: harmless here
 			}
 			if strings.ToLower(target.Repository) != repository || target.PRNumber != prNumber || !strings.EqualFold(target.HeadSHA, headSHA) {
 				continue
@@ -128,6 +142,26 @@ func FindApprovedMarkReadyTarget(s store.Store, repository string, prNumber int,
 		}
 		cursor = page.Cursor()
 	}
+}
+
+// markReadyScopeIdentity extracts just the target-identity fields (repository,
+// PR number, head SHA) from a mark-ready scope, tolerating malformation in the
+// non-identity fields (re-draft flag, nonce). It reports identified=false when
+// the identity itself cannot be read.
+func markReadyScopeIdentity(scope []string) (repository string, prNumber int, headSHA string, identified bool) {
+	if len(scope) != markReadyScopeLen || scope[0] != string(safety.ActionRepoPullRequestMarkReady) {
+		return "", 0, "", false
+	}
+	prNumber, err := strconv.Atoi(scope[2])
+	if err != nil || prNumber <= 0 {
+		return "", 0, "", false
+	}
+	repository = strings.TrimSpace(scope[1])
+	headSHA = strings.TrimSpace(scope[4])
+	if repository == "" || headSHA == "" {
+		return "", 0, "", false
+	}
+	return repository, prNumber, headSHA, true
 }
 
 // NewStoreMarkReadyApprovalLookup adapts FindApprovedMarkReadyTarget to the

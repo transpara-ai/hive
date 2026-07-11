@@ -1404,7 +1404,18 @@ func (r *Runtime) consumeIssueScanMarkReadyApproval(runID string, mutation Issue
 		return err
 	}
 	if len(claims) > 0 {
-		return fmt.Errorf("mark-ready approval nonce %q was already consumed by run %q: a single-use approval never authorizes twice", nonce, claims[0].RunID)
+		// The SAME run retrying the SAME approved transition re-enters
+		// idempotently: a transient failure while recording ready evidence
+		// after a successful flip must not strand the stage behind its own
+		// consumption record. Any other run or any other target refuses.
+		winner := claims[0]
+		if winner.RunID == strings.TrimSpace(runID) &&
+			strings.EqualFold(strings.TrimSpace(winner.Repository), mutation.Repository) &&
+			winner.PRNumber == mutation.PRNumber &&
+			strings.EqualFold(strings.TrimSpace(winner.HeadSHA), mutation.HeadSHA) {
+			return nil
+		}
+		return fmt.Errorf("mark-ready approval nonce %q was already consumed by run %q: a single-use approval never authorizes twice", nonce, winner.RunID)
 	}
 	claimID, err := issueScanMarkReadyClaimID()
 	if err != nil {
