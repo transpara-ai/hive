@@ -377,6 +377,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			},
 			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
+				"recorded approved pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying)",
 				"ready_state_review_runner returns passing exact-head receipt",
 			},
 			RecordedArtifacts: []string{
@@ -390,6 +391,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			AuthorityBoundaries: []string{
 				"does not approve, merge, deploy, or perform production migrations",
 				"requires --issue-scan-ready-pr-review-runner",
+				"re-drafts after a failed ready-state review only when the recorded mark-ready approval carries re_draft_on_failure; otherwise records blocked evidence and stops",
 			},
 		},
 		OperatorNotes: []string{

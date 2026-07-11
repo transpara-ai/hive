@@ -37,8 +37,12 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
 - **R2 — Fail-closed approval gate in the finalizer.** `RunIssueScanReadyPRFinalizer`
   refuses to call `MarkReadyForReview` unless a recorded, **approved**,
   non-stale mark-ready decision exactly matches the run-derived target
-  (repository, PR number, head SHA, nonce unused). Missing, denied,
-  undecided, mismatched, or unreadable records all refuse with typed errors.
+  (repository, PR number, head SHA). Missing, denied, undecided, mismatched,
+  or unreadable records all refuse with typed errors. The single-use nonce is
+  carried and recorded in blocked evidence; durable consumption records are
+  deferred to the live-enablement slice as a named residual — this slice
+  enforces single-use structurally (the pre-mutation draft-state requirement
+  rejects a second flip of the same PR). (v0.2.0 truth-up.)
 - **R3 — Failure remediation, re-draft under recorded scope only.** When
   ready-state review fails, errors, or cannot run after the draft→ready
   mutation: never record ready-for-Human evidence; if the matching approval's
