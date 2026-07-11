@@ -201,14 +201,12 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
   if systemctl --user is-active --quiet hive; then
-    # Restarting hive.service re-launches whatever the unit encodes — gate BOTH before restart:
-    # (1) credential: run the "hive.service credential preflight" (Hive Up section); proceed only on an OK verdict.
-    # (2) autonomy: flags already in ExecStart RESUME on restart.
-    if systemctl --user cat hive 2>/dev/null | grep -qE -- '--approve-(requests|roles)'; then
-      echo "hive.service ExecStart carries full-autonomy flags — restart resumes FULL AUTONOMY; do NOT restart without explicit current-turn approval"
-    else
-      echo "run the hive.service credential preflight; only on an OK verdict restart with: systemctl --user restart hive"
-    fi
+    # Restarting hive.service re-launches whatever the unit encodes. Run the
+    # "hive.service credential preflight" (Hive Up section) — its VERDICT covers
+    # credentials AND full-autonomy flags from the merged effective properties.
+    echo "hive.service is active — run the hive.service credential preflight;"
+    echo "restart only on 'VERDICT: OK to start' (or with the explicit approval"
+    echo "the verdict names): systemctl --user restart hive"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     echo "manual runtime detected; stopping it and preserving command for the user to rerun:"
     pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'
@@ -310,29 +308,41 @@ LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic
 Before starting or restarting `hive.service` (its environment comes from unit config, `EnvironmentFile`s, and the systemd `--user` manager — not this shell), run this read-only, names-only preflight; any hit or unreadable source means do NOT start without explicit production authorization:
 
 ```bash
-hit=0
-cfg=$(systemctl --user cat hive 2>/dev/null) || { echo "cannot read hive.service config"; hit=1; }
-# Every Environment= assignment, including quoted and multi-assignment forms
-# (splitting quoted values may over-match — that errs closed, never open):
-printf '%s\n' "$cfg" | grep '^Environment=' | sed 's/^Environment=//' | tr ' ' '\n' | tr -d '"' | grep -q '^LOVYOU_API_KEY=' && { echo "unit Environment= sets LOVYOU_API_KEY"; hit=1; }
-for ef in $(printf '%s\n' "$cfg" | grep '^EnvironmentFile=' | cut -d= -f2- | sed 's/^-//'); do
+# Merged EFFECTIVE properties via `systemctl show` — systemd resolves unit
+# fragments, drop-ins, list resets, whitespace, and quoting authoritatively,
+# so no text-parsing of unit files is needed (parsing `systemctl cat` output
+# missed quoted/spaced assignments and ignored later-fragment list resets).
+cred=0; unknown=0; auto=0
+if unitenv=$(systemctl --user show hive -p Environment --value 2>/dev/null); then
+  printf '%s\n' "$unitenv" | tr ' ' '\n' | tr -d '"'"'"'"' | grep -q '^LOVYOU_API_KEY=' && { echo "unit Environment sets LOVYOU_API_KEY"; cred=1; }
+else
+  echo "cannot read unit properties"; unknown=1
+fi
+for ef in $(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null | sed 's/ (ignore_errors=[^)]*)$//' | sed 's/^-//'); do
   if [ -r "$ef" ]; then
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?"?LOVYOU_API_KEY"?=' "$ef" && { echo "$ef sets LOVYOU_API_KEY"; hit=1; }
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?[\"']?LOVYOU_API_KEY[\"']?[[:space:]]*=" "$ef" && { echo "$ef sets LOVYOU_API_KEY"; cred=1; }
   else
-    echo "cannot read $ef — UNKNOWN"; hit=1
+    echo "cannot read $ef — UNKNOWN"; unknown=1
   fi
 done
-systemctl --user show-environment | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; hit=1; }
-if [ "$hit" -eq 0 ]; then
-  echo "preflight clean — OK to start"
-elif systemctl --user cat hive 2>/dev/null | grep -qx 'UnsetEnvironment=LOVYOU_API_KEY'; then
-  echo "credential present in sources but the clearing drop-in is ACTIVE — OK to start; verify post-start"
+systemctl --user show-environment | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; cred=1; }
+systemctl --user show hive -p ExecStart --value 2>/dev/null | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+cleared=0
+case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " in
+  *" LOVYOU_API_KEY "*) cleared=1;;
+esac
+if [ "$unknown" -ne 0 ]; then
+  echo "VERDICT: a source is unreadable — do NOT start"
+elif [ "$cred" -ne 0 ] && [ "$cleared" -eq 0 ]; then
+  echo "VERDICT: credential present and not cleared — do NOT start without explicit production authorization (or apply the clearing drop-in)"
+elif [ "$auto" -ne 0 ]; then
+  echo "VERDICT: full-autonomy flags in ExecStart — starting RESUMES FULL AUTONOMY; start ONLY with explicit current-turn approval"
 else
-  echo "do NOT start without explicit production authorization (or apply the clearing drop-in)"
+  echo "VERDICT: OK to start"
 fi
 ```
 
-If a source sets the key and the user still wants a local-only runtime, apply a clearing drop-in (a mutating config change — confirm with the user first), then re-run the preflight (it reports the source hits as cleared by the active drop-in) and, after start, verify with the Endpoint Reference effective-environment check using unit `hive` and variable `LOVYOU_API_KEY` — `UnsetEnvironment` strips the variable from the final environment regardless of which source set it, but the post-start check is the authoritative proof:
+If a source sets the key and the user still wants a local-only runtime, apply a clearing drop-in (a mutating config change — confirm with the user first), then re-run the preflight (its verdict reads the merged effective `UnsetEnvironment` property, so an active drop-in — and any later list reset — is judged correctly) and, after start, verify with the Endpoint Reference effective-environment check using unit `hive` and variable `LOVYOU_API_KEY` — `UnsetEnvironment` strips the variable from the final environment regardless of which source set it, but the post-start check is the authoritative proof:
 
 ```bash
 mkdir -p ~/.config/systemd/user/hive.service.d
