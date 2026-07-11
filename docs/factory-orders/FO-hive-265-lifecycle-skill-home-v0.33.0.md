@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.32.0
+version: 0.33.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -313,6 +313,24 @@ the new head surfaced three operational defects, repaired in both dialects:
   policy stored in Postgres still overrides them and can route roles to
   Codex or API-key models; both dialects now say so and direct the operator
   to inspect/clear stored role policies for strict provider isolation.
+
+### Round-2 fresh-head repairs (v0.33.0)
+
+- **bi — merged-property runtime gates.** `systemctl is-active --quiet`
+  reads `activating (auto-restart)` as stopped, yet systemd will relaunch
+  the encoded full-autonomy command within `RestartSec` — bypassing the
+  protected-action gate. All runtime gates in both dialects now read
+  `systemctl show -p ActiveState --value` and allowlist only the
+  provably-stopped states (`inactive|failed`); anything else, including an
+  unreadable value, is treated as a MANAGED runtime requiring the human
+  gate (a pending auto-restart is cancelable with `systemctl --user stop
+  hive`).
+- **bj — quiescence-gated database reset.** The Nuclear Option stopped only
+  the systemd units; manually launched work-server/hive-ops-api processes
+  could keep connections and write into the reset chain. Both dialects now
+  sweep manual APIs with the identity-verified loops and GATE `docker
+  compose down -v` on a process-quiescence check (a false argv match only
+  ABORTS — fail-closed direction).
 
 ## Non-Goals
 

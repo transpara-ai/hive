@@ -104,8 +104,13 @@ systemctl --user is-active work-server hive-ops-api
 systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|Main PID:'
 
 echo "=== hive runtime ==="
-if systemctl --user is-active --quiet hive; then
+# Merged-property read, not is-active: `activating (auto-restart)` returns
+# nonzero from is-active yet systemd WILL relaunch the unit shortly.
+hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)
+if [ "$hive_state" = "active" ]; then
   echo "hive.service: active"
+elif [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
+  echo "hive.service: ${hive_state:-unreadable} — pending auto-restart or transition; treat as a MANAGED runtime"
 elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
   echo "manual runtime: RUNNING"
   pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only — full argv may contain sensitive --idea text or credential assignments
@@ -198,12 +203,18 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 # runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
-  if systemctl --user is-active --quiet hive; then
-    # Restarting hive.service re-launches whatever the unit encodes — a
-    # PROTECTED ACTION (see the human gate in On-demand Runtime): require the
-    # user's explicit current-turn approval naming the credential AND autonomy
-    # postures, then: systemctl --user restart hive
-    echo "hive.service is active — protected action: get explicit current-turn"
+  # Merged-property read, not is-active: a unit in `activating (auto-restart)`
+  # reads as "stopped" via is-active, yet systemd will relaunch the encoded
+  # (full-autonomy) command shortly — bypassing this gate. Allowlist only the
+  # provably-stopped states; anything else (incl. unreadable) is MANAGED.
+  hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)
+  if [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
+    # Restarting or letting hive.service relaunch runs whatever the unit
+    # encodes — a PROTECTED ACTION (see the human gate in On-demand Runtime):
+    # require the user's explicit current-turn approval naming the credential
+    # AND autonomy postures; a pending auto-restart can be canceled with
+    # `systemctl --user stop hive`.
+    echo "hive.service state=${hive_state:-unreadable} — protected action: get explicit current-turn"
     echo "approval (credential + autonomy postures) before: systemctl --user restart hive"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     # Do NOT terminate yet — killing first loses the workload and its
@@ -411,10 +422,19 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 sleep 3
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
-# The && chain is load-bearing: if the repo path is missing or unmounted, a
-# bare cd would leave the shell in the CALLER's directory and `docker compose
-# down -v` would destroy an unrelated project's volumes.
-cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
+# Manual APIs also write the chain — sweep them, then GATE the reset on
+# quiescence. The broad argv pattern is safe here: a false match only ABORTS.
+pgrep -f '[c]md/work-server|[e]xe/work-server' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
+pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+sleep 1
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)|[c]md/work-server|[e]xe/work-server|[c]md/hive-ops-api|[e]xe/hive-ops-api' >/dev/null; then
+  echo "hive/work processes still running — NOT resetting the database"
+else
+  # The && chain is load-bearing: if the repo path is missing or unmounted, a
+  # bare cd would leave the shell in the CALLER's directory and `docker compose
+  # down -v` would destroy an unrelated project's volumes.
+  cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
+fi
 ```
 
 ## Common Problems
