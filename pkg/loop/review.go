@@ -437,7 +437,9 @@ func (l *Loop) catchUpReviewProjectionStep() bool {
 		// The prefix was COLLECTED in full before any fold, so a failed walk
 		// folds nothing and the whole replay retries — never a partial prefix.
 		for _, ev := range events {
-			s.foldChainEvent(ev, selfID)
+			if l.reviewEventInScope(ev) {
+				s.foldChainEvent(ev, selfID)
+			}
 		}
 		s.replayHead = head
 		return true
@@ -453,7 +455,9 @@ func (l *Loop) catchUpReviewProjectionStep() bool {
 			return true
 		}
 		for _, ev := range items {
-			s.foldChainEvent(ev, selfID)
+			if l.reviewEventInScope(ev) {
+				s.foldChainEvent(ev, selfID)
+			}
 		}
 		// Commit the watermark PER FOLDED PAGE: a failure on a later page must
 		// resume from here, not from the walk's start — re-folding an earlier
@@ -463,6 +467,33 @@ func (l *Loop) catchUpReviewProjectionStep() bool {
 			return true
 		}
 	}
+}
+
+// reviewEventInScope prevents a one-shot reviewer from adopting completion,
+// review, reopen, or escalation state for a task created by another run. The
+// default daemon path has no TaskScope and preserves the global projection.
+func (l *Loop) reviewEventInScope(ev event.Event) bool {
+	if l == nil || l.config.TaskScope == nil {
+		return true
+	}
+	var taskID types.EventID
+	switch c := ev.Content().(type) {
+	case work.TaskCompletedContent:
+		taskID = c.TaskID
+	case event.CodeReviewContent:
+		id, err := types.NewEventID(c.TaskID)
+		if err != nil {
+			return false
+		}
+		taskID = id
+	case work.TaskReopenedContent:
+		taskID = c.TaskID
+	case work.CommentContent:
+		taskID = c.TaskID
+	default:
+		return true
+	}
+	return l.taskInScope(taskID)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -572,6 +603,15 @@ func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
 	if l.reviewerState != nil && l.reviewerState.projectionStale {
 		return fmt.Errorf("review emission blocked: projection stale (chain catch-up failing); verdicts are fail-closed until it recovers")
 	}
+	if l.config.TaskScope != nil {
+		taskID, err := types.NewEventID(cmd.TaskID)
+		if err != nil {
+			return fmt.Errorf("review emission blocked: invalid task id %q: %w", cmd.TaskID, err)
+		}
+		if !l.taskInScope(taskID) {
+			return fmt.Errorf("review emission blocked: task %s is outside the current run boundary", cmd.TaskID)
+		}
+	}
 	content := event.CodeReviewContent{
 		TaskID:     cmd.TaskID,
 		Verdict:    cmd.Verdict,
@@ -601,6 +641,17 @@ func (l *Loop) emitCodeReview(cmd *ReviewCommand) error {
 func (l *Loop) routeReviewVerdict(cmd *ReviewCommand) {
 	if cmd.Verdict != "request_changes" {
 		return
+	}
+	if l.config.TaskScope != nil {
+		taskID, err := types.NewEventID(cmd.TaskID)
+		if err != nil {
+			fmt.Printf("review return edge: invalid task id %q: %v\n", cmd.TaskID, err)
+			return
+		}
+		if !l.taskInScope(taskID) {
+			fmt.Printf("review return edge: task %s is outside the current run boundary\n", cmd.TaskID)
+			return
+		}
 	}
 	if l.reviewerState.shouldEscalate(cmd.TaskID) {
 		l.emitReviewEscalationOnce(cmd.TaskID, cmd.Issues)

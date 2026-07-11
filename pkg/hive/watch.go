@@ -53,6 +53,9 @@ func (r *Runtime) processApprovedRoles(ctx context.Context) {
 	}
 
 	for _, approvedEv := range approvedPage.Items() {
+		if !r.eventInCurrentRun(approvedEv) {
+			continue
+		}
 		content, ok := approvedEv.Content().(event.RoleApprovedContent)
 		if !ok {
 			continue
@@ -118,6 +121,9 @@ func (r *Runtime) findRoleProposal(name string) (event.RoleProposedContent, bool
 		return event.RoleProposedContent{}, false
 	}
 	for _, ev := range page.Items() {
+		if !r.eventInCurrentRun(ev) {
+			continue
+		}
 		c, ok := ev.Content().(event.RoleProposedContent)
 		if ok && c.Name == name {
 			return c, true
@@ -135,6 +141,9 @@ func (r *Runtime) findBudgetForRole(name string) (event.AgentBudgetAdjustedConte
 		return event.AgentBudgetAdjustedContent{}, false
 	}
 	for _, ev := range page.Items() {
+		if !r.eventInCurrentRun(ev) {
+			continue
+		}
 		c, ok := ev.Content().(event.AgentBudgetAdjustedContent)
 		// Iteration grants only (codex r1 on hive#156): a duration renewal
 		// matching the role name would hand the spawned agent MINUTES as
@@ -156,6 +165,9 @@ func (r *Runtime) autoApproveProposedRoles(_ context.Context) {
 	}
 
 	for _, ev := range proposedPage.Items() {
+		if !r.eventInCurrentRun(ev) {
+			continue
+		}
 		proposal, ok := ev.Content().(event.RoleProposedContent)
 		if !ok {
 			continue
@@ -237,6 +249,9 @@ func (r *Runtime) findApproval(name string) (event.RoleApprovedContent, bool) {
 		return event.RoleApprovedContent{}, false
 	}
 	for _, ev := range page.Items() {
+		if !r.eventInCurrentRun(ev) {
+			continue
+		}
 		c, ok := ev.Content().(event.RoleApprovedContent)
 		if ok && c.Name == name {
 			return c, true
@@ -323,6 +338,8 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		TaskStore:              r.tasks,
 		PhaseGateStore:         r.phaseGates,
 		ConvID:                 r.convID,
+		TaskScope:              r.oneShotTaskScope(),
+		TaskWorkspace:          r.oneShotTaskWorkspace(),
 		OnTaskCompleted:        r.handleTaskCompletion,
 		OnTaskCommandsExecuted: r.progressIssueScanLifecycleAfterTaskCommands,
 		OnReviewCompleted:      r.progressIssueScanLifecycleAfterReview,

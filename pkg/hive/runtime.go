@@ -110,6 +110,7 @@ type Runtime struct {
 	repoPath              string
 	repoWorkspaceRoot     string
 	loop                  bool
+	isolateRunTasks       bool
 	catalogPath           string
 	catalogReloadInterval time.Duration
 }
@@ -124,6 +125,7 @@ type Config struct {
 	RepoPath                             string                               // --repo: path to repo for Operate
 	RepoWorkspaceRoot                    string                               // parent directory containing Transpara-AI repo checkouts for issue-scan targets
 	Loop                                 bool                                 // --loop: agents block on bus instead of quiescing
+	IsolateRunTasks                      bool                                 // one-shot runs: restrict task perception and mutation to this run conversation/repo
 	CatalogPath                          string                               // --catalog: custom YAML catalog file (merged with defaults)
 	CatalogReloadInterval                time.Duration                        // reload --catalog for future spawns; 0 disables
 	RunLaunchDispatchInterval            time.Duration                        // dispatch queued run-launch requests; <0 disables
@@ -205,6 +207,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		repoPath:                             cfg.RepoPath,
 		repoWorkspaceRoot:                    cfg.RepoWorkspaceRoot,
 		loop:                                 cfg.Loop,
+		isolateRunTasks:                      cfg.IsolateRunTasks,
 		catalogPath:                          cfg.CatalogPath,
 		catalogReloadInterval:                cfg.CatalogReloadInterval,
 		runLaunchDispatchInterval:            cfg.RunLaunchDispatchInterval,
@@ -326,7 +329,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		if head.IsSome() {
 			causes = []types.EventID{head.Unwrap().ID()}
 		}
-		task, err := r.tasks.Create(r.humanID, "Seed: "+seedIdea, seedIdea, causes, r.convID)
+		var task work.Task
+		if r.isolateRunTasks {
+			task, err = r.tasks.CreateInWorkspace(r.humanID, "Seed: "+seedIdea, seedIdea, r.repoPath, causes, r.convID)
+		} else {
+			task, err = r.tasks.Create(r.humanID, "Seed: "+seedIdea, seedIdea, causes, r.convID)
+		}
 		if err != nil {
 			return fmt.Errorf("create seed task: %w", err)
 		}
@@ -415,6 +423,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	if openBrainURL != "" {
 		thoughtStore = checkpoint.NewOpenBrainClient(openBrainURL, openBrainKey)
 	}
+	if r.isolateRunTasks {
+		// A one-shot run is a new bounded execution, not a daemon restart.
+		// Reusing role-keyed checkpoints imports prior intent/workspace state;
+		// writing new role-keyed checkpoints would contaminate a later daemon.
+		thoughtStore = nil
+	}
 
 	staleness := 2 * time.Hour
 	if s := os.Getenv("CHECKPOINT_STALENESS"); s != "" {
@@ -430,29 +444,35 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		}
 	}
 
-	// Collect role names for recovery — starters + any dynamically spawned
-	// agents discovered from hive.role.approved events on the chain.
-	var roleNames []string
-	for _, def := range r.defs {
-		roleNames = append(roleNames, def.Name)
-	}
-	dynamicNames, dynErr := checkpoint.ReplayDynamicAgentsFromStore(r.store)
-	if dynErr != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: dynamic agent discovery: %v\n", dynErr)
-	}
-	starterSet := make(map[string]bool, len(roleNames))
-	for _, n := range roleNames {
-		starterSet[n] = true
-	}
-	for _, n := range dynamicNames {
-		if !starterSet[n] {
-			roleNames = append(roleNames, n)
+	if r.isolateRunTasks {
+		recoveryStates = make(map[string]*checkpoint.RecoveryState)
+		fmt.Fprintln(os.Stderr, "Checkpoint: isolated one-shot cold start (prior role checkpoints excluded)")
+	} else {
+		// Collect role names for recovery — starters + any dynamically spawned
+		// agents discovered from hive.role.approved events on the chain.
+		var roleNames []string
+		for _, def := range r.defs {
+			roleNames = append(roleNames, def.Name)
 		}
-	}
+		dynamicNames, dynErr := checkpoint.ReplayDynamicAgentsFromStore(r.store)
+		if dynErr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: dynamic agent discovery: %v\n", dynErr)
+		}
+		starterSet := make(map[string]bool, len(roleNames))
+		for _, n := range roleNames {
+			starterSet[n] = true
+		}
+		for _, n := range dynamicNames {
+			if !starterSet[n] {
+				roleNames = append(roleNames, n)
+			}
+		}
 
-	recoveryStates, recoverErr := checkpoint.RecoverAll(roleNames, thoughtStore, r.store, staleness)
-	if recoverErr != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: checkpoint recovery: %v\n", recoverErr)
+		var recoverErr error
+		recoveryStates, recoverErr = checkpoint.RecoverAll(roleNames, thoughtStore, r.store, staleness)
+		if recoverErr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: checkpoint recovery: %v\n", recoverErr)
+		}
 	}
 
 	// Log recovery summary.
@@ -478,6 +498,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	// Build loop configs for all agents.
 	configs := make([]loop.Config, 0, len(r.defs))
+	var taskScope func(types.EventID) bool
+	taskWorkspace := ""
+	if r.isolateRunTasks {
+		taskScope = r.taskInCurrentRun
+		taskWorkspace = r.repoPath
+	}
 	for _, def := range r.defs {
 		agent, resolvedModel, err := r.spawnAgent(ctx, def)
 		if err != nil {
@@ -520,6 +546,8 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			TaskStore:              r.tasks,
 			PhaseGateStore:         r.phaseGates,
 			ConvID:                 r.convID,
+			TaskScope:              taskScope,
+			TaskWorkspace:          taskWorkspace,
 			OnTaskCompleted:        r.handleTaskCompletion,
 			OnTaskCommandsExecuted: r.progressIssueScanLifecycleAfterTaskCommands,
 			OnReviewCompleted:      r.progressIssueScanLifecycleAfterReview,

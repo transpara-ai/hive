@@ -130,6 +130,15 @@ type Config struct {
 	// ConvID is the conversation ID for task operations.
 	ConvID types.ConversationID
 
+	// TaskScope optionally restricts task perception and mutation to task IDs
+	// owned by the current run. A nil scope preserves daemon/global behavior.
+	// Returning false must fail closed: the task is hidden and cannot be acted on.
+	TaskScope func(types.EventID) bool
+
+	// TaskWorkspace is attached to tasks created by this loop when TaskScope is
+	// active, binding derived work to the same authorized repository as Operate.
+	TaskWorkspace string
+
 	// OnTaskCompleted is called after TaskStore.Complete succeeds. Optional.
 	OnTaskCompleted func(ctx context.Context, task work.Task, summary string)
 
@@ -1530,6 +1539,9 @@ func (l *Loop) buildTaskContext() string {
 	sb.WriteString("## Work Tasks\n")
 
 	for _, t := range summaries {
+		if !l.taskInScope(t.ID) {
+			continue
+		}
 		status := string(t.Status)
 		if t.Blocked {
 			status = "blocked"
@@ -1950,7 +1962,7 @@ func (l *Loop) processTaskCommands(ctx context.Context, response string) {
 		causes = []types.EventID{lastEv}
 	}
 
-	executed := executeTaskCommands(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID, l.config.CanOperate)
+	executed := executeTaskCommandsScoped(commands, l.config.TaskStore, l.agent.ID(), causes, l.config.ConvID, l.config.CanOperate, l.config.TaskScope, l.config.TaskWorkspace)
 	if executed > 0 {
 		fmt.Printf("[%s] executed %d/%d task commands\n", l.agent.Name(), executed, len(commands))
 		if l.config.OnTaskCommandsExecuted != nil {
@@ -2104,6 +2116,9 @@ func (l *Loop) firstAssignableOpenTask() (work.Task, bool) {
 	// first canonical task gets executed before newer duplicate chains.
 	for i := len(open) - 1; i >= 0; i-- {
 		t := open[i]
+		if !l.taskInScope(t.ID) {
+			continue
+		}
 		if assignees[t.ID] != (types.ActorID{}) {
 			continue
 		}
@@ -2154,7 +2169,7 @@ func (l *Loop) hasAssignedTask() bool {
 		return false
 	}
 	for _, t := range tasks {
-		if l.taskIsOperable(t.ID) {
+		if l.taskInScope(t.ID) && l.taskIsOperable(t.ID) {
 			return true
 		}
 	}
@@ -2165,11 +2180,22 @@ func (l *Loop) hasAssignedTask() bool {
 func (l *Loop) nextAssignedTask() work.Task {
 	tasks, _ := l.config.TaskStore.GetByAssignee(l.agent.ID())
 	for _, t := range tasks {
-		if l.taskIsOperable(t.ID) {
+		if l.taskInScope(t.ID) && l.taskIsOperable(t.ID) {
 			return t
 		}
 	}
 	return work.Task{}
+}
+
+// taskInScope applies the optional one-shot run boundary. It deliberately
+// returns false on every scope rejection; callers must never infer authority
+// from task text or assignment state when the durable creation event is out of
+// scope or unreadable.
+func (l *Loop) taskInScope(taskID types.EventID) bool {
+	if l == nil || l.config.TaskScope == nil {
+		return true
+	}
+	return l.config.TaskScope(taskID)
 }
 
 // attachOperateArtifact captures the verified Operate commit range as a task
