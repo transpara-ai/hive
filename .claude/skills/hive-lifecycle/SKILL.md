@@ -218,7 +218,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
-curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
 **Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Diagnose read-only:
@@ -265,7 +265,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
 
 ```bash
-curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
      http://localhost:8085/api/hive/operator-projection | jq .
 ```
 
@@ -284,7 +284,7 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_A
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
 ```
 
 ## Model Catalog
@@ -392,8 +392,9 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 # or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
 pgrep -x work-server | xargs -r kill 2>/dev/null
 pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
+pgrep -x localapi | xargs -r kill 2>/dev/null   # the Local Offline API also holds hive-DB tables
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null || pgrep -x localapi >/dev/null; then
   echo "hive/work processes still running — NOT resetting the database"
 else
   # The && chain is load-bearing: if the repo path is missing or unmounted, a

@@ -128,7 +128,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
-curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status
 ```
 
 If `systemctl --user is-active` reports `activating` or `auto-restart`, inspect logs read-only first:
@@ -289,8 +289,8 @@ The probe reads this one variable's value (an operator actor id, not a secret) b
 Read-only probes:
 
 ```bash
-curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection | jq .
-curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status | jq .
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection | jq .
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status | jq .
 ```
 
 ## Model Catalog
@@ -449,8 +449,9 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
 pgrep -x work-server | xargs -r kill 2>/dev/null
 pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
+pgrep -x localapi | xargs -r kill 2>/dev/null   # the Local Offline API also holds hive-DB tables
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null || pgrep -x localapi >/dev/null; then
   echo "hive/work processes still running — NOT resetting the database"
 else
   # The && chain is load-bearing: if the repo path is missing or unmounted, a

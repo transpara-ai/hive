@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.37.0
+version: 0.38.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -389,6 +389,16 @@ the new head surfaced three operational defects, repaired in both dialects:
   catalog; the probe now detects flag presence first and reports an empty
   value as "built-in defaults" instead of falling back to the environment
   line.
+
+### Round-7 fresh-head repairs (v0.38.0)
+
+- **br — authenticated localhost probes bypass ambient proxies.** With
+  `http_proxy` set and `localhost` absent from `NO_PROXY`, curl would send
+  the request AND its `Authorization` bearer to the proxy. Every
+  authenticated localhost probe now carries `--noproxy '*'`, both dialects.
+- **bs — localapi joins the reset quiescence.** The Local Offline API binds
+  :8082 against the hive database and migrates only at startup; the Nuclear
+  sweep and quiescence gate now include `pgrep -x localapi`, both dialects.
 
 ## Non-Goals
 
