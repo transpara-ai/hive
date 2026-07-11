@@ -484,6 +484,33 @@ func TestFinalizerReDraftSurvivesCallerCancellation(t *testing.T) {
 	}
 }
 
+// TestFinalizerNeverReDraftsAHumanApprovedPR proves human authority is
+// supreme over remediation: when the live state shows the PR was explicitly
+// approved by a human (e.g. approval landed between the managed flip and the
+// final verification), the blocked path declines the re-draft even under an
+// approval carrying ReDraftOnFailure (CFAR hive#272 round 6, finding 1).
+func TestFinalizerNeverReDraftsAHumanApprovedPR(t *testing.T) {
+	client := happyMockClient()
+	approvedState := finalizerLiveState(true)
+	approvedState.ReviewDecision = "APPROVED"
+	client.fetchState = approvedState
+	consumeCalls := 0
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, passingReviewer, finalizerApproval(true))
+	if err == nil {
+		t.Fatal("expected blocked error")
+	}
+	var blocked *IssueScanReadyPRBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected blocked error, got %v", err)
+	}
+	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDraftDeclinedHumanApproval {
+		t.Fatalf("remediation = %q, want %q", blocked.Evidence.Remediation, IssueScanReadyPRRemediationReDraftDeclinedHumanApproval)
+	}
+	if client.convertCalls != 0 {
+		t.Fatalf("ConvertToDraft must never run against a human-approved PR (called %d times)", client.convertCalls)
+	}
+}
+
 // TestFinalizerNeverReDraftsATransitionItDidNotPerform proves remediation
 // only touches state this run created: when the PR was already ready (the
 // client reports no managed mutation) and a later step fails, the finalizer

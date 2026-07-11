@@ -340,11 +340,13 @@ func markReadyConsumptionFixturesForTest(runID, orderID string, evidence IssueSc
 }
 
 // TestIssueScanMarkReadyApprovalConsumerIsSingleUse proves the durable
-// consumption record: a nonce consumed by one run never authorizes another
-// run or another target, while the SAME run retrying the SAME approved
-// transition re-enters idempotently — so a transient evidence-recording
-// failure after a successful flip cannot strand the stage (CFAR hive#272
-// round 1 finding 1; round 4 finding 2).
+// consumption record: a consumed nonce NEVER authorizes again — not for
+// another run, not for another target, and not for the same run retrying.
+// (CFAR hive#272 round 1 finding 1; the round-4 same-run re-entry allowance
+// was withdrawn in round 6 — a re-draft plus a failed blocked-evidence append
+// would let the retry flip the PR a second time on the same nonce. A stalled
+// run is remediated by a FRESH human approval with a new nonce, never by
+// reusing the consumed one.)
 func TestIssueScanMarkReadyApprovalConsumerIsSingleUse(t *testing.T) {
 	rt, _, runID, orderID, _, _ := issueScanReadyStageFixtureForTest(t)
 	evidence := issueScanReadyPREvidenceForTest(runID, orderID)
@@ -353,15 +355,15 @@ func TestIssueScanMarkReadyApprovalConsumerIsSingleUse(t *testing.T) {
 	if err := consume(context.Background(), mutation, target); err != nil {
 		t.Fatalf("first consumption: %v", err)
 	}
-	if err := consume(context.Background(), mutation, target); err != nil {
-		t.Fatalf("same-run same-target re-entry must be idempotent, got %v", err)
+	if err := consume(context.Background(), mutation, target); err == nil {
+		t.Fatal("a consumed nonce must refuse even the same run and target: reuse could flip the PR a second time")
 	}
 	differentHead := mutation
 	differentHead.HeadSHA = "some-other-head"
 	differentTarget := target
 	differentTarget.HeadSHA = "some-other-head"
 	if err := consume(context.Background(), differentHead, differentTarget); err == nil {
-		t.Fatal("the same nonce must never authorize a DIFFERENT transition, even for the same run")
+		t.Fatal("the same nonce must never authorize a DIFFERENT transition")
 	}
 	other := target
 	other.SingleUseNonce = "nonce-single-use-2"
@@ -473,13 +475,9 @@ func TestIssueScanMarkReadyChecksSurviveArtifactPagination(t *testing.T) {
 			t.Fatalf("append noise artifact %d: %v", i, err)
 		}
 	}
-	// Same nonce toward a DIFFERENT transition: if the buried claim were
-	// invisible to a single-page read, this would consume fresh and succeed.
-	differentHead := mutation
-	differentHead.HeadSHA = "some-other-head"
-	differentTarget := target
-	differentTarget.HeadSHA = "some-other-head"
-	if err := consume(context.Background(), differentHead, differentTarget); err == nil {
+	// If the buried claim were invisible to a single-page read, this would
+	// consume fresh and succeed.
+	if err := consume(context.Background(), mutation, target); err == nil {
 		t.Fatal("a consumption record buried beyond one artifact page must still refuse reuse")
 	}
 	_, _, err := rt.issueScanReadyPRRunnerContext(runID)

@@ -322,6 +322,20 @@ func (c *issueScanReadyPRGitHubClient) ConvertToDraft(ctx context.Context, mutat
 	if state.Draft {
 		return state, nil
 	}
+	// Human authority is supreme: never convert a human-approved PR back to
+	// draft, on any caller path. The review-decision query is GraphQL-only
+	// (no commit-status/check-runs dependency).
+	owner, repo, err := issueScanReadyPROwnerRepo(mutation.Repository)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	decision, err := c.fetchPullRequestReviewDecision(ctx, owner, repo, mutation.PRNumber)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: cannot verify review decision before re-draft: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(decision), "approved") {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: PR #%d is human-approved; refusing to re-draft over human authority", mutation.PRNumber)
+	}
 	if err := c.convertPullRequestToDraft(ctx, nodeID); err != nil {
 		return hive.IssueScanReadyPRLiveState{}, err
 	}

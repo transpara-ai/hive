@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -256,6 +258,10 @@ func TestIssueScanReadyPRGitHubClientReDraftsDespiteFailingChecks(t *testing.T) 
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
 			writeJSON(t, w, map[string]any{"total_count": 0, "check_runs": []map[string]string{}})
 		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			if graphQLBodyContains(t, r, "reviewDecision") {
+				writeJSON(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]string{"reviewDecision": "REVIEW_REQUIRED"}}}})
+				return
+			}
 			graphQLCalls++
 			writeJSON(t, w, map[string]any{"data": map[string]any{"convertPullRequestToDraft": map[string]any{"pullRequest": map[string]any{"id": "PR_kwDOtest", "isDraft": true}}}})
 		default:
@@ -270,7 +276,7 @@ func TestIssueScanReadyPRGitHubClientReDraftsDespiteFailingChecks(t *testing.T) 
 		t.Fatalf("ConvertToDraft with failing checks: %v", err)
 	}
 	if graphQLCalls != 1 {
-		t.Fatalf("graphql calls = %d, want 1 (re-draft must run despite failing checks)", graphQLCalls)
+		t.Fatalf("convert mutations = %d, want 1 (re-draft must run despite failing checks)", graphQLCalls)
 	}
 	if !state.Draft {
 		t.Fatalf("state = %+v, want draft after conversion", state)
@@ -303,6 +309,10 @@ func TestIssueScanReadyPRGitHubClientReDraftsDuringCIEndpointOutage(t *testing.T
 		case r.Method == http.MethodGet && (strings.HasSuffix(r.URL.Path, "/status") || strings.HasSuffix(r.URL.Path, "/check-runs")):
 			t.Fatalf("re-draft must not depend on CI endpoints (queried %s)", r.URL.Path)
 		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			if graphQLBodyContains(t, r, "reviewDecision") {
+				writeJSON(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]string{"reviewDecision": "REVIEW_REQUIRED"}}}})
+				return
+			}
 			graphQLCalls++
 			writeJSON(t, w, map[string]any{"data": map[string]any{"convertPullRequestToDraft": map[string]any{"pullRequest": map[string]any{"id": "PR_kwDOtest", "isDraft": true}}}})
 		default:
@@ -317,8 +327,63 @@ func TestIssueScanReadyPRGitHubClientReDraftsDuringCIEndpointOutage(t *testing.T
 		t.Fatalf("ConvertToDraft during CI endpoint outage: %v", err)
 	}
 	if graphQLCalls != 1 || !state.Draft {
-		t.Fatalf("graphql calls = %d, state = %+v; want one conversion to draft", graphQLCalls, state)
+		t.Fatalf("convert mutations = %d, state = %+v; want one conversion to draft", graphQLCalls, state)
 	}
+}
+
+// TestIssueScanReadyPRGitHubClientRefusesReDraftOfHumanApprovedPR proves the
+// client-level guard: a PR whose review decision is APPROVED is never
+// converted to draft — human authority is supreme over remediation, on every
+// caller path (CFAR hive#272 round 6, finding 1).
+func TestIssueScanReadyPRGitHubClientRefusesReDraftOfHumanApprovedPR(t *testing.T) {
+	mutation := readyPRGitHubMutationForTest()
+	convertCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+			writeJSON(t, w, map[string]any{
+				"number":          321,
+				"html_url":        mutation.PRURL,
+				"node_id":         "PR_kwDOtest",
+				"state":           "open",
+				"draft":           false,
+				"mergeable_state": "clean",
+				"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+				"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			if graphQLBodyContains(t, r, "reviewDecision") {
+				writeJSON(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]string{"reviewDecision": "APPROVED"}}}})
+				return
+			}
+			convertCalls++
+			t.Fatal("convertPullRequestToDraft must never be issued for a human-approved PR")
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+	_, err := client.ConvertToDraft(context.Background(), mutation)
+	if err == nil || !strings.Contains(err.Error(), "approved") {
+		t.Fatalf("ConvertToDraft error = %v, want human-approved refusal", err)
+	}
+	if convertCalls != 0 {
+		t.Fatalf("convert mutations = %d, want 0", convertCalls)
+	}
+}
+
+// graphQLBodyContains reports whether the GraphQL request body mentions the
+// marker, restoring the body for any later reads.
+func graphQLBodyContains(t *testing.T, r *http.Request, marker string) bool {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read graphql body: %v", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return strings.Contains(string(body), marker)
 }
 
 // TestIssueScanReadyPRGitHubClientReconcilesFailedMutation proves the

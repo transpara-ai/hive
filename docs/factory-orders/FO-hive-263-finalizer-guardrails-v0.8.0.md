@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.7.0
+version: 0.8.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -66,11 +66,15 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   CFAR round 2.) Authority currency is re-checked immediately before the side
   effect: after consumption the lookup re-resolves and must return EXACTLY
   the consumed approval, so an expiry lapsing or a newer human decision
-  landing during the consumption scans refuses. The SAME run retrying the
-  SAME approved transition re-enters its own consumption record idempotently
-  (a transient evidence-recording failure after a successful flip must not
-  strand the stage); any other run or target still refuses. (v0.6.0, from
-  CFAR round 4.)
+  landing during the consumption scans refuses. (v0.6.0, from CFAR round 4.)
+  A consumed nonce NEVER authorizes again — not for another run, another
+  target, or the same run retrying. (v0.8.0 REVERSAL of the v0.6.0 same-run
+  re-entry allowance, from CFAR round 6: after an authorized re-draft plus a
+  failed blocked-evidence append, a same-run retry would flip the PR a
+  SECOND time on one approval, and a concurrent same-run claimant could pass
+  after observing the first claim. The stall this reintroduces is the
+  doctrine-correct trade — a stalled run is remediated by a FRESH human
+  approval with a new nonce, never by nonce reuse.)
 - **R3 — Failure remediation, re-draft under recorded scope only.** When
   ready-state review fails, errors, or cannot run after the draft→ready
   mutation: never record ready-for-Human evidence; if the matching approval's
@@ -92,13 +96,19 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   — no recorded approval of this transition covers un-flipping another
   actor's ready state. The mutation-error reconcile fetch is identity-only
   (draft state, not CI health, is what proves non-mutation). (v0.7.0, from
-  CFAR round 5.) Either way the run surfaces a durable blocked state.
+  CFAR round 5.) Human authority is supreme over remediation: a live state
+  carrying an explicit human approval declines the re-draft
+  (`re_draft_declined_human_approval`) at the finalizer, and the live client
+  additionally refuses to convert any human-approved PR on every caller path
+  (review-decision query is GraphQL-only, no CI dependency). (v0.8.0, from
+  CFAR round 6.) Either way the run surfaces a durable blocked state.
 - **R4 — Blocked-state evidence as Work artifacts.** A structured
   `issue_scan_ready_pr_blocked` evidence artifact (kind, lifecycle version,
   run/order ids, PR identity, failure reason, remediation taken:
   `re_drafted` | `re_draft_unauthorized` | `re_draft_failed` |
-  `re_draft_not_attempted`, review ref if any) is recorded on the ready-stage
-  task through the existing Work artifact path. Absence of evidence is never success; evidence-recording failure
+  `re_draft_not_attempted` | `re_draft_declined_human_approval`, review ref
+  if any) is recorded on the ready-stage task through the existing Work
+  artifact path. Absence of evidence is never success; evidence-recording failure
   propagates as error. (v0.3.0 truth-up: `re_draft_unsupported` dropped —
   client support is compile-time via the interface, so the state is
   unrepresentable.)
@@ -134,7 +144,7 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
   reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.7.0)
+## Implementation Notes (v0.8.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary

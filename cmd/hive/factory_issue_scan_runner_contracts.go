@@ -378,7 +378,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
 				"recorded approved human-decided unexpired pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying; non-human decisions neither authorize nor shadow human ones; a past finite expires_at refuses)",
-				"the approval's single-use nonce has no recorded consumption anywhere in the store (mark_ready_approval_consumed artifact, cross-run, full pagination); consumption is recorded durably before the mutation with append-then-verify-winner claim ordering, and the same run may re-enter only the same approved transition",
+				"the approval's single-use nonce has no recorded consumption anywhere in the store (mark_ready_approval_consumed artifact, cross-run, full pagination); consumption is recorded durably before the mutation with append-then-verify-winner claim ordering, and a consumed nonce never authorizes again — a stalled run needs a fresh human approval",
 				"authority currency is re-checked immediately before the mutation: the re-resolved approval must exactly equal the consumed approval",
 				"no issue_scan_ready_pr_blocked artifact is recorded on the ready stage (blocked evidence is terminal until explicit human remediation; the check pages through all artifact events)",
 				"ready_state_review_runner returns passing exact-head receipt",
@@ -399,6 +399,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				"reports a re-draft successful only when the returned live state proves the same PR is draft again",
 				"re-draft reads only the pull-request endpoint (never commit-status or check-runs), so a CI-endpoint outage cannot prevent returning the PR to draft",
 				"re-drafts only a transition this run performed: a PR already ready on arrival records re_draft_not_attempted, never an un-flip of another actor's ready state",
+				"never re-drafts a human-approved PR: the finalizer declines with re_draft_declined_human_approval and the live client refuses the conversion on every caller path",
 			},
 		},
 		OperatorNotes: []string{

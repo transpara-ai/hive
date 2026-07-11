@@ -59,6 +59,11 @@ type MarkReadyApprovalConsumer func(context.Context, IssueScanReadyPRFinalizerMu
 // target. A draft-PR creation approval never satisfies this gate.
 var ErrIssueScanMarkReadyNotAuthorized = errors.New("issue-scan mark-ready is not authorized by a recorded approval")
 
+// errIssueScanReadyPRHumanApproved marks a live-state rejection whose cause
+// is an explicit human approval on the PR. Human authority is supreme: the
+// blocked path must never re-draft over it.
+var errIssueScanReadyPRHumanApproved = errors.New("live PR carries an explicit human approval")
+
 // ErrIssueScanMarkReadyNotMutated marks a MarkReadyForReview failure the
 // client has PROVEN left the PR un-mutated (a refusal before any GraphQL
 // call, or a post-failure reconcile fetch showing the PR still draft). Only
@@ -79,6 +84,10 @@ const (
 	// re-drafting would mutate state some other actor created — refused even
 	// under an approval carrying ReDraftOnFailure.
 	IssueScanReadyPRRemediationReDraftNotAttempted IssueScanReadyPRRemediation = "re_draft_not_attempted"
+	// IssueScanReadyPRRemediationReDraftDeclinedHumanApproval records that
+	// re-draft was declined because the live PR carries an explicit human
+	// approval — human authority is never undone by managed remediation.
+	IssueScanReadyPRRemediationReDraftDeclinedHumanApproval IssueScanReadyPRRemediation = "re_draft_declined_human_approval"
 )
 
 // IssueScanReadyPRBlockedEvidence is the durable record of a managed ready
@@ -415,7 +424,7 @@ func validateIssueScanReadyPRLiveState(label string, mutation IssueScanReadyPRFi
 		switch strings.ToLower(strings.TrimSpace(state.ReviewDecision)) {
 		case "", "review_required":
 		case "approved":
-			return fmt.Errorf("%s review_decision %q indicates Human approval is already satisfied", label, state.ReviewDecision)
+			return fmt.Errorf("%w: %s review_decision %q indicates Human approval is already satisfied", errIssueScanReadyPRHumanApproved, label, state.ReviewDecision)
 		default:
 			return fmt.Errorf("%s review_decision %q is not waiting on Human approval", label, state.ReviewDecision)
 		}
@@ -504,6 +513,13 @@ func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinaliz
 			"the PR is not represented as Human-ready",
 			"merge and deploy remain separate governed authorities",
 		}),
+	}
+	if errors.Is(cause, errIssueScanReadyPRHumanApproved) {
+		// A human approved the PR after the managed flip: human authority is
+		// supreme, and managed remediation never reverts it.
+		evidence.Remediation = IssueScanReadyPRRemediationReDraftDeclinedHumanApproval
+		evidence.RemediationError = "the live PR carries an explicit human approval; refusing to re-draft over human authority"
+		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
 	}
 	if !mutated {
 		// This run never issued the ready mutation (the PR was already ready
