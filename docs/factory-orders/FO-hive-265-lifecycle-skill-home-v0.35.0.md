@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.34.0
+version: 0.35.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -340,6 +340,17 @@ the new head surfaced three operational defects, repaired in both dialects:
   miss a live chain-writing process. Candidate selection now unions
   name-exact `pgrep -x work-server` / `pgrep -x hive-ops-api` with the argv
   patterns (comm identity check retained), in both dialects.
+
+### Round-4 fresh-head repair (v0.35.0)
+
+- **bl — pending relaunches are canceled, not just detected.** With the
+  auto-restart timer armed (`activating`), printing an approval prompt does
+  not stop systemd from relaunching the full-autonomy unit while approval is
+  pending. The restart gates in both dialects now CANCEL the pending
+  relaunch (`systemctl --user stop hive` — fail-closed: it kills no running
+  workload in these states) before requiring approval to start again; a
+  RUNNING unit (`active|reloading`) is still never touched without approval,
+  and read-only Status sections keep reporting without mutating.
 
 ## Non-Goals
 
