@@ -163,24 +163,22 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   # reads as "stopped" via is-active, yet systemd will relaunch the encoded
   # (full-autonomy) command shortly — bypassing this gate. Allowlist only the
   # provably-stopped states; anything else (incl. unreadable) is MANAGED.
+  # Runtime adjudication is a HUMAN gate, not shell forensics (a runbook
+  # cannot reliably prove systemd transition states; the mechanical verifier
+  # belongs in a tested Go subcommand — tracked separately). Read the merged
+  # state, REPORT it verbatim, mutate nothing:
   hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)
-  if [ "$hive_state" = "active" ] || [ "$hive_state" = "reloading" ]; then
-    # Runtime is RUNNING. Restarting hive.service re-launches whatever the
-    # unit encodes — a PROTECTED ACTION (see the human gate in Hive Up):
-    # require the user's explicit current-turn approval naming the credential
-    # AND autonomy postures, then: systemctl --user restart hive
-    echo "hive.service is running — protected action: get explicit current-turn"
-    echo "approval (credential + autonomy postures) before: systemctl --user restart hive"
-  elif [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
-    # activating (auto-restart timer ARMED), deactivating, or unreadable:
-    # detection alone does not prevent systemd from relaunching the
-    # full-autonomy command while approval is still pending — CANCEL the
-    # pending relaunch first (stopping is the fail-closed direction; it
-    # kills no running workload in these states), THEN require approval to
-    # start it again.
-    systemctl --user stop hive 2>/dev/null
-    echo "hive.service was ${hive_state:-unreadable} — pending relaunch CANCELED; starting it again is a"
-    echo "protected action: get explicit current-turn approval (credential + autonomy postures) first"
+  hive_sub=$(systemctl --user show hive -p SubState --value 2>/dev/null)
+  if [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
+    # active/reloading: running now. activating/auto-restart: systemd WILL
+    # relaunch the encoded full-autonomy command shortly. Unreadable: unknown.
+    # In every one of these the decision is the human's — including whether
+    # to cancel a queued relaunch (systemctl --user stop hive), which must be
+    # CONFIRMED by re-reading ActiveState afterward, never assumed.
+    echo "hive.service state=${hive_state:-unreadable}/${hive_sub:-unreadable} — MANAGED runtime (running, or a queued relaunch)."
+    echo "protected action: any stop/cancel/restart needs the user's explicit current-turn approval"
+    echo "(credential + autonomy postures). To cancel a queued auto-restart after approval:"
+    echo "  systemctl --user stop hive   # then re-read ActiveState to CONFIRM before relying on it"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     # Do NOT terminate yet — killing first would lose the workload and its
     # governance flags with nothing to relaunch. Get the user's original
@@ -298,9 +296,11 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
   if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
-    flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
-    if [ -n "$flagval" ]; then
-      echo "catalog (from --catalog flag): $flagval"
+    # Flag PRESENCE is tracked separately from its value: an explicit empty
+    # --catalog= clears the env-derived default and selects the built-ins.
+    if printf '%s\n' "$args" | grep -qE -x -- '--?catalog(=.*)?'; then
+      flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
+      echo "catalog (from --catalog flag): ${flagval:-<empty — built-in defaults>}"
     else
       printf '%s\n' "$envlines" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset and no --catalog flag (built-in defaults)"
     fi

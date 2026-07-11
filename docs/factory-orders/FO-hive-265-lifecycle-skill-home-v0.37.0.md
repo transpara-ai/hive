@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.36.0
+version: 0.37.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -370,6 +370,25 @@ the new head surfaced three operational defects, repaired in both dialects:
   the MainPID lookup and the reads yields an empty-but-successful cmdline
   read; the catalog probes now require non-empty cmdline AND environment or
   fail closed to UNKNOWN, in both dialects.
+
+### Round-6 fresh-head repairs (v0.37.0)
+
+- **bp — the v0.35.0 auto-cancel is WITHDRAWN (subtraction).** Round 6 showed
+  the auto-cancel machinery unsound in both directions: it claimed
+  "CANCELED" without verifying the stop succeeded, and it could stop a
+  normal initial activation (not an auto-restart). Rather than growing
+  SubState discrimination plus stop-verification forensics into the runbook
+  — the exact spiral this Factory Order already resolved once by installing
+  the human gate — the restart branch reverts to REPORT-ONLY: it reads
+  ActiveState/SubState (merged properties), reports them verbatim, mutates
+  nothing, and gives the human the exact cancel command WITH the instruction
+  to re-read state to confirm. The mechanical verifier remains tracked as a
+  separate Go subcommand.
+- **bq — catalog flag presence tracked separately from value.** An explicit
+  empty `--catalog=` clears the env-derived default and selects the built-in
+  catalog; the probe now detects flag presence first and reports an empty
+  value as "built-in defaults" instead of falling back to the environment
+  line.
 
 ## Non-Goals
 
