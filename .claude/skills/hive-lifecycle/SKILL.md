@@ -92,9 +92,32 @@ fi
 #   an ambient LOVYOU_API_KEY enables a reconciliation loop + task-completion
 #   mirror posts against PRODUCTION. The blank LOVYOU_API_KEY= prefix disables
 #   that client for local runs; production crossing needs explicit user
-#   authorization. Before starting hive.service (unit env is outside this
-#   shell), verify the running unit carries no LOVYOU_API_KEY via the
-#   effective-environment name check in Endpoint Reference.
+#   authorization. Before systemctl --user start/restart hive, run the
+#   "hive.service credential preflight" below — the unit's env comes from unit
+#   config, EnvironmentFiles, and the user manager, not this shell.
+```
+
+**hive.service credential preflight** (read-only, names only; any hit or unreadable source = do NOT start without explicit production authorization):
+
+```bash
+cfg=$(systemctl --user cat hive 2>/dev/null) || echo "cannot read hive.service config — do NOT start"
+printf '%s\n' "$cfg" | grep -oE '^Environment=[A-Z0-9_]+' | cut -d= -f2 | grep -x LOVYOU_API_KEY && echo "unit Environment= sets LOVYOU_API_KEY — do NOT start"
+for ef in $(printf '%s\n' "$cfg" | grep '^EnvironmentFile=' | cut -d= -f2- | sed 's/^-//'); do
+  if [ -r "$ef" ]; then
+    cut -d= -f1 "$ef" | grep -x LOVYOU_API_KEY && echo "$ef sets LOVYOU_API_KEY — do NOT start"
+  else
+    echo "cannot read $ef — UNKNOWN; do NOT start"
+  fi
+done
+systemctl --user show-environment | cut -d= -f1 | grep -x LOVYOU_API_KEY && echo "user-manager environment sets LOVYOU_API_KEY — do NOT start"
+```
+
+If a source sets the key and the user still wants a local-only runtime: apply a clearing drop-in (mutating config — confirm with the user first), re-run the preflight, and after start verify via the Endpoint Reference effective-environment check with unit `hive` / variable `LOVYOU_API_KEY`:
+
+```bash
+mkdir -p ~/.config/systemd/user/hive.service.d
+printf '[Service]\nUnsetEnvironment=LOVYOU_API_KEY\n' > ~/.config/systemd/user/hive.service.d/no-remote-credential.conf
+systemctl --user daemon-reload
 ```
 
 ## Hive Down
@@ -195,14 +218,14 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 >
 > ```bash
 > pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-> if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null | cut -d= -f1); then
->   printf '%s\n' "$names" | grep -cx HIVE_OPS_HUMAN_ACTOR
+> if [ "${pid:-0}" -gt 0 ] 2>/dev/null && raw=$(cat /proc/"$pid"/environ 2>/dev/null) && [ -n "$raw" ]; then
+>   printf '%s' "$raw" | tr '\0' '\n' | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
 > else
 >   echo "cannot read process environment — mode UNKNOWN"
 > fi
 > ```
 >
-> `0` = read-only; non-zero = **writer mode**; service down or `/proc` unreadable (restart race, permissions) = mode unknown, fail closed — a pipeline failure must never be read as `0`.
+> `0` = read-only; non-zero = **writer mode**. The read is captured **before** any pipeline (`raw=$(cat …)` must succeed and be non-empty), so a restart race or permission failure can never print `0` and masquerade as read-only. Service down or unreadable = mode unknown, fail closed.
 
 ```bash
 curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
