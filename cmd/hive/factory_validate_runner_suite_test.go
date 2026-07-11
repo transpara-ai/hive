@@ -502,6 +502,18 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			wantErr: "confidence",
 		},
 		{
+			name: "ready state review status not passing",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "ready_state_review_runner", "stdout.json")
+				body := `{"review_ref":"synthetic-review-0002","reviewed_head_sha":"0000000000000000000000000000000000000001","status":"failed"}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "not passing",
+		},
+		{
 			name: "operate result body not parseable by the runtime parser",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				path := filepath.Join(dir, "examples", "implementation_runner", "stdout.json")

@@ -535,7 +535,14 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 		if side == issueScanRunnerSuiteFixtureStdin {
 			target = &hive.IssueScanReadyStateReviewContext{}
 		} else {
-			target = &hive.IssueScanReadyStateReviewReceipt{}
+			receipt := &hive.IssueScanReadyStateReviewReceipt{}
+			if err := strictDecodeJSON(body, receipt); err != nil {
+				return err
+			}
+			if err := hive.ValidateIssueScanReadyStateReviewReceiptShape(*receipt); err != nil {
+				return fmt.Errorf("receipt shape the runtime would reject: %w", err)
+			}
+			return nil
 		}
 	case "ready_pr_evidence_runner":
 		if side == issueScanRunnerSuiteFixtureStdin {
