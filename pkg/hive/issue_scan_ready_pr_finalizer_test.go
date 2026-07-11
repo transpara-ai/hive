@@ -11,21 +11,22 @@ import (
 // finalizerMockClient records calls and returns configurable results for each
 // of the three client operations.
 type finalizerMockClient struct {
-	markReadyCalls   int
-	fetchCalls       int
-	convertCalls     int
-	markReadyState   IssueScanReadyPRLiveState
-	markReadyErr     error
-	fetchState       IssueScanReadyPRLiveState
-	fetchErr         error
-	convertState     IssueScanReadyPRLiveState
-	convertErr       error
-	lastConvertInput IssueScanReadyPRFinalizerMutation
+	markReadyCalls      int
+	fetchCalls          int
+	convertCalls        int
+	markReadyState      IssueScanReadyPRLiveState
+	markReadyErr        error
+	markReadyNotMutated bool
+	fetchState          IssueScanReadyPRLiveState
+	fetchErr            error
+	convertState        IssueScanReadyPRLiveState
+	convertErr          error
+	lastConvertInput    IssueScanReadyPRFinalizerMutation
 }
 
-func (m *finalizerMockClient) MarkReadyForReview(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+func (m *finalizerMockClient) MarkReadyForReview(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, bool, error) {
 	m.markReadyCalls++
-	return m.markReadyState, m.markReadyErr
+	return m.markReadyState, !m.markReadyNotMutated, m.markReadyErr
 }
 
 func (m *finalizerMockClient) FetchReadyPRState(_ context.Context, _ IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
@@ -480,6 +481,31 @@ func TestFinalizerReDraftSurvivesCallerCancellation(t *testing.T) {
 	}
 	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDrafted || client.convertCalls != 1 {
 		t.Fatalf("remediation = %q (error %q), convertCalls = %d; the re-draft must run under a detached context", blocked.Evidence.Remediation, blocked.Evidence.RemediationError, client.convertCalls)
+	}
+}
+
+// TestFinalizerNeverReDraftsATransitionItDidNotPerform proves remediation
+// only touches state this run created: when the PR was already ready (the
+// client reports no managed mutation) and a later step fails, the finalizer
+// records blocked evidence but refuses to re-draft — even under an approval
+// carrying ReDraftOnFailure (CFAR hive#272 round 5, finding 1).
+func TestFinalizerNeverReDraftsATransitionItDidNotPerform(t *testing.T) {
+	client := happyMockClient()
+	client.markReadyNotMutated = true
+	consumeCalls := 0
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, failingReviewer, finalizerApproval(true))
+	if err == nil {
+		t.Fatal("expected blocked error")
+	}
+	var blocked *IssueScanReadyPRBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected blocked error, got %v", err)
+	}
+	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDraftNotAttempted {
+		t.Fatalf("remediation = %q, want %q", blocked.Evidence.Remediation, IssueScanReadyPRRemediationReDraftNotAttempted)
+	}
+	if client.convertCalls != 0 {
+		t.Fatalf("ConvertToDraft must never run for a transition this run did not perform (called %d times)", client.convertCalls)
 	}
 }
 

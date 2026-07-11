@@ -6104,12 +6104,12 @@ type fakeReadyPRFinalizerClient struct {
 	fetchState IssueScanReadyPRLiveState
 }
 
-func (f *fakeReadyPRFinalizerClient) MarkReadyForReview(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+func (f *fakeReadyPRFinalizerClient) MarkReadyForReview(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, bool, error) {
 	f.markCalls++
 	if f.markState.PRNumber != 0 {
-		return f.markState, nil
+		return f.markState, true, nil
 	}
-	return readyPRLiveStateFromMutationForTest(mutation), nil
+	return readyPRLiveStateFromMutationForTest(mutation), true, nil
 }
 
 func (f *fakeReadyPRFinalizerClient) ConvertToDraft(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {

@@ -30,8 +30,14 @@ const issueScanReDraftRemediationTimeout = 60 * time.Second
 // human approval carrying ReDraftOnFailure — returning the PR to draft when
 // ready-state review fails after the mutation. It must not merge, approve,
 // deploy, retarget, push, or change protected settings.
+//
+// MarkReadyForReview's bool result reports whether THIS invocation issued the
+// managed ready mutation: false when the PR was already ready (early return)
+// or when the failure provably preceded the mutation. The finalizer re-drafts
+// only after a managed mutation — never a ready state some other actor
+// created.
 type IssueScanReadyPRFinalizerClient interface {
-	MarkReadyForReview(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
+	MarkReadyForReview(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, bool, error)
 	FetchReadyPRState(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
 	ConvertToDraft(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
 }
@@ -68,6 +74,11 @@ const (
 	IssueScanReadyPRRemediationReDrafted           IssueScanReadyPRRemediation = "re_drafted"
 	IssueScanReadyPRRemediationReDraftUnauthorized IssueScanReadyPRRemediation = "re_draft_unauthorized"
 	IssueScanReadyPRRemediationReDraftFailed       IssueScanReadyPRRemediation = "re_draft_failed"
+	// IssueScanReadyPRRemediationReDraftNotAttempted records that this run
+	// did not perform the ready transition (the PR was already ready), so
+	// re-drafting would mutate state some other actor created — refused even
+	// under an approval carrying ReDraftOnFailure.
+	IssueScanReadyPRRemediationReDraftNotAttempted IssueScanReadyPRRemediation = "re_draft_not_attempted"
 )
 
 // IssueScanReadyPRBlockedEvidence is the durable record of a managed ready
@@ -224,7 +235,7 @@ func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanRea
 	if current != approval {
 		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: recorded authority changed after consumption (consumed nonce %q, current nonce %q)", ErrIssueScanMarkReadyNotAuthorized, approval.SingleUseNonce, current.SingleUseNonce)
 	}
-	marked, err := client.MarkReadyForReview(ctx, mutation)
+	marked, mutated, err := client.MarkReadyForReview(ctx, mutation)
 	if err != nil {
 		if errors.Is(err, ErrIssueScanMarkReadyNotMutated) {
 			// The client PROVED the PR was untouched: plain refusal, nothing
@@ -233,25 +244,25 @@ func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanRea
 		}
 		// Unproven: fail safe — the PR may have been mutated, so record
 		// durable blocked evidence and remediate under the recorded scope.
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, "", err)
 	}
 	if err := validateIssueScanReadyPRLiveState("mark ready", mutation, marked, false); err != nil {
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, "", err)
 	}
 	reviewContext := issueScanReadyStateReviewContext(readyContext, mutation, marked)
 	review, err := reviewer(ctx, reviewContext)
 	if err != nil {
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, "", err)
 	}
 	if err := validateIssueScanReadyStateReviewReceipt(mutation, review); err != nil {
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, review.ReviewRef, err)
 	}
 	live, err := client.FetchReadyPRState(ctx, mutation)
 	if err != nil {
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, review.ReviewRef, err)
 	}
 	if err := validateIssueScanReadyPRLiveState("ready evidence", mutation, live, true); err != nil {
-		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, mutated, review.ReviewRef, err)
 	}
 	evidence := readyContext.ExpectedReadyPREvidence
 	evidence.Repository = strings.ToLower(strings.TrimSpace(live.Repository))
@@ -473,8 +484,9 @@ func validateMarkReadyApproval(mutation IssueScanReadyPRFinalizerMutation, appro
 
 // issueScanReadyPRBlocked builds the durable blocked outcome for any failure
 // after the ready mutation. Re-drafting runs only when the recorded approval
-// carries ReDraftOnFailure; its own failure is recorded, never swallowed.
-func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinalizerClient, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget, reviewRef string, cause error) error {
+// carries ReDraftOnFailure AND this run actually performed the transition;
+// its own failure is recorded, never swallowed.
+func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinalizerClient, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget, mutated bool, reviewRef string, cause error) error {
 	evidence := IssueScanReadyPRBlockedEvidence{
 		Kind:             issueScanReadyPRBlockedEvidenceKind,
 		LifecycleVersion: issueScanLifecycleVersion,
@@ -492,6 +504,14 @@ func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinaliz
 			"the PR is not represented as Human-ready",
 			"merge and deploy remain separate governed authorities",
 		}),
+	}
+	if !mutated {
+		// This run never issued the ready mutation (the PR was already ready
+		// when it arrived): re-drafting would mutate state some other actor
+		// created, which no recorded approval of THIS transition covers.
+		evidence.Remediation = IssueScanReadyPRRemediationReDraftNotAttempted
+		evidence.RemediationError = "this run did not perform the ready transition; refusing to re-draft a PR it did not flip"
+		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
 	}
 	if !approval.ReDraftOnFailure {
 		evidence.Remediation = IssueScanReadyPRRemediationReDraftUnauthorized

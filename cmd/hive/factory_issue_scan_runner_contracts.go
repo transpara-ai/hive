@@ -398,6 +398,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				"treats a mark-ready client failure as a possible mutation unless the client proves the PR un-mutated; unproven failures record blocked evidence",
 				"reports a re-draft successful only when the returned live state proves the same PR is draft again",
 				"re-draft reads only the pull-request endpoint (never commit-status or check-runs), so a CI-endpoint outage cannot prevent returning the PR to draft",
+				"re-drafts only a transition this run performed: a PR already ready on arrival records re_draft_not_attempted, never an un-flip of another actor's ready state",
 			},
 		},
 		OperatorNotes: []string{

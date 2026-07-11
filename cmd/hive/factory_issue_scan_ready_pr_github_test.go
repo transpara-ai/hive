@@ -49,9 +49,12 @@ func TestIssueScanReadyPRGitHubClientMarksDraftReadyAndRefetches(t *testing.T) {
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	state, err := client.MarkReadyForReview(context.Background(), mutation)
+	state, mutated, err := client.MarkReadyForReview(context.Background(), mutation)
 	if err != nil {
 		t.Fatalf("MarkReadyForReview: %v", err)
+	}
+	if !mutated {
+		t.Fatal("a performed GraphQL flip must report mutated=true")
 	}
 	if graphQLCalls != 1 || getPRCalls != 3 {
 		t.Fatalf("calls graphql/getPR = %d/%d, want 1/3", graphQLCalls, getPRCalls)
@@ -91,7 +94,7 @@ func TestIssueScanReadyPRGitHubClientRejectsMovedHeadBeforeGraphQL(t *testing.T)
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	_, err := client.MarkReadyForReview(context.Background(), mutation)
+	_, _, err := client.MarkReadyForReview(context.Background(), mutation)
 	if err == nil || !strings.Contains(err.Error(), "head") {
 		t.Fatalf("MarkReadyForReview error = %v, want moved-head refusal", err)
 	}
@@ -133,7 +136,7 @@ func TestIssueScanReadyPRGitHubClientRejectsRetargetBeforeGraphQL(t *testing.T) 
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	if _, err := client.MarkReadyForReview(context.Background(), mutation); err == nil || !strings.Contains(err.Error(), "base_ref") {
+	if _, _, err := client.MarkReadyForReview(context.Background(), mutation); err == nil || !strings.Contains(err.Error(), "base_ref") {
 		t.Fatalf("MarkReadyForReview error = %v, want base_ref refusal", err)
 	}
 	if graphQLCalls != 0 {
@@ -171,7 +174,7 @@ func TestIssueScanReadyPRGitHubClientRejectsFailingCIBeforeGraphQL(t *testing.T)
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	if _, err := client.MarkReadyForReview(context.Background(), mutation); err == nil || !strings.Contains(err.Error(), "ci_status") {
+	if _, _, err := client.MarkReadyForReview(context.Background(), mutation); err == nil || !strings.Contains(err.Error(), "ci_status") {
 		t.Fatalf("MarkReadyForReview error = %v, want ci_status refusal", err)
 	}
 	if graphQLCalls != 0 {
@@ -211,9 +214,12 @@ func TestIssueScanReadyPRGitHubClientSkipsGraphQLWhenAlreadyReady(t *testing.T) 
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	state, err := client.MarkReadyForReview(context.Background(), mutation)
+	state, mutated, err := client.MarkReadyForReview(context.Background(), mutation)
 	if err != nil {
 		t.Fatalf("MarkReadyForReview: %v", err)
+	}
+	if mutated {
+		t.Fatal("an already-ready early return must report mutated=false: this run performed no transition")
 	}
 	if getPRCalls != 1 || graphQLCalls != 0 {
 		t.Fatalf("calls getPR/graphql = %d/%d, want 1/0", getPRCalls, graphQLCalls)
@@ -323,15 +329,22 @@ func TestIssueScanReadyPRGitHubClientReconcilesFailedMutation(t *testing.T) {
 	cases := []struct {
 		name           string
 		reconcileOK    bool
+		ciOutageAfter  bool
 		wantNotMutated bool
 	}{
 		{name: "reconcile shows still draft", reconcileOK: true, wantNotMutated: true},
 		{name: "reconcile fetch fails", reconcileOK: false, wantNotMutated: false},
+		// The reconcile proof is DRAFT STATE, not CI health: an outage on the
+		// commit-status/check-runs endpoints after the mutation must not
+		// discard a PR GET proving the PR still draft (CFAR hive#272 round 5,
+		// finding 2).
+		{name: "reconcile proves draft during CI endpoint outage", reconcileOK: true, ciOutageAfter: true, wantNotMutated: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mutation := readyPRGitHubMutationForTest()
 			getPRCalls := 0
+			graphQLCalled := false
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
@@ -352,10 +365,21 @@ func TestIssueScanReadyPRGitHubClientReconcilesFailedMutation(t *testing.T) {
 						"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
 					})
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+					if tc.ciOutageAfter && graphQLCalled {
+						w.WriteHeader(http.StatusBadGateway)
+						writeJSON(t, w, map[string]string{"message": "ci endpoint outage"})
+						return
+					}
 					writeJSON(t, w, map[string]any{"state": "success", "total_count": 1})
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+					if tc.ciOutageAfter && graphQLCalled {
+						w.WriteHeader(http.StatusBadGateway)
+						writeJSON(t, w, map[string]string{"message": "ci endpoint outage"})
+						return
+					}
 					writeJSON(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}})
 				case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+					graphQLCalled = true
 					w.WriteHeader(http.StatusBadGateway)
 					writeJSON(t, w, map[string]string{"message": "mutation transport failure"})
 				default:
@@ -365,7 +389,7 @@ func TestIssueScanReadyPRGitHubClientReconcilesFailedMutation(t *testing.T) {
 			defer srv.Close()
 
 			client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-			_, err := client.MarkReadyForReview(context.Background(), mutation)
+			_, _, err := client.MarkReadyForReview(context.Background(), mutation)
 			if err == nil {
 				t.Fatal("expected mutation failure")
 			}
@@ -414,7 +438,7 @@ func TestIssueScanReadyPRGitHubClientPostMutationFetchFailureIsIndeterminate(t *
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	_, err := client.MarkReadyForReview(context.Background(), mutation)
+	_, _, err := client.MarkReadyForReview(context.Background(), mutation)
 	if err == nil {
 		t.Fatal("expected verification fetch failure")
 	}

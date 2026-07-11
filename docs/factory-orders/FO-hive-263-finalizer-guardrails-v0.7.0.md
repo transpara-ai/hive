@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.6.0
+version: 0.7.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -86,13 +86,19 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   returning the PR to draft (v0.5.0, from CFAR round 3). The remediation runs
   under a detached, bounded context (60s) so caller cancellation after the
   mutation cannot disable the authorized safety cleanup (v0.6.0, from CFAR
-  round 4). Either way the run surfaces a durable blocked state.
+  round 4). Remediation only touches state this run created: the client
+  reports whether THIS invocation issued the managed mutation, and a PR that
+  was already ready on arrival is never re-drafted (`re_draft_not_attempted`)
+  — no recorded approval of this transition covers un-flipping another
+  actor's ready state. The mutation-error reconcile fetch is identity-only
+  (draft state, not CI health, is what proves non-mutation). (v0.7.0, from
+  CFAR round 5.) Either way the run surfaces a durable blocked state.
 - **R4 — Blocked-state evidence as Work artifacts.** A structured
   `issue_scan_ready_pr_blocked` evidence artifact (kind, lifecycle version,
   run/order ids, PR identity, failure reason, remediation taken:
-  `re_drafted` | `re_draft_unauthorized` | `re_draft_failed`, review ref if
-  any) is recorded on the ready-stage task through the existing Work artifact
-  path. Absence of evidence is never success; evidence-recording failure
+  `re_drafted` | `re_draft_unauthorized` | `re_draft_failed` |
+  `re_draft_not_attempted`, review ref if any) is recorded on the ready-stage
+  task through the existing Work artifact path. Absence of evidence is never success; evidence-recording failure
   propagates as error. (v0.3.0 truth-up: `re_draft_unsupported` dropped —
   client support is compile-time via the interface, so the state is
   unrepresentable.)
@@ -128,7 +134,7 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
   reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.6.0)
+## Implementation Notes (v0.7.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary

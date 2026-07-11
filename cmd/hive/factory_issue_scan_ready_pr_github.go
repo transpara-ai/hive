@@ -26,45 +26,47 @@ func newIssueScanReadyPRGitHubClient(token string) *issueScanReadyPRGitHubClient
 	}
 }
 
-func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, bool, error) {
 	// Failures before the GraphQL mutation provably leave the PR un-mutated
 	// and are wrapped in ErrIssueScanMarkReadyNotMutated; anything at or after
 	// the mutation stays unwrapped so the finalizer fails safe toward durable
-	// blocked evidence.
+	// blocked evidence. The bool result is true only once the managed GraphQL
+	// mutation has been issued — an already-ready early return is NOT a
+	// transition this run performed.
 	if c == nil || strings.TrimSpace(c.token) == "" {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: github ready PR client: empty token", hive.ErrIssueScanMarkReadyNotMutated)
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: github ready PR client: empty token", hive.ErrIssueScanMarkReadyNotMutated)
 	}
 	state, _, err := c.fetchPullRequestState(ctx, mutation)
 	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if err := validateGitHubReadyPRTarget("preflight", mutation, state); err != nil {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if !state.Draft {
-		return state, nil
+		return state, false, nil
 	}
 	state, nodeID, err := c.fetchPullRequestState(ctx, mutation)
 	if err != nil {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if err := validateGitHubReadyPRTarget("pre-mutation", mutation, state); err != nil {
-		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+		return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 	}
 	if !state.Draft {
-		return state, nil
+		return state, false, nil
 	}
 	if err := c.markPullRequestReadyForReview(ctx, nodeID); err != nil {
-		// The mutation may or may not have landed. Reconcile: only a
-		// successful re-fetch proving the PR still draft downgrades this to a
-		// proven-unmutated failure; anything else stays indeterminate.
-		if reconciled, _, reconcileErr := c.fetchPullRequestState(ctx, mutation); reconcileErr == nil && reconciled.Draft {
-			return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
+		// The mutation may or may not have landed. Reconcile with the
+		// identity-only fetch — draft state, not CI health, is what proves
+		// non-mutation, and the CI endpoints may be the very outage at hand.
+		if reconciled, _, reconcileErr := c.fetchPullRequestIdentity(ctx, mutation); reconcileErr == nil && reconciled.Draft {
+			return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
 		}
-		return hive.IssueScanReadyPRLiveState{}, err
+		return hive.IssueScanReadyPRLiveState{}, true, err
 	}
 	state, _, err = c.fetchPullRequestState(ctx, mutation)
-	return state, err
+	return state, true, err
 }
 
 func (c *issueScanReadyPRGitHubClient) FetchReadyPRState(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
