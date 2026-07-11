@@ -378,6 +378,8 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 			Preconditions: []string{
 				"transpara_ai_draft_pr_receipt artifact already recorded",
 				"recorded approved pull_request.mark_ready decision exactly matches the run-derived repository, PR number, and head (a draft-PR creation approval never authorizes readying)",
+				"the approval's single-use nonce has no recorded consumption (mark_ready_approval_consumed artifact); consumption is recorded durably before the mutation",
+				"no issue_scan_ready_pr_blocked artifact is recorded on the ready stage (blocked evidence is terminal until explicit human remediation)",
 				"ready_state_review_runner returns passing exact-head receipt",
 			},
 			RecordedArtifacts: []string{
@@ -392,6 +394,8 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				"does not approve, merge, deploy, or perform production migrations",
 				"requires --issue-scan-ready-pr-review-runner",
 				"re-drafts after a failed ready-state review only when the recorded mark-ready approval carries re_draft_on_failure; otherwise records blocked evidence and stops",
+				"treats a mark-ready client failure as a possible mutation unless the client proves the PR un-mutated; unproven failures record blocked evidence",
+				"reports a re-draft successful only when the returned live state proves the same PR is draft again",
 			},
 		},
 		OperatorNotes: []string{

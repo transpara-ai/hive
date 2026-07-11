@@ -1,6 +1,7 @@
 package hive
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -208,4 +209,60 @@ func seedMarkReadyApprovalTargetForTest(t *testing.T, rt *Runtime, writer *opera
 	t.Helper()
 	requestID := seedMarkReadyAnchor(t, rt.store, writer.factory, writer.signer, writer.human, writer.conv)
 	seedMarkReadyDecision(t, rt.store, writer.factory, writer.signer, writer.human, writer.conv, requestID, "approved", target)
+}
+
+func markReadyConsumptionFixturesForTest(runID, orderID string, evidence IssueScanReadyPREvidence, nonce string) (IssueScanReadyPRFinalizerMutation, MarkReadyTarget) {
+	mutation := IssueScanReadyPRFinalizerMutation{
+		RunID:          runID,
+		FactoryOrderID: orderID,
+		Repository:     strings.ToLower(strings.TrimSpace(evidence.Repository)),
+		PRNumber:       evidence.PRNumber,
+		PRURL:          strings.TrimSpace(evidence.PRURL),
+		HeadSHA:        strings.TrimSpace(evidence.HeadSHA),
+	}
+	target := MarkReadyTarget{
+		Repository:     mutation.Repository,
+		PRNumber:       mutation.PRNumber,
+		PRURL:          mutation.PRURL,
+		HeadSHA:        mutation.HeadSHA,
+		SingleUseNonce: nonce,
+	}
+	return mutation, target
+}
+
+// TestIssueScanMarkReadyApprovalConsumerIsSingleUse proves the durable
+// consumption record: the same nonce never authorizes twice, even after a
+// re-draft returns the PR to draft state (CFAR hive#272 round 1, finding 1).
+func TestIssueScanMarkReadyApprovalConsumerIsSingleUse(t *testing.T) {
+	rt, _, runID, orderID, _, _ := issueScanReadyStageFixtureForTest(t)
+	evidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	mutation, target := markReadyConsumptionFixturesForTest(runID, orderID, evidence, "nonce-single-use-1")
+	consume := rt.issueScanMarkReadyApprovalConsumer(runID)
+	if err := consume(context.Background(), mutation, target); err != nil {
+		t.Fatalf("first consumption: %v", err)
+	}
+	if err := consume(context.Background(), mutation, target); err == nil {
+		t.Fatal("second consumption of the same nonce must refuse")
+	}
+	other := target
+	other.SingleUseNonce = "nonce-single-use-2"
+	if err := consume(context.Background(), mutation, other); err != nil {
+		t.Fatalf("an independent nonce must remain consumable: %v", err)
+	}
+}
+
+// TestIssueScanMarkReadyApprovalConsumerFailsClosedOnUnreadableRecord proves
+// the doctrine case: a consumption record that cannot be parsed can never
+// prove the nonce unconsumed, so consumption refuses.
+func TestIssueScanMarkReadyApprovalConsumerFailsClosedOnUnreadableRecord(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	if err := rt.tasks.AddArtifact(writer.human, readyStage.ID, IssueScanMarkReadyConsumptionArtifactLabel, "application/json", "{not-json", []types.EventID{readyStage.ID}, writer.conv); err != nil {
+		t.Fatalf("seed unreadable consumption record: %v", err)
+	}
+	evidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	mutation, target := markReadyConsumptionFixturesForTest(runID, orderID, evidence, "nonce-single-use-1")
+	consume := rt.issueScanMarkReadyApprovalConsumer(runID)
+	if err := consume(context.Background(), mutation, target); err == nil {
+		t.Fatal("an unreadable consumption record must refuse consumption (fail closed)")
+	}
 }

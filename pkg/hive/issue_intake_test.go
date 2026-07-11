@@ -3,6 +3,7 @@ package hive
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -4913,6 +4914,52 @@ func TestProgressIssueScanLifecycleRunsConfiguredReadyPRFinalizer(t *testing.T) 
 	}
 	if len(again.ReadyPRRuns) != 0 {
 		t.Fatalf("second ready PR finalizer runs = %+v, want none after ready stage completed", again.ReadyPRRuns)
+	}
+}
+
+// TestProgressIssueScanLifecycleBlockedEvidenceIsTerminal proves blocked
+// ready-PR evidence stops the managed chain: once recorded, later progress
+// cycles refuse to re-run the finalizer (and so can never reuse the approval)
+// until a human remediates (CFAR hive#272 round 1, finding 2).
+func TestProgressIssueScanLifecycleBlockedEvidenceIsTerminal(t *testing.T) {
+	rt, writer, runID, orderID, _, readyStage := issueScanReadyStageFixtureForTest(t)
+	readyEvidence := issueScanReadyPREvidenceForTest(runID, orderID)
+	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
+		t.Fatalf("attach draft PR receipt: %v", err)
+	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
+	client := &fakeReadyPRFinalizerClient{}
+	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(_ context.Context, _ IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
+		return IssueScanReadyStateReviewReceipt{}, fmt.Errorf("ready-state review crashed after the mutation")
+	})
+
+	_, err := rt.progressIssueScanLifecycle()
+	if err == nil || !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("first progress error = %v, want blocked failure", err)
+	}
+	if client.markCalls != 1 {
+		t.Fatalf("markCalls = %d, want 1", client.markCalls)
+	}
+	artifacts, err := rt.tasks.ListArtifacts(readyStage.ID)
+	if err != nil {
+		t.Fatalf("list ready stage artifacts: %v", err)
+	}
+	blockedRecorded := false
+	for _, artifact := range artifacts {
+		if artifact.Label == IssueScanReadyPRBlockedEvidenceArtifactLabel {
+			blockedRecorded = true
+		}
+	}
+	if !blockedRecorded {
+		t.Fatal("blocked evidence artifact was not recorded on the ready stage")
+	}
+
+	_, err = rt.progressIssueScanLifecycle()
+	if err == nil || !errors.Is(err, ErrIssueScanReadyPRBlockedPendingHuman) {
+		t.Fatalf("second progress error = %v, want ErrIssueScanReadyPRBlockedPendingHuman", err)
+	}
+	if client.markCalls != 1 {
+		t.Fatalf("markCalls after blocked evidence = %d, want still 1 (the finalizer must not re-run)", client.markCalls)
 	}
 }
 

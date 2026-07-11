@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.2.0
+version: 0.3.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -34,29 +34,38 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   single-use nonce. Draft-creation approval alone can never authorize
   readying (allowlist: absence of a matching approved mark-ready record ⇒
   refuse).
-- **R2 — Fail-closed approval gate in the finalizer.** `RunIssueScanReadyPRFinalizer`
-  refuses to call `MarkReadyForReview` unless a recorded, **approved**,
-  non-stale mark-ready decision exactly matches the run-derived target
-  (repository, PR number, head SHA). Missing, denied, undecided, mismatched,
-  or unreadable records all refuse with typed errors. The single-use nonce is
-  carried and recorded in blocked evidence; durable consumption records are
-  deferred to the live-enablement slice as a named residual — this slice
-  enforces single-use structurally (the pre-mutation draft-state requirement
-  rejects a second flip of the same PR). (v0.2.0 truth-up.)
+- **R2 — Fail-closed approval gate with durable single-use consumption.**
+  `RunIssueScanReadyPRFinalizer` refuses to call `MarkReadyForReview` unless a
+  recorded, **approved**, non-stale mark-ready decision exactly matches the
+  run-derived target (repository, PR number, head SHA). Missing, denied,
+  undecided, mismatched, or unreadable records all refuse with typed errors.
+  Single-use is enforced by a durable consumption record
+  (`mark_ready_approval_consumed` Work artifact, nonce-keyed) written and
+  read back BEFORE the mutation: an already-consumed nonce, an unreadable
+  consumption record, or an unconfirmable append all refuse. (v0.3.0
+  truth-up: the v0.2.0 "structural single-use" deferral was refuted in CFAR
+  round 1 — a re-draft returns the PR to draft state, so the pre-mutation
+  draft-state requirement does NOT reject a second flip; consumption records
+  are therefore required in this slice, not deferred.)
 - **R3 — Failure remediation, re-draft under recorded scope only.** When
   ready-state review fails, errors, or cannot run after the draft→ready
   mutation: never record ready-for-Human evidence; if the matching approval's
-  `re_draft_on_failure` flag is set AND the client supports it, call a new
-  `ConvertToDraft` client method and record the outcome; otherwise leave the
-  PR as-is and record why re-draft was unavailable. Either way the run
-  surfaces a durable blocked state.
+  `re_draft_on_failure` flag is set, call the `ConvertToDraft` client method
+  and record the outcome; otherwise leave the PR as-is and record why
+  re-draft was unavailable. The re-draft preflight validates PR identity and
+  openness only — never ready-state health (CI, merge state, exact head),
+  which is failing in exactly the states re-draft remediates — and a re-draft
+  is reported successful only when the returned live state proves the same PR
+  is draft again. Either way the run surfaces a durable blocked state.
 - **R4 — Blocked-state evidence as Work artifacts.** A structured
   `issue_scan_ready_pr_blocked` evidence artifact (kind, lifecycle version,
   run/order ids, PR identity, failure reason, remediation taken:
-  `re_drafted` | `re_draft_unauthorized` | `re_draft_unsupported` |
-  `re_draft_failed`, review ref if any) is recorded on the ready-stage task
-  through the existing Work artifact path. Absence of evidence is never
-  success; evidence-recording failure propagates as error.
+  `re_drafted` | `re_draft_unauthorized` | `re_draft_failed`, review ref if
+  any) is recorded on the ready-stage task through the existing Work artifact
+  path. Absence of evidence is never success; evidence-recording failure
+  propagates as error. (v0.3.0 truth-up: `re_draft_unsupported` dropped —
+  client support is compile-time via the interface, so the state is
+  unrepresentable.)
 - **R5 — Mocked-only boundary.** All new behavior is exercised through the
   existing injected interfaces (`IssueScanReadyPRFinalizerClient` gains
   `ConvertToDraft`) with mock clients and in-memory stores in tests. The live
@@ -69,22 +78,37 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   entire input domain per the fail-safe doctrine: missing approval, denied,
   undecided, stale/mismatched target (each field), unreadable store, approval
   without re-draft flag, approval with flag + client success, client error,
-  client unsupported, review failure before/after mutation, evidence-append
-  failure. The class-sweep audit runs BEFORE the first cross-family review
-  round.
+  re-draft returning unproven state, review failure before/after mutation,
+  evidence-append failure, nonce reuse, unreadable consumption record,
+  blocked-terminal refusal, and mutation-error classification (proven
+  un-mutated vs indeterminate). The class-sweep audit runs BEFORE the first
+  cross-family review round.
+- **R7 — Blocked evidence is terminal (v0.3.0, from CFAR round 1).** Once an
+  `issue_scan_ready_pr_blocked` artifact exists on the ready stage, the
+  managed chain refuses to re-run the finalizer for that run — a typed
+  refusal, not a silent skip — until a human remediates. Automatic retry
+  after a blocked mutation could reuse authority the human granted once.
+- **R8 — Fail-safe mutation-error classification (v0.3.0, from CFAR round
+  1).** A `MarkReadyForReview` failure is treated as a possible mutation
+  (durable blocked evidence, remediation under recorded scope) unless the
+  client PROVES the PR was left un-mutated by wrapping the typed
+  not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
+  reconcile fetch showing the PR still draft. Indeterminate stays blocked.
 
-## Implementation Notes (v0.2.0)
+## Implementation Notes (v0.3.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary
   stays untouched; its RiskClass falls to the conservative default
   ("critical").
-- The machine-readable `issue-scan-runner-contracts` document now names the
-  recorded mark-ready approval as a finalizer precondition and the
-  re-draft-under-recorded-scope boundary.
-- The runtime injects the store-backed approval lookup through the runner
-  context as a `json:"-"` field: external runners can neither supply nor
-  observe it, and a context without it fails closed.
+- The machine-readable `issue-scan-runner-contracts` document names the
+  recorded mark-ready approval, the unconsumed nonce, and the absent blocked
+  artifact as finalizer preconditions, plus the re-draft-under-recorded-scope,
+  fail-safe error-classification, and proven-re-draft boundaries.
+- The runtime injects the store-backed approval lookup AND the durable
+  single-use consumer through the runner context as `json:"-"` fields:
+  external runners can neither supply nor observe them, and a context missing
+  either fails closed.
 
 ## Non-Goals
 

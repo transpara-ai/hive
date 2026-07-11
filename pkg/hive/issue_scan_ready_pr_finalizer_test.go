@@ -81,6 +81,18 @@ func finalizerTestContext() IssueScanReadyPRRunnerContext {
 	}
 }
 
+// finalizerTestContextWithConsumer equips the test context with a counting
+// no-op consumer so direct finalizer calls pass the single-use gate; tests
+// proving the consumer gate itself construct contexts without it.
+func finalizerTestContextWithConsumer(consumeCalls *int) IssueScanReadyPRRunnerContext {
+	readyContext := finalizerTestContext()
+	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
+		*consumeCalls++
+		return nil
+	}
+	return readyContext
+}
+
 func finalizerLiveState(clean bool) IssueScanReadyPRLiveState {
 	state := IssueScanReadyPRLiveState{
 		Repository:     finalizerTestRepo,
@@ -138,15 +150,61 @@ func happyMockClient() *finalizerMockClient {
 
 func TestFinalizerSucceedsWithMatchingApproval(t *testing.T) {
 	client := happyMockClient()
-	result, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, passingReviewer, finalizerApproval(false))
+	consumeCalls := 0
+	result, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(false))
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 	if client.markReadyCalls != 1 || client.convertCalls != 0 {
 		t.Fatalf("unexpected client calls: markReady=%d convert=%d", client.markReadyCalls, client.convertCalls)
 	}
+	if consumeCalls != 1 {
+		t.Fatalf("approval consumption calls = %d, want exactly 1", consumeCalls)
+	}
 	if !result.ReadyPREvidence.ReadyForReview || result.ReadyPREvidence.ReadyStateReviewStatus != "pass" {
 		t.Fatalf("unexpected evidence: %+v", result.ReadyPREvidence)
+	}
+}
+
+// TestFinalizerConsumesApprovalBeforeMutation proves the single-use record is
+// written durably BEFORE the PR is touched, so a crash after the mutation can
+// never leave the approval reusable.
+func TestFinalizerConsumesApprovalBeforeMutation(t *testing.T) {
+	client := happyMockClient()
+	readyContext := finalizerTestContext()
+	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
+		if client.markReadyCalls != 0 {
+			t.Fatal("approval must be consumed before MarkReadyForReview is called")
+		}
+		return nil
+	}
+	if _, err := RunIssueScanReadyPRFinalizer(context.Background(), readyContext, client, passingReviewer, finalizerApproval(false)); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+}
+
+// TestFinalizerRefusesWithoutConsumer proves the fail-closed default: a
+// context that never received the runtime-injected single-use consumer
+// refuses before any mutation.
+func TestFinalizerRefusesWithoutConsumer(t *testing.T) {
+	client := happyMockClient()
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, passingReviewer, finalizerApproval(false))
+	if err == nil || !errors.Is(err, ErrIssueScanMarkReadyNotAuthorized) || client.markReadyCalls != 0 {
+		t.Fatalf("expected fail-closed refusal with no consumer, err=%v markReadyCalls=%d", err, client.markReadyCalls)
+	}
+}
+
+// TestFinalizerRefusesWhenConsumptionFails proves an already-consumed (or
+// unrecordable) single-use approval refuses before any mutation.
+func TestFinalizerRefusesWhenConsumptionFails(t *testing.T) {
+	client := happyMockClient()
+	readyContext := finalizerTestContext()
+	readyContext.ConsumeMarkReadyApproval = func(_ context.Context, _ IssueScanReadyPRFinalizerMutation, _ MarkReadyTarget) error {
+		return fmt.Errorf("single-use nonce already consumed")
+	}
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), readyContext, client, passingReviewer, finalizerApproval(false))
+	if err == nil || !errors.Is(err, ErrIssueScanMarkReadyNotAuthorized) || client.markReadyCalls != 0 {
+		t.Fatalf("expected consumption refusal before mutation, err=%v markReadyCalls=%d", err, client.markReadyCalls)
 	}
 }
 
@@ -171,7 +229,8 @@ func TestFinalizerRefusesWithoutMatchingApproval(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			client := happyMockClient()
-			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, passingReviewer, tc.approval)
+			consumeCalls := 0
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, tc.approval)
 			if err == nil {
 				t.Fatal("expected refusal")
 			}
@@ -180,6 +239,9 @@ func TestFinalizerRefusesWithoutMatchingApproval(t *testing.T) {
 			}
 			if client.markReadyCalls != 0 {
 				t.Fatalf("MarkReadyForReview must not be called on refusal (called %d times)", client.markReadyCalls)
+			}
+			if consumeCalls != 0 {
+				t.Fatalf("a mismatched approval must never be consumed (consumed %d times)", consumeCalls)
 			}
 		})
 	}
@@ -210,13 +272,15 @@ func TestFinalizerRunnerRefusesWithoutLookup(t *testing.T) {
 }
 
 // TestFinalizerBlockedRemediation proves the post-mutation failure domain:
-// never ready evidence; re-draft only under the recorded flag.
+// never ready evidence; re-draft only under the recorded flag; a re-draft is
+// reported successful only when the returned live state proves Draft.
 func TestFinalizerBlockedRemediation(t *testing.T) {
 	cases := []struct {
 		name            string
 		reDraft         bool
 		reviewer        IssueScanReadyStateReviewRunner
 		convertErr      error
+		convertState    *IssueScanReadyPRLiveState
 		fetchErr        error
 		wantRemediation IssueScanReadyPRRemediation
 		wantConverts    int
@@ -260,13 +324,33 @@ func TestFinalizerBlockedRemediation(t *testing.T) {
 			wantRemediation: IssueScanReadyPRRemediationReDrafted,
 			wantConverts:    1,
 		},
+		{
+			name:            "re-draft returns non-draft state",
+			reDraft:         true,
+			reviewer:        failingReviewer,
+			convertState:    &IssueScanReadyPRLiveState{Repository: finalizerTestRepo, PRNumber: finalizerTestPR, Draft: false, State: "open"},
+			wantRemediation: IssueScanReadyPRRemediationReDraftFailed,
+			wantConverts:    1,
+		},
+		{
+			name:            "re-draft returns mismatched PR identity",
+			reDraft:         true,
+			reviewer:        failingReviewer,
+			convertState:    &IssueScanReadyPRLiveState{Repository: finalizerTestRepo, PRNumber: 999, Draft: true, State: "open"},
+			wantRemediation: IssueScanReadyPRRemediationReDraftFailed,
+			wantConverts:    1,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			client := happyMockClient()
 			client.convertErr = tc.convertErr
 			client.fetchErr = tc.fetchErr
-			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, tc.reviewer, finalizerApproval(tc.reDraft))
+			if tc.convertState != nil {
+				client.convertState = *tc.convertState
+			}
+			consumeCalls := 0
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, tc.reviewer, finalizerApproval(tc.reDraft))
 			if err == nil {
 				t.Fatal("expected blocked error")
 			}
@@ -277,6 +361,9 @@ func TestFinalizerBlockedRemediation(t *testing.T) {
 			evidence := blocked.Evidence
 			if evidence.Remediation != tc.wantRemediation {
 				t.Fatalf("remediation = %q, want %q", evidence.Remediation, tc.wantRemediation)
+			}
+			if tc.wantRemediation == IssueScanReadyPRRemediationReDraftFailed && evidence.RemediationError == "" {
+				t.Fatalf("re_draft_failed evidence must carry the remediation error: %+v", evidence)
 			}
 			if client.convertCalls != tc.wantConverts {
 				t.Fatalf("ConvertToDraft calls = %d, want %d", client.convertCalls, tc.wantConverts)
@@ -294,21 +381,43 @@ func TestFinalizerBlockedRemediation(t *testing.T) {
 	}
 }
 
-// TestFinalizerPreMutationClientErrorIsNotBlocked proves a MarkReadyForReview
-// transport error (PR never mutated) surfaces as a plain error, not blocked
-// evidence, and never records ready evidence or converts.
-func TestFinalizerPreMutationClientErrorIsNotBlocked(t *testing.T) {
+// TestFinalizerProvenNotMutatedErrorIsNotBlocked proves the ONLY path that
+// bypasses blocked evidence on a MarkReadyForReview error: the client proved
+// the PR was never mutated by wrapping ErrIssueScanMarkReadyNotMutated.
+func TestFinalizerProvenNotMutatedErrorIsNotBlocked(t *testing.T) {
 	client := happyMockClient()
-	client.markReadyErr = fmt.Errorf("github unavailable")
-	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContext(), client, passingReviewer, finalizerApproval(true))
+	consumeCalls := 0
+	client.markReadyErr = fmt.Errorf("%w: preflight head mismatch", ErrIssueScanMarkReadyNotMutated)
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(true))
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	var blocked *IssueScanReadyPRBlockedError
 	if errors.As(err, &blocked) {
-		t.Fatalf("pre-mutation failure must not be a blocked error: %v", err)
+		t.Fatalf("proven not-mutated failure must not be a blocked error: %v", err)
 	}
 	if client.convertCalls != 0 {
-		t.Fatalf("ConvertToDraft must not run when the PR was never marked ready")
+		t.Fatalf("ConvertToDraft must not run when the PR was proven unmutated")
+	}
+}
+
+// TestFinalizerUnprovenMarkReadyErrorIsBlocked proves the fail-safe default:
+// a MarkReadyForReview error WITHOUT the not-mutated proof is treated as an
+// indeterminate/post-mutation failure — durable blocked evidence plus the
+// recorded remediation, never a silent plain error.
+func TestFinalizerUnprovenMarkReadyErrorIsBlocked(t *testing.T) {
+	client := happyMockClient()
+	consumeCalls := 0
+	client.markReadyErr = fmt.Errorf("github unavailable while reconciling mutation state")
+	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextWithConsumer(&consumeCalls), client, passingReviewer, finalizerApproval(true))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var blocked *IssueScanReadyPRBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("unproven mark-ready failure must produce blocked evidence, got %v", err)
+	}
+	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDrafted || client.convertCalls != 1 {
+		t.Fatalf("remediation = %q, convertCalls = %d; want re_drafted under the recorded flag", blocked.Evidence.Remediation, client.convertCalls)
 	}
 }

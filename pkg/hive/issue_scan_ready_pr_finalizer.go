@@ -36,10 +36,24 @@ type IssueScanReadyPRFinalizerClient interface {
 // the PR is touched (fail closed).
 type MarkReadyApprovalLookup func(context.Context, IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error)
 
+// MarkReadyApprovalConsumer durably records single-use consumption of the
+// recorded approval BEFORE the ready mutation, erroring when the nonce was
+// already consumed or the record cannot be written and read back (fail
+// closed). Without it, a re-draft would return the PR to draft state and the
+// same recorded approval would authorize a second flip.
+type MarkReadyApprovalConsumer func(context.Context, IssueScanReadyPRFinalizerMutation, MarkReadyTarget) error
+
 // ErrIssueScanMarkReadyNotAuthorized is returned when no recorded, approved,
 // exactly-matching pull_request.mark_ready decision covers the run-derived
 // target. A draft-PR creation approval never satisfies this gate.
 var ErrIssueScanMarkReadyNotAuthorized = errors.New("issue-scan mark-ready is not authorized by a recorded approval")
+
+// ErrIssueScanMarkReadyNotMutated marks a MarkReadyForReview failure the
+// client has PROVEN left the PR un-mutated (a refusal before any GraphQL
+// call, or a post-failure reconcile fetch showing the PR still draft). Only
+// errors wrapping this sentinel bypass blocked evidence; any unproven failure
+// is treated as a possible mutation and produces durable blocked evidence.
+var ErrIssueScanMarkReadyNotMutated = errors.New("mark-ready failed with the PR proven un-mutated")
 
 // IssueScanReadyPRRemediation names what the finalizer did after a
 // post-mutation failure. The set is an allowlist; there is no default.
@@ -185,11 +199,22 @@ func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanRea
 	if err := validateMarkReadyApproval(mutation, approval); err != nil {
 		return IssueScanReadyPRRunnerResult{}, err
 	}
+	if readyContext.ConsumeMarkReadyApproval == nil {
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: no single-use approval consumer configured on the run context", ErrIssueScanMarkReadyNotAuthorized)
+	}
+	if err := readyContext.ConsumeMarkReadyApproval(ctx, mutation, approval); err != nil {
+		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: %v", ErrIssueScanMarkReadyNotAuthorized, err)
+	}
 	marked, err := client.MarkReadyForReview(ctx, mutation)
 	if err != nil {
-		// The PR was not mutated (transport-level failure): plain error, no
-		// blocked evidence, no remediation.
-		return IssueScanReadyPRRunnerResult{}, err
+		if errors.Is(err, ErrIssueScanMarkReadyNotMutated) {
+			// The client PROVED the PR was untouched: plain refusal, nothing
+			// to remediate.
+			return IssueScanReadyPRRunnerResult{}, err
+		}
+		// Unproven: fail safe — the PR may have been mutated, so record
+		// durable blocked evidence and remediate under the recorded scope.
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
 	}
 	if err := validateIssueScanReadyPRLiveState("mark ready", mutation, marked, false); err != nil {
 		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
@@ -453,7 +478,13 @@ func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinaliz
 		evidence.Remediation = IssueScanReadyPRRemediationReDraftUnauthorized
 		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
 	}
-	if _, convertErr := client.ConvertToDraft(ctx, mutation); convertErr != nil {
+	state, convertErr := client.ConvertToDraft(ctx, mutation)
+	if convertErr == nil && (!state.Draft || state.PRNumber != mutation.PRNumber || !strings.EqualFold(strings.TrimSpace(state.Repository), mutation.Repository)) {
+		// A "successful" conversion is only successful when the returned live
+		// state proves THIS PR is draft again.
+		convertErr = fmt.Errorf("convert-to-draft returned unproven state: repository %q pr %d draft %t (want %q %d draft)", state.Repository, state.PRNumber, state.Draft, mutation.Repository, mutation.PRNumber)
+	}
+	if convertErr != nil {
 		evidence.Remediation = IssueScanReadyPRRemediationReDraftFailed
 		evidence.RemediationError = convertErr.Error()
 		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}

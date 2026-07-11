@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,8 +91,12 @@ func TestIssueScanReadyPRGitHubClientRejectsMovedHeadBeforeGraphQL(t *testing.T)
 	defer srv.Close()
 
 	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
-	if _, err := client.MarkReadyForReview(context.Background(), mutation); err == nil || !strings.Contains(err.Error(), "head") {
+	_, err := client.MarkReadyForReview(context.Background(), mutation)
+	if err == nil || !strings.Contains(err.Error(), "head") {
 		t.Fatalf("MarkReadyForReview error = %v, want moved-head refusal", err)
+	}
+	if !errors.Is(err, hive.ErrIssueScanMarkReadyNotMutated) {
+		t.Fatalf("a refusal before any GraphQL mutation must prove not-mutated, got %v", err)
 	}
 	if graphQLCalls != 0 {
 		t.Fatalf("graphql calls = %d, want 0", graphQLCalls)
@@ -215,6 +220,162 @@ func TestIssueScanReadyPRGitHubClientSkipsGraphQLWhenAlreadyReady(t *testing.T) 
 	}
 	if state.Draft || !state.ReadyForReview {
 		t.Fatalf("state = %+v, want already-ready PR", state)
+	}
+}
+
+// TestIssueScanReadyPRGitHubClientReDraftsDespiteFailingChecks proves re-draft
+// is failure REMEDIATION: it must issue the GraphQL mutation precisely when
+// the ready-state health checks (CI, merge state, exact head) are failing —
+// the states it exists to remediate (CFAR hive#272 round 1, finding 4).
+func TestIssueScanReadyPRGitHubClientReDraftsDespiteFailingChecks(t *testing.T) {
+	mutation := readyPRGitHubMutationForTest()
+	getPRCalls := 0
+	graphQLCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+			getPRCalls++
+			writeJSON(t, w, map[string]any{
+				"number":          321,
+				"html_url":        mutation.PRURL,
+				"node_id":         "PR_kwDOtest",
+				"state":           "open",
+				"draft":           getPRCalls > 1,
+				"mergeable_state": "dirty",
+				"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+				"head":            map[string]string{"ref": mutation.HeadRef, "sha": "dddddddddddddddddddddddddddddddddddddddd"},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+			writeJSON(t, w, map[string]any{"state": "failure", "total_count": 1})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+			writeJSON(t, w, map[string]any{"total_count": 0, "check_runs": []map[string]string{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			graphQLCalls++
+			writeJSON(t, w, map[string]any{"data": map[string]any{"convertPullRequestToDraft": map[string]any{"pullRequest": map[string]any{"id": "PR_kwDOtest", "isDraft": true}}}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+	state, err := client.ConvertToDraft(context.Background(), mutation)
+	if err != nil {
+		t.Fatalf("ConvertToDraft with failing checks: %v", err)
+	}
+	if graphQLCalls != 1 {
+		t.Fatalf("graphql calls = %d, want 1 (re-draft must run despite failing checks)", graphQLCalls)
+	}
+	if !state.Draft {
+		t.Fatalf("state = %+v, want draft after conversion", state)
+	}
+}
+
+// TestIssueScanReadyPRGitHubClientReconcilesFailedMutation proves the
+// fail-safe classification of mark-ready mutation errors: only a successful
+// reconcile fetch showing the PR still draft proves not-mutated; a failed
+// reconcile stays indeterminate (CFAR hive#272 round 1, finding 3).
+func TestIssueScanReadyPRGitHubClientReconcilesFailedMutation(t *testing.T) {
+	cases := []struct {
+		name           string
+		reconcileOK    bool
+		wantNotMutated bool
+	}{
+		{name: "reconcile shows still draft", reconcileOK: true, wantNotMutated: true},
+		{name: "reconcile fetch fails", reconcileOK: false, wantNotMutated: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutation := readyPRGitHubMutationForTest()
+			getPRCalls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+					getPRCalls++
+					if getPRCalls > 2 && !tc.reconcileOK {
+						w.WriteHeader(http.StatusBadGateway)
+						writeJSON(t, w, map[string]string{"message": "temporary failure"})
+						return
+					}
+					writeJSON(t, w, map[string]any{
+						"number":          321,
+						"html_url":        mutation.PRURL,
+						"node_id":         "PR_kwDOtest",
+						"state":           "open",
+						"draft":           true,
+						"mergeable_state": "draft",
+						"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+						"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
+					})
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+					writeJSON(t, w, map[string]any{"state": "success", "total_count": 1})
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+					writeJSON(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}})
+				case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+					w.WriteHeader(http.StatusBadGateway)
+					writeJSON(t, w, map[string]string{"message": "mutation transport failure"})
+				default:
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+				}
+			}))
+			defer srv.Close()
+
+			client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+			_, err := client.MarkReadyForReview(context.Background(), mutation)
+			if err == nil {
+				t.Fatal("expected mutation failure")
+			}
+			if got := errors.Is(err, hive.ErrIssueScanMarkReadyNotMutated); got != tc.wantNotMutated {
+				t.Fatalf("errors.Is(err, NotMutated) = %t, want %t (err=%v)", got, tc.wantNotMutated, err)
+			}
+		})
+	}
+}
+
+// TestIssueScanReadyPRGitHubClientPostMutationFetchFailureIsIndeterminate
+// proves a successful mutation whose verification fetch fails is never
+// reported as proven-unmutated.
+func TestIssueScanReadyPRGitHubClientPostMutationFetchFailureIsIndeterminate(t *testing.T) {
+	mutation := readyPRGitHubMutationForTest()
+	getPRCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/transpara-ai/hive/pulls/321":
+			getPRCalls++
+			if getPRCalls > 2 {
+				w.WriteHeader(http.StatusBadGateway)
+				writeJSON(t, w, map[string]string{"message": "temporary failure"})
+				return
+			}
+			writeJSON(t, w, map[string]any{
+				"number":          321,
+				"html_url":        mutation.PRURL,
+				"node_id":         "PR_kwDOtest",
+				"state":           "open",
+				"draft":           true,
+				"mergeable_state": "draft",
+				"base":            map[string]string{"ref": mutation.BaseRef, "sha": mutation.BaseSHA},
+				"head":            map[string]string{"ref": mutation.HeadRef, "sha": mutation.HeadSHA},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
+			writeJSON(t, w, map[string]any{"state": "success", "total_count": 1})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/check-runs"):
+			writeJSON(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			writeJSON(t, w, map[string]any{"data": map[string]any{"markPullRequestReadyForReview": map[string]any{"pullRequest": map[string]any{"id": "PR_kwDOtest", "isDraft": false}}}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	client := &issueScanReadyPRGitHubClient{token: "token", baseURL: srv.URL, http: srv.Client()}
+	_, err := client.MarkReadyForReview(context.Background(), mutation)
+	if err == nil {
+		t.Fatal("expected verification fetch failure")
+	}
+	if errors.Is(err, hive.ErrIssueScanMarkReadyNotMutated) {
+		t.Fatalf("a post-mutation fetch failure must stay indeterminate, got proven-unmutated: %v", err)
 	}
 }
 
