@@ -78,7 +78,7 @@ fi
 #    Ollama model is running AND OPENROUTER_API_KEY is set.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   cd /Transpara/transpara-ai/repos/hive
-  go run ./cmd/hive civilization daemon \
+  LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
       --human Michael \
       --store postgres://hive:hive@localhost:5432/hive
 else
@@ -88,6 +88,13 @@ fi
 #       --approve-requests --approve-roles
 #   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
 #   its ExecStart already includes --approve-requests --approve-roles.
+#   ⚠ civilization run/daemon default their Site API to https://transpara.ai:
+#   an ambient LOVYOU_API_KEY enables a reconciliation loop + task-completion
+#   mirror posts against PRODUCTION. The blank LOVYOU_API_KEY= prefix disables
+#   that client for local runs; production crossing needs explicit user
+#   authorization. Before starting hive.service (unit env is outside this
+#   shell), verify the running unit carries no LOVYOU_API_KEY via the
+#   effective-environment name check in Endpoint Reference.
 ```
 
 ## Hive Down
@@ -188,14 +195,14 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 >
 > ```bash
 > pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-> if [ "${pid:-0}" -gt 0 ] 2>/dev/null; then
->   tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+> if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null | cut -d= -f1); then
+>   printf '%s\n' "$names" | grep -cx HIVE_OPS_HUMAN_ACTOR
 > else
->   echo "service not running — mode UNKNOWN"
+>   echo "cannot read process environment — mode UNKNOWN"
 > fi
 > ```
 >
-> `0` = read-only; non-zero = **writer mode**; service down = mode unknown (fail closed).
+> `0` = read-only; non-zero = **writer mode**; service down or `/proc` unreadable (restart race, permissions) = mode unknown, fail closed — a pipeline failure must never be read as `0`.
 
 ```bash
 curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
@@ -223,7 +230,16 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KE
 ## Model Catalog
 
 The operator API and the runtime select models from a catalog YAML (hot-reloaded):
-- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm by name from the running process's effective environment — unit `Environment=` lines can miss manager-inherited vars; names only, never values: `pid=$(systemctl --user show hive-ops-api -p MainPID --value); [ "${pid:-0}" -gt 0 ] 2>/dev/null && tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -x HIVE_OPS_CATALOG`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
+- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`**; `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`. Verify the actual resolved path from the running process's effective environment (this variable's value only — a filepath, not a secret; unrelated values are never printed; `/proc` unreadable = UNKNOWN, fail closed):
+
+  ```bash
+  pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envnames=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
+    printf '%s\n' "$envnames" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset (built-in defaults)"
+  else
+    echo "cannot read process environment — catalog UNKNOWN"
+  fi
+  ```
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
 Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
@@ -232,9 +248,9 @@ Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/hive civilization run    --human Michael --idea "…" \
+LOVYOU_API_KEY= go run ./cmd/hive civilization run    --human Michael --idea "…" \
        --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
-go run ./cmd/hive civilization daemon --human Michael \
+LOVYOU_API_KEY= go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent

@@ -233,14 +233,14 @@ Default `hive-ops-api.service` should be read-only because it does not set `HIVE
 
 ```bash
 pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-if [ "${pid:-0}" -gt 0 ] 2>/dev/null; then
-  tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null | cut -d= -f1); then
+  printf '%s\n' "$names" | grep -cx HIVE_OPS_HUMAN_ACTOR
 else
-  echo "service not running — mode UNKNOWN; do not POST"
+  echo "cannot read process environment — mode UNKNOWN; do not POST"
 fi
 ```
 
-`0` means the running process has no `HIVE_OPS_HUMAN_ACTOR` (read-only); a non-zero count means writer mode. If the service is not running, treat the mode as unknown and do not POST.
+`0` means the running process has no `HIVE_OPS_HUMAN_ACTOR` (read-only); a non-zero count means writer mode. If the service is not running, or `/proc` cannot be read (restart race, permissions), the mode is unknown — do not POST. A pipeline failure must never be read as `0`.
 
 `work-server` on `http://localhost:8080`, bearer `$WORK_API_KEY`:
 
@@ -263,7 +263,16 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
 
 ## Model Catalog
 
-- `hive-ops-api` uses `HIVE_OPS_CATALOG`; confirm by name from the running process's effective environment (unit `Environment=` lines can miss manager-inherited variables; names only, never values): `pid=$(systemctl --user show hive-ops-api -p MainPID --value); [ "${pid:-0}" -gt 0 ] 2>/dev/null && tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -x HIVE_OPS_CATALOG`.
+- `hive-ops-api` uses `HIVE_OPS_CATALOG`. Verify the actual resolved path from the running process's effective environment — this variable's value only (a filepath, not a secret; unrelated values are never printed; `/proc` unreadable = UNKNOWN, fail closed):
+
+  ```bash
+  pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envnames=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
+    printf '%s\n' "$envnames" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset (built-in defaults)"
+  else
+    echo "cannot read process environment — catalog UNKNOWN"
+  fi
+  ```
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
 - `council` accepts `--catalog <path>` only; do not pass `--catalog-reload-interval` to `council`.
 - If avoiding provider keys, omit `--catalog` for built-in Claude defaults.
@@ -275,12 +284,12 @@ Runtime execution is not a status check. Run only after explicit user request.
 ```bash
 cd /Transpara/transpara-ai/repos/hive
 
-go run ./cmd/hive civilization run \
+LOVYOU_API_KEY= go run ./cmd/hive civilization run \
   --human Michael \
   --idea "..." \
   --store postgres://hive:hive@localhost:5432/hive
 
-go run ./cmd/hive civilization daemon \
+LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
   --human Michael \
   --store postgres://hive:hive@localhost:5432/hive
 
@@ -288,6 +297,8 @@ LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --
 LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
+
+`civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization. Before starting `hive.service` (whose unit environment is outside this shell), verify the running unit carries no `LOVYOU_API_KEY` using the effective-environment name check from the Endpoint Reference section.
 
 Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and replace any ambient remote credential with the non-secret local `dev` credential as shown; remote publishing requires the user's explicit authorization in the current turn.
 

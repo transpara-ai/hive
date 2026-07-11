@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.10.0
+version: 0.11.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.10.0, CFAR rounds 1–8 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.11.0, CFAR rounds 1–9 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -122,6 +122,16 @@ authority: repository documentation/skill-source preservation only; no Hive star
   would 401); (t) the FO's seed citations pin immutable git blob SHAs from the
   branch's first commit `7e649d6` instead of mutable home-directory paths, so
   the R2 seed-vs-R7-delta diff stays reproducible after installs re-sync.
+  Round 9 (v0.11.0): (u) `civilization run`/`daemon` examples blank
+  `LOVYOU_API_KEY` — their Site API defaults to `https://transpara.ai` and an
+  ambient key enables a reconciliation loop plus task-completion mirror posts
+  against production; both dialects also caution that `hive.service` must be
+  checked for the key via the effective-environment check before start;
+  (v) the writer-mode checks treat an unreadable `/proc` (restart race,
+  permissions) as mode UNKNOWN instead of letting a failed pipeline print `0`
+  and read as read-only; (w) the catalog checks print this variable's value
+  only (a filepath, not a secret) so the claimed `catalog-mixed.yaml`
+  resolution is actually verified, with UNKNOWN on read failure.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
