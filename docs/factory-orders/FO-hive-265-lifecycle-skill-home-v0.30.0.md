@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.29.0
+version: 0.30.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.29.0, CFAR rounds 1–26 on hive#267, simplified in v0.29.0).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.29.0, CFAR rounds 1–26 on hive#267, simplified in v0.29.0, gate semantics trued in v0.30.0).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -273,6 +273,13 @@ authority: repository documentation/skill-source preservation only; no Hive star
   bounded+gated Postgres waits, ask-before-terminate restart handling, argv
   redaction, local pins with true council/webhook exposure statements, honest
   binding tables, value-aware writer/catalog probes.
+  v0.30.0 (round 27): the protected-action gate prohibits unit startup for
+  local-only intent outright (reconciliation's first cycle runs before any
+  post-start check, so pre-start approval always covers the worst-case
+  production-connected posture), and the post-start probe compares the
+  running posture against what the user APPROVED — non-empty key = matches
+  an approved production posture or STOP; empty/absent = local-only (an
+  empty value leaves the Site client disabled); unreadable = UNKNOWN.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
