@@ -362,7 +362,7 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
   # Auxiliary exec phases (ExecStartPre/ExecCondition/ExecStartPost) run around
   # start and can hide opaque commands this preflight cannot analyze — the
   # recognized unit shape has ONLY ExecStart, so any populated phase fails closed.
-  for phase in ExecStartPre ExecCondition ExecStartPost; do
+  for phase in ExecStartPre ExecCondition ExecStartPost ExecStop ExecStopPost; do   # stop hooks run during restart, before the new start
     if phaseval=$(systemctl --user show hive -p "$phase" --value 2>/dev/null); then
       [ -n "$phaseval" ] && { echo "$phase is configured — auxiliary exec phases are not analyzable here; inspect manually"; unknown=1; }
     else
@@ -403,12 +403,27 @@ else
 fi
 ```
 
-If a source sets the key and the user still wants a local-only runtime, apply a clearing drop-in (a mutating config change — confirm with the user first), then re-run the preflight (its verdict reads the merged effective `UnsetEnvironment` property, so an active drop-in — and any later list reset — is judged correctly) and, after start, verify with the Endpoint Reference effective-environment check using unit `hive` and variable `LOVYOU_API_KEY` — `UnsetEnvironment` strips the variable from the final environment regardless of which source set it, but the post-start check is the authoritative proof:
+If a source sets the key and the user still wants a local-only runtime, apply a clearing drop-in (a mutating config change — confirm with the user first), then re-run the preflight (its verdict reads the merged effective `UnsetEnvironment` property, so an active drop-in — and any later list reset — is judged correctly) and, after start, run the post-start verification below — `UnsetEnvironment` strips the variable from the final environment regardless of which source set it, but only the running process proves it:
 
 ```bash
 mkdir -p ~/.config/systemd/user/hive.service.d
 printf '[Service]\nUnsetEnvironment=LOVYOU_API_KEY\n' > ~/.config/systemd/user/hive.service.d/no-remote-credential.conf
 systemctl --user daemon-reload
+```
+
+Post-start (or post-restart) verification — the authoritative proof the credential is absent from the RUNNING runtime (names only):
+
+```bash
+pid=$(systemctl --user show hive -p MainPID --value)
+if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$names" ]; then
+  if printf '%s\n' "$names" | cut -d= -f1 | grep -qx LOVYOU_API_KEY; then
+    echo "LOVYOU_API_KEY PRESENT in the running runtime — STOP it; the clearing did not take effect"
+  else
+    echo "LOVYOU_API_KEY absent from the running runtime — cleared"
+  fi
+else
+  echo "cannot read runtime process environment — verification UNKNOWN; treat as NOT cleared"
+fi
 ```
 
 Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and replace any ambient remote credential with the non-secret local `dev` credential as shown; remote publishing requires the user's explicit authorization in the current turn.
