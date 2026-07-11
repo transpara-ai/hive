@@ -1146,7 +1146,7 @@ func (r *Runtime) progressIssueScanLifecycle() (IssueScanLifecycleProgress, erro
 
 func (r *Runtime) progressIssueScanLifecycleContext(ctx context.Context) (IssueScanLifecycleProgress, error) {
 	var progress IssueScanLifecycleProgress
-	if r == nil {
+	if r == nil || r.isolateRunTasks {
 		return progress, nil
 	}
 
@@ -1305,7 +1305,7 @@ func issueScanContextDone(ctx context.Context, errs *[]error) bool {
 
 func (r *Runtime) progressIssueScanLifecycleInlineContext(ctx context.Context) (IssueScanLifecycleProgress, error) {
 	var progress IssueScanLifecycleProgress
-	if r == nil {
+	if r == nil || r.isolateRunTasks {
 		return progress, nil
 	}
 	r.issueScanLifecycleMu.Lock()
@@ -1446,6 +1446,9 @@ func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Contex
 
 func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summary string) {
 	r.mirrorTaskCompletion(ctx, task, summary)
+	if r.isolateRunTasks {
+		return
+	}
 	select {
 	case <-ctx.Done():
 		return
@@ -1459,6 +1462,9 @@ func (r *Runtime) handleTaskCompletion(ctx context.Context, task work.Task, summ
 }
 
 func (r *Runtime) progressIssueScanLifecycleAfterReview(ctx context.Context, taskID, verdict string) {
+	if r.isolateRunTasks {
+		return
+	}
 	select {
 	case <-ctx.Done():
 		return
