@@ -69,16 +69,21 @@ else
 fi
 
 # 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
+#    GATED on Postgres readiness like step 2: launching the daemon with a Postgres
+#    store while the DB is down only produces a crashing runtime.
 #    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
 #    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
-#    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys).
-#    catalog-mixed.yaml is a mixed-provider catalog (some roles → Ollama + OpenRouter);
+#    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys);
 #    add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a local
 #    Ollama model is running AND OPENROUTER_API_KEY is set.
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/hive civilization daemon \
-    --human Michael \
-    --store postgres://hive:hive@localhost:5432/hive
+if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
+  cd /Transpara/transpara-ai/repos/hive
+  go run ./cmd/hive civilization daemon \
+      --human Michael \
+      --store postgres://hive:hive@localhost:5432/hive
+else
+  echo "postgres not ready — NOT launching the runtime"
+fi
 #   Full autonomy (auto-approve everything) is an EXPLICIT opt-in: add
 #       --approve-requests --approve-roles
 #   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
@@ -108,24 +113,25 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound —
 # Ensure Postgres is up + accepting connections first (restart = a true down→up):
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
-# Restart is gated on Postgres readiness — restarting against a dead DB crash-loops both services:
+# EVERYTHING below is gated on Postgres readiness — restarting services or the
+# runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
+  # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
+  # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
+  # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
+  if systemctl --user is-active --quiet hive; then
+    systemctl --user restart hive
+  elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+    echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
+    pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
+    pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'; sleep 3
+    pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+  else
+    echo "hive runtime not running (on-demand) — left stopped"
+  fi
 else
-  echo "postgres not ready — NOT restarting services; fix postgres first"
-fi
-# The hive runtime is on-demand (unit disabled). `restart` would START the disabled
-# unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
-# Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
-if systemctl --user is-active --quiet hive; then
-  systemctl --user restart hive
-elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
-  echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
-  pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
-  pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'; sleep 3
-  pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
-else
-  echo "hive runtime not running (on-demand) — left stopped"
+  echo "postgres not ready — NOT restarting services or runtime; fix postgres first"
 fi
 ```
 
@@ -221,11 +227,13 @@ go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
-go run ./cmd/hive council --api http://localhost:8082 --topic "…"            # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+LOVYOU_API_KEY= go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 # ⚠ council's --api DEFAULTS to https://transpara.ai and, when LOVYOU_API_KEY is set,
-#   POSTS up to 2000 chars of the deliberation report to the remote social feed.
-#   Always pin --api to the local endpoint (see "Local / Offline"); remote publishing
-#   requires the user's explicit authorization in the current turn.
+#   POSTS up to 2000 chars of the deliberation report to the remote social feed —
+#   AND interpolates that key into every council agent's prompt (exposing the bearer
+#   to model providers). For local runs, always pin --api to the local endpoint AND
+#   blank LOVYOU_API_KEY as shown; remote publishing requires the user's explicit
+#   authorization in the current turn.
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 

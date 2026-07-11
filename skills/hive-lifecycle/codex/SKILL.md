@@ -196,22 +196,23 @@ cd /Transpara/transpara-ai/repos/hive
 docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
+# Everything below is gated on Postgres readiness — restarting services or the
+# runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
+  if systemctl --user is-active --quiet hive; then
+    systemctl --user restart hive
+  elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+    echo "manual runtime detected; stopping it and preserving command for the user to rerun:"
+    pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
+    pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'
+    sleep 3
+    pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
+  else
+    echo "hive runtime not running; left stopped"
+  fi
 else
-  echo "postgres not ready — NOT restarting services; fix postgres first"
-fi
-
-if systemctl --user is-active --quiet hive; then
-  systemctl --user restart hive
-elif pgrep -f 'hive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
-  echo "manual runtime detected; stopping it and preserving command for the user to rerun:"
-  pgrep -af 'hive (--human|civilization|pipeline|role|council|factory)'
-  pkill -INT -f 'hive (--human|civilization|pipeline|role|council|factory)'
-  sleep 3
-  pkill -KILL -f 'hive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
-else
-  echo "hive runtime not running; left stopped"
+  echo "postgres not ready — NOT restarting services or runtime; fix postgres first"
 fi
 ```
 
@@ -280,10 +281,10 @@ go run ./cmd/hive civilization daemon \
 
 go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
 go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
-go run ./cmd/hive council --api http://localhost:8082 --topic "..."
+LOVYOU_API_KEY= go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
 
-Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed. Always pin `--api` to the local endpoint; remote publishing requires the user's explicit authorization in the current turn.
+Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and blank `LOVYOU_API_KEY` as shown; remote publishing requires the user's explicit authorization in the current turn.
 
 Full autonomy is an explicit opt-in with `--approve-requests --approve-roles`. Do not add those flags unless the user explicitly authorizes that mode in the current turn.
 

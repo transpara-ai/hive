@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.4.0
+version: 0.5.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -51,7 +51,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
 - **R5 — No private addresses or secrets.** No literal private-network
   addresses (hostnames/`localhost` only) and no credentials anywhere under
   `skills/`.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.4.0, CFAR rounds 1–2 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.5.0, CFAR rounds 1–3 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -73,6 +73,14 @@ authority: repository documentation/skill-source preservation only; no Hive star
   dependent `systemctl start`/`restart` runs only inside an `if pg_isready`
   gate, so a timeout stops the operation instead of crash-looping services
   (repairing the round-1 `break` that fell through).
+  Round 3 (v0.5.0): (h) council examples additionally blank `LOVYOU_API_KEY`
+  for local runs — `runCouncilCmd` reads the remote credential and
+  `buildCouncilOperateInstruction` interpolates it into every council agent's
+  prompt, so pinning `--api` alone still exposed the bearer token to model
+  providers; (i) the readiness gate now encloses ALL downstream mutating
+  steps — the optional runtime daemon launch (Hive Up step 3) and the hive
+  unit bounce in both restart sections run only inside the `pg_isready`
+  success branch (round-2's gate covered only the API services).
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
