@@ -24,6 +24,14 @@ home.
    Today the dialects are `claude/` and `codex/`. The set may grow with
    additional dialects for other model optimizations; each new dialect is a
    new subfolder under the same feature, never a separate home.
+
+   **One physical copy per dialect.** Claude Code auto-discovers a repo's
+   project-level skills only at `.claude/skills/<feature>/`, so that path
+   holds the Claude dialect's physical files and `skills/<feature>/claude`
+   is a relative symlink to it — the dialects stay together here without
+   duplicating content. A dialect whose tooling has no such discovery
+   requirement (Codex today) keeps its physical files directly under
+   `skills/<feature>/<dialect>/`.
 3. **Installed copies are caches; the repo is truth.** Local installs
    (`~/.claude/skills/<feature>/`, `~/.codex/skills/<feature>/`) are copies of
    the committed dialect folders. Drift is resolved toward the repo.

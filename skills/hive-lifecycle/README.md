@@ -10,8 +10,11 @@ Canonical home per `skills/README.md`: this repo, this folder. Dialects:
 
 | Dialect | Contents | Installed at |
 |---|---|---|
-| `claude/` | `SKILL.md` (Claude-native frontmatter) | `~/.claude/skills/hive-lifecycle/` |
+| `claude/` | symlink to `.claude/skills/hive-lifecycle/` — the physical `SKILL.md` lives there because Claude Code auto-discovers project skills only at that path (committed via #259) | project-level: auto-discovered in this repo; user-level: `~/.claude/skills/hive-lifecycle/` |
 | `codex/` | `SKILL.md` + `agents/openai.yaml` (Codex frontmatter + UI discovery metadata) | `~/.codex/skills/hive-lifecycle/` |
+
+There is exactly one physical copy of each dialect in this repo; the symlink
+keeps both dialects visible together here without duplicating content.
 
 ## Provenance (hive#265)
 
