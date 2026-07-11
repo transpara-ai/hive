@@ -25,7 +25,7 @@ keeps both dialects visible together here without duplicating content.
   `~/.codex/skills/hive-lifecycle/` and validated with the Codex skill
   validator; this folder preserves that port in a governed, versioned home.
 - Both dialects then received the reviewed safety repairs enumerated in
-  `FO-HIVE-265-LIFECYCLE-SKILL-HOME` v0.17.0 (CFAR findings, hive#267): the
+  `FO-HIVE-265-LIFECYCLE-SKILL-HOME` v0.18.0 (CFAR findings, hive#267): the
   repo copies are truth; re-sync local installs from the repo after merge
   using the install commands in `skills/README.md`.
 

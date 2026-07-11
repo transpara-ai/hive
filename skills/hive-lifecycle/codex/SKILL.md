@@ -312,7 +312,7 @@ Before starting or restarting `hive.service` (its environment comes from unit co
 # fragments, drop-ins, list resets, whitespace, and quoting authoritatively,
 # so no text-parsing of unit files is needed (parsing `systemctl cat` output
 # missed quoted/spaced assignments and ignored later-fragment list resets).
-cred=0; unknown=0; auto=0
+cred=0; unknown=0; auto=0; execcred=0
 if unitenv=$(systemctl --user show hive -p Environment --value 2>/dev/null); then
   printf '%s\n' "$unitenv" | tr ' ' '\n' | tr -d '"'"'"'"' | grep -q '^LOVYOU_API_KEY=' && { echo "unit Environment sets LOVYOU_API_KEY"; cred=1; }
 else
@@ -336,6 +336,7 @@ else
 fi
 if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); then
   printf '%s\n' "$execstart" | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+  printf '%s\n' "$execstart" | grep -q 'LOVYOU_API_KEY=' && { echo "ExecStart itself injects LOVYOU_API_KEY (env/shell wrapper) — the clearing drop-in CANNOT remove this"; execcred=1; }
 else
   echo "cannot read ExecStart property"; unknown=1
 fi
@@ -345,6 +346,8 @@ case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " i
 esac
 if [ "$unknown" -ne 0 ]; then
   echo "VERDICT: a source is unreadable — do NOT start"
+elif [ "$execcred" -ne 0 ]; then
+  echo "VERDICT: ExecStart injects the credential — the clearing drop-in cannot help; do NOT start without explicit production authorization"
 elif [ "$cred" -ne 0 ] && [ "$cleared" -eq 0 ]; then
   echo "VERDICT: credential present and not cleared — do NOT start without explicit production authorization (or apply the clearing drop-in)"
 elif [ "$auto" -ne 0 ]; then
