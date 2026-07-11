@@ -642,6 +642,17 @@ func (l *Loop) routeReviewVerdict(cmd *ReviewCommand) {
 	if cmd.Verdict != "request_changes" {
 		return
 	}
+	if l.config.TaskScope != nil {
+		taskID, err := types.NewEventID(cmd.TaskID)
+		if err != nil {
+			fmt.Printf("review return edge: invalid task id %q: %v\n", cmd.TaskID, err)
+			return
+		}
+		if !l.taskInScope(taskID) {
+			fmt.Printf("review return edge: task %s is outside the current run boundary\n", cmd.TaskID)
+			return
+		}
+	}
 	if l.reviewerState.shouldEscalate(cmd.TaskID) {
 		l.emitReviewEscalationOnce(cmd.TaskID, cmd.Issues)
 		return

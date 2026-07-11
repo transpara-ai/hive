@@ -1094,7 +1094,7 @@ func (r *Runtime) ProgressIssueScanRunLifecycle(runID string) (IssueScanLifecycl
 func (r *Runtime) ProgressIssueScanRunLifecycleContext(ctx context.Context, runID string) (IssueScanLifecycleProgress, error) {
 	runID = strings.TrimSpace(runID)
 	var progress IssueScanLifecycleProgress
-	if r == nil {
+	if r == nil || r.isolateRunTasks {
 		return progress, nil
 	}
 	if runID == "" {
@@ -1120,7 +1120,7 @@ func (r *Runtime) ProgressIssueScanRunLifecycleContext(ctx context.Context, runI
 func (r *Runtime) ProgressIssueScanRunLifecycleWithConfiguredRunners(ctx context.Context, runID string) (IssueScanLifecycleProgress, error) {
 	runID = strings.TrimSpace(runID)
 	var progress IssueScanLifecycleProgress
-	if r == nil {
+	if r == nil || r.isolateRunTasks {
 		return progress, nil
 	}
 	if runID == "" {
@@ -1429,7 +1429,7 @@ func mergeIssueScanLifecycleProgress(dst *IssueScanLifecycleProgress, src IssueS
 }
 
 func (r *Runtime) progressIssueScanLifecycleAfterTaskCommands(ctx context.Context, executed, total int) {
-	if executed <= 0 {
+	if r.isolateRunTasks || executed <= 0 {
 		return
 	}
 	select {

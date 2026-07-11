@@ -101,3 +101,23 @@ func TestOneShotTaskScopeRejectsReviewEmission(t *testing.T) {
 		t.Fatalf("emitCodeReview error = %v, want run-boundary rejection", err)
 	}
 }
+
+func TestOneShotTaskScopeRejectsReviewReopen(t *testing.T) {
+	taskID := types.MustEventID("019f51b4-1d9e-7852-8eb4-7fff8008b644")
+	checked := false
+	l := &Loop{config: Config{
+		TaskScope: func(types.EventID) bool {
+			checked = true
+			return false
+		},
+	}}
+	// The scope guard runs before reviewer state, agent, or TaskStore access;
+	// an out-of-run request_changes verdict therefore cannot reopen old work.
+	l.routeReviewVerdict(&ReviewCommand{
+		TaskID:  taskID.Value(),
+		Verdict: "request_changes",
+	})
+	if !checked {
+		t.Fatal("review reopen path did not consult one-shot task scope")
+	}
+}
