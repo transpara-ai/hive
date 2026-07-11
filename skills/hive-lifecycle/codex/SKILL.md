@@ -108,7 +108,7 @@ if systemctl --user is-active --quiet hive; then
   echo "hive.service: active"
 elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
   echo "manual runtime: RUNNING"
-  pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'
+  pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only — full argv may contain sensitive --idea text or credential assignments
 else
   echo "runtime: stopped"
 fi
@@ -208,8 +208,8 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "restart only on 'VERDICT: OK to start' (or with the explicit approval"
     echo "the verdict names): systemctl --user restart hive"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
-    echo "manual runtime detected; stopping it and preserving command for the user to rerun:"
-    pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'
+    echo "manual runtime detected; stopping it. Argv is NOT echoed (it may contain sensitive --idea text or credential assignments); ask the user for their original command to rerun:"
+    pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only — full argv may contain sensitive --idea text or credential assignments
     pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)'
     sleep 3
     pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null || true
@@ -351,6 +351,11 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
   # Launcher allowlist: only direct, argv-transparent launchers are analyzable.
   # A wrapper script (bash/sh/env/custom) can source hive.env or add flags in
   # its BODY, invisible to every property check — treat as opaque, fail closed.
+  # Recognized shape: exactly ONE ExecStart command (Type=oneshot units may
+  # chain several; a canonical first command followed by an opaque one would
+  # otherwise pass a first-entry check).
+  launchercount=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | grep -c .)
+  [ "$launchercount" -eq 1 ] || { echo "ExecStart has $launchercount commands — not the recognized single-command shape; inspect manually"; unknown=1; }
   launcher=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
   wd=$(systemctl --user show hive -p WorkingDirectory --value 2>/dev/null)
   argvline=$(printf '%s\n' "$execstart" | grep -o 'argv\[\]=[^;]*' | head -1)

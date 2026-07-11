@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.22.0
+version: 0.23.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.22.0, CFAR rounds 1–20 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.23.0, CFAR rounds 1–21 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -217,6 +217,14 @@ authority: repository documentation/skill-source preservation only; no Hive star
   auxiliary exec phase (`ExecStartPre`, `ExecCondition`, `ExecStartPost`) —
   a drop-in can attach opaque commands around start that no `ExecStart`
   analysis sees; the recognized unit shape has ONLY `ExecStart`.
+  Round 21 (v0.23.0): (au) the recognized shape requires exactly ONE
+  `ExecStart` command — `Type=oneshot` units may chain several, and a
+  first-entry check would pass a canonical command followed by an opaque
+  one; (av) status/restart diagnostics report runtime PIDs and executable
+  names only (`ps -o pid=,comm=`) — `pgrep -af` wrote full argv into
+  transcripts, which can carry sensitive `--idea` text or credential
+  assignments; the stop-and-rerun messages now ask the user for their
+  original command instead of echoing it.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
