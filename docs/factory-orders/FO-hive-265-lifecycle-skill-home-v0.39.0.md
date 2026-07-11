@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.38.0
+version: 0.39.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -399,6 +399,20 @@ the new head surfaced three operational defects, repaired in both dialects:
 - **bs — localapi joins the reset quiescence.** The Local Offline API binds
   :8082 against the hive database and migrates only at startup; the Nuclear
   sweep and quiescence gate now include `pgrep -x localapi`, both dialects.
+
+### Round-8 fresh-head repair (v0.39.0)
+
+- **bt — reset quiescence adjudicated by the database (subtraction of
+  process enumeration).** Round 8 showed the round-7 name-based gate wrong
+  in both directions: a bare `localapi` name-kill could hit an instance
+  serving a different database, and the enumeration missed `social-server`
+  (and by induction every future EventGraph writer). The gate now asks
+  POSTGRES: `pg_stat_activity` must report ZERO client connections across
+  ALL databases (the volume reset destroys the whole cluster) or the reset
+  refuses and lists the connected clients for the operator to stop
+  explicitly. The `localapi` name-kill is withdrawn; only Hive's own
+  services (`work-server`, `hive-ops-api`, the hive runtime) are swept
+  before the check.
 
 ## Non-Goals
 

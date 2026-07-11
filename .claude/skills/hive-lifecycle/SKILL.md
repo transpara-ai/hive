@@ -392,15 +392,22 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 # or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
 pgrep -x work-server | xargs -r kill 2>/dev/null
 pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
-pgrep -x localapi | xargs -r kill 2>/dev/null   # the Local Offline API also holds hive-DB tables
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null || pgrep -x localapi >/dev/null; then
-  echo "hive/work processes still running — NOT resetting the database"
-else
+# Quiescence is adjudicated by the DATABASE, not by enumerating client
+# process names — any enumeration is incomplete (localapi, social-server,
+# psql, future services), and killing by bare name could hit an instance
+# serving a DIFFERENT database. `down -v` destroys the whole cluster volume,
+# so require ZERO client connections across ALL databases; anything still
+# connected is the operator's to stop explicitly.
+conns=$(docker exec hive-postgres-1 psql -U hive -d hive -Atc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null)
+if [ "$conns" = "0" ]; then
   # The && chain is load-bearing: if the repo path is missing or unmounted, a
   # bare cd would leave the shell in the CALLER's directory and `docker compose
   # down -v` would destroy an unrelated project's volumes.
   cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
+else
+  echo "postgres reports ${conns:-unreadable} live client connection(s) — NOT resetting; stop these first:"
+  docker exec hive-postgres-1 psql -U hive -d hive -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
 fi
 ```
 
