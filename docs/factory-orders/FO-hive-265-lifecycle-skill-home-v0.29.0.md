@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.28.0
+version: 0.29.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.28.0, CFAR rounds 1–26 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.29.0, CFAR rounds 1–26 on hive#267, simplified in v0.29.0).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -256,6 +256,23 @@ authority: repository documentation/skill-source preservation only; no Hive star
   webhook binds `:8081` on ALL interfaces with an unauthenticated
   event-writing `POST /event` (not flag-configurable), requiring explicit
   user acknowledgment or host-level firewalling on reachable hosts.
+  v0.29.0 — DELIBERATE SIMPLIFICATION (operator feedback, Michael,
+  2026-07-11): the hive.service unit-forensics preflight that grew across
+  rounds 9–26 (the machinery behind items covering merged-property parsing,
+  launcher/shape allowlists, expansion rejection, drop-in clearing and its
+  verification) is REMOVED from both dialects and superseded by a compact
+  human protected-action gate: explicit current-turn approval naming the
+  credential AND autonomy postures before any hive.service start/restart,
+  with the post-start running-process probe kept as the single authoritative
+  check. Rationale: a shell runbook cannot prove a systemd unit safe — each
+  hardening round added attack surface for the next; refusing to automate the
+  decision is the fail-closed answer, and the mechanical verifier is tracked
+  as a separate tested-Go-subcommand slice. The round 1–26 findings and their
+  lessons remain recorded above as the evidence trail that motivated both the
+  gate and that slice. Retained repairs: secret-safe name-only checks,
+  bounded+gated Postgres waits, ask-before-terminate restart handling, argv
+  redaction, local pins with true council/webhook exposure statements, honest
+  binding tables, value-aware writer/catalog probes.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

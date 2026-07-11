@@ -201,12 +201,12 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
   if systemctl --user is-active --quiet hive; then
-    # Restarting hive.service re-launches whatever the unit encodes. Run the
-    # "hive.service credential preflight" (On-demand Runtime section) — its VERDICT covers
-    # credentials AND full-autonomy flags from the merged effective properties.
-    echo "hive.service is active — run the hive.service credential preflight;"
-    echo "restart only on 'VERDICT: OK to start' (or with the explicit approval"
-    echo "the verdict names): systemctl --user restart hive"
+    # Restarting hive.service re-launches whatever the unit encodes — a
+    # PROTECTED ACTION (see the human gate in On-demand Runtime): require the
+    # user's explicit current-turn approval naming the credential AND autonomy
+    # postures, then: systemctl --user restart hive
+    echo "hive.service is active — protected action: get explicit current-turn"
+    echo "approval (credential + autonomy postures) before: systemctl --user restart hive"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     # Do NOT terminate yet — killing first loses the workload and its
     # governance flags with nothing to relaunch. Get the user's original
@@ -320,103 +320,11 @@ The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated ev
 
 `civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
 
-Before starting or restarting `hive.service` (its environment comes from unit config, `EnvironmentFile`s, and the systemd `--user` manager — not this shell), run this read-only, names-only preflight; any hit or unreadable source means do NOT start without explicit production authorization:
+`hive.service` start/restart is a **protected action — a human gate, not automated forensics**. A shell runbook cannot reliably prove a systemd unit safe: environment sources, ExecStart wrappers, exec phases, and variable expansion all provide places for authority to hide, and a mechanical verifier belongs in a tested Go subcommand (tracked as separate work), not here. Before `systemctl --user start|restart hive`:
 
-```bash
-# Merged EFFECTIVE properties via `systemctl show` — systemd resolves unit
-# fragments, drop-ins, list resets, whitespace, and quoting authoritatively,
-# so no text-parsing of unit files is needed (parsing `systemctl cat` output
-# missed quoted/spaced assignments and ignored later-fragment list resets).
-cred=0; unknown=0; auto=0; execcred=0
-if unitenv=$(systemctl --user show hive -p Environment --value 2>/dev/null); then
-  printf '%s\n' "$unitenv" | tr ' ' '\n' | tr -d '"'"'"'"' | grep -q '^LOVYOU_API_KEY=' && { echo "unit Environment sets LOVYOU_API_KEY"; cred=1; }
-else
-  echo "cannot read unit properties"; unknown=1
-fi
-if effiles=$(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null); then
-  for ef in $(printf '%s\n' "$effiles" | sed 's/ (ignore_errors=[^)]*)//g' | sed 's/^-//'); do
-    if [ -r "$ef" ]; then
-      grep -Eq "^[[:space:]]*(export[[:space:]]+)?[\"']?LOVYOU_API_KEY[\"']?[[:space:]]*=" "$ef" && { echo "$ef sets LOVYOU_API_KEY"; cred=1; }
-    else
-      echo "cannot read $ef — UNKNOWN"; unknown=1
-    fi
-  done
-else
-  echo "cannot read EnvironmentFiles property"; unknown=1
-fi
-if mgrenv=$(systemctl --user show-environment 2>/dev/null); then
-  printf '%s\n' "$mgrenv" | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; cred=1; }
-else
-  echo "cannot read user-manager environment"; unknown=1
-fi
-if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); then
-  printf '%s\n' "$execstart" | grep -qE -- '(^|[ "=])--?approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
-  # Unresolved $VAR expansion in ExecStart hides flags/credentials from every
-  # property check (systemd expands only at start) — not the recognized shape.
-  printf '%s\n' "$execstart" | grep -q '[$]' && { echo "ExecStart contains variable expansion — arguments can hide behind it; inspect manually"; unknown=1; }
-  printf '%s\n' "$execstart" | grep -q 'LOVYOU_API_KEY=' && { echo "ExecStart itself injects LOVYOU_API_KEY (env/shell wrapper) — the clearing drop-in CANNOT remove this"; execcred=1; }
-  # Launcher allowlist: only direct, argv-transparent launchers are analyzable.
-  # A wrapper script (bash/sh/env/custom) can source hive.env or add flags in
-  # its BODY, invisible to every property check — treat as opaque, fail closed.
-  # Recognized shape: exactly ONE ExecStart command (Type=oneshot units may
-  # chain several; a canonical first command followed by an opaque one would
-  # otherwise pass a first-entry check).
-  launchercount=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | grep -c .)
-  [ "$launchercount" -eq 1 ] || { echo "ExecStart has $launchercount commands — not the recognized single-command shape; inspect manually"; unknown=1; }
-  launcher=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
-  wd=$(systemctl --user show hive -p WorkingDirectory --value 2>/dev/null)
-  argvline=$(printf '%s\n' "$execstart" | grep -o 'argv\[\]=[^;]*' | head -1)
-  # Auxiliary exec phases (ExecStartPre/ExecCondition/ExecStartPost) run around
-  # start and can hide opaque commands this preflight cannot analyze — the
-  # recognized unit shape has ONLY ExecStart, so any populated phase fails closed.
-  for phase in ExecStartPre ExecCondition ExecStartPost ExecStop ExecStopPost; do   # stop hooks run during restart, before the new start
-    if phaseval=$(systemctl --user show hive -p "$phase" --value 2>/dev/null); then
-      [ -n "$phaseval" ] && { echo "$phase is configured — auxiliary exec phases are not analyzable here; inspect manually"; unknown=1; }
-    else
-      echo "cannot read $phase property"; unknown=1
-    fi
-  done
-  case "$launcher" in
-    /Transpara/transpara-ai/repos/hive/hive) : ;;   # the canonical built binary, exact path (a wrapper merely NAMED hive elsewhere is rejected)
-    /snap/bin/go|/usr/bin/go|/usr/local/go/bin/go)
-      # trusted Go toolchain paths only — /tmp/go or version-manager shims are
-      # opaque wrappers even with canonical-looking arguments
-      if [ "$wd" = "/Transpara/transpara-ai/repos/hive" ] && printf '%s\n' "$argvline" | grep -qE "^argv\[\]=$launcher run \./cmd/hive( |$)"; then
-        :   # argv BEGINS with the trusted launcher + 'run ./cmd/hive' — a wrapper carrying that text as a later argument is rejected
-      else
-        echo "go launcher without the canonical 'go run ./cmd/hive' target in the hive repo — opaque; inspect manually"; unknown=1
-      fi ;;
-    "") echo "cannot determine ExecStart launcher"; unknown=1 ;;
-    *) echo "ExecStart launcher $launcher is not the canonical hive binary or go-run form — an opaque wrapper can inject credentials/flags in its body; inspect it manually"; unknown=1 ;;
-  esac
-else
-  echo "cannot read ExecStart property"; unknown=1
-fi
-cleared=0
-case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " in
-  *" LOVYOU_API_KEY "*) cleared=1;;
-esac
-blocked=0
-[ "$unknown" -ne 0 ] && { echo "BLOCKER: a source is unreadable"; blocked=1; }
-[ "$execcred" -ne 0 ] && { echo "BLOCKER: ExecStart injects the credential — the clearing drop-in cannot help; needs explicit production authorization"; blocked=1; }
-if [ "$cred" -ne 0 ] && [ "$cleared" -eq 0 ]; then
-  echo "BLOCKER: credential present and not cleared — needs explicit production authorization (or apply the clearing drop-in)"; blocked=1
-fi
-[ "$auto" -ne 0 ] && { echo "BLOCKER: full-autonomy flags in ExecStart — starting RESUMES FULL AUTONOMY; needs explicit current-turn approval"; blocked=1; }
-if [ "$blocked" -eq 0 ]; then
-  echo "VERDICT: OK to start"
-else
-  echo "VERDICT: do NOT start — EVERY blocker above must be individually resolved or explicitly authorized"
-fi
-```
-
-If a source sets the key and the user still wants a local-only runtime, apply a clearing drop-in (a mutating config change — confirm with the user first), then re-run the preflight (its verdict reads the merged effective `UnsetEnvironment` property, so an active drop-in — and any later list reset — is judged correctly) and, after start, run the post-start verification below — `UnsetEnvironment` strips the variable from the final environment regardless of which source set it, but only the running process proves it:
-
-```bash
-mkdir -p ~/.config/systemd/user/hive.service.d
-printf '[Service]\nUnsetEnvironment=LOVYOU_API_KEY\n' > ~/.config/systemd/user/hive.service.d/no-remote-credential.conf
-systemctl --user daemon-reload
-```
+1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `LOVYOU_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
+2. For a local-only runtime, prefer the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form above — both postures are explicit in the command itself.
+3. After any start, verify the credential posture against the RUNNING process — the only authoritative check.
 
 Post-start (or post-restart) verification — the authoritative proof the credential is absent from the RUNNING runtime (names only):
 
