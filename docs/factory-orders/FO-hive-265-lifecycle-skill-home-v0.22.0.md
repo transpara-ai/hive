@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.21.0
+version: 0.22.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.21.0, CFAR rounds 1–19 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.22.0, CFAR rounds 1–20 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -213,6 +213,10 @@ authority: repository documentation/skill-source preservation only; no Hive star
   first because the `--catalog` flag overrides `HIVE_OPS_CATALOG` (the
   flag's default is the env value), falling back to the env var, UNKNOWN on
   unreadable.
+  Round 20 (v0.22.0): (at) the preflight fails closed on any populated
+  auxiliary exec phase (`ExecStartPre`, `ExecCondition`, `ExecStartPost`) —
+  a drop-in can attach opaque commands around start that no `ExecStart`
+  analysis sees; the recognized unit shape has ONLY `ExecStart`.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

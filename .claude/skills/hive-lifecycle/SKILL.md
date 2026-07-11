@@ -135,6 +135,16 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
   launcher=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
   wd=$(systemctl --user show hive -p WorkingDirectory --value 2>/dev/null)
   argvline=$(printf '%s\n' "$execstart" | grep -o 'argv\[\]=[^;]*' | head -1)
+  # Auxiliary exec phases (ExecStartPre/ExecCondition/ExecStartPost) run around
+  # start and can hide opaque commands this preflight cannot analyze — the
+  # recognized unit shape has ONLY ExecStart, so any populated phase fails closed.
+  for phase in ExecStartPre ExecCondition ExecStartPost; do
+    if phaseval=$(systemctl --user show hive -p "$phase" --value 2>/dev/null); then
+      [ -n "$phaseval" ] && { echo "$phase is configured — auxiliary exec phases are not analyzable here; inspect manually"; unknown=1; }
+    else
+      echo "cannot read $phase property"; unknown=1
+    fi
+  done
   case "$launcher" in
     /Transpara/transpara-ai/repos/hive/hive) : ;;   # the canonical built binary, exact path (a wrapper merely NAMED hive elsewhere is rejected)
     /snap/bin/go|/usr/bin/go|/usr/local/go/bin/go)
