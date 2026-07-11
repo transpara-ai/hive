@@ -17,8 +17,8 @@ For **"hive help" / "hive commands"**: print the section list below — Stack Co
 
 | Component | Unit / process | Bind | Notes |
 |---|---|---|---|
-| **Postgres** | docker container `hive-postgres-1` | `:5432` | `docker compose up -d postgres` (compose file in `repos/hive`); DSN `postgres://hive:hive@localhost:5432/hive` |
-| **work-server** | `work-server.service` (enabled) | `:8080` | builds + runs `repos/work/work-server`; serves the telemetry API, task API, and dashboard |
+| **Postgres** | docker container `hive-postgres-1` | ALL interfaces `:5432` (compose publishes `5432:5432`) | dev credentials — network exposure is real; `docker compose up -d postgres` (compose file in `repos/hive`); DSN `postgres://hive:hive@localhost:5432/hive` |
+| **work-server** | `work-server.service` (enabled) | ALL interfaces `:8080` (binds `":"+PORT`) | builds + runs `repos/work/work-server`; serves the telemetry API, task API, and dashboard |
 | **hive-ops-api** | `hive-ops-api.service` (enabled) |  `loopback :8085` | runs `repos/hive/hive-ops-api`; serves the operator projection API; loads a model catalog |
 | **hive runtime** | `hive.service` (**disabled** — on-demand) | — | `hive civilization daemon …`; the multi-agent civilization loop |
 
@@ -161,7 +161,14 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
   # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
   if systemctl --user is-active --quiet hive; then
-    systemctl --user restart hive
+    # Restarting hive.service re-launches whatever the unit encodes — gate BOTH before restart:
+    # (1) credential: run the "hive.service credential preflight" (Hive Up section); proceed only on an OK verdict.
+    # (2) autonomy: flags already in ExecStart RESUME on restart.
+    if systemctl --user cat hive 2>/dev/null | grep -qE -- '--approve-(requests|roles)'; then
+      echo "hive.service ExecStart carries full-autonomy flags — restart resumes FULL AUTONOMY; do NOT restart without explicit current-turn approval"
+    else
+      echo "run the hive.service credential preflight; only on an OK verdict restart with: systemctl --user restart hive"
+    fi
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     echo "MANUAL (go run) runtime detected — stopping it; re-run YOUR exact command to bring it back (its verb/flags are shown below, so the workload + governance mode are preserved):"
     pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'

@@ -23,8 +23,8 @@ Default to read-only inspection. Start, stop, restart, clean slate, runtime laun
 
 | Component | Unit or process | Bind | Notes |
 |---|---|---|---|
-| Postgres | Docker container `hive-postgres-1` | `localhost:5432` | Compose file in `/Transpara/transpara-ai/repos/hive`; DSN `postgres://hive:hive@localhost:5432/hive` |
-| work-server | `work-server.service` | `localhost:8080` | Built from `/Transpara/transpara-ai/repos/work/work-server`; telemetry, task API, dashboard |
+| Postgres | Docker container `hive-postgres-1` | ALL interfaces `:5432` (compose publishes `5432:5432`) | Dev credentials — network exposure is real; DSN `postgres://hive:hive@localhost:5432/hive`; compose file in `/Transpara/transpara-ai/repos/hive` |
+| work-server | `work-server.service` | ALL interfaces `:8080` (binds `":"+PORT`) | Built from `/Transpara/transpara-ai/repos/work/work-server`; telemetry, task API, dashboard |
 | hive-ops-api | `hive-ops-api.service` | loopback `:8085` | Operator projection API; normally read-only |
 | hive runtime | `hive.service` or manual `go run` | webhook `:8081` when running | On-demand multi-agent loop; unit may be disabled |
 
@@ -201,7 +201,14 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
   if systemctl --user is-active --quiet hive; then
-    systemctl --user restart hive
+    # Restarting hive.service re-launches whatever the unit encodes — gate BOTH before restart:
+    # (1) credential: run the "hive.service credential preflight" (Hive Up section); proceed only on an OK verdict.
+    # (2) autonomy: flags already in ExecStart RESUME on restart.
+    if systemctl --user cat hive 2>/dev/null | grep -qE -- '--approve-(requests|roles)'; then
+      echo "hive.service ExecStart carries full-autonomy flags — restart resumes FULL AUTONOMY; do NOT restart without explicit current-turn approval"
+    else
+      echo "run the hive.service credential preflight; only on an OK verdict restart with: systemctl --user restart hive"
+    fi
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
     echo "manual runtime detected; stopping it and preserving command for the user to rerun:"
     pgrep -af '[h]ive (--human|civilization|pipeline|role|council|factory)'
