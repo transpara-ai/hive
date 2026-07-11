@@ -21,7 +21,6 @@
         "GITHUB_TOKEN"
       ],
       "authority_boundaries": [
-        "planning evidence only",
         "does not implement code",
         "does not run adversarial review",
         "does not create, mark ready, approve, merge, or deploy a PR"
@@ -71,7 +70,6 @@
         "GITHUB_TOKEN"
       ],
       "authority_boundaries": [
-        "exact-head review evidence only",
         "does not repair blockers",
         "does not mark PRs ready",
         "does not approve, merge, or deploy"
@@ -97,7 +95,6 @@
         "GITHUB_TOKEN"
       ],
       "authority_boundaries": [
-        "may repair only after review blockers reopen implementation work",
         "may modify the target worktree/branch only within the supplied repo context",
         "does not create, mark ready, approve, merge, or deploy a PR"
       ],
@@ -123,7 +120,6 @@
       ],
       "authority_boundaries": [
         "used only with --issue-scan-ready-pr-mark-ready",
-        "reviews the exact PR head after the managed finalizer performs the draft-to-ready transition",
         "does not approve, merge, deploy, or perform production migrations"
       ],
       "fixtures": {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -208,6 +209,11 @@ func validateIssueScanRunnerSuiteComponent(dir string, document issueScanRunnerC
 	} else if !filepath.IsLocal(component.Command) {
 		fail("command %q is not package-local", component.Command)
 	}
+	// nil means the field was omitted (or JSON null) — an absent declaration
+	// is not the same fail-closed statement as an explicit empty list.
+	if component.Argv == nil {
+		fail("argv is required (declare [] for no arguments)")
+	}
 	for _, arg := range component.Argv {
 		if strings.TrimSpace(arg) == "" {
 			fail("argv entries must be non-empty")
@@ -236,13 +242,23 @@ func validateIssueScanRunnerSuiteComponent(dir string, document issueScanRunnerC
 			break
 		}
 	}
+	// Exact set match against the contract: a dropped boundary hides a limit
+	// and an added one could grant authority, so neither direction is open to
+	// package authors. Operational notes belong in the package README.
 	declared := make(map[string]bool, len(component.AuthorityBoundaries))
 	for _, boundary := range component.AuthorityBoundaries {
 		declared[boundary] = true
 	}
+	contractBoundaries := make(map[string]bool, len(contract.AuthorityBoundaries))
 	for _, boundary := range contract.AuthorityBoundaries {
+		contractBoundaries[boundary] = true
 		if !declared[boundary] {
 			fail("authority_boundaries must include contract boundary %q", boundary)
+		}
+	}
+	for _, boundary := range component.AuthorityBoundaries {
+		if !contractBoundaries[boundary] {
+			fail("authority_boundaries entry %q is not a contract boundary (exact match required)", boundary)
 		}
 	}
 	problems = append(problems, validateIssueScanRunnerSuiteFixtures(dir, document, contract, component)...)
@@ -253,6 +269,9 @@ func validateIssueScanRunnerSuiteEnv(component issueScanRunnerSuiteComponent) []
 	var problems []error
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Errorf("component %q: %w", component.ID, fmt.Errorf(format, args...)))
+	}
+	if component.RequiredEnv == nil {
+		fail("required_env is required (declare [] for no required variables)")
 	}
 	forbidden := make(map[string]bool, len(component.ForbiddenEnv))
 	for _, name := range component.ForbiddenEnv {
@@ -448,7 +467,9 @@ func strictDecodeJSON(body []byte, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	if decoder.More() {
+	// Decoder.More() reports false for stray closing delimiters, so require a
+	// clean io.EOF from a second decode instead.
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return errors.New("trailing data after JSON document")
 	}
 	return nil

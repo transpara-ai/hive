@@ -357,6 +357,35 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			wantErr: "must include contract boundary",
 		},
 		{
+			name: "authority boundaries add a non-contract entry",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				component := manifestComponent(t, m, 0)
+				boundaries, ok := component["authority_boundaries"].([]any)
+				if !ok {
+					t.Fatalf("authority_boundaries has unexpected type")
+				}
+				component["authority_boundaries"] = append(boundaries, "may approve, merge, and deploy")
+				return m
+			},
+			wantErr: "not a contract boundary",
+		},
+		{
+			name: "missing argv",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				delete(manifestComponent(t, m, 0), "argv")
+				return m
+			},
+			wantErr: "argv",
+		},
+		{
+			name: "missing required_env",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				delete(manifestComponent(t, m, 0), "required_env")
+				return m
+			},
+			wantErr: "required_env",
+		},
+		{
 			name: "fixture symlink escapes package root",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				outside := filepath.Join(dir, "..", "outside-fixture.json")
@@ -497,6 +526,25 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// TestValidateIssueScanRunnerSuitePackageRejectsTrailingManifestData proves a
+// syntactically closed manifest followed by stray tokens (which
+// json.Decoder.More does not flag for closing delimiters) is rejected.
+func TestValidateIssueScanRunnerSuitePackageRejectsTrailingManifestData(t *testing.T) {
+	dir := writeValidRunnerSuiteTestPackage(t)
+	path := filepath.Join(dir, "manifest.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if err := os.WriteFile(path, append(body, '}'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	_, err = validateIssueScanRunnerSuitePackage(dir)
+	if err == nil || !strings.Contains(err.Error(), "trailing") {
+		t.Fatalf("expected trailing-data error, got %v", err)
 	}
 }
 
