@@ -395,7 +395,7 @@ func issueScanRunnerContracts() issueScanRunnerContractsDocument {
 				"does not approve, merge, deploy, or perform production migrations",
 				"requires --issue-scan-ready-pr-review-runner",
 				"re-drafts after a failed ready-state review only when the recorded mark-ready approval carries re_draft_on_failure; otherwise records blocked evidence and stops",
-				"treats a mark-ready client failure as a possible mutation unless the client proves the PR un-mutated; unproven failures record blocked evidence",
+				"treats a mark-ready client failure as a possible mutation unless the client proves the PR un-mutated (only pre-dispatch refusals qualify; post-dispatch provenance is never inferred from reads); indeterminate failures record blocked evidence and decline re-draft",
 				"reports a re-draft successful only when the returned live state proves the same PR is draft again",
 				"re-draft reads only the pull-request endpoint (never commit-status or check-runs), so a CI-endpoint outage cannot prevent returning the PR to draft",
 				"re-drafts only a transition this run performed: a PR already ready on arrival records re_draft_not_attempted, never an un-flip of another actor's ready state",

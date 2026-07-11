@@ -557,22 +557,40 @@ func TestFinalizerProvenNotMutatedErrorIsNotBlocked(t *testing.T) {
 }
 
 // TestFinalizerUnprovenMarkReadyErrorIsBlocked proves the fail-safe default:
-// a MarkReadyForReview error WITHOUT the not-mutated proof is treated as an
-// indeterminate/post-mutation failure — durable blocked evidence plus the
-// recorded remediation, never a silent plain error.
+// a MarkReadyForReview error WITHOUT the not-mutated proof produces durable
+// blocked evidence, never a silent plain error. Remediation then follows
+// provenance: a proven mutation (post-success verification failure)
+// re-drafts under the recorded flag; an indeterminate dispatch failure
+// (mutated=false, no sentinel) records blocked evidence but never re-drafts
+// a transition this run cannot prove it performed (CFAR hive#272 round 7,
+// finding 1).
 func TestFinalizerUnprovenMarkReadyErrorIsBlocked(t *testing.T) {
-	client := happyMockClient()
-	consumeCalls := 0
-	client.markReadyErr = fmt.Errorf("github unavailable while reconciling mutation state")
-	_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, passingReviewer, finalizerApproval(true))
-	if err == nil {
-		t.Fatal("expected error")
+	cases := []struct {
+		name            string
+		notMutated      bool
+		wantRemediation IssueScanReadyPRRemediation
+		wantConverts    int
+	}{
+		{name: "proven mutation with verification failure re-drafts", notMutated: false, wantRemediation: IssueScanReadyPRRemediationReDrafted, wantConverts: 1},
+		{name: "indeterminate dispatch failure never re-drafts", notMutated: true, wantRemediation: IssueScanReadyPRRemediationReDraftNotAttempted, wantConverts: 0},
 	}
-	var blocked *IssueScanReadyPRBlockedError
-	if !errors.As(err, &blocked) {
-		t.Fatalf("unproven mark-ready failure must produce blocked evidence, got %v", err)
-	}
-	if blocked.Evidence.Remediation != IssueScanReadyPRRemediationReDrafted || client.convertCalls != 1 {
-		t.Fatalf("remediation = %q, convertCalls = %d; want re_drafted under the recorded flag", blocked.Evidence.Remediation, client.convertCalls)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := happyMockClient()
+			client.markReadyNotMutated = tc.notMutated
+			consumeCalls := 0
+			client.markReadyErr = fmt.Errorf("github failed after the mutation was dispatched")
+			_, err := RunIssueScanReadyPRFinalizer(context.Background(), finalizerTestContextEchoing(finalizerApproval(true), &consumeCalls), client, passingReviewer, finalizerApproval(true))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			var blocked *IssueScanReadyPRBlockedError
+			if !errors.As(err, &blocked) {
+				t.Fatalf("unproven mark-ready failure must produce blocked evidence, got %v", err)
+			}
+			if blocked.Evidence.Remediation != tc.wantRemediation || client.convertCalls != tc.wantConverts {
+				t.Fatalf("remediation = %q, convertCalls = %d; want %q/%d", blocked.Evidence.Remediation, client.convertCalls, tc.wantRemediation, tc.wantConverts)
+			}
+		})
 	}
 }

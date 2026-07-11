@@ -3,7 +3,7 @@ doc_id: FO-HIVE-263-FINALIZER-GUARDRAILS
 title: Factory Order — Managed Ready-PR Finalizer Approval Scope and Failure Remediation (Mocked-Only)
 doc_type: factory-order
 status: proposal
-version: 0.8.0
+version: 0.9.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -137,14 +137,20 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   managed chain refuses to re-run the finalizer for that run — a typed
   refusal, not a silent skip — until a human remediates. Automatic retry
   after a blocked mutation could reuse authority the human granted once.
-- **R8 — Fail-safe mutation-error classification (v0.3.0, from CFAR round
-  1).** A `MarkReadyForReview` failure is treated as a possible mutation
-  (durable blocked evidence, remediation under recorded scope) unless the
-  client PROVES the PR was left un-mutated by wrapping the typed
-  not-mutated sentinel — a refusal before any GraphQL call, or a post-failure
-  reconcile fetch showing the PR still draft. Indeterminate stays blocked.
+- **R8 — Fail-safe mutation-error classification with preserved
+  indeterminacy.** A `MarkReadyForReview` failure is treated as a possible
+  mutation (durable blocked evidence) unless the client PROVES the PR was
+  left un-mutated by wrapping the typed not-mutated sentinel — ONLY a
+  refusal before the managed mutation was dispatched qualifies. (v0.9.0,
+  from CFAR round 7: the earlier post-failure reconcile inference is
+  withdrawn — no client-side read after dispatch can prove provenance; a
+  timed-out mutation can commit after the read, and a third party can flip
+  the PR inside the window. Post-dispatch failures therefore record blocked
+  evidence AND decline re-draft: `mutated=false` without the sentinel, so
+  remediation never undoes a transition this run cannot prove it
+  performed.)
 
-## Implementation Notes (v0.8.0)
+## Implementation Notes (v0.9.0)
 
 - The mark-ready action enters enforcement via the DF-SOP-0001 repo-narrower
   allowance (`safety.RepoProtectedActions`) so the pinned baseline vocabulary
@@ -158,6 +164,23 @@ authority: mocked-only implementation of protected-action guardrails; no live PR
   single-use consumer through the runner context as `json:"-"` fields:
   external runners can neither supply nor observe them, and a context missing
   either fails closed.
+
+## Named Irreducible Residual (v0.9.0)
+
+- **The approval-vs-re-draft race window on GitHub's API.** A human approval
+  submitted after the client's review-decision query but before
+  `convertPullRequestToDraft` is processed will still be followed by the
+  conversion — GitHub offers no compare-and-set across these operations, so
+  the window is irreducible from the client side. It is bounded and
+  mitigated: the pre-check and the mutation are adjacent (network-latency
+  wide), the finalizer separately declines re-draft whenever observed live
+  state carries an approval, converting to draft does NOT delete the
+  human's approval review (the human re-readies and the approval stands),
+  and blocked evidence records exactly what happened. Removing automatic
+  re-draft entirely would contradict the recorded human scope verdict
+  ("re-draft permitted" as a recorded approval-scope flag); closing the
+  window fully requires transactional/live-enablement machinery outside
+  this mocked-only slice.
 
 ## Non-Goals
 

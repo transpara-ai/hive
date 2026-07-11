@@ -57,13 +57,14 @@ func (c *issueScanReadyPRGitHubClient) MarkReadyForReview(ctx context.Context, m
 		return state, false, nil
 	}
 	if err := c.markPullRequestReadyForReview(ctx, nodeID); err != nil {
-		// The mutation may or may not have landed. Reconcile with the
-		// identity-only fetch — draft state, not CI health, is what proves
-		// non-mutation, and the CI endpoints may be the very outage at hand.
-		if reconciled, _, reconcileErr := c.fetchPullRequestIdentity(ctx, mutation); reconcileErr == nil && reconciled.Draft {
-			return hive.IssueScanReadyPRLiveState{}, false, fmt.Errorf("%w: %w", hive.ErrIssueScanMarkReadyNotMutated, err)
-		}
-		return hive.IssueScanReadyPRLiveState{}, true, err
+		// The mutation was DISPATCHED and failed: no client-side read can
+		// prove which request produced the observed state (a timed-out
+		// mutation can still commit after a reconcile GET; a third party can
+		// flip the PR inside the window). Preserve the uncertainty: not the
+		// proven-unmutated sentinel (so blocked evidence is recorded) and
+		// not mutated=true (so remediation never re-drafts a transition this
+		// run cannot prove it performed).
+		return hive.IssueScanReadyPRLiveState{}, false, err
 	}
 	state, _, err = c.fetchPullRequestState(ctx, mutation)
 	return state, true, err

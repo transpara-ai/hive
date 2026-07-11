@@ -65,10 +65,12 @@ var ErrIssueScanMarkReadyNotAuthorized = errors.New("issue-scan mark-ready is no
 var errIssueScanReadyPRHumanApproved = errors.New("live PR carries an explicit human approval")
 
 // ErrIssueScanMarkReadyNotMutated marks a MarkReadyForReview failure the
-// client has PROVEN left the PR un-mutated (a refusal before any GraphQL
-// call, or a post-failure reconcile fetch showing the PR still draft). Only
-// errors wrapping this sentinel bypass blocked evidence; any unproven failure
-// is treated as a possible mutation and produces durable blocked evidence.
+// client has PROVEN left the PR un-mutated — a refusal BEFORE the managed
+// mutation was dispatched. Once dispatched, no client-side read can prove
+// provenance, so post-dispatch failures never carry this sentinel: they stay
+// indeterminate (durable blocked evidence, and no re-draft of a transition
+// this run cannot prove it performed). Only errors wrapping this sentinel
+// bypass blocked evidence.
 var ErrIssueScanMarkReadyNotMutated = errors.New("mark-ready failed with the PR proven un-mutated")
 
 // IssueScanReadyPRRemediation names what the finalizer did after a
