@@ -179,14 +179,14 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "protected action: any stop/cancel/restart needs the user's explicit current-turn approval"
     echo "(credential + autonomy postures). To cancel a queued auto-restart after approval:"
     echo "  systemctl --user stop hive   # then re-read ActiveState to CONFIRM before relying on it"
-  elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
+  elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # comm-verified like the kill loops
     # Do NOT terminate yet — killing first would lose the workload and its
     # governance flags with nothing to relaunch. Get the user's original
     # command (argv is never echoed: it may contain sensitive --idea text or
     # credential assignments) or explicit stop-without-restore authorization,
     # THEN stop with the identity-verified kill loops from "Hive Down" and relaunch their command.
     echo "MANUAL (go run) runtime detected — restart needs the user's original command first:"
-    pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
+    printf '%s\n' "$hive_pids" | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
   else
     echo "hive runtime not running (on-demand) — left stopped"
   fi
@@ -207,7 +207,7 @@ echo "=== hive runtime (systemd unit OR manual go-run) ==="
 hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)   # merged-property read: is-active reads `activating (auto-restart)` as stopped
 if [ "$hive_state" = "active" ]; then echo "hive.service: active"
 elif [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then echo "hive.service: ${hive_state:-unreadable} — pending auto-restart or transition; treat as a MANAGED runtime"
-elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then echo "manual runtime: RUNNING"
+elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then echo "manual runtime: RUNNING"   # comm-verified
 else echo "runtime: stopped"; fi
 ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 

@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.40.0
+version: 0.41.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -431,6 +431,15 @@ the new head surfaced three operational defects, repaired in both dialects:
 - **bv — proxy bypass on ALL localhost probes.** The unauthenticated /health
   probes now carry `--noproxy '*'` like the authenticated ones, so an
   ambient proxy's response can never masquerade as local service health.
+
+### Round-10 fresh-head repair (v0.41.0)
+
+- **bw — detection predicates comm-verified like the kill loops.** The
+  status/restart "manual runtime" checks used unqualified `pgrep -f`, so an
+  editor, shell, or agent session merely MENTIONING the pattern reported a
+  running runtime and blocked the restart path. Detection now applies the
+  same comm allowlist (`hive|go`) as the kill loops, in both dialects; the
+  candidate listings reuse the verified PID set.
 
 ## Non-Goals
 
