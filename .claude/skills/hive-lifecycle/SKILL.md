@@ -236,8 +236,8 @@ go run ./cmd/hive civilization run    --human Michael --idea "…" \
        --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
 go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
-go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
-go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
+LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
+LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 # ⚠ council's --api DEFAULTS to https://transpara.ai and, when LOVYOU_API_KEY is set,
 #   POSTS up to 2000 chars of the deliberation report to the remote social feed —
@@ -262,7 +262,7 @@ Run the pipeline against a local API with no external dependency:
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/localapi --addr :8082 --api-key dev   # add --site-db to read the site DB instead of hive
+go run ./cmd/localapi --addr localhost:8082 --api-key dev   # add --site-db to read the site DB instead of hive
 ```
 
 ## Logs

@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.9.0
+version: 0.10.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -21,8 +21,8 @@ authority: repository documentation/skill-source preservation only; no Hive star
 |---|---|---|
 | [transpara-ai/hive#265](https://github.com/transpara-ai/hive/issues/265) | issue body as of 2026-07-11 (labels `cc:intake`, `cc:pr-deferred`, `cc:protected-action`, `cc:civilization-presence`, `cc:needs-human-scope`) | Raw intake — the governed tracker for the Codex skill port |
 | Michael Saucier, in-session operator scope verdict, 2026-07-11 | "Claude and Codex versions of a particular feature together in the same repo … choose the correct home for the feature … differences subdivided (as of today) into Claude and Codex subfolders … may grow to various dialects" | Channel A human scope decision this FO implements; supplies the `needs-human-scope` answer |
-| `~/.claude/skills/hive-lifecycle/SKILL.md` | current local content (runbook rewritten from code via hive PR #259) | Claude dialect source |
-| `~/.codex/skills/hive-lifecycle/` (`SKILL.md`, `agents/openai.yaml`) | current local content, validated by the Codex skill validator per #265 kickoff evidence | Codex dialect source (the port to preserve) |
+| `~/.claude/skills/hive-lifecycle/SKILL.md` | immutable seed pin: git blob `d4f8b8a1772a6810eb1d808902df7cae20e53da2` (the dialect as first committed at `7e649d6`; runbook lineage: hive PR #259) | Claude dialect seed |
+| `~/.codex/skills/hive-lifecycle/` (`SKILL.md`, `agents/openai.yaml`) | immutable seed pins: git blobs `da3dcef568eef77e82a0a1ba9555a28416cc88c6` (SKILL.md) and `22ee02b5541293bf479f64ba903e79ead278e9a6` (openai.yaml), the port as first committed at `7e649d6`; validated by the Codex skill validator per #265 kickoff evidence | Codex dialect seeds |
 
 ## Requirements
 
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.9.0, CFAR rounds 1–7 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.10.0, CFAR rounds 1–8 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -114,6 +114,14 @@ authority: repository documentation/skill-source preservation only; no Hive star
   note carries the same fail-closed effective-environment check — round 6 had
   mirrored only its catalog check, leaving the endpoint note asserting
   read-only from the unit file alone.
+  Round 8 (v0.10.0): (r) the offline `localapi` example binds explicitly to
+  `localhost:8082` — `--addr :8082` exposed the dev-credential API (including
+  mutating board routes) on every interface; (s) the pipeline/role examples
+  override `LOVYOU_API_KEY=dev` like council, so an ambient remote key sourced
+  from `hive.env` is never forwarded to the local API (which expects `dev` and
+  would 401); (t) the FO's seed citations pin immutable git blob SHAs from the
+  branch's first commit `7e649d6` instead of mutable home-directory paths, so
+  the R2 seed-vs-R7-delta diff stays reproducible after installs re-sync.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

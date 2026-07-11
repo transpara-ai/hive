@@ -284,8 +284,8 @@ go run ./cmd/hive civilization daemon \
   --human Michael \
   --store postgres://hive:hive@localhost:5432/hive
 
-go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
-go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
+LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
+LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
 
@@ -322,7 +322,7 @@ For local pipeline/role commands with no external dependency:
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/localapi --addr :8082 --api-key dev
+go run ./cmd/localapi --addr localhost:8082 --api-key dev
 ```
 
 ## Logs
