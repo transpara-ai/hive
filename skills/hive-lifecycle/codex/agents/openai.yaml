@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hive Lifecycle"
+  short_description: "Operate the local Hive stack safely"
+  default_prompt: "Use $hive-lifecycle to check Hive status on nucbuntu without starting or stopping anything unless I explicitly ask."
