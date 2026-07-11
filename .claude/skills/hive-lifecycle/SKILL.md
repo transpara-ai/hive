@@ -127,7 +127,10 @@ else
   echo "cannot read user-manager environment"; unknown=1
 fi
 if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); then
-  printf '%s\n' "$execstart" | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+  printf '%s\n' "$execstart" | grep -qE -- '(^|[ "=])--?approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+  # Unresolved $VAR expansion in ExecStart hides flags/credentials from every
+  # property check (systemd expands only at start) — not the recognized shape.
+  printf '%s\n' "$execstart" | grep -q '[$]' && { echo "ExecStart contains variable expansion — arguments can hide behind it; inspect manually"; unknown=1; }
   printf '%s\n' "$execstart" | grep -q 'LOVYOU_API_KEY=' && { echo "ExecStart itself injects LOVYOU_API_KEY (env/shell wrapper) — the clearing drop-in CANNOT remove this"; execcred=1; }
   # Launcher allowlist: only direct, argv-transparent launchers are analyzable.
   # A wrapper script (bash/sh/env/custom) can source hive.env or add flags in
