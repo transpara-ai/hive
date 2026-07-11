@@ -318,14 +318,18 @@ if unitenv=$(systemctl --user show hive -p Environment --value 2>/dev/null); the
 else
   echo "cannot read unit properties"; unknown=1
 fi
-for ef in $(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null | sed 's/ (ignore_errors=[^)]*)$//' | sed 's/^-//'); do
+for ef in $(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null | sed 's/ (ignore_errors=[^)]*)//g' | sed 's/^-//'); do
   if [ -r "$ef" ]; then
     grep -Eq "^[[:space:]]*(export[[:space:]]+)?[\"']?LOVYOU_API_KEY[\"']?[[:space:]]*=" "$ef" && { echo "$ef sets LOVYOU_API_KEY"; cred=1; }
   else
     echo "cannot read $ef — UNKNOWN"; unknown=1
   fi
 done
-systemctl --user show-environment | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; cred=1; }
+if mgrenv=$(systemctl --user show-environment 2>/dev/null); then
+  printf '%s\n' "$mgrenv" | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; cred=1; }
+else
+  echo "cannot read user-manager environment"; unknown=1
+fi
 systemctl --user show hive -p ExecStart --value 2>/dev/null | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
 cleared=0
 case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " in
