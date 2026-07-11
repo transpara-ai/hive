@@ -151,10 +151,13 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
   echo "waiting for postgres..."
   sleep 1
 done
-docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null && echo "postgres ready"
-
-systemctl --user start work-server hive-ops-api
-systemctl --user is-active work-server hive-ops-api
+if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
+  echo "postgres ready"
+  systemctl --user start work-server hive-ops-api
+  systemctl --user is-active work-server hive-ops-api
+else
+  echo "postgres not ready — NOT starting services; fix postgres first"
+fi
 ```
 
 Do not start the multi-agent runtime as part of ordinary `hive up` unless the user explicitly asks for runtime/daemon execution.
@@ -193,7 +196,11 @@ cd /Transpara/transpara-ai/repos/hive
 docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
-systemctl --user restart work-server hive-ops-api
+if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
+  systemctl --user restart work-server hive-ops-api
+else
+  echo "postgres not ready — NOT restarting services; fix postgres first"
+fi
 
 if systemctl --user is-active --quiet hive; then
   systemctl --user restart hive
@@ -273,8 +280,10 @@ go run ./cmd/hive civilization daemon \
 
 go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
 go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
-go run ./cmd/hive council --topic "..."
+go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
+
+Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed. Always pin `--api` to the local endpoint; remote publishing requires the user's explicit authorization in the current turn.
 
 Full autonomy is an explicit opt-in with `--approve-requests --approve-roles`. Do not add those flags unless the user explicitly authorizes that mode in the current turn.
 

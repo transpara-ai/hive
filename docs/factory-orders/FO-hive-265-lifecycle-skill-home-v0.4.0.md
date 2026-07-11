@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.3.0
+version: 0.4.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -51,7 +51,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
 - **R5 — No private addresses or secrets.** No literal private-network
   addresses (hostnames/`localhost` only) and no credentials anywhere under
   `skills/`.
-- **R7 — Reviewed safety repairs (v0.3.0, CFAR round 1 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.4.0, CFAR rounds 1–2 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -65,6 +65,14 @@ authority: repository documentation/skill-source preservation only; no Hive star
   `until` loops; (e) install instructions synchronize with deletion
   (`rsync -a --delete`) so stale files cannot survive in installed copies.
   Local installs re-sync from the repo after merge.
+  Round 2 (v0.4.0): (f) `council` examples pin `--api` to the local endpoint
+  and disclose that the default `--api https://transpara.ai` posts up to 2000
+  characters of the deliberation report to the remote social feed when
+  `LOVYOU_API_KEY` is set — remote publishing requires explicit user
+  authorization; (g) post-timeout gating — after a bounded Postgres wait, the
+  dependent `systemctl start`/`restart` runs only inside an `if pg_isready`
+  gate, so a timeout stops the operation instead of crash-looping services
+  (repairing the round-1 `break` that fell through).
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

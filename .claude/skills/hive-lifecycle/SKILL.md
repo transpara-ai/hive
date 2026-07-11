@@ -58,10 +58,15 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 done
 docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null && echo "postgres ready"
 
-# 2. The API services (systemd --user). Dirty start? Run "Hive Down" first to clear
-#    any stale manual go-run process still holding :8080/:8085.
-systemctl --user start work-server hive-ops-api
-systemctl --user is-active work-server hive-ops-api   # expect: active / active
+# 2. The API services (systemd --user) — gated on Postgres readiness: starting them
+#    against a dead Postgres just puts both into crash loops. Dirty start? Run
+#    "Hive Down" first to clear any stale manual go-run process holding :8080/:8085.
+if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
+  systemctl --user start work-server hive-ops-api
+  systemctl --user is-active work-server hive-ops-api   # expect: active / active
+else
+  echo "postgres not ready — NOT starting services; fix postgres first"
+fi
 
 # 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
 #    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
@@ -103,7 +108,12 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound —
 # Ensure Postgres is up + accepting connections first (restart = a true down→up):
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
-systemctl --user restart work-server hive-ops-api
+# Restart is gated on Postgres readiness — restarting against a dead DB crash-loops both services:
+if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
+  systemctl --user restart work-server hive-ops-api
+else
+  echo "postgres not ready — NOT restarting services; fix postgres first"
+fi
 # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
 # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
 # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
@@ -211,7 +221,11 @@ go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
 go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
-go run ./cmd/hive council --topic "…"                                       # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+go run ./cmd/hive council --api http://localhost:8082 --topic "…"            # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+# ⚠ council's --api DEFAULTS to https://transpara.ai and, when LOVYOU_API_KEY is set,
+#   POSTS up to 2000 chars of the deliberation report to the remote social feed.
+#   Always pin --api to the local endpoint (see "Local / Offline"); remote publishing
+#   requires the user's explicit authorization in the current turn.
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 
