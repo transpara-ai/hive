@@ -100,19 +100,29 @@ fi
 **hive.service credential preflight** (read-only, names only; any hit or unreadable source = do NOT start without explicit production authorization):
 
 ```bash
-cfg=$(systemctl --user cat hive 2>/dev/null) || echo "cannot read hive.service config — do NOT start"
-printf '%s\n' "$cfg" | grep -oE '^Environment=[A-Z0-9_]+' | cut -d= -f2 | grep -x LOVYOU_API_KEY && echo "unit Environment= sets LOVYOU_API_KEY — do NOT start"
+hit=0
+cfg=$(systemctl --user cat hive 2>/dev/null) || { echo "cannot read hive.service config"; hit=1; }
+# Every Environment= assignment, including quoted and multi-assignment forms
+# (splitting quoted values may over-match — that errs closed, never open):
+printf '%s\n' "$cfg" | grep '^Environment=' | sed 's/^Environment=//' | tr ' ' '\n' | tr -d '"' | grep -q '^LOVYOU_API_KEY=' && { echo "unit Environment= sets LOVYOU_API_KEY"; hit=1; }
 for ef in $(printf '%s\n' "$cfg" | grep '^EnvironmentFile=' | cut -d= -f2- | sed 's/^-//'); do
   if [ -r "$ef" ]; then
-    cut -d= -f1 "$ef" | grep -x LOVYOU_API_KEY && echo "$ef sets LOVYOU_API_KEY — do NOT start"
+    grep -Eq '^[[:space:]]*(export[[:space:]]+)?"?LOVYOU_API_KEY"?=' "$ef" && { echo "$ef sets LOVYOU_API_KEY"; hit=1; }
   else
-    echo "cannot read $ef — UNKNOWN; do NOT start"
+    echo "cannot read $ef — UNKNOWN"; hit=1
   fi
 done
-systemctl --user show-environment | cut -d= -f1 | grep -x LOVYOU_API_KEY && echo "user-manager environment sets LOVYOU_API_KEY — do NOT start"
+systemctl --user show-environment | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; hit=1; }
+if [ "$hit" -eq 0 ]; then
+  echo "preflight clean — OK to start"
+elif systemctl --user cat hive 2>/dev/null | grep -qx 'UnsetEnvironment=LOVYOU_API_KEY'; then
+  echo "credential present in sources but the clearing drop-in is ACTIVE — OK to start; verify post-start"
+else
+  echo "do NOT start without explicit production authorization (or apply the clearing drop-in)"
+fi
 ```
 
-If a source sets the key and the user still wants a local-only runtime: apply a clearing drop-in (mutating config — confirm with the user first), re-run the preflight, and after start verify via the Endpoint Reference effective-environment check with unit `hive` / variable `LOVYOU_API_KEY`:
+If a source sets the key and the user still wants a local-only runtime: apply a clearing drop-in (mutating config — confirm with the user first), re-run the preflight (it reports the source hits as cleared by the active drop-in), and after start verify via the Endpoint Reference effective-environment check with unit `hive` / variable `LOVYOU_API_KEY` — `UnsetEnvironment` strips the variable from the final environment regardless of source, but the post-start check is the authoritative proof:
 
 ```bash
 mkdir -p ~/.config/systemd/user/hive.service.d
@@ -218,14 +228,14 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 >
 > ```bash
 > pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-> if [ "${pid:-0}" -gt 0 ] 2>/dev/null && raw=$(cat /proc/"$pid"/environ 2>/dev/null) && [ -n "$raw" ]; then
->   printf '%s' "$raw" | tr '\0' '\n' | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+> if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$names" ]; then
+>   printf '%s\n' "$names" | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
 > else
 >   echo "cannot read process environment — mode UNKNOWN"
 > fi
 > ```
 >
-> `0` = read-only; non-zero = **writer mode**. The read is captured **before** any pipeline (`raw=$(cat …)` must succeed and be non-empty), so a restart race or permission failure can never print `0` and masquerade as read-only. Service down or unreadable = mode unknown, fail closed.
+> `0` = read-only; non-zero = **writer mode**. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
 
 ```bash
 curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \

@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.12.0
+version: 0.13.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.12.0, CFAR rounds 1–10 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.13.0, CFAR rounds 1–11 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -142,6 +142,18 @@ authority: repository documentation/skill-source preservation only; no Hive star
   pointed at a running-process check unusable on a stopped unit, plus a
   user-confirmed `UnsetEnvironment=LOVYOU_API_KEY` clearing drop-in and a
   post-start effective-environment verification.
+  Round 11 (v0.13.0): (z) the writer-mode probes convert NULs to newlines
+  INSIDE the command substitution — the round-10 `raw=$(cat …)` form lost the
+  NUL separators (bash substitution strips them), concatenating all
+  assignments so the check always printed `0`/read-only even in writer mode;
+  `tr` is the sole command so a failed read still fails the condition;
+  (aa) the preflight parses every `Environment=` assignment (quoted and
+  multi-assignment forms; over-matching split values errs closed) and matches
+  `EnvironmentFile` lines with leading whitespace/`export`/quotes; (ab) the
+  preflight verdict recognizes the active `UnsetEnvironment` clearing drop-in
+  so the documented local-only recovery path can actually reach start and
+  post-start verification instead of dead-ending on the unchanged source
+  file.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
