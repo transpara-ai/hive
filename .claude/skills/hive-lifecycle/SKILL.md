@@ -135,8 +135,8 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
 # port (a blind port-kill could hit pgadmin or a dev server):
-pgrep -f '[c]md/work-server|[e]xe/work-server' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
+{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -369,10 +369,10 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 # Manual APIs also write the chain — sweep them, then GATE the reset on
 # quiescence. The broad argv pattern is safe here: a false match only ABORTS.
-pgrep -f '[c]md/work-server|[e]xe/work-server' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
+{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)|[c]md/work-server|[e]xe/work-server|[c]md/hive-ops-api|[e]xe/hive-ops-api' >/dev/null; then
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)|[c]md/work-server|[e]xe/work-server|[c]md/hive-ops-api|[e]xe/hive-ops-api' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
   echo "hive/work processes still running — NOT resetting the database"
 else
   # The && chain is load-bearing: if the repo path is missing or unmounted, a

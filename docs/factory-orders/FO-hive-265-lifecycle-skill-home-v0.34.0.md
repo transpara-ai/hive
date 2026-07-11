@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.33.0
+version: 0.34.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -331,6 +331,15 @@ the new head surfaced three operational defects, repaired in both dialects:
   sweep manual APIs with the identity-verified loops and GATE `docker
   compose down -v` on a process-quiescence check (a false argv match only
   ABORTS — fail-closed direction).
+
+### Round-3 fresh-head repair (v0.34.0)
+
+- **bk — direct-binary API launches covered.** The `[c]md/…|[e]xe/…` argv
+  patterns miss an API launched directly from its built binary (argv carries
+  neither prefix), so Hive Down sweeps and the Nuclear quiescence gate could
+  miss a live chain-writing process. Candidate selection now unions
+  name-exact `pgrep -x work-server` / `pgrep -x hive-ops-api` with the argv
+  patterns (comm identity check retained), in both dialects.
 
 ## Non-Goals
 
