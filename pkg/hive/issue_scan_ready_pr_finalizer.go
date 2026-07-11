@@ -285,15 +285,33 @@ func validateIssueScanReadyPRLiveState(label string, mutation IssueScanReadyPRFi
 	return nil
 }
 
-func validateIssueScanReadyStateReviewReceipt(mutation IssueScanReadyPRFinalizerMutation, receipt IssueScanReadyStateReviewReceipt) error {
+// issueScanReadyStateReviewPassingStatuses is the allowlist of ready-state
+// receipt statuses the managed finalizer records; anything else is rejected.
+var issueScanReadyStateReviewPassingStatuses = []string{"success", "passed", "pass", "no_blockers", "no blockers"}
+
+// ValidateIssueScanReadyStateReviewReceiptShape checks the receipt properties
+// that are deterministic from the receipt alone — review_ref presence and a
+// passing status from the finalizer's allowlist. The managed chain records
+// only passing ready-state receipts (a non-passing receipt stops the chain
+// and is never recordable evidence), so local runner-suite package validation
+// applies the same rule to expected stdout fixtures. Head binding stays in
+// the runtime validator.
+func ValidateIssueScanReadyStateReviewReceiptShape(receipt IssueScanReadyStateReviewReceipt) error {
 	if strings.TrimSpace(receipt.ReviewRef) == "" {
 		return fmt.Errorf("ready-state review_ref is required")
 	}
+	if !issueScanReadyStatusOK(receipt.Status, issueScanReadyStateReviewPassingStatuses) {
+		return fmt.Errorf("ready-state review status %q is not passing", receipt.Status)
+	}
+	return nil
+}
+
+func validateIssueScanReadyStateReviewReceipt(mutation IssueScanReadyPRFinalizerMutation, receipt IssueScanReadyStateReviewReceipt) error {
+	if err := ValidateIssueScanReadyStateReviewReceiptShape(receipt); err != nil {
+		return err
+	}
 	if !strings.EqualFold(strings.TrimSpace(receipt.ReviewedHeadSHA), mutation.HeadSHA) {
 		return fmt.Errorf("ready-state reviewed_head_sha %q does not match approved head %q", receipt.ReviewedHeadSHA, mutation.HeadSHA)
-	}
-	if !issueScanReadyStatusOK(receipt.Status, []string{"success", "passed", "pass", "no_blockers", "no blockers"}) {
-		return fmt.Errorf("ready-state review status %q is not passing", receipt.Status)
 	}
 	return nil
 }

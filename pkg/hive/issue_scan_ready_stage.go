@@ -124,6 +124,117 @@ type IssueScanReadyPRRunnerResult struct {
 	ReadyPREvidence IssueScanReadyPREvidence  `json:"ready_pr_evidence"`
 }
 
+// ValidateIssueScanReadyPRRunnerResultForContext checks the deterministic,
+// non-store-backed runtime rules for an external ready-PR runner packet. The
+// authoritative record path still verifies live authority decisions and Work
+// artifacts; this helper prevents package fixtures from certifying a result
+// whose shape or context binding that record path would reject first.
+func ValidateIssueScanReadyPRRunnerResultForContext(context IssueScanReadyPRRunnerContext, result IssueScanReadyPRRunnerResult) error {
+	if strings.TrimSpace(context.Kind) != issueScanReadyPRRunnerContextKind {
+		return fmt.Errorf("context kind %q does not match %q", context.Kind, issueScanReadyPRRunnerContextKind)
+	}
+	if strings.TrimSpace(context.LifecycleVersion) != issueScanLifecycleVersion {
+		return fmt.Errorf("context lifecycle_version %q does not match %q", context.LifecycleVersion, issueScanLifecycleVersion)
+	}
+	for field, value := range map[string]string{
+		"run_id":                 context.RunID,
+		"factory_order_id":       context.FactoryOrderID,
+		"repository":             context.Repository,
+		"ready_stage_task_id":    context.ReadyStageTaskID,
+		"blocker_stage_task_id":  context.BlockerStageTaskID,
+		"implementation_task_id": context.ImplementationTaskID,
+		"operate_branch":         context.OperateBranch,
+		"operate_commit":         context.OperateCommit,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("context %s is required", field)
+		}
+	}
+	repo := strings.ToLower(strings.TrimSpace(context.Repository))
+	if !ValidTransparaAIRepo(repo) {
+		return fmt.Errorf("context repository %q is not a Transpara-AI repo", context.Repository)
+	}
+	expected := context.ExpectedReadyPREvidence
+	for field, values := range map[string][2]string{
+		"kind":              {strings.TrimSpace(expected.Kind), issueScanReadyPREvidenceArtifactKind},
+		"lifecycle_version": {strings.TrimSpace(expected.LifecycleVersion), issueScanLifecycleVersion},
+		"run_id":            {strings.TrimSpace(expected.RunID), strings.TrimSpace(context.RunID)},
+		"factory_order_id":  {strings.TrimSpace(expected.FactoryOrderID), strings.TrimSpace(context.FactoryOrderID)},
+		"repository":        {strings.ToLower(strings.TrimSpace(expected.Repository)), repo},
+	} {
+		if values[0] != values[1] {
+			return fmt.Errorf("context expected_ready_pr_evidence %s %q does not match %q", field, values[0], values[1])
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(expected.HeadSHA), strings.TrimSpace(context.OperateCommit)) {
+		return fmt.Errorf("context expected_ready_pr_evidence head_sha %q does not match operate_commit %q", expected.HeadSHA, context.OperateCommit)
+	}
+	if !strings.EqualFold(strings.TrimSpace(expected.State), "open") || expected.Draft || !expected.ReadyForReview || !expected.HumanApprovalRequired {
+		return fmt.Errorf("context expected_ready_pr_evidence must require an open, non-draft, ready-for-review PR with Human approval still required")
+	}
+
+	content := FactoryRunRequestedContent{TargetRepos: []string{repo}}
+	if err := validateIssueScanDraftPRReceiptForRecord(content, result.DraftPRReceipt); err != nil {
+		return fmt.Errorf("draft_pr_receipt: %w", err)
+	}
+	if strings.ToLower(strings.TrimSpace(result.DraftPRReceipt.Repository)) != repo {
+		return fmt.Errorf("draft_pr_receipt repository %q does not match context %q", result.DraftPRReceipt.Repository, context.Repository)
+	}
+	if strings.TrimSpace(result.DraftPRReceipt.HeadSHA) != strings.TrimSpace(context.OperateCommit) {
+		return fmt.Errorf("draft_pr_receipt head_sha %q does not match context operate_commit %q", result.DraftPRReceipt.HeadSHA, context.OperateCommit)
+	}
+
+	evidence := result.ReadyPREvidence
+	for field, values := range map[string][2]string{
+		"kind":              {strings.TrimSpace(evidence.Kind), issueScanReadyPREvidenceArtifactKind},
+		"lifecycle_version": {strings.TrimSpace(evidence.LifecycleVersion), issueScanLifecycleVersion},
+		"run_id":            {strings.TrimSpace(evidence.RunID), strings.TrimSpace(context.RunID)},
+		"factory_order_id":  {strings.TrimSpace(evidence.FactoryOrderID), strings.TrimSpace(context.FactoryOrderID)},
+		"repository":        {strings.ToLower(strings.TrimSpace(evidence.Repository)), repo},
+	} {
+		if values[0] != values[1] {
+			return fmt.Errorf("ready_pr_evidence %s %q does not match context %q", field, values[0], values[1])
+		}
+	}
+	if evidence.PRNumber <= 0 {
+		return fmt.Errorf("ready_pr_evidence pr_number is required")
+	}
+	if strings.TrimSpace(evidence.PRURL) == "" || !strings.Contains(strings.ToLower(strings.TrimSpace(evidence.PRURL)), "github.com/"+repo+"/pull/") {
+		return fmt.Errorf("ready_pr_evidence pr_url %q does not match repository %q", evidence.PRURL, repo)
+	}
+	if !strings.EqualFold(strings.TrimSpace(evidence.HeadSHA), strings.TrimSpace(context.OperateCommit)) {
+		return fmt.Errorf("ready_pr_evidence head_sha %q does not match context operate_commit %q", evidence.HeadSHA, context.OperateCommit)
+	}
+	if !strings.EqualFold(strings.TrimSpace(evidence.State), "open") {
+		return fmt.Errorf("ready_pr_evidence state %q is not open", evidence.State)
+	}
+	if evidence.Draft || !evidence.ReadyForReview {
+		return fmt.Errorf("ready_pr_evidence must prove a non-draft ready-for-review PR")
+	}
+	if !issueScanReadyStatusOK(evidence.MergeStateStatus, []string{"clean", "blocked"}) {
+		return fmt.Errorf("ready_pr_evidence merge_state_status %q is not clean or blocked", evidence.MergeStateStatus)
+	}
+	if !issueScanReadyStatusOK(evidence.CIStatus, []string{"success", "passed", "green"}) {
+		return fmt.Errorf("ready_pr_evidence ci_status %q is not successful", evidence.CIStatus)
+	}
+	if strings.TrimSpace(evidence.ReadyStateReviewRef) == "" {
+		return fmt.Errorf("ready_pr_evidence ready_state_review_ref is required")
+	}
+	if !issueScanReadyStatusOK(evidence.ReadyStateReviewStatus, []string{"success", "passed", "pass", "no_blockers", "no blockers"}) {
+		return fmt.Errorf("ready_pr_evidence ready_state_review_status %q is not passing", evidence.ReadyStateReviewStatus)
+	}
+	if !evidence.HumanApprovalRequired {
+		return fmt.Errorf("ready_pr_evidence human_approval_required must be true")
+	}
+	if strings.TrimSpace(evidence.DraftPRReceiptRef) != strings.TrimSpace(context.DraftPRReceiptRef) {
+		return fmt.Errorf("ready_pr_evidence draft_pr_receipt_ref %q does not match context %q", evidence.DraftPRReceiptRef, context.DraftPRReceiptRef)
+	}
+	if err := validateIssueScanDraftPRReceiptForReadyEvidence(issueScanDraftPRReceiptEvidence{Receipt: result.DraftPRReceipt}, evidence, repo, strings.TrimSpace(evidence.HeadSHA)); err != nil {
+		return fmt.Errorf("ready_pr_evidence: %w", err)
+	}
+	return nil
+}
+
 type IssueScanReadyPRRunnerRecordResult struct {
 	RunID            string
 	FactoryOrderID   string

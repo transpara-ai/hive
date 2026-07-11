@@ -1,0 +1,14 @@
+{
+  "role_outputs": [
+    {
+      "role": "researcher",
+      "summary": "Synthetic research summary.",
+      "outputs": [
+        {
+          "key": "research_findings",
+          "summary": "Synthetic finding."
+        }
+      ]
+    }
+  ]
+}
