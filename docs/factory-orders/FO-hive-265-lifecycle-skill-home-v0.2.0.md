@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.1.0
+version: 0.2.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -31,9 +31,17 @@ authority: repository documentation/skill-source preservation only; no Hive star
   home: the skill manages this repo's stack). The convention itself — feature
   home + dialect subfolders (`claude/`, `codex/`, future dialects) — is
   recorded in `skills/README.md` with the operator verdict cited.
-- **R2 — Both dialects preserved verbatim.** `skills/hive-lifecycle/claude/SKILL.md`
-  and `skills/hive-lifecycle/codex/{SKILL.md, agents/openai.yaml}` are
-  byte-copies of the local sources cited above.
+- **R2 — Both dialects preserved verbatim, one physical copy each.** The
+  Claude dialect's physical file is the repo's pre-existing
+  `.claude/skills/hive-lifecycle/SKILL.md` (committed via hive#259; verified
+  identical to the local install), reached from the feature home via the
+  relative symlink `skills/hive-lifecycle/claude`; the Codex dialect files
+  `skills/hive-lifecycle/codex/{SKILL.md, agents/openai.yaml}` are byte-copies
+  of the local port cited above. No dialect content exists twice in the repo.
+  (v0.2.0: revised from committing a second Claude copy after IAR found the
+  pre-existing #259 home; moving the physical file out of `.claude/skills/`
+  would break Claude Code project-skill auto-discovery, so the symlink points
+  home-to-file rather than file-to-home.)
 - **R3 — Codex structure valid.** The in-repo Codex dialect passes the Codex
   skill validator (`quick_validate.py`), including frontmatter and UI
   discovery metadata (`agents/openai.yaml`).
