@@ -238,14 +238,19 @@ Default `hive-ops-api.service` should be read-only because it does not set `HIVE
 
 ```bash
 pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-if [ "${pid:-0}" -gt 0 ] 2>/dev/null && names=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$names" ]; then
-  printf '%s\n' "$names" | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
+  actor=$(printf '%s\n' "$envlines" | grep '^HIVE_OPS_HUMAN_ACTOR=' | head -1 | cut -d= -f2-)
+  if [ -n "$actor" ]; then
+    echo "HIVE_OPS_HUMAN_ACTOR set and non-empty — WRITER MODE possible (an invalid actor id still yields read-only at startup; check journal for 'HIVE_OPS_HUMAN_ACTOR invalid')"
+  else
+    echo "HIVE_OPS_HUMAN_ACTOR absent or empty — read-only (opsWriterOptions requires a non-empty valid actor id)"
+  fi
 else
   echo "cannot read process environment — mode UNKNOWN; do not POST"
 fi
 ```
 
-`0` means the running process has no `HIVE_OPS_HUMAN_ACTOR` (read-only); a non-zero count means writer mode. The NUL separators are converted to newlines **inside** the substitution (`tr` is the sole command, so a failed `/proc` read fails the whole condition — no pipeline can mask it, and no NUL bytes are lost to command substitution, which strips them). Service down or unreadable — the mode is unknown; do not POST.
+The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NUL separators are converted to newlines **inside** the substitution (`tr` is the sole command, so a failed `/proc` read fails the whole condition — no pipeline masks it, and no NUL bytes are lost to command substitution, which strips them). Service down or unreadable — the mode is unknown; do not POST.
 
 `work-server` on `http://localhost:8080`, bearer `$WORK_API_KEY`:
 
@@ -341,10 +346,18 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
   # A wrapper script (bash/sh/env/custom) can source hive.env or add flags in
   # its BODY, invisible to every property check — treat as opaque, fail closed.
   launcher=$(printf '%s\n' "$execstart" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
+  wd=$(systemctl --user show hive -p WorkingDirectory --value 2>/dev/null)
+  argvline=$(printf '%s\n' "$execstart" | grep -o 'argv\[\]=[^;]*' | head -1)
   case "$launcher" in
-    */go|*/hive) : ;;
+    /Transpara/transpara-ai/repos/hive/hive) : ;;   # the canonical built binary, exact path (a wrapper merely NAMED hive elsewhere is rejected)
+    */go)
+      if [ "$wd" = "/Transpara/transpara-ai/repos/hive" ] && printf '%s\n' "$argvline" | grep -q 'go run \./cmd/hive '; then
+        :   # canonical `go run ./cmd/hive …` from the hive repo — argv-transparent
+      else
+        echo "go launcher without the canonical 'go run ./cmd/hive' target in the hive repo — opaque; inspect manually"; unknown=1
+      fi ;;
     "") echo "cannot determine ExecStart launcher"; unknown=1 ;;
-    *) echo "ExecStart launcher $launcher is not a recognized direct launcher — an opaque wrapper can inject credentials/flags; inspect its body manually"; unknown=1 ;;
+    *) echo "ExecStart launcher $launcher is not the canonical hive binary or go-run form — an opaque wrapper can inject credentials/flags in its body; inspect it manually"; unknown=1 ;;
   esac
 else
   echo "cannot read ExecStart property"; unknown=1
