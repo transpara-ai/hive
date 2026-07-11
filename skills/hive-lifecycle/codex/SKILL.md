@@ -284,7 +284,7 @@ go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 ```
 
-Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and blank `LOVYOU_API_KEY` as shown; remote publishing requires the user's explicit authorization in the current turn.
+Warning: `council` defaults `--api` to `https://transpara.ai` and, when `LOVYOU_API_KEY` is set, posts up to 2000 characters of the deliberation report to the remote social feed — and interpolates that key into every council agent's prompt, exposing the bearer token to model providers. For local runs, always pin `--api` to the local endpoint and replace any ambient remote credential with the non-secret local `dev` credential as shown; remote publishing requires the user's explicit authorization in the current turn.
 
 Full autonomy is an explicit opt-in with `--approve-requests --approve-roles`. Do not add those flags unless the user explicitly authorizes that mode in the current turn.
 

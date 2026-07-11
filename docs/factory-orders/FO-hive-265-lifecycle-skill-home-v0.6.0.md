@@ -49,8 +49,10 @@ authority: repository documentation/skill-source preservation only; no Hive star
   help/status; mutating lifecycle actions require explicit user intent in the
   current turn; no `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` use.
 - **R5 — No private addresses or secrets.** No literal private-network
-  addresses (hostnames/`localhost` only) and no credentials anywhere under
-  `skills/`.
+  addresses (hostnames/`localhost` only) and no non-default credentials or
+  secrets anywhere under `skills/`. Checked-in local development defaults such
+  as the `dev` bearer and local Postgres DSN are explicitly allowed and are
+  never represented as production credentials.
 - **R7 — Reviewed safety repairs (v0.3.0–v0.6.0, CFAR rounds 1–4 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
@@ -73,8 +75,9 @@ authority: repository documentation/skill-source preservation only; no Hive star
   dependent `systemctl start`/`restart` runs only inside an `if pg_isready`
   gate, so a timeout stops the operation instead of crash-looping services
   (repairing the round-1 `break` that fell through).
-  Round 3 (v0.5.0): (h) council examples additionally blank `LOVYOU_API_KEY`
-  for local runs — `runCouncilCmd` reads the remote credential and
+  Round 3 (v0.5.0): (h) council examples additionally replace any ambient
+  remote `LOVYOU_API_KEY` with the non-secret local `dev` credential for local
+  runs — `runCouncilCmd` reads the credential and
   `buildCouncilOperateInstruction` interpolates it into every council agent's
   prompt, so pinning `--api` alone still exposed the bearer token to model
   providers; (i) the readiness gate now encloses ALL downstream mutating
@@ -87,7 +90,10 @@ authority: repository documentation/skill-source preservation only; no Hive star
   confirmed that `buildCouncilOperateInstruction` is reachable only from the
   standalone `council` verb, not from `civilization run` or `civilization
   daemon`; those examples are therefore outside the council credential-prompt
-  path repaired in (h).
+  path repaired in (h). The same round also (k) makes `pgrep`/`pkill` patterns
+  self-match-resistant, (l) bounds read-only HTTP probes with connection and
+  total timeouts, and (m) documents the local `dev` credential honestly rather
+  than claiming all checked-in development defaults are secrets.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth

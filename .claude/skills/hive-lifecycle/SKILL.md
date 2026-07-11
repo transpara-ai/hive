@@ -232,8 +232,9 @@ LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic
 #   POSTS up to 2000 chars of the deliberation report to the remote social feed —
 #   AND interpolates that key into every council agent's prompt (exposing the bearer
 #   to model providers). For local runs, always pin --api to the local endpoint AND
-#   blank LOVYOU_API_KEY as shown; remote publishing requires the user's explicit
-#   authorization in the current turn.
+#   replace any ambient remote credential with the non-secret local `dev` credential
+#   as shown; remote publishing requires the user's explicit authorization in the
+#   current turn.
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 ```
 
