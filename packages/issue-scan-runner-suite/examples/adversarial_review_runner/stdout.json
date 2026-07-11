@@ -1,0 +1,9 @@
+{
+  "repository": "transpara-ai/synthetic-example",
+  "review_ref": "synthetic-review-0001",
+  "reviewed_head_sha": "0000000000000000000000000000000000000001",
+  "verdict": "approve",
+  "summary": "Synthetic exact-head review.",
+  "issues": [],
+  "confidence": 0.9
+}

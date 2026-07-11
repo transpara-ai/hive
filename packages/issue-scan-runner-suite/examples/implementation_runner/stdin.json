@@ -1,0 +1,12 @@
+{
+  "kind": "issue_scan_implementation_runner_context",
+  "lifecycle_version": "civilization_issue_to_human_ready_pr_v0.9",
+  "run_id": "run-synthetic-0001",
+  "factory_order_id": "fo-synthetic-0001",
+  "repository": "transpara-ai/synthetic-example",
+  "repo_path": "workspace/synthetic-example",
+  "implementation_task_id": "task-synthetic-0002",
+  "implementation_stage_task_id": "task-synthetic-0003",
+  "design_stage_task_id": "task-synthetic-0004",
+  "design_runtime_evidence_ref": "evidence-synthetic-0001"
+}

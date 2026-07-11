@@ -600,6 +600,20 @@ type parsedIssueScanOperateResult struct {
 	ChangedFilesSummary string
 }
 
+// IssueScanOperateResultBodyCommit parses body with the exact runtime Operate
+// parser the issue-scan lifecycle records for implementation and
+// blocker-repair runner output (branch, commit/head, changed-file stat
+// required) and returns the verified commit. Local package validation uses it
+// so an "expected stdout" fixture cannot claim an Operate result the runtime
+// would reject.
+func IssueScanOperateResultBodyCommit(body string) (string, error) {
+	parsed, err := parseIssueScanOperateResultArtifact(body)
+	if err != nil {
+		return "", err
+	}
+	return parsed.Commit, nil
+}
+
 func parseIssueScanOperateResultArtifact(body string) (parsedIssueScanOperateResult, error) {
 	var out parsedIssueScanOperateResult
 	header := true

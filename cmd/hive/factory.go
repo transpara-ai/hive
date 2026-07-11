@@ -92,6 +92,10 @@ import (
 //               → record governed runtime evidence for one issue-scan stage,
 //                  complete that stage task, and optionally release the next
 //                  stage barrier.
+//   validate-issue-scan-runner-suite
+//               → locally validate a runner-suite package manifest and its
+//                  inert fixtures against the in-process runner contracts;
+//                  reads files only, never executes runners.
 //   request-pr   → (*hive.Runtime).RaiseDraftPRAuthorityRequest (H2): raise the
 //                  guardian authority request; the gate HOLDS by design.
 //   create-pr    → hive.LoadApprovedDraftPRTarget (the governance gate: load the
@@ -101,7 +105,7 @@ import (
 
 func cmdFactory(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]", errUsage)
+		return fmt.Errorf("%w: hive factory <daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|validate-issue-scan-runner-suite|request-pr|create-pr> [flags]", errUsage)
 	}
 	subverb := args[0]
 	rest := args[1:]
@@ -144,6 +148,8 @@ func cmdFactory(args []string) error {
 		return cmdFactoryRequestIssueScanPR(rest)
 	case "create-issue-scan-draft-pr":
 		return cmdFactoryCreateIssueScanDraftPR(rest)
+	case "validate-issue-scan-runner-suite":
+		return cmdFactoryValidateIssueScanRunnerSuite(rest)
 	case "complete-issue-scan-stage":
 		return cmdFactoryCompleteIssueScanStage(rest)
 	case "request-pr":
@@ -151,11 +157,11 @@ func cmdFactory(args []string) error {
 	case "create-pr":
 		return cmdFactoryCreatePR(rest)
 	case "-h", "--help":
-		fmt.Println("usage: hive factory <daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr> [flags]")
+		fmt.Println("usage: hive factory <daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|validate-issue-scan-runner-suite|request-pr|create-pr> [flags]")
 		fmt.Println("\nRun 'hive factory <sub> --help' for subcommand flags.")
 		return nil
 	default:
-		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|request-pr|create-pr)", subverb)
+		return fmt.Errorf("unknown factory subverb %q (want daemon|order|scan-issues|canary-scan|progress-issue-scan|advance-issue-scan|record-issue-scan-role-output|run-issue-scan-stage-role-output|run-issue-scan-implementation|record-issue-scan-review|run-issue-scan-review|run-issue-scan-blocker-repair|record-issue-scan-draft-pr|record-issue-scan-ready-pr|run-issue-scan-ready-pr|issue-scan-runner-contracts|issue-scan-runner-contexts|request-issue-scan-pr|create-issue-scan-draft-pr|complete-issue-scan-stage|validate-issue-scan-runner-suite|request-pr|create-pr)", subverb)
 	}
 }
 

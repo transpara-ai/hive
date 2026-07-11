@@ -1,0 +1,12 @@
+{
+  "kind": "issue_scan_adversarial_review_context",
+  "lifecycle_version": "civilization_issue_to_human_ready_pr_v0.9",
+  "run_id": "run-synthetic-0001",
+  "factory_order_id": "fo-synthetic-0001",
+  "repository": "transpara-ai/synthetic-example",
+  "implementation_task_id": "task-synthetic-0002",
+  "review_stage_task_id": "task-synthetic-0005",
+  "operate_branch": "feat/synthetic-change",
+  "operate_commit": "0000000000000000000000000000000000000001",
+  "changed_files_summary": "1 file changed (synthetic)"
+}

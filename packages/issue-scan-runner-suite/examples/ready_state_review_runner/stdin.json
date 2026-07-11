@@ -1,0 +1,12 @@
+{
+  "kind": "issue_scan_ready_state_review_context",
+  "lifecycle_version": "civilization_issue_to_human_ready_pr_v0.9",
+  "run_id": "run-synthetic-0001",
+  "factory_order_id": "fo-synthetic-0001",
+  "repository": "transpara-ai/synthetic-example",
+  "pr_number": 1,
+  "pr_url": "https://github.com/transpara-ai/synthetic-example/pull/1",
+  "ready_stage_task_id": "task-synthetic-0007",
+  "implementation_task_id": "task-synthetic-0002",
+  "operate_commit": "0000000000000000000000000000000000000001"
+}
