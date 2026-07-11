@@ -87,7 +87,7 @@ func runnerSuiteTestFixtures() map[string]map[string]string {
 		},
 		"blocker_repair_runner": {
 			"stdin":  `{"kind":"issue_scan_blocker_repair_runner_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","repo_path":"workspace/synthetic-example","implementation_task_id":"task-synthetic-0002","implementation_stage_task_id":"task-synthetic-0003","review_stage_task_id":"task-synthetic-0005","blocker_stage_task_id":"task-synthetic-0006","request_changes_review_event_id":"event-synthetic-0001","request_changes_review_summary":"Synthetic blocker summary.","request_changes_review_issues":["synthetic blocker"],"request_changes_review_confidence":0.8,"reopen_event_id":"event-synthetic-0002","reopen_reason":"synthetic reopen","previous_operate_branch":"feat/synthetic-change","previous_operate_commit":"0000000000000000000000000000000000000001","previous_changed_files_summary":"1 file changed (synthetic)"}`,
-			"stdout": `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 0000000000000000000000000000000000000001\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic blocker repair completion."}`,
+			"stdout": `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 0000000000000000000000000000000000000002\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic blocker repair completion."}`,
 		},
 		"ready_state_review_runner": {
 			"stdin":  `{"kind":"issue_scan_ready_state_review_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","pr_number":1,"pr_url":"https://github.com/transpara-ai/synthetic-example/pull/1","ready_stage_task_id":"task-synthetic-0007","implementation_task_id":"task-synthetic-0002","operate_commit":"0000000000000000000000000000000000000001"}`,
@@ -423,6 +423,42 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 				return m
 			},
 			wantErr: "fixture",
+		},
+		{
+			name: "blocker repair stdout commit equals previous operate commit",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "blocker_repair_runner", "stdout.json")
+				body := `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 0000000000000000000000000000000000000001\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic blocker repair completion."}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "must differ",
+		},
+		{
+			name: "adversarial review reviewed head does not match operate commit",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
+				body := `{"repository":"transpara-ai/synthetic-example","review_ref":"synthetic-review-0001","reviewed_head_sha":"0000000000000000000000000000000000000999","verdict":"approve","summary":"Synthetic exact-head review.","issues":[],"confidence":0.9}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "must match",
+		},
+		{
+			name: "ready state review reviewed head does not match operate commit",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "ready_state_review_runner", "stdout.json")
+				body := `{"review_ref":"synthetic-review-0002","reviewed_head_sha":"0000000000000000000000000000000000000999","status":"pass"}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "must match",
 		},
 		{
 			name: "operate result body not parseable by the runtime parser",

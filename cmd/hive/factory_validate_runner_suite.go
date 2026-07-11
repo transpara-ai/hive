@@ -312,7 +312,80 @@ func validateIssueScanRunnerSuiteFixtures(dir string, document issueScanRunnerCo
 	if stdoutBody != nil {
 		problems = append(problems, validateIssueScanRunnerSuiteStdoutFixture(contract, component, stdoutBody)...)
 	}
+	if stdinBody != nil && stdoutBody != nil {
+		problems = append(problems, validateIssueScanRunnerSuiteFixturePair(component, stdinBody, stdoutBody)...)
+	}
 	return problems
+}
+
+// validateIssueScanRunnerSuiteFixturePair enforces the deterministic
+// stdin↔stdout relations the runtime validates when recording runner results,
+// so a package cannot certify an expected-output pair the runtime rejects:
+// a blocker-repair commit must differ from the previously reviewed commit,
+// and review receipts must cite the exact reviewed head (the finalizer
+// rejects moved heads, so the ready head equals the Operate commit).
+// Stage-role and implementation outputs have no such stdin-derived relation;
+// per-side validation still applies to them. Decode errors return no pair
+// problems here because the per-side strict decodes already report them.
+func validateIssueScanRunnerSuiteFixturePair(component issueScanRunnerSuiteComponent, stdinBody, stdoutBody []byte) []error {
+	fail := func(format string, args ...any) []error {
+		return []error{fmt.Errorf("component %q fixture pair: %w", component.ID, fmt.Errorf(format, args...))}
+	}
+	switch component.ID {
+	case "blocker_repair_runner":
+		var context hive.IssueScanBlockerRepairRunnerContext
+		if err := json.Unmarshal(stdinBody, &context); err != nil {
+			return nil
+		}
+		var result hive.IssueScanBlockerRepairRunnerResult
+		if err := json.Unmarshal(stdoutBody, &result); err != nil {
+			return nil
+		}
+		commit, err := hive.IssueScanOperateResultBodyCommit(result.OperateResultBody)
+		if err != nil {
+			return nil
+		}
+		previous := strings.TrimSpace(context.PreviousOperateCommit)
+		if previous == "" {
+			return fail("stdin previous_operate_commit is required")
+		}
+		if commit == previous {
+			return fail("stdout Operate commit %q must differ from stdin previous_operate_commit (the runtime rejects unchanged repair commits)", commit)
+		}
+	case "adversarial_review_runner":
+		var context hive.IssueScanAdversarialReviewContext
+		if err := json.Unmarshal(stdinBody, &context); err != nil {
+			return nil
+		}
+		var receipt hive.IssueScanAdversarialReviewReceipt
+		if err := json.Unmarshal(stdoutBody, &receipt); err != nil {
+			return nil
+		}
+		operateCommit := strings.TrimSpace(context.OperateCommit)
+		if operateCommit == "" {
+			return fail("stdin operate_commit is required")
+		}
+		if strings.TrimSpace(receipt.ReviewedHeadSHA) != operateCommit {
+			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
+		}
+	case "ready_state_review_runner":
+		var context hive.IssueScanReadyStateReviewContext
+		if err := json.Unmarshal(stdinBody, &context); err != nil {
+			return nil
+		}
+		var receipt hive.IssueScanReadyStateReviewReceipt
+		if err := json.Unmarshal(stdoutBody, &receipt); err != nil {
+			return nil
+		}
+		operateCommit := strings.TrimSpace(context.OperateCommit)
+		if operateCommit == "" {
+			return fail("stdin operate_commit is required")
+		}
+		if strings.TrimSpace(receipt.ReviewedHeadSHA) != operateCommit {
+			return fail("stdout reviewed_head_sha %q must match stdin operate_commit %q", receipt.ReviewedHeadSHA, operateCommit)
+		}
+	}
+	return nil
 }
 
 func readIssueScanRunnerSuiteFixture(dir, componentID, fixturePath, field string) ([]byte, []error) {
@@ -473,7 +546,7 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 // parser over a fixture's operate_result_body so a package cannot certify an
 // expected stdout the runtime would reject.
 func validateIssueScanRunnerSuiteOperateBody(body string) error {
-	if err := hive.ValidateIssueScanOperateResultBody(body); err != nil {
+	if _, err := hive.IssueScanOperateResultBodyCommit(body); err != nil {
 		return fmt.Errorf("operate_result_body is not a valid Operate result: %w", err)
 	}
 	return nil
