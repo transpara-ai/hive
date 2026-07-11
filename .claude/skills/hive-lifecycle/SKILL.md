@@ -31,7 +31,7 @@ The **Claude CLI** path (Max plan, `~/.claude/.credentials.json`) needs **no Ant
 **CRITICAL — never set these:** `ANTHROPIC_API_KEY`, `HIVE_ANTHROPIC_API_KEY`. They override the working CLI auth and cause "Invalid API key" on every Claude agent. Verify clean:
 
 ```bash
-env | grep -i anthropic   # must print nothing
+env | cut -d= -f1 | grep -i anthropic   # names only — never print values; must print nothing
 ```
 
 ⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, **omit `--catalog`** — the runtime falls back to its built-in Claude defaults (there is no checked-in Claude-only catalog).
@@ -52,8 +52,11 @@ set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populate
 # 1. Postgres (Docker) — everything else depends on it. WAIT until it accepts connections
 #    (compose returns while the container may still be "health: starting").
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
-until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do echo "waiting for postgres…"; sleep 1; done
-echo "postgres ready"
+tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do
+  tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }
+  echo "waiting for postgres…"; sleep 1
+done
+docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null && echo "postgres ready"
 
 # 2. The API services (systemd --user). Dirty start? Run "Hive Down" first to clear
 #    any stale manual go-run process still holding :8080/:8085.
@@ -99,7 +102,7 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound —
 ```bash
 # Ensure Postgres is up + accepting connections first (restart = a true down→up):
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
-until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do sleep 1; done
+tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 systemctl --user restart work-server hive-ops-api
 # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
 # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
@@ -140,10 +143,15 @@ curl -s -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' htt
 curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
-**Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Confirm and fix:
+**Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Diagnose read-only:
 
 ```bash
 journalctl --user -u hive-ops-api -n 20 --no-pager   # look for: dial tcp 127.0.0.1:5432: connect: connection refused
+```
+
+Starting Postgres is a **mutating recovery action, not part of status** — perform it only after the user confirms:
+
+```bash
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring the DB back (recreates it if it was `compose down`-ed); services self-heal on their next restart tick
 ```
 
@@ -188,7 +196,7 @@ curl -s -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry
 ## Model Catalog
 
 The operator API and the runtime select models from a catalog YAML (hot-reloaded):
-- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm with `systemctl --user show hive-ops-api -p Environment`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
+- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm the variable is present by name only, never dumping values: `systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
 Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.
@@ -211,7 +219,7 @@ Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--sp
 
 ## Operator Actions
 
-- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. `POST /api/hive/operator-decision` only decides **draft-PR-create** authority requests — not role proposals.
+- **Approve a proposed role** — use the CLI (it emits the `hive.role.approved` + budget events the runtime needs): `go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive`. ⚠ This CLI **also allocates budget**: it emits `agent.budget.adjusted` with an initial budget of **200** for the new role (`cmd/approve-role/main.go`). Disclose that amount and get the user's explicit approval for **both** the role and the initial budget before running it. `POST /api/hive/operator-decision` only decides **draft-PR-create** authority requests — not role proposals.
 - **Inject a spec/file as a task** — posts to the civilization daemon **webhook** (`:8081/event`), so the runtime must be running: `go run ./cmd/inject-file --title "…" --priority medium <file>`.
 
 ## Local / Offline

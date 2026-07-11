@@ -40,10 +40,10 @@ WORK_REPO=/Transpara/transpara-ai/repos/work
 Claude CLI subscription auth uses `~/.claude/.credentials.json` and needs no Anthropic API key. Verify the shell is clean before runtime operations:
 
 ```bash
-env | grep -i anthropic
+env | cut -d= -f1 | grep -i anthropic
 ```
 
-The command should print nothing. If it prints `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY`, stop and ask the user before changing shell profile files. For the current shell only, unset them before runtime commands:
+Check names only — never print environment values into the transcript. The command should print nothing. If it prints `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY`, stop and ask the user before changing shell profile files. For the current shell only, unset them before runtime commands:
 
 ```bash
 unset ANTHROPIC_API_KEY HIVE_ANTHROPIC_API_KEY
@@ -125,13 +125,18 @@ curl -s -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' htt
 curl -s -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status
 ```
 
-If `systemctl --user is-active` reports `activating` or `auto-restart`, inspect logs and Postgres first:
+If `systemctl --user is-active` reports `activating` or `auto-restart`, inspect logs read-only first:
 
 ```bash
 journalctl --user -u hive-ops-api -n 40 --no-pager
+```
+
+Starting Postgres is a mutating recovery action, not part of status — run it only after the user explicitly confirms:
+
+```bash
 cd /Transpara/transpara-ai/repos/hive
 docker compose up -d postgres
-until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do sleep 1; done
+tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 ```
 
 ## Hive Up
@@ -141,11 +146,12 @@ Start only when the user explicitly asks to bring Hive up. Start Postgres first 
 ```bash
 cd /Transpara/transpara-ai/repos/hive
 docker compose up -d postgres
-until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do
+tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do
+  tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }
   echo "waiting for postgres..."
   sleep 1
 done
-echo "postgres ready"
+docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null && echo "postgres ready"
 
 systemctl --user start work-server hive-ops-api
 systemctl --user is-active work-server hive-ops-api
@@ -185,7 +191,7 @@ Restart means true down-to-up for APIs after Postgres is available. Preserve man
 ```bash
 cd /Transpara/transpara-ai/repos/hive
 docker compose up -d postgres
-until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do sleep 1; done
+tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
 systemctl --user restart work-server hive-ops-api
 
@@ -215,11 +221,13 @@ fi
 | `POST /api/hive/runs` | writer-mode only; launch operator-initiated run |
 | `POST /api/hive/model-selection/role-policy` | writer-mode only; update role model policy |
 
-Default `hive-ops-api.service` should be read-only because it does not set `HIVE_OPS_HUMAN_ACTOR`. Confirm before POSTing:
+Default `hive-ops-api.service` should be read-only because it does not set `HIVE_OPS_HUMAN_ACTOR`. Confirm before POSTing — check variable names only, never dump values (the Environment line carries the ops API key and DSN):
 
 ```bash
-systemctl --user show hive-ops-api -p Environment
+systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'
 ```
+
+`HIVE_OPS_HUMAN_ACTOR` absent from that name list means read-only mode.
 
 `work-server` on `http://localhost:8080`, bearer `$WORK_API_KEY`:
 
@@ -242,7 +250,7 @@ curl -s -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telem
 
 ## Model Catalog
 
-- `hive-ops-api` uses `HIVE_OPS_CATALOG`; confirm with `systemctl --user show hive-ops-api -p Environment`.
+- `hive-ops-api` uses `HIVE_OPS_CATALOG`; confirm the name is present with `systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'` (names only — never print values).
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
 - `council` accepts `--catalog <path>` only; do not pass `--catalog-reload-interval` to `council`.
 - If avoiding provider keys, omit `--catalog` for built-in Claude defaults.
@@ -279,7 +287,7 @@ Flag reminders:
 
 ## Operator Actions
 
-Approving proposed roles should use the CLI because it emits the role approval and budget events the runtime needs:
+Approving proposed roles should use the CLI because it emits the role approval and budget events the runtime needs. Warning: this CLI also allocates budget — it emits `agent.budget.adjusted` with an initial budget of 200 for the new role (`cmd/approve-role/main.go`). Disclose that amount and obtain the user's explicit approval for both the role and the initial budget before running it:
 
 ```bash
 cd /Transpara/transpara-ai/repos/hive

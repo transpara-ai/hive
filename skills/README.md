@@ -41,11 +41,14 @@ home.
 
 ## Install
 
-Copy the dialect folder's contents into the model's local skill directory:
+Synchronize the dialect folder into the model's local skill directory —
+`--delete` removes files that no longer exist in the canonical dialect, so a
+stale install cannot keep content the repo dropped (the trailing slashes make
+rsync copy folder contents and follow the `claude` symlink):
 
 ```bash
-cp -r skills/hive-lifecycle/claude/. ~/.claude/skills/hive-lifecycle/
-cp -r skills/hive-lifecycle/codex/.  ~/.codex/skills/hive-lifecycle/
+rsync -a --delete skills/hive-lifecycle/claude/ ~/.claude/skills/hive-lifecycle/
+rsync -a --delete skills/hive-lifecycle/codex/  ~/.codex/skills/hive-lifecycle/
 ```
 
 ## Safety baseline (all skills, all dialects)

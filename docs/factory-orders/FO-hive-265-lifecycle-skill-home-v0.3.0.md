@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.2.0
+version: 0.3.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -51,6 +51,20 @@ authority: repository documentation/skill-source preservation only; no Hive star
 - **R5 — No private addresses or secrets.** No literal private-network
   addresses (hostnames/`localhost` only) and no credentials anywhere under
   `skills/`.
+- **R7 — Reviewed safety repairs (v0.3.0, CFAR round 1 on hive#267).** Both
+  dialects carry exactly these enumerated content repairs, applied identically
+  where the defect exists in each: (a) environment checks print variable
+  names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
+  Environment` filtered to names) so credentials cannot land in transcripts;
+  (b) `hive status` crash-loop handling is diagnostic-only — starting
+  Postgres is a separate mutating recovery action requiring explicit user
+  confirmation; (c) the `approve-role` CLI's side effect is disclosed
+  (`agent.budget.adjusted`, initial budget 200) and requires explicit user
+  approval for both role and budget; (d) all Postgres readiness waits are
+  bounded (60 attempts) with failure diagnostics instead of unbounded
+  `until` loops; (e) install instructions synchronize with deletion
+  (`rsync -a --delete`) so stale files cannot survive in installed copies.
+  Local installs re-sync from the repo after merge.
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
@@ -59,8 +73,9 @@ authority: repository documentation/skill-source preservation only; no Hive star
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
-- No changes to the skill's commands or semantics in this arc — preservation
-  only; content diffs from the cited sources are defects.
+- No changes to the skill's commands or semantics beyond the reviewed safety
+  repairs enumerated in R7 — every other content diff from the cited sources
+  is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 
