@@ -158,8 +158,8 @@ if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); the
     /snap/bin/go|/usr/bin/go|/usr/local/go/bin/go)
       # trusted Go toolchain paths only — /tmp/go or version-manager shims are
       # opaque wrappers even with canonical-looking arguments
-      if [ "$wd" = "/Transpara/transpara-ai/repos/hive" ] && printf '%s\n' "$argvline" | grep -q 'go run \./cmd/hive '; then
-        :   # canonical `go run ./cmd/hive …` from the hive repo — argv-transparent
+      if [ "$wd" = "/Transpara/transpara-ai/repos/hive" ] && printf '%s\n' "$argvline" | grep -qE "^argv\[\]=$launcher run \./cmd/hive( |$)"; then
+        :   # argv BEGINS with the trusted launcher + 'run ./cmd/hive' — a wrapper carrying that text as a later argument is rejected
       else
         echo "go launcher without the canonical 'go run ./cmd/hive' target in the hive repo — opaque; inspect manually"; unknown=1
       fi ;;
