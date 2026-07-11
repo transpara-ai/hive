@@ -85,9 +85,10 @@ For help requests, summarize these sections and stop:
 For CLI help, use:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/hive --help
-go run ./cmd/hive <verb> --help
+( cd /Transpara/transpara-ai/repos/hive || exit   # subshell: a missing checkout stops the block without touching the caller's shell
+  go run ./cmd/hive --help
+  go run ./cmd/hive <verb> --help
+)
 ```
 
 ## Hive Status
@@ -179,8 +180,11 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 
 systemctl --user stop hive-ops-api work-server
 
-{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+# Name-exact (comm) kills cover go-run children AND direct binaries; the
+# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
+# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
+pgrep -x work-server | xargs -r kill 2>/dev/null
+pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
 
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound; inspect before clearing it" || echo "ports clear"
 ```
@@ -297,7 +301,7 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
 
   ```bash
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
+  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
     flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
     if [ -n "$flagval" ]; then
@@ -318,7 +322,10 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
 Runtime execution is not a status check. Run only after explicit user request.
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
+# Subshell + exit: if the canonical checkout is missing, NOTHING below may run
+# from the caller's directory — a stale checkout would launch the wrong
+# runtime against the live database.
+( cd /Transpara/transpara-ai/repos/hive || exit
 
 LOVYOU_API_KEY= go run ./cmd/hive civilization run \
   --human Michael \
@@ -332,6 +339,7 @@ LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
 LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
+)
 ```
 
 The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated event-writing `POST /event` (the bind address is not flag-configurable); launching the runtime on a host reachable by untrusted peers requires the user's explicit acknowledgment of that exposure or host-level firewalling.
@@ -377,15 +385,17 @@ Flag reminders:
 Approving proposed roles should use the CLI because it emits the role approval and budget events the runtime needs. Warning: this CLI also allocates budget — it emits `agent.budget.adjusted` with an initial budget of 200 for the new role (`cmd/approve-role/main.go`). Disclose that amount and obtain the user's explicit approval for both the role and the initial budget before running it:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive
+( cd /Transpara/transpara-ai/repos/hive || exit
+  go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive
+)
 ```
 
 Injecting a spec/file requires the runtime webhook to be running:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/inject-file --title "..." --priority medium <file>
+( cd /Transpara/transpara-ai/repos/hive || exit
+  go run ./cmd/inject-file --title "..." --priority medium <file>
+)
 ```
 
 ## Local Offline API
@@ -393,8 +403,9 @@ go run ./cmd/inject-file --title "..." --priority medium <file>
 For local pipeline/role commands with no external dependency:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/localapi --addr localhost:8082 --api-key dev
+( cd /Transpara/transpara-ai/repos/hive || exit
+  go run ./cmd/localapi --addr localhost:8082 --api-key dev
+)
 ```
 
 ## Logs
@@ -433,10 +444,13 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # Manual APIs also write the chain — sweep them, then GATE the reset on
 # quiescence. The broad argv pattern is safe here: a false match only ABORTS.
-{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+# Name-exact (comm) kills cover go-run children AND direct binaries; the
+# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
+# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
+pgrep -x work-server | xargs -r kill 2>/dev/null
+pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)|[c]md/work-server|[e]xe/work-server|[c]md/hive-ops-api|[e]xe/hive-ops-api' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
   echo "hive/work processes still running — NOT resetting the database"
 else
   # The && chain is load-bearing: if the repo path is missing or unmounted, a

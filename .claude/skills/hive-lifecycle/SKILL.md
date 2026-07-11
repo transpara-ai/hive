@@ -77,7 +77,8 @@ fi
 #    add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a local
 #    Ollama model is running AND OPENROUTER_API_KEY is set.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
-  cd /Transpara/transpara-ai/repos/hive
+  # && chain: a missing checkout must not launch a runtime from the caller's directory
+  cd /Transpara/transpara-ai/repos/hive &&
   LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
       --human Michael \
       --store postgres://hive:hive@localhost:5432/hive
@@ -135,8 +136,11 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 systemctl --user stop hive-ops-api work-server
 # Sweep stray MANUAL hive/work runtimes from the old non-systemd flow — BY IDENTITY, not by
 # port (a blind port-kill could hit pgadmin or a dev server):
-{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+# Name-exact (comm) kills cover go-run children AND direct binaries; the
+# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
+# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
+pgrep -x work-server | xargs -r kill 2>/dev/null
+pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
@@ -292,7 +296,7 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
 
   ```bash
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
-  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
+  if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
     flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
     if [ -n "$flagval" ]; then
@@ -311,7 +315,10 @@ Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `
 ## On-demand Runtime (`cmd/hive` verbs)
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
+# Subshell + exit: if the canonical checkout is missing, NOTHING below may run
+# from the caller's directory — a stale checkout would launch the wrong
+# runtime against the live database.
+( cd /Transpara/transpara-ai/repos/hive || exit
 LOVYOU_API_KEY= go run ./cmd/hive civilization run    --human Michael --idea "…" \
        --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
 LOVYOU_API_KEY= go run ./cmd/hive civilization daemon --human Michael \
@@ -328,6 +335,7 @@ LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic
 #   council agent's prompt (and matches the local API's --api-key dev).
 #   Remote publishing requires the user's explicit authorization in the turn.
 go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
+)
 ```
 
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). ⚠ `--spec`/`--seed-spec` are NOT local-only seeds: both call the remote ingest path BEFORE the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`) — with the blank credential the command fails after possible bootstrap activity, and with a credential it writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); `--spec`/`--seed-spec` need explicit ingest/production authorization plus a deliberate `--api`/credential pairing. `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
@@ -342,8 +350,9 @@ Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--sp
 Run the pipeline against a local API with no external dependency:
 
 ```bash
-cd /Transpara/transpara-ai/repos/hive
-go run ./cmd/localapi --addr localhost:8082 --api-key dev   # add --site-db to read the site DB instead of hive
+( cd /Transpara/transpara-ai/repos/hive || exit
+  go run ./cmd/localapi --addr localhost:8082 --api-key dev   # add --site-db to read the site DB instead of hive
+)
 ```
 
 ## Logs
@@ -378,10 +387,13 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 # Manual APIs also write the chain — sweep them, then GATE the reset on
 # quiescence. The broad argv pattern is safe here: a false match only ABORTS.
-{ pgrep -x work-server; pgrep -f '[c]md/work-server|[e]xe/work-server'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in work-server|go) kill "$pid" 2>/dev/null;; esac; done
-{ pgrep -x hive-ops-api; pgrep -f '[c]md/hive-ops-api|[e]xe/hive-ops-api'; } | sort -u | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive-ops-api|go) kill "$pid" 2>/dev/null;; esac; done
+# Name-exact (comm) kills cover go-run children AND direct binaries; the
+# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
+# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
+pgrep -x work-server | xargs -r kill 2>/dev/null
+pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
 sleep 1
-if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)|[c]md/work-server|[e]xe/work-server|[c]md/hive-ops-api|[e]xe/hive-ops-api' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
+if pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null || pgrep -x work-server >/dev/null || pgrep -x hive-ops-api >/dev/null; then
   echo "hive/work processes still running — NOT resetting the database"
 else
   # The && chain is load-bearing: if the repo path is missing or unmounted, a

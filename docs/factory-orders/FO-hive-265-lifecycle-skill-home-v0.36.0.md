@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.35.0
+version: 0.36.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -351,6 +351,25 @@ the new head surfaced three operational defects, repaired in both dialects:
   workload in these states) before requiring approval to start again; a
   RUNNING unit (`active|reloading`) is still never touched without approval,
   and read-only Status sections keep reporting without mutating.
+
+### Round-5 fresh-head repairs (v0.36.0)
+
+- **bm — API sweeps simplified to name-exact kills (subtraction).** The
+  argv+comm loops could kill an unrelated `go test ./cmd/work-server` or
+  `go build ./cmd/hive-ops-api` job (its driver's comm is `go`). Sweeps and
+  the quiescence gate now use only `pgrep -x <server-name>` — comm-exact
+  covers go-run children and direct binaries, and the go-run driver exits
+  with its child; no argv matching remains for the APIs.
+- **bn — runtime blocks abort when the checkout is unavailable.** A bare
+  `cd` before `go run` could execute from the CALLER's directory — a stale
+  Hive checkout would launch the wrong runtime against the live database.
+  Every runnable block is now a subshell with `cd … || exit` (paste-safe:
+  exiting a subshell never closes the operator's terminal), or `cd … &&`
+  where the block is a single command.
+- **bo — empty `/proc` reads report catalog UNKNOWN.** A PID exiting between
+  the MainPID lookup and the reads yields an empty-but-successful cmdline
+  read; the catalog probes now require non-empty cmdline AND environment or
+  fail closed to UNKNOWN, in both dialects.
 
 ## Non-Goals
 
