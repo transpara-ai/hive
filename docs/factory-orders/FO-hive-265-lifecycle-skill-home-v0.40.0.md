@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.39.0
+version: 0.40.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -413,6 +413,24 @@ the new head surfaced three operational defects, repaired in both dialects:
   explicitly. The `localapi` name-kill is withdrawn; only Hive's own
   services (`work-server`, `hive-ops-api`, the hive runtime) are swept
   before the check.
+
+### Round-9 fresh-head repairs (v0.40.0)
+
+- **bu — manual-service kills withdrawn entirely (subtraction, ends the
+  kill-scoping oscillation).** Argv matching over-killed (`go test` jobs,
+  round 5); name-exact matching over-killed (foreign binaries sharing the
+  name, round 9). The class-final posture: the runbook never auto-kills
+  operator-owned manual processes. Hive Down LISTS candidates (pid +
+  `/proc/<pid>/exe`) and leaves the decision with the human — consistent
+  with the existing port check ("inspect and clear manually") and the
+  restart flow's "the operator owns their command" principle. The Nuclear
+  block drops name sweeps entirely: its database refusal list already names
+  every still-attached client. Hive's own systemd units are still stopped,
+  and the verb-anchored hive-runtime kill loops (argv + comm, untouched by
+  any round) remain.
+- **bv — proxy bypass on ALL localhost probes.** The unauthenticated /health
+  probes now carry `--noproxy '*'` like the authenticated ones, so an
+  ambient proxy's response can never masquerade as local service health.
 
 ## Non-Goals
 

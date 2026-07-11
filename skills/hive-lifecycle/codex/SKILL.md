@@ -126,8 +126,8 @@ docker ps --filter name=hive-postgres-1 --format '{{.Names}} {{.Status}}'
 docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events' 2>/dev/null || echo "DB unreachable"
 
 echo "=== endpoint health ==="
-curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
-curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
+curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status
 ```
 
@@ -180,11 +180,13 @@ pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while r
 
 systemctl --user stop hive-ops-api work-server
 
-# Name-exact (comm) kills cover go-run children AND direct binaries; the
-# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
-# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
-pgrep -x work-server | xargs -r kill 2>/dev/null
-pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
+# Stray MANUAL services are the OPERATOR's to stop — they know what they
+# launched, and a name-only kill could hit an unrelated binary that merely
+# shares the name. LIST candidates (pid + executable) and leave the decision
+# with the human; the port check below surfaces anything still bound:
+for name in work-server hive-ops-api; do
+  pgrep -x "$name" | while read -r pid; do printf 'manual %s candidate: pid=%s exe=%s\n' "$name" "$pid" "$(readlink /proc/"$pid"/exe 2>/dev/null || echo unreadable)"; done
+done
 
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound; inspect before clearing it" || echo "ports clear"
 ```
@@ -447,9 +449,9 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # Name-exact (comm) kills cover go-run children AND direct binaries; the
 # go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
 # or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
-pgrep -x work-server | xargs -r kill 2>/dev/null
-pgrep -x hive-ops-api | xargs -r kill 2>/dev/null
-sleep 1
+# No name-based kills here: our units were stopped above, and ANY other
+# client still attached shows up in the database refusal list below for the
+# operator to stop.
 # Quiescence is adjudicated by the DATABASE, not by enumerating client
 # process names — any enumeration is incomplete (localapi, social-server,
 # psql, future services), and killing by bare name could hit an instance
