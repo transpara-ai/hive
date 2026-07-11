@@ -3910,6 +3910,7 @@ func TestProgressIssueScanLifecycleRecordsReadyRoleOutputsAndCompletesStage(t *t
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
 	if err != nil {
 		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
@@ -4383,6 +4384,14 @@ func TestProgressIssueScanLifecycleConfiguredRunnersSurfaceReadyForHumanPR(t *te
 
 	draftPRClient := &fakePRClient{preflightFiles: []string{"pkg/hive/example.go", "pkg/hive/example_test.go"}}
 	rt.issueScanDraftPRCreator = draftPRClient
+	seedMarkReadyApprovalTargetForTest(t, rt, writer, MarkReadyTarget{
+		Repository:       "transpara-ai/hive",
+		PRNumber:         111,
+		PRURL:            "https://github.com/transpara-ai/hive/pull/111",
+		HeadSHA:          "cccccccccccccccccccccccccccccccccccccccc",
+		ReDraftOnFailure: false,
+		SingleUseNonce:   "mark-ready-nonce-e2e",
+	})
 	readyPRClient := &fakeReadyPRFinalizerClient{}
 	readyReviewCalls := 0
 	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(readyPRClient, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
@@ -4851,6 +4860,7 @@ func TestProgressIssueScanLifecycleRunsConfiguredReadyPRFinalizer(t *testing.T) 
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	client := &fakeReadyPRFinalizerClient{}
 	reviewCalls := 0
 	rt.issueScanReadyPRRunner = NewIssueScanReadyPRFinalizerRunner(client, func(ctx context.Context, reviewContext IssueScanReadyStateReviewContext) (IssueScanReadyStateReviewReceipt, error) {
@@ -5015,6 +5025,7 @@ func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsMovedHead(t *testing.T
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	client := &fakeReadyPRFinalizerClient{
 		markState: IssueScanReadyPRLiveState{
 			Repository:       "transpara-ai/hive",
@@ -5124,6 +5135,7 @@ func TestProgressIssueScanLifecycleReadyPRFinalizerRejectsUnsafeFinalEvidence(t 
 			if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 				t.Fatalf("attach draft PR receipt: %v", err)
 			}
+			seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 			fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
 				Repository: readyEvidence.Repository,
 				PRNumber:   readyEvidence.PRNumber,
@@ -5173,6 +5185,7 @@ func TestProgressIssueScanLifecycleReadyPRFinalizerAcceptsBlockedForHumanReview(
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
 		Repository: readyEvidence.Repository,
 		PRNumber:   readyEvidence.PRNumber,
@@ -5227,6 +5240,7 @@ func TestProgressIssueScanLifecycleReadyPRFinalizerAcceptsAdvancedBaseSHA(t *tes
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	fetchState := readyPRLiveStateFromMutationForTest(IssueScanReadyPRFinalizerMutation{
 		Repository: readyEvidence.Repository,
 		PRNumber:   readyEvidence.PRNumber,
@@ -5391,6 +5405,7 @@ func TestProgressIssueScanLifecycleRejectsDraftReadyPREvidence(t *testing.T) {
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	body, err := IssueScanReadyPREvidenceArtifactBody(readyEvidence)
 	if err != nil {
 		t.Fatalf("IssueScanReadyPREvidenceArtifactBody: %v", err)
@@ -5580,6 +5595,7 @@ func TestIssueScanDraftPRAuthorityRequestRefusesAfterDraftReceipt(t *testing.T) 
 	if err := attachIssueScanDraftPRReceiptForReadyTest(t, rt, writer, readyStage.ID, readyEvidence); err != nil {
 		t.Fatalf("attach draft PR receipt: %v", err)
 	}
+	seedMarkReadyApprovalForReadyTest(t, rt, writer, readyEvidence, false)
 	if _, err := rt.IssueScanDraftPRAuthorityRequestContext(runID, "main", "dddddddddddddddddddddddddddddddddddddddd", "nonce-issue-scan-pr"); err == nil || !strings.Contains(err.Error(), "not ready") {
 		t.Fatalf("IssueScanDraftPRAuthorityRequestContext error = %v, want not ready after draft receipt", err)
 	}
@@ -6047,6 +6063,13 @@ func (f *fakeReadyPRFinalizerClient) MarkReadyForReview(_ context.Context, mutat
 		return f.markState, nil
 	}
 	return readyPRLiveStateFromMutationForTest(mutation), nil
+}
+
+func (f *fakeReadyPRFinalizerClient) ConvertToDraft(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {
+	state := readyPRLiveStateFromMutationForTest(mutation)
+	state.Draft = true
+	state.ReadyForReview = false
+	return state, nil
 }
 
 func (f *fakeReadyPRFinalizerClient) FetchReadyPRState(_ context.Context, mutation IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error) {

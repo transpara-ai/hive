@@ -101,22 +101,26 @@ type IssueScanReadyPREvidenceRecordResult struct {
 type IssueScanReadyPRRunner func(context.Context, IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error)
 
 type IssueScanReadyPRRunnerContext struct {
-	Kind                    string                     `json:"kind"`
-	LifecycleVersion        string                     `json:"lifecycle_version"`
-	RunID                   string                     `json:"run_id"`
-	FactoryOrderID          string                     `json:"factory_order_id"`
-	Repository              string                     `json:"repository"`
-	DraftPRReceiptRef       string                     `json:"draft_pr_receipt_ref,omitempty"`
-	DraftPRReceipt          *TransparaAIDraftPRReceipt `json:"-"`
-	ReadyStageTaskID        string                     `json:"ready_stage_task_id"`
-	BlockerStageTaskID      string                     `json:"blocker_stage_task_id"`
-	ImplementationTaskID    string                     `json:"implementation_task_id"`
-	OperateBranch           string                     `json:"operate_branch"`
-	OperateCommit           string                     `json:"operate_commit"`
-	OperateRange            string                     `json:"operate_range,omitempty"`
-	ChangedFilesSummary     string                     `json:"changed_files_summary,omitempty"`
-	ExpectedReadyPREvidence IssueScanReadyPREvidence   `json:"expected_ready_pr_evidence"`
-	BoundaryDisclaimers     []string                   `json:"boundary_disclaimers,omitempty"`
+	Kind              string                     `json:"kind"`
+	LifecycleVersion  string                     `json:"lifecycle_version"`
+	RunID             string                     `json:"run_id"`
+	FactoryOrderID    string                     `json:"factory_order_id"`
+	Repository        string                     `json:"repository"`
+	DraftPRReceiptRef string                     `json:"draft_pr_receipt_ref,omitempty"`
+	DraftPRReceipt    *TransparaAIDraftPRReceipt `json:"-"`
+	// MarkReadyApprovalLookup is injected by the runtime (bound to its store)
+	// and never serialized: external runners cannot supply or observe it. The
+	// managed finalizer refuses when it is absent (fail closed).
+	MarkReadyApprovalLookup MarkReadyApprovalLookup  `json:"-"`
+	ReadyStageTaskID        string                   `json:"ready_stage_task_id"`
+	BlockerStageTaskID      string                   `json:"blocker_stage_task_id"`
+	ImplementationTaskID    string                   `json:"implementation_task_id"`
+	OperateBranch           string                   `json:"operate_branch"`
+	OperateCommit           string                   `json:"operate_commit"`
+	OperateRange            string                   `json:"operate_range,omitempty"`
+	ChangedFilesSummary     string                   `json:"changed_files_summary,omitempty"`
+	ExpectedReadyPREvidence IssueScanReadyPREvidence `json:"expected_ready_pr_evidence"`
+	BoundaryDisclaimers     []string                 `json:"boundary_disclaimers,omitempty"`
 }
 
 type IssueScanReadyPRRunnerResult struct {
@@ -301,6 +305,15 @@ func (r *Runtime) RunConfiguredIssueScanReadyPRRunner(ctx context.Context, runID
 	if err != nil {
 		if errors.Is(err, errIssueScanReadyPRFinalizerAwaitingDraftReceipt) {
 			return result, false, nil
+		}
+		var blocked *IssueScanReadyPRBlockedError
+		if errors.As(err, &blocked) {
+			// The PR was mutated and then failed ready-state verification:
+			// record the durable blocked evidence, then still surface the
+			// error — the chain stops here and the PR is not Human-ready.
+			if _, recordErr := r.RecordIssueScanReadyPRBlocked(runID, blocked.Evidence); recordErr != nil {
+				return result, true, errors.Join(err, fmt.Errorf("record blocked evidence: %w", recordErr))
+			}
 		}
 		return result, true, err
 	}
@@ -711,6 +724,7 @@ func (r *Runtime) issueScanReadyPRRunnerContext(runID string) (IssueScanReadyPRR
 		Repository:              repo,
 		DraftPRReceiptRef:       draftReceiptRef,
 		DraftPRReceipt:          draftReceipt,
+		MarkReadyApprovalLookup: NewStoreMarkReadyApprovalLookup(r.store),
 		ReadyStageTaskID:        readyStage.TaskID.Value(),
 		BlockerStageTaskID:      blockerStage.TaskID.Value(),
 		ImplementationTaskID:    implementationTaskID.Value(),
@@ -1308,4 +1322,57 @@ func issueScanReadySourceRefs(evidence issueScanReadyStageEvidence) []string {
 	}
 	refs = append(refs, evidence.ReadyPR.SourceRefs...)
 	return compactStrings(refs)
+}
+
+// IssueScanReadyPRBlockedEvidenceBody serializes blocked evidence for durable
+// Work artifact storage.
+func IssueScanReadyPRBlockedEvidenceBody(evidence IssueScanReadyPRBlockedEvidence) (string, error) {
+	evidence.Kind = valueOr(evidence.Kind, issueScanReadyPRBlockedEvidenceKind)
+	evidence.LifecycleVersion = valueOr(evidence.LifecycleVersion, issueScanLifecycleVersion)
+	encoded, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal issue-scan ready PR blocked evidence: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// RecordIssueScanReadyPRBlocked records blocked-transition evidence as a Work
+// artifact on the run's ready stage. Idempotent on identical evidence bodies.
+// Absence of evidence is never success: callers surface the blocking error
+// regardless; this only makes the blocked state durable and operator-visible.
+func (r *Runtime) RecordIssueScanReadyPRBlocked(runID string, evidence IssueScanReadyPRBlockedEvidence) (bool, error) {
+	if r == nil || r.store == nil || r.tasks == nil {
+		return false, fmt.Errorf("runtime store and task store are required")
+	}
+	content, orderID, requestID, readyStage, err := r.issueScanReadyStageTarget(runID)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(evidence.RunID) == "" {
+		evidence.RunID = strings.TrimSpace(runID)
+	}
+	if strings.TrimSpace(evidence.FactoryOrderID) == "" {
+		evidence.FactoryOrderID = orderID
+	}
+	body, err := IssueScanReadyPRBlockedEvidenceBody(evidence)
+	if err != nil {
+		return false, err
+	}
+	_, exists, err := r.findIssueScanReadyStageArtifactID(readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, body)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	causes := compactEventIDs([]types.EventID{requestID, readyStage.TaskID})
+	if err := r.tasks.AddArtifact(r.humanID, readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, "application/json", body, causes, runLaunchConversationID(content.RunID, r.convID)); err != nil {
+		return false, fmt.Errorf("record issue-scan ready PR blocked evidence: %w", err)
+	}
+	if _, exists, err = r.findIssueScanReadyStageArtifactID(readyStage.TaskID, IssueScanReadyPRBlockedEvidenceArtifactLabel, body); err != nil {
+		return false, err
+	} else if !exists {
+		return false, fmt.Errorf("issue-scan ready PR blocked evidence artifact was not found after append")
+	}
+	return true, nil
 }

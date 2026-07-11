@@ -277,6 +277,44 @@ func combineGitHubCIStatus(statusState, checkState string) string {
 	return "unknown"
 }
 
+// ConvertToDraft returns the already-mutated PR to draft state. It runs only
+// under a recorded human mark-ready approval whose ReDraftOnFailure flag is
+// set (the finalizer enforces that); it never approves, merges, or deploys.
+func (c *issueScanReadyPRGitHubClient) ConvertToDraft(ctx context.Context, mutation hive.IssueScanReadyPRFinalizerMutation) (hive.IssueScanReadyPRLiveState, error) {
+	if c == nil || strings.TrimSpace(c.token) == "" {
+		return hive.IssueScanReadyPRLiveState{}, fmt.Errorf("github ready PR client: empty token")
+	}
+	state, nodeID, err := c.fetchPullRequestState(ctx, mutation)
+	if err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if err := validateGitHubReadyPRTarget("re-draft", mutation, state); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	if state.Draft {
+		return state, nil
+	}
+	if err := c.convertPullRequestToDraft(ctx, nodeID); err != nil {
+		return hive.IssueScanReadyPRLiveState{}, err
+	}
+	state, _, err = c.fetchPullRequestState(ctx, mutation)
+	return state, err
+}
+
+func (c *issueScanReadyPRGitHubClient) convertPullRequestToDraft(ctx context.Context, nodeID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("github ready PR client: pull request node_id is required")
+	}
+	payload := map[string]any{
+		"query": "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }",
+		"variables": map[string]string{
+			"id": nodeID,
+		},
+	}
+	return c.postGraphQLMutation(ctx, payload)
+}
+
 func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context.Context, nodeID string) error {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
@@ -288,6 +326,12 @@ func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context
 			"id": nodeID,
 		},
 	}
+	return c.postGraphQLMutation(ctx, payload)
+}
+
+// postGraphQLMutation posts one GraphQL mutation payload and fails on any
+// transport, HTTP, or GraphQL-level error.
+func (c *issueScanReadyPRGitHubClient) postGraphQLMutation(ctx context.Context, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -310,7 +354,7 @@ func (c *issueScanReadyPRGitHubClient) markPullRequestReadyForReview(ctx context
 		} `json:"errors"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("github ready PR client: decode mark-ready response: %w", err)
+		return fmt.Errorf("github ready PR client: decode graphql mutation response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		msg := ""

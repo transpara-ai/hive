@@ -10,18 +10,80 @@ import (
 const (
 	issueScanReadyPRFinalizerMutationKind = "issue_scan_ready_pr_finalizer_mutation"
 	issueScanReadyStateReviewContextKind  = "issue_scan_ready_state_review_context"
+	issueScanReadyPRBlockedEvidenceKind   = "issue_scan_ready_pr_blocked"
+
+	// IssueScanReadyPRBlockedEvidenceArtifactLabel labels the durable Work
+	// artifact recording a blocked managed ready transition.
+	IssueScanReadyPRBlockedEvidenceArtifactLabel = "issue_scan_ready_pr_blocked"
 )
 
 var errIssueScanReadyPRFinalizerAwaitingDraftReceipt = errors.New("issue-scan ready PR finalizer awaiting draft PR receipt")
 
-// IssueScanReadyPRFinalizerClient performs the one live PR-state mutation in
-// the terminal issue-scan stage. It marks the already-created draft PR ready for
-// review, then reports live PR state for validation. It must not merge, approve,
+// IssueScanReadyPRFinalizerClient performs the PR-state mutations in the
+// terminal issue-scan stage: marking the already-created draft PR ready for
+// review, reporting live PR state for validation, and — only under a recorded
+// human approval carrying ReDraftOnFailure — returning the PR to draft when
+// ready-state review fails after the mutation. It must not merge, approve,
 // deploy, retarget, push, or change protected settings.
 type IssueScanReadyPRFinalizerClient interface {
 	MarkReadyForReview(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
 	FetchReadyPRState(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
+	ConvertToDraft(context.Context, IssueScanReadyPRFinalizerMutation) (IssueScanReadyPRLiveState, error)
 }
+
+// MarkReadyApprovalLookup resolves the recorded human mark-ready approval for
+// a run-derived mutation. A lookup error refuses the ready transition before
+// the PR is touched (fail closed).
+type MarkReadyApprovalLookup func(context.Context, IssueScanReadyPRFinalizerMutation) (MarkReadyTarget, error)
+
+// ErrIssueScanMarkReadyNotAuthorized is returned when no recorded, approved,
+// exactly-matching pull_request.mark_ready decision covers the run-derived
+// target. A draft-PR creation approval never satisfies this gate.
+var ErrIssueScanMarkReadyNotAuthorized = errors.New("issue-scan mark-ready is not authorized by a recorded approval")
+
+// IssueScanReadyPRRemediation names what the finalizer did after a
+// post-mutation failure. The set is an allowlist; there is no default.
+type IssueScanReadyPRRemediation string
+
+const (
+	IssueScanReadyPRRemediationReDrafted           IssueScanReadyPRRemediation = "re_drafted"
+	IssueScanReadyPRRemediationReDraftUnauthorized IssueScanReadyPRRemediation = "re_draft_unauthorized"
+	IssueScanReadyPRRemediationReDraftFailed       IssueScanReadyPRRemediation = "re_draft_failed"
+)
+
+// IssueScanReadyPRBlockedEvidence is the durable record of a managed ready
+// transition that mutated the PR and then failed ready-state review (or its
+// verification). It is recorded as a Work artifact on the ready stage; its
+// presence means the PR is NOT Human-ready and the chain stopped here.
+type IssueScanReadyPRBlockedEvidence struct {
+	Kind                string                      `json:"kind"`
+	LifecycleVersion    string                      `json:"lifecycle_version"`
+	RunID               string                      `json:"run_id"`
+	FactoryOrderID      string                      `json:"factory_order_id"`
+	Repository          string                      `json:"repository"`
+	PRNumber            int                         `json:"pr_number"`
+	PRURL               string                      `json:"pr_url"`
+	HeadSHA             string                      `json:"head_sha"`
+	FailureReason       string                      `json:"failure_reason"`
+	Remediation         IssueScanReadyPRRemediation `json:"remediation"`
+	RemediationError    string                      `json:"remediation_error,omitempty"`
+	ReviewRef           string                      `json:"review_ref,omitempty"`
+	SingleUseNonce      string                      `json:"single_use_nonce"`
+	BoundaryDisclaimers []string                    `json:"boundary_disclaimers,omitempty"`
+}
+
+// IssueScanReadyPRBlockedError carries blocked evidence out of the finalizer
+// so the runtime records it durably; it always wraps the causing error.
+type IssueScanReadyPRBlockedError struct {
+	Evidence IssueScanReadyPRBlockedEvidence
+	Cause    error
+}
+
+func (e *IssueScanReadyPRBlockedError) Error() string {
+	return fmt.Sprintf("issue-scan ready PR blocked (%s): %v", e.Evidence.Remediation, e.Cause)
+}
+
+func (e *IssueScanReadyPRBlockedError) Unwrap() error { return e.Cause }
 
 type IssueScanReadyPRFinalizerMutation struct {
 	Kind                  string `json:"kind"`
@@ -85,15 +147,31 @@ type IssueScanReadyStateReviewReceipt struct {
 
 func NewIssueScanReadyPRFinalizerRunner(client IssueScanReadyPRFinalizerClient, reviewer IssueScanReadyStateReviewRunner) IssueScanReadyPRRunner {
 	return func(ctx context.Context, readyContext IssueScanReadyPRRunnerContext) (IssueScanReadyPRRunnerResult, error) {
-		return RunIssueScanReadyPRFinalizer(ctx, readyContext, client, reviewer)
+		if readyContext.MarkReadyApprovalLookup == nil {
+			return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: no mark-ready approval lookup configured on the run context", ErrIssueScanMarkReadyNotAuthorized)
+		}
+		mutation, _, err := issueScanReadyPRFinalizerMutation(readyContext)
+		if err != nil {
+			return IssueScanReadyPRRunnerResult{}, err
+		}
+		approval, err := readyContext.MarkReadyApprovalLookup(ctx, mutation)
+		if err != nil {
+			return IssueScanReadyPRRunnerResult{}, fmt.Errorf("%w: %v", ErrIssueScanMarkReadyNotAuthorized, err)
+		}
+		return RunIssueScanReadyPRFinalizer(ctx, readyContext, client, reviewer, approval)
 	}
 }
 
-// RunIssueScanReadyPRFinalizer marks the recorded draft PR ready, runs a
-// ready-state exact-head review, verifies live state, and returns terminal
-// ready-for-Human evidence for the existing ready-stage recorder. It does not
-// approve, merge, deploy, close, retarget, or request Human approval.
-func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanReadyPRRunnerContext, client IssueScanReadyPRFinalizerClient, reviewer IssueScanReadyStateReviewRunner) (IssueScanReadyPRRunnerResult, error) {
+// RunIssueScanReadyPRFinalizer gates the draft→ready transition on a
+// recorded human mark-ready approval, marks the recorded draft PR ready, runs
+// a ready-state exact-head review, verifies live state, and returns terminal
+// ready-for-Human evidence for the existing ready-stage recorder. Any failure
+// AFTER the ready mutation returns *IssueScanReadyPRBlockedError carrying
+// durable blocked evidence (re-drafting only when the recorded approval
+// permits it); ready-for-Human evidence is never produced on that path. It
+// does not approve, merge, deploy, close, retarget, or request Human
+// approval.
+func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanReadyPRRunnerContext, client IssueScanReadyPRFinalizerClient, reviewer IssueScanReadyStateReviewRunner, approval MarkReadyTarget) (IssueScanReadyPRRunnerResult, error) {
 	if client == nil {
 		return IssueScanReadyPRRunnerResult{}, fmt.Errorf("ready PR finalizer client is required")
 	}
@@ -104,27 +182,32 @@ func RunIssueScanReadyPRFinalizer(ctx context.Context, readyContext IssueScanRea
 	if err != nil {
 		return IssueScanReadyPRRunnerResult{}, err
 	}
+	if err := validateMarkReadyApproval(mutation, approval); err != nil {
+		return IssueScanReadyPRRunnerResult{}, err
+	}
 	marked, err := client.MarkReadyForReview(ctx, mutation)
 	if err != nil {
+		// The PR was not mutated (transport-level failure): plain error, no
+		// blocked evidence, no remediation.
 		return IssueScanReadyPRRunnerResult{}, err
 	}
 	if err := validateIssueScanReadyPRLiveState("mark ready", mutation, marked, false); err != nil {
-		return IssueScanReadyPRRunnerResult{}, err
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
 	}
 	reviewContext := issueScanReadyStateReviewContext(readyContext, mutation, marked)
 	review, err := reviewer(ctx, reviewContext)
 	if err != nil {
-		return IssueScanReadyPRRunnerResult{}, err
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, "", err)
 	}
 	if err := validateIssueScanReadyStateReviewReceipt(mutation, review); err != nil {
-		return IssueScanReadyPRRunnerResult{}, err
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
 	}
 	live, err := client.FetchReadyPRState(ctx, mutation)
 	if err != nil {
-		return IssueScanReadyPRRunnerResult{}, err
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
 	}
 	if err := validateIssueScanReadyPRLiveState("ready evidence", mutation, live, true); err != nil {
-		return IssueScanReadyPRRunnerResult{}, err
+		return IssueScanReadyPRRunnerResult{}, issueScanReadyPRBlocked(ctx, client, mutation, approval, review.ReviewRef, err)
 	}
 	evidence := readyContext.ExpectedReadyPREvidence
 	evidence.Repository = strings.ToLower(strings.TrimSpace(live.Repository))
@@ -314,4 +397,67 @@ func validateIssueScanReadyStateReviewReceipt(mutation IssueScanReadyPRFinalizer
 		return fmt.Errorf("ready-state reviewed_head_sha %q does not match approved head %q", receipt.ReviewedHeadSHA, mutation.HeadSHA)
 	}
 	return nil
+}
+
+// validateMarkReadyApproval requires the recorded approval to exactly cover
+// the run-derived mutation: same repository (case-insensitive), same PR
+// number, same PR URL (case-insensitive), same head SHA (case-insensitive,
+// runtime EqualFold semantics), with a non-empty single-use nonce. Anything
+// less refuses with ErrIssueScanMarkReadyNotAuthorized before the PR is
+// touched.
+func validateMarkReadyApproval(mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget) error {
+	refuse := func(format string, args ...any) error {
+		return fmt.Errorf("%w: %s", ErrIssueScanMarkReadyNotAuthorized, fmt.Sprintf(format, args...))
+	}
+	if strings.TrimSpace(approval.SingleUseNonce) == "" {
+		return refuse("approval carries no single-use nonce")
+	}
+	if !strings.EqualFold(strings.TrimSpace(approval.Repository), mutation.Repository) {
+		return refuse("approved repository %q does not match %q", approval.Repository, mutation.Repository)
+	}
+	if approval.PRNumber != mutation.PRNumber {
+		return refuse("approved PR number %d does not match %d", approval.PRNumber, mutation.PRNumber)
+	}
+	if !strings.EqualFold(strings.TrimSpace(approval.PRURL), mutation.PRURL) {
+		return refuse("approved PR url %q does not match %q", approval.PRURL, mutation.PRURL)
+	}
+	if !strings.EqualFold(strings.TrimSpace(approval.HeadSHA), mutation.HeadSHA) {
+		return refuse("approved head %q does not match %q", approval.HeadSHA, mutation.HeadSHA)
+	}
+	return nil
+}
+
+// issueScanReadyPRBlocked builds the durable blocked outcome for any failure
+// after the ready mutation. Re-drafting runs only when the recorded approval
+// carries ReDraftOnFailure; its own failure is recorded, never swallowed.
+func issueScanReadyPRBlocked(ctx context.Context, client IssueScanReadyPRFinalizerClient, mutation IssueScanReadyPRFinalizerMutation, approval MarkReadyTarget, reviewRef string, cause error) error {
+	evidence := IssueScanReadyPRBlockedEvidence{
+		Kind:             issueScanReadyPRBlockedEvidenceKind,
+		LifecycleVersion: issueScanLifecycleVersion,
+		RunID:            mutation.RunID,
+		FactoryOrderID:   mutation.FactoryOrderID,
+		Repository:       mutation.Repository,
+		PRNumber:         mutation.PRNumber,
+		PRURL:            mutation.PRURL,
+		HeadSHA:          mutation.HeadSHA,
+		FailureReason:    cause.Error(),
+		ReviewRef:        strings.TrimSpace(reviewRef),
+		SingleUseNonce:   approval.SingleUseNonce,
+		BoundaryDisclaimers: compactStrings([]string{
+			"blocked evidence is not Human approval",
+			"the PR is not represented as Human-ready",
+			"merge and deploy remain separate governed authorities",
+		}),
+	}
+	if !approval.ReDraftOnFailure {
+		evidence.Remediation = IssueScanReadyPRRemediationReDraftUnauthorized
+		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
+	}
+	if _, convertErr := client.ConvertToDraft(ctx, mutation); convertErr != nil {
+		evidence.Remediation = IssueScanReadyPRRemediationReDraftFailed
+		evidence.RemediationError = convertErr.Error()
+		return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
+	}
+	evidence.Remediation = IssueScanReadyPRRemediationReDrafted
+	return &IssueScanReadyPRBlockedError{Evidence: evidence, Cause: cause}
 }

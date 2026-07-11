@@ -43,6 +43,7 @@ const (
 	ActionMemoryIngestSensitive      ProtectedAction = "memory.ingest.sensitive"
 	ActionKnowledgeActivate          ProtectedAction = "knowledge.activate"
 	ActionRepoPullRequestCreate      ProtectedAction = "pull_request.create"
+	ActionRepoPullRequestMarkReady   ProtectedAction = "pull_request.mark_ready"
 )
 
 // ProtectedActions is the DF-SOP-0001 baseline vocabulary. Repos may add
@@ -76,9 +77,19 @@ var ProtectedActions = []ProtectedAction{
 	ActionRepoPullRequestCreate,
 }
 
+// RepoProtectedActions are hive-narrower protected actions added under the
+// DF-SOP-0001 allowance ("repos may add narrower protected actions") — they
+// extend the enforcement set without altering the pinned baseline vocabulary.
+var RepoProtectedActions = []ProtectedAction{
+	ActionRepoPullRequestMarkReady,
+}
+
 var protectedActionSet = func() map[ProtectedAction]bool {
-	set := make(map[ProtectedAction]bool, len(ProtectedActions))
+	set := make(map[ProtectedAction]bool, len(ProtectedActions)+len(RepoProtectedActions))
 	for _, action := range ProtectedActions {
+		set[action] = true
+	}
+	for _, action := range RepoProtectedActions {
 		set[action] = true
 	}
 	return set
