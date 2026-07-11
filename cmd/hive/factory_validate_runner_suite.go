@@ -396,7 +396,7 @@ func validateIssueScanRunnerSuiteStdoutFixture(contract issueScanRunnerContract,
 		return problems
 	}
 	if err := strictDecodeIssueScanRunnerSuiteFixture(component.ID, issueScanRunnerSuiteFixtureStdout, body); err != nil {
-		fail("fixture does not strictly decode into %s: %v", contract.StdoutContractType, err)
+		fail("fixture does not satisfy %s: %v", contract.StdoutContractType, err)
 	}
 	for _, spec := range contract.StdoutRequiredFields {
 		if err := checkIssueScanStdoutRequiredField(generic, spec); err != nil {
@@ -429,7 +429,11 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 		if side == issueScanRunnerSuiteFixtureStdin {
 			target = &hive.IssueScanImplementationRunnerContext{}
 		} else {
-			target = &hive.IssueScanImplementationRunnerResult{}
+			result := &hive.IssueScanImplementationRunnerResult{}
+			if err := strictDecodeJSON(body, result); err != nil {
+				return err
+			}
+			return validateIssueScanRunnerSuiteOperateBody(result.OperateResultBody)
 		}
 	case "adversarial_review_runner":
 		if side == issueScanRunnerSuiteFixtureStdin {
@@ -441,7 +445,11 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 		if side == issueScanRunnerSuiteFixtureStdin {
 			target = &hive.IssueScanBlockerRepairRunnerContext{}
 		} else {
-			target = &hive.IssueScanBlockerRepairRunnerResult{}
+			result := &hive.IssueScanBlockerRepairRunnerResult{}
+			if err := strictDecodeJSON(body, result); err != nil {
+				return err
+			}
+			return validateIssueScanRunnerSuiteOperateBody(result.OperateResultBody)
 		}
 	case "ready_state_review_runner":
 		if side == issueScanRunnerSuiteFixtureStdin {
@@ -459,6 +467,16 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 		return fmt.Errorf("no fixture type mapping for component %q", componentID)
 	}
 	return strictDecodeJSON(body, target)
+}
+
+// validateIssueScanRunnerSuiteOperateBody runs the exact runtime Operate
+// parser over a fixture's operate_result_body so a package cannot certify an
+// expected stdout the runtime would reject.
+func validateIssueScanRunnerSuiteOperateBody(body string) error {
+	if err := hive.ValidateIssueScanOperateResultBody(body); err != nil {
+		return fmt.Errorf("operate_result_body is not a valid Operate result: %w", err)
+	}
+	return nil
 }
 
 func strictDecodeJSON(body []byte, target any) error {

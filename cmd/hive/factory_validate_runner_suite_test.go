@@ -79,7 +79,7 @@ func runnerSuiteTestFixtures() map[string]map[string]string {
 		},
 		"implementation_runner": {
 			"stdin":  `{"kind":"issue_scan_implementation_runner_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","repo_path":"workspace/synthetic-example","implementation_task_id":"task-synthetic-0002","implementation_stage_task_id":"task-synthetic-0003","design_stage_task_id":"task-synthetic-0004","design_runtime_evidence_ref":"evidence-synthetic-0001"}`,
-			"stdout": `{"operate_result_body":"{\"status\":\"completed\"}","completion_summary":"Synthetic implementation completion."}`,
+			"stdout": `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 0000000000000000000000000000000000000001\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic implementation completion."}`,
 		},
 		"adversarial_review_runner": {
 			"stdin":  `{"kind":"issue_scan_adversarial_review_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","implementation_task_id":"task-synthetic-0002","review_stage_task_id":"task-synthetic-0005","operate_branch":"feat/synthetic-change","operate_commit":"0000000000000000000000000000000000000001","changed_files_summary":"1 file changed (synthetic)"}`,
@@ -87,7 +87,7 @@ func runnerSuiteTestFixtures() map[string]map[string]string {
 		},
 		"blocker_repair_runner": {
 			"stdin":  `{"kind":"issue_scan_blocker_repair_runner_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","repo_path":"workspace/synthetic-example","implementation_task_id":"task-synthetic-0002","implementation_stage_task_id":"task-synthetic-0003","review_stage_task_id":"task-synthetic-0005","blocker_stage_task_id":"task-synthetic-0006","request_changes_review_event_id":"event-synthetic-0001","request_changes_review_summary":"Synthetic blocker summary.","request_changes_review_issues":["synthetic blocker"],"request_changes_review_confidence":0.8,"reopen_event_id":"event-synthetic-0002","reopen_reason":"synthetic reopen","previous_operate_branch":"feat/synthetic-change","previous_operate_commit":"0000000000000000000000000000000000000001","previous_changed_files_summary":"1 file changed (synthetic)"}`,
-			"stdout": `{"operate_result_body":"{\"status\":\"completed\"}","completion_summary":"Synthetic blocker repair completion."}`,
+			"stdout": `{"operate_result_body":"branch: feat/synthetic-change\ncommit: 0000000000000000000000000000000000000001\n\n 1 file changed, 1 insertion(+)\n","completion_summary":"Synthetic blocker repair completion."}`,
 		},
 		"ready_state_review_runner": {
 			"stdin":  `{"kind":"issue_scan_ready_state_review_context","lifecycle_version":"` + lifecycle + `","run_id":"run-synthetic-0001","factory_order_id":"fo-synthetic-0001","repository":"transpara-ai/synthetic-example","pr_number":1,"pr_url":"https://github.com/transpara-ai/synthetic-example/pull/1","ready_stage_task_id":"task-synthetic-0007","implementation_task_id":"task-synthetic-0002","operate_commit":"0000000000000000000000000000000000000001"}`,
@@ -423,6 +423,18 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 				return m
 			},
 			wantErr: "fixture",
+		},
+		{
+			name: "operate result body not parseable by the runtime parser",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "implementation_runner", "stdout.json")
+				body := `{"operate_result_body":"{\"status\":\"completed\"}","completion_summary":"Synthetic implementation completion."}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "operate_result_body",
 		},
 		{
 			name: "null stdout fixture",
