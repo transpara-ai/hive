@@ -512,7 +512,14 @@ func strictDecodeIssueScanRunnerSuiteFixture(componentID string, side issueScanR
 		if side == issueScanRunnerSuiteFixtureStdin {
 			target = &hive.IssueScanAdversarialReviewContext{}
 		} else {
-			target = &hive.IssueScanAdversarialReviewReceipt{}
+			receipt := &hive.IssueScanAdversarialReviewReceipt{}
+			if err := strictDecodeJSON(body, receipt); err != nil {
+				return err
+			}
+			if err := hive.ValidateIssueScanAdversarialReviewReceiptShape(*receipt); err != nil {
+				return fmt.Errorf("receipt shape the runtime would reject: %w", err)
+			}
+			return nil
 		}
 	case "blocker_repair_runner":
 		if side == issueScanRunnerSuiteFixtureStdin {

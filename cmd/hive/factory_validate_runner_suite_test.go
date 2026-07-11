@@ -478,6 +478,30 @@ func TestValidateIssueScanRunnerSuitePackageFailsClosed(t *testing.T) {
 			wantErr: "must match",
 		},
 		{
+			name: "adversarial review verdict outside the runtime allowlist",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
+				body := `{"repository":"transpara-ai/synthetic-example","review_ref":"synthetic-review-0001","reviewed_head_sha":"0000000000000000000000000000000000000001","verdict":"banana","summary":"Synthetic exact-head review.","issues":[],"confidence":0.9}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "verdict",
+		},
+		{
+			name: "adversarial review confidence outside runtime bounds",
+			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
+				path := filepath.Join(dir, "examples", "adversarial_review_runner", "stdout.json")
+				body := `{"repository":"transpara-ai/synthetic-example","review_ref":"synthetic-review-0001","reviewed_head_sha":"0000000000000000000000000000000000000001","verdict":"approve","summary":"Synthetic exact-head review.","issues":[],"confidence":0.3}`
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
+				return m
+			},
+			wantErr: "confidence",
+		},
+		{
 			name: "operate result body not parseable by the runtime parser",
 			corrupt: func(t *testing.T, dir string, m map[string]any) map[string]any {
 				path := filepath.Join(dir, "examples", "implementation_runner", "stdout.json")

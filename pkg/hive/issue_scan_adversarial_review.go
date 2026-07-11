@@ -100,6 +100,40 @@ type IssueScanAdversarialReviewRecordResult struct {
 	ReviewAlreadyRecorded      bool
 }
 
+// ValidateIssueScanAdversarialReviewReceiptShape checks the receipt
+// properties that are deterministic from the receipt alone — verdict
+// allowlist, summary presence, issues presence and verdict consistency,
+// confidence bounds. The runtime applies it before recording a receipt;
+// local runner-suite package validation applies it to expected stdout
+// fixtures so a package cannot certify a receipt the runtime rejects.
+// Run-bound properties (run, repo, task, exact-head binding) stay in the
+// runtime validator.
+func ValidateIssueScanAdversarialReviewReceiptShape(receipt IssueScanAdversarialReviewReceipt) error {
+	verdict := strings.ToLower(strings.TrimSpace(receipt.Verdict))
+	switch verdict {
+	case "approve", "request_changes", "reject":
+	default:
+		return fmt.Errorf("verdict %q is not valid", receipt.Verdict)
+	}
+	if strings.TrimSpace(receipt.Summary) == "" {
+		return fmt.Errorf("summary is required")
+	}
+	if receipt.Issues == nil {
+		return fmt.Errorf("issues must be present; use [] when no blockers remain")
+	}
+	issues := compactStrings(receipt.Issues)
+	if verdict == "approve" && len(issues) > 0 {
+		return fmt.Errorf("approve verdict requires zero issues")
+	}
+	if verdict != "approve" && len(issues) == 0 {
+		return fmt.Errorf("%s verdict requires at least one issue", verdict)
+	}
+	if receipt.Confidence < 0.5 || receipt.Confidence > 1.0 {
+		return fmt.Errorf("confidence %.2f must be between 0.50 and 1.00", receipt.Confidence)
+	}
+	return nil
+}
+
 // IssueScanAdversarialReviewReceiptBody serializes a receipt for durable Work
 // artifact storage.
 func IssueScanAdversarialReviewReceiptBody(receipt IssueScanAdversarialReviewReceipt) (string, error) {
@@ -571,29 +605,12 @@ func normalizeIssueScanAdversarialReviewReceipt(content FactoryRunRequestedConte
 	if !strings.EqualFold(head, completion.OperateCommit) {
 		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("reviewed_head_sha %q does not match implementation commit %q", head, completion.OperateCommit)
 	}
+	if err := ValidateIssueScanAdversarialReviewReceiptShape(receipt); err != nil {
+		return IssueScanAdversarialReviewReceipt{}, err
+	}
 	verdict := strings.ToLower(strings.TrimSpace(receipt.Verdict))
-	switch verdict {
-	case "approve", "request_changes", "reject":
-	default:
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("verdict %q is not valid", receipt.Verdict)
-	}
 	summary := strings.TrimSpace(receipt.Summary)
-	if summary == "" {
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("summary is required")
-	}
-	if receipt.Issues == nil {
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("issues must be present; use [] when no blockers remain")
-	}
 	issues := compactStrings(receipt.Issues)
-	if verdict == "approve" && len(issues) > 0 {
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("approve verdict requires zero issues")
-	}
-	if verdict != "approve" && len(issues) == 0 {
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("%s verdict requires at least one issue", verdict)
-	}
-	if receipt.Confidence < 0.5 || receipt.Confidence > 1.0 {
-		return IssueScanAdversarialReviewReceipt{}, fmt.Errorf("confidence %.2f must be between 0.50 and 1.00", receipt.Confidence)
-	}
 	receipt.Kind = issueScanAdversarialReviewReceiptArtifactKind
 	receipt.LifecycleVersion = issueScanLifecycleVersion
 	receipt.RunID = strings.TrimSpace(content.RunID)
