@@ -19,7 +19,7 @@ For **"hive help" / "hive commands"**: print the section list below — Stack Co
 |---|---|---|---|
 | **Postgres** | docker container `hive-postgres-1` | `:5432` | `docker compose up -d postgres` (compose file in `repos/hive`); DSN `postgres://hive:hive@localhost:5432/hive` |
 | **work-server** | `work-server.service` (enabled) | `:8080` | builds + runs `repos/work/work-server`; serves the telemetry API, task API, and dashboard |
-| **hive-ops-api** | `hive-ops-api.service` (enabled) | `127.0.0.1:8085` | runs `repos/hive/hive-ops-api`; serves the operator projection API; loads a model catalog |
+| **hive-ops-api** | `hive-ops-api.service` (enabled) |  `loopback :8085` | runs `repos/hive/hive-ops-api`; serves the operator projection API; loads a model catalog |
 | **hive runtime** | `hive.service` (**disabled** — on-demand) | — | `hive civilization daemon …`; the multi-agent civilization loop |
 
 Paths: `HIVE_REPO=/Transpara/transpara-ai/repos/hive`, `WORK_REPO=/Transpara/transpara-ai/repos/work`.
@@ -155,7 +155,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 
 echo "=== endpoint health ==="
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
-curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://127.0.0.1:8085/health
+curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
 curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
 ```
 
@@ -173,7 +173,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 
 ## Endpoint Reference
 
-### hive-ops-api — `http://127.0.0.1:8085` (Bearer `HIVE_OPS_API_KEY`, default `dev`)
+### hive-ops-api — `http://localhost:8085` (Bearer `HIVE_OPS_API_KEY`, default `dev`)
 
 | Method · Path | Purpose |
 |---|---|
@@ -188,7 +188,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 
 ```bash
 curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
-     http://127.0.0.1:8085/api/hive/operator-projection | jq .
+     http://localhost:8085/api/hive/operator-projection | jq .
 ```
 
 ### work-server — `http://localhost:8080` (Bearer `WORK_API_KEY`)
