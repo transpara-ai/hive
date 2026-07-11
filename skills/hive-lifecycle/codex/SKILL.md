@@ -202,7 +202,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api
   if systemctl --user is-active --quiet hive; then
     # Restarting hive.service re-launches whatever the unit encodes. Run the
-    # "hive.service credential preflight" (Hive Up section) — its VERDICT covers
+    # "hive.service credential preflight" (On-demand Runtime section) — its VERDICT covers
     # credentials AND full-autonomy flags from the merged effective properties.
     echo "hive.service is active — run the hive.service credential preflight;"
     echo "restart only on 'VERDICT: OK to start' (or with the explicit approval"
@@ -318,19 +318,27 @@ if unitenv=$(systemctl --user show hive -p Environment --value 2>/dev/null); the
 else
   echo "cannot read unit properties"; unknown=1
 fi
-for ef in $(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null | sed 's/ (ignore_errors=[^)]*)//g' | sed 's/^-//'); do
-  if [ -r "$ef" ]; then
-    grep -Eq "^[[:space:]]*(export[[:space:]]+)?[\"']?LOVYOU_API_KEY[\"']?[[:space:]]*=" "$ef" && { echo "$ef sets LOVYOU_API_KEY"; cred=1; }
-  else
-    echo "cannot read $ef — UNKNOWN"; unknown=1
-  fi
-done
+if effiles=$(systemctl --user show hive -p EnvironmentFiles --value 2>/dev/null); then
+  for ef in $(printf '%s\n' "$effiles" | sed 's/ (ignore_errors=[^)]*)//g' | sed 's/^-//'); do
+    if [ -r "$ef" ]; then
+      grep -Eq "^[[:space:]]*(export[[:space:]]+)?[\"']?LOVYOU_API_KEY[\"']?[[:space:]]*=" "$ef" && { echo "$ef sets LOVYOU_API_KEY"; cred=1; }
+    else
+      echo "cannot read $ef — UNKNOWN"; unknown=1
+    fi
+  done
+else
+  echo "cannot read EnvironmentFiles property"; unknown=1
+fi
 if mgrenv=$(systemctl --user show-environment 2>/dev/null); then
   printf '%s\n' "$mgrenv" | cut -d= -f1 | grep -qx LOVYOU_API_KEY && { echo "user-manager environment sets LOVYOU_API_KEY"; cred=1; }
 else
   echo "cannot read user-manager environment"; unknown=1
 fi
-systemctl --user show hive -p ExecStart --value 2>/dev/null | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+if execstart=$(systemctl --user show hive -p ExecStart --value 2>/dev/null); then
+  printf '%s\n' "$execstart" | grep -qE -- '--approve-(requests|roles)' && { echo "ExecStart carries full-autonomy flags"; auto=1; }
+else
+  echo "cannot read ExecStart property"; unknown=1
+fi
 cleared=0
 case " $(systemctl --user show hive -p UnsetEnvironment --value 2>/dev/null) " in
   *" LOVYOU_API_KEY "*) cleared=1;;
