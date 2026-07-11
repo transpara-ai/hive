@@ -248,10 +248,13 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "restart only on 'VERDICT: OK to start' (or with the explicit approval"
     echo "the verdict names): systemctl --user restart hive"
   elif pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' >/dev/null; then
-    echo "MANUAL (go run) runtime detected — stopping it. Argv is NOT echoed (it may contain sensitive --idea text or credential assignments); ask the user for their original command to bring the workload + governance mode back:"
-    pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only — full argv may contain sensitive --idea text or credential assignments
-    pkill -INT -f '[h]ive (--human|civilization|pipeline|role|council|factory)'; sleep 3
-    pkill -KILL -f '[h]ive (--human|civilization|pipeline|role|council|factory)' 2>/dev/null
+    # Do NOT terminate yet — killing first would lose the workload and its
+    # governance flags with nothing to relaunch. Get the user's original
+    # command (argv is never echoed: it may contain sensitive --idea text or
+    # credential assignments) or explicit stop-without-restore authorization,
+    # THEN stop with the pkill pair from "Hive Down" and relaunch their command.
+    echo "MANUAL (go run) runtime detected — restart needs the user's original command first:"
+    pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
   else
     echo "hive runtime not running (on-demand) — left stopped"
   fi
@@ -358,8 +361,8 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
   ```bash
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
   if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null); then
-    # the --catalog flag OVERRIDES the env var (the flag's default is the env value)
-    flagval=$(printf '%s\n' "$args" | grep -A1 -x -- '--catalog' | tail -1; printf '%s\n' "$args" | grep -- '^--catalog=' | cut -d= -f2-)
+    # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
+    flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
     if [ -n "$flagval" ]; then
       echo "catalog (from --catalog flag): $flagval"
     else

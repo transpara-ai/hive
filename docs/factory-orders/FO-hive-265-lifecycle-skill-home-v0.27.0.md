@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.26.0
+version: 0.27.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -58,7 +58,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
   (`grep -R`) so the `claude` dialect symlink's target is covered. Checked-in local development defaults such
   as the `dev` bearer and local Postgres DSN are explicitly allowed and are
   never represented as production credentials.
-- **R7 — Reviewed safety repairs (v0.3.0–v0.26.0, CFAR rounds 1–24 on hive#267).** Both
+- **R7 — Reviewed safety repairs (v0.3.0–v0.27.0, CFAR rounds 1–25 on hive#267).** Both
   dialects carry exactly these enumerated content repairs, applied identically
   where the defect exists in each: (a) environment checks print variable
   names only, never values (`env | cut -d= -f1 …`; `systemctl … -p
@@ -243,6 +243,12 @@ authority: repository documentation/skill-source preservation only; no Hive star
   must BEGIN with the trusted launcher path followed by `run ./cmd/hive`;
   the previous unanchored substring accepted a wrapper that merely carried
   "go run ./cmd/hive" as a later argument (e.g. a --label value).
+  Round 25 (v0.27.0): (bb) the manual-runtime restart branch no longer kills
+  before asking — it reports PIDs/names and requires the user's original
+  command (or explicit stop-without-restore authorization) BEFORE any
+  termination, so a restart request cannot silently destroy the workload;
+  (bc) the catalog probe matches one- and two-dash `-catalog`/`--catalog`
+  forms (Go flags accept both).
 - **R6 — Update path defined.** Future changes to lifecycle commands or
   safety boundaries are reviewed via governed PRs on this repo (TLC arc with
   cross-family review); installed copies are caches, repo is truth
