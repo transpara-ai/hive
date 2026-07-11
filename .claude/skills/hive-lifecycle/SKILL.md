@@ -212,7 +212,7 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KE
 ## Model Catalog
 
 The operator API and the runtime select models from a catalog YAML (hot-reloaded):
-- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm the variable is present by name only, never dumping values: `systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
+- **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`** (confirm by name from the running process's effective environment — unit `Environment=` lines can miss manager-inherited vars; names only, never values: `pid=$(systemctl --user show hive-ops-api -p MainPID --value); [ "${pid:-0}" -gt 0 ] 2>/dev/null && tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -x HIVE_OPS_CATALOG`), `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`.
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 
 Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `catalog-codex.yaml` referenced by `hive.service`'s `ExecStart` is the likely cause if that unit fails to start). For a manual Claude-only run, **omit `--catalog`** (built-in Claude defaults); add `--catalog ./catalog-mixed.yaml` **only** when a local Ollama model is running and `OPENROUTER_API_KEY` is set.

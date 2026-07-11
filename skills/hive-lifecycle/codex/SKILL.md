@@ -229,13 +229,18 @@ fi
 | `POST /api/hive/runs` | writer-mode only; launch operator-initiated run |
 | `POST /api/hive/model-selection/role-policy` | writer-mode only; update role model policy |
 
-Default `hive-ops-api.service` should be read-only because it does not set `HIVE_OPS_HUMAN_ACTOR`. Confirm before POSTing — check variable names only, never dump values (the Environment line carries the ops API key and DSN):
+Default `hive-ops-api.service` should be read-only because it does not set `HIVE_OPS_HUMAN_ACTOR`. Confirm before POSTing by inspecting the running process's effective environment — unit `Environment=` lines miss variables inherited from the systemd `--user` manager, so `systemctl show -p Environment` can misreport writer mode as read-only. Check names only, never dump values:
 
 ```bash
-systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'
+pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+if [ "${pid:-0}" -gt 0 ] 2>/dev/null; then
+  tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -cx HIVE_OPS_HUMAN_ACTOR
+else
+  echo "service not running — mode UNKNOWN; do not POST"
+fi
 ```
 
-`HIVE_OPS_HUMAN_ACTOR` absent from that name list means read-only mode.
+`0` means the running process has no `HIVE_OPS_HUMAN_ACTOR` (read-only); a non-zero count means writer mode. If the service is not running, treat the mode as unknown and do not POST.
 
 `work-server` on `http://localhost:8080`, bearer `$WORK_API_KEY`:
 
@@ -258,7 +263,7 @@ curl -s --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_K
 
 ## Model Catalog
 
-- `hive-ops-api` uses `HIVE_OPS_CATALOG`; confirm the name is present with `systemctl --user show hive-ops-api -p Environment | grep -o '[A-Z0-9_]\+=' | tr -d '=' | grep -v '^Environment$'` (names only — never print values).
+- `hive-ops-api` uses `HIVE_OPS_CATALOG`; confirm by name from the running process's effective environment (unit `Environment=` lines can miss manager-inherited variables; names only, never values): `pid=$(systemctl --user show hive-ops-api -p MainPID --value); [ "${pid:-0}" -gt 0 ] 2>/dev/null && tr '\0' '\n' </proc/"$pid"/environ | cut -d= -f1 | grep -x HIVE_OPS_CATALOG`.
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
 - `council` accepts `--catalog <path>` only; do not pass `--catalog-reload-interval` to `council`.
 - If avoiding provider keys, omit `--catalog` for built-in Claude defaults.
