@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/safety"
@@ -110,6 +111,9 @@ func (r *Runtime) approvedIssueScanDraftPRAuthorityRequestForRun(runID string) (
 		}
 		if content.RequestID.IsZero() {
 			return types.EventID{}, false, fmt.Errorf("approved draft PR decision %s has empty request_id", ev.ID().Value())
+		}
+		if !content.ExpiresAt.IsZero() && !time.Now().Before(content.ExpiresAt.Value()) {
+			return types.EventID{}, false, fmt.Errorf("approved draft PR decision %s for run %s expired at %s: refusing draft PR creation", ev.ID().Value(), runID, content.ExpiresAt.String())
 		}
 		return content.RequestID, true, nil
 	}

@@ -1069,8 +1069,6 @@ type IssueScanLifecycleProgress struct {
 	ReadyRoleOutputs          []IssueScanStageRoleOutputResult
 }
 
-type issueScanLifecycleProgress = IssueScanLifecycleProgress
-
 // ProgressIssueScanLifecycle advances all queued/dispatched issue-scan runs
 // through the evidence bridge. Daemon paths may run explicitly configured
 // external runners, including the approved draft-PR creator and the configured

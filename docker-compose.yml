@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: hive
       POSTGRES_DB: hive
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_CONFIG_SERVER_MODE: "False"
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       postgres:
         condition: service_healthy
