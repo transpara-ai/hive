@@ -177,12 +177,21 @@ func knownHiveUnitActiveState(state string) bool {
 }
 
 func hiveUnitExecStartHasFlag(execStart, flagName string) bool {
+	target := strings.TrimLeft(flagName, "-")
 	for _, field := range strings.Fields(execStart) {
 		field = strings.Trim(field, "{};\"")
-		name, _, _ := strings.Cut(field, "=")
-		if name == flagName {
+		name, value, hasValue := strings.Cut(field, "=")
+		if !strings.HasPrefix(name, "-") || strings.TrimLeft(name, "-") != target {
+			continue
+		}
+		if !hasValue {
 			return true
 		}
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return true
+		}
+		return enabled
 	}
 	return false
 }

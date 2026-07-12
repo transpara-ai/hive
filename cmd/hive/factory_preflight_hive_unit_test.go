@@ -58,6 +58,11 @@ func TestEvaluateHiveUnitPreflightCoversAutonomyPostures(t *testing.T) {
 		{name: "requests only", execStart: "/usr/local/bin/hive civilization daemon --approve-requests", approveRequests: true},
 		{name: "roles only", execStart: "/usr/local/bin/hive civilization daemon --approve-roles=true", approveRoles: true},
 		{name: "both", execStart: "/usr/local/bin/hive civilization daemon --approve-requests --approve-roles", approveRequests: true, approveRoles: true},
+		{name: "single dash requests", execStart: "/usr/local/bin/hive civilization daemon -approve-requests", approveRequests: true},
+		{name: "single dash roles", execStart: "/usr/local/bin/hive civilization daemon -approve-roles=true", approveRoles: true},
+		{name: "explicit requests false", execStart: "/usr/local/bin/hive civilization daemon --approve-requests=false"},
+		{name: "explicit roles false", execStart: "/usr/local/bin/hive civilization daemon -approve-roles=0"},
+		{name: "invalid value fails cautious", execStart: "/usr/local/bin/hive civilization daemon --approve-requests=unexpected", approveRequests: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +173,28 @@ func TestRunHiveUnitPreflightUsesOnlyReadOnlyMergedPropertyProbe(t *testing.T) {
 	}
 	if strings.Contains(out, "LOVYOU_API_KEY=") {
 		t.Fatalf("output disclosed credential material: %s", out)
+	}
+}
+
+func TestRunHiveUnitPreflightRedactsPresentCredentialValue(t *testing.T) {
+	runner := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("ActiveState=active\nSubState=running\nExecStart={ path=/usr/local/bin/hive ; argv[]=/usr/local/bin/hive civilization daemon ; }\nMainPID=42\n"), nil
+	}
+	readFile := func(string) ([]byte, error) {
+		return []byte("LOVYOU_API_KEY=super-secret\x00PATH=/usr/bin\x00"), nil
+	}
+	var stdout bytes.Buffer
+	if err := runHiveUnitPreflight(context.Background(), &stdout, runner, readFile); err != nil {
+		t.Fatalf("run preflight: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "credential_posture=PRESENT") {
+		t.Fatalf("output missing PRESENT credential posture: %s", out)
+	}
+	for _, secretMaterial := range []string{"super-secret", "LOVYOU_API_KEY="} {
+		if strings.Contains(out, secretMaterial) {
+			t.Fatalf("output disclosed %q: %s", secretMaterial, out)
+		}
 	}
 }
 
