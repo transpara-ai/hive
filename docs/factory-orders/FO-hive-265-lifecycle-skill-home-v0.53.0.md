@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.52.0
+version: 0.53.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -577,6 +577,20 @@ the new head surfaced three operational defects, repaired in both dialects:
   at least ONE unit is active, so a half-crashed stack reported success;
   the check is now a per-service loop requiring literally `active` for each,
   anything else setting `restart_failed`.
+
+### Round-22 fresh-head repairs (v0.53.0)
+
+- **cn — deferred restart paths report PENDING, not success.** The
+  managed-runtime and manual-runtime branches deliberately stop at the human
+  gate, but the block exited 0 as if the requested restart were complete;
+  the exit status is now three-state (`0` restarted, `1` failed, `2`
+  runtime decision pending the human gate), with the pending branches
+  setting `2` unless a failure already set `1`.
+- **co — the xtrace sentinel is freshly derived.** A stale inherited `__xt=1`
+  with xtrace currently off would have re-ENABLED tracing in the caller's
+  shell after the credential load; the guard now initializes `__xt=0` from
+  scratch before reading `$-`. Both dialects; full-fence `bash -n` audit at
+  zero failures.
 
 ## Non-Goals
 

@@ -43,7 +43,7 @@ API bearer tokens (for the endpoints below):
 To run the `curl` examples below from a plain shell, load the tokens first:
 
 ```bash
-case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
+__xt=0; case $- in *x*) __xt=1; set +x;; esac   # freshly derived from $-: a stale inherited __xt must never re-enable xtrace
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populates WORK_API_KEY (HIVE_OPS_API_KEY defaults to `dev`)
 [ "${__xt:-}" = 1 ] && set -x; unset __xt
 ```
@@ -161,17 +161,17 @@ lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound —
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (a down unit, an unreadable manager) must not abort the block mid-way in strict shells
-restart_failed=0   # diagnostics stay loud AND the block's exit status stays honest
+restart_status=0   # 0 = restarted, 1 = FAILED, 2 = runtime decision PENDING the human gate — the exit status must say which
 # Ensure Postgres is up + accepting connections first (restart = a true down→up):
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 # EVERYTHING below is gated on Postgres readiness — restarting services or the
 # runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
-  systemctl --user restart work-server hive-ops-api || { echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"; restart_failed=1; }
+  systemctl --user restart work-server hive-ops-api || { echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"; restart_status=1; }
   for svc in work-server hive-ops-api; do   # per-unit: is-active with multiple units exits 0 if ANY is active
     svc_state=$(systemctl --user is-active "$svc" 2>/dev/null || true)
-    [ "$svc_state" = "active" ] || { echo "$svc is ${svc_state:-unreadable} after restart — do not report success"; restart_failed=1; }
+    [ "$svc_state" = "active" ] || { echo "$svc is ${svc_state:-unreadable} after restart — do not report success"; restart_status=1; }
   done
   # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
   # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
@@ -196,6 +196,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "protected action: any stop/cancel/restart needs the user's explicit current-turn approval"
     echo "(credential + autonomy postures). To cancel a queued auto-restart after approval:"
     echo "  systemctl --user stop hive   # then re-read ActiveState to CONFIRM before relying on it"
+    [ "$restart_status" -eq 0 ] && restart_status=2   # the requested restart is INCOMPLETE pending the human decision
   elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # comm-verified like the kill loops
     # Do NOT terminate yet — killing first would lose the workload and its
     # governance flags with nothing to relaunch. Get the user's original
@@ -204,14 +205,15 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     # THEN stop with the identity-verified kill loops from "Hive Down" and relaunch their command.
     echo "MANUAL (go run) runtime detected — restart needs the user's original command first:"
     printf '%s\n' "$hive_pids" | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only
+    [ "$restart_status" -eq 0 ] && restart_status=2   # the requested restart is INCOMPLETE pending the user's command
   else
     echo "hive runtime not running (on-demand) — left stopped"
   fi
 else
   echo "postgres not ready — NOT restarting services or runtime; fix postgres first"
-  restart_failed=1
+  restart_status=1
 fi
-exit "$restart_failed"   # subshell exit: strict callers see the truth, the operator's terminal survives
+exit "$restart_status"   # subshell exit: 0 restarted / 1 failed / 2 pending the human runtime gate — strict callers see the truth, the operator's terminal survives
 )
 ```
 
@@ -219,7 +221,7 @@ exit "$restart_failed"   # subshell exit: strict callers see the truth, the oper
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # STATUS BLOCK CONTRACT: nonzero exits below are INFORMATION (a down service, an absent key, a clean env) — never errors; relax strict shells for the whole block
-case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
+__xt=0; case $- in *x*) __xt=1; set +x;; esac   # freshly derived from $-: a stale inherited __xt must never re-enable xtrace
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
 [ "${__xt:-}" = 1 ] && set -x; unset __xt
 echo "=== services ==="
