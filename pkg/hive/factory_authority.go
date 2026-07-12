@@ -3,6 +3,7 @@ package hive
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
@@ -128,6 +129,9 @@ func LoadApprovedDraftPRTarget(s store.Store, requestID string) (DraftPRTarget, 
 	}
 	if decision.Outcome != draftPRApprovedOutcome {
 		return DraftPRTarget{}, fmt.Errorf("authority decision for request %s has outcome %q, not %q: refusing to create a PR", requestID, decision.Outcome, draftPRApprovedOutcome)
+	}
+	if !decision.ExpiresAt.IsZero() && !time.Now().Before(decision.ExpiresAt.Value()) {
+		return DraftPRTarget{}, fmt.Errorf("authority approval for request %s expired at %s: refusing to create a PR", requestID, decision.ExpiresAt.String())
 	}
 	target, err := ParseDraftPRScope(decision.Scope)
 	if err != nil {
