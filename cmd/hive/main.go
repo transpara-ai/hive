@@ -1201,7 +1201,7 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr, webhookBearerToken string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -1330,7 +1330,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		if err := runner.StartEventListener(ctx, rt, runner.EventListenerConfig{
 			Addr:        webhookAddr,
 			Port:        listenerPort,
-			BearerToken: apiKey,
+			BearerToken: webhookBearerToken,
 		}); err != nil {
 			log.Printf("event listener exited: %v", err)
 		}
