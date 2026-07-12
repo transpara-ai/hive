@@ -266,9 +266,9 @@ Default `hive-ops-api.service` should be read-only because it does not set `HIVE
 
 ```bash
 ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
-pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+pid=$(systemctl --user show hive-ops-api -p MainPID --value 2>/dev/null || true)
 if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
-  actor=$(printf '%s\n' "$envlines" | grep '^HIVE_OPS_HUMAN_ACTOR=' | head -1 | cut -d= -f2-)
+  actor=$(printf '%s\n' "$envlines" | grep '^HIVE_OPS_HUMAN_ACTOR=' | head -1 | cut -d= -f2- || true)   # no match = read-only, the expected default: never trip errexit/pipefail
   if [ -n "$actor" ]; then
     echo "HIVE_OPS_HUMAN_ACTOR set and non-empty — WRITER MODE possible (an invalid actor id still yields read-only at startup; check journal for 'HIVE_OPS_HUMAN_ACTOR invalid')"
   else
@@ -307,13 +307,13 @@ Read-only probes:
 
   ```bash
   ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
-  pid=$(systemctl --user show hive-ops-api -p MainPID --value)
+  pid=$(systemctl --user show hive-ops-api -p MainPID --value 2>/dev/null || true)
   if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
     # Flag PRESENCE is tracked separately from its value: an explicit empty
     # --catalog= clears the env-derived default and selects the built-ins.
     if printf '%s\n' "$args" | grep -qE -x -- '--?catalog(=.*)?'; then
-      flagval=$(printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2-)
+      flagval=$({ printf '%s\n' "$args" | grep -A1 -E -x -- '--?catalog' | tail -1 || true; printf '%s\n' "$args" | grep -E -- '^--?catalog=' | cut -d= -f2- || true; })   # split/= forms are alternatives: a no-match must not trip errexit/pipefail
       echo "catalog (from --catalog flag): ${flagval:-<empty — built-in defaults>}"
     else
       printf '%s\n' "$envlines" | grep '^HIVE_OPS_CATALOG=' || echo "HIVE_OPS_CATALOG unset and no --catalog flag (built-in defaults)"
@@ -366,9 +366,9 @@ Post-start (or post-restart) posture confirmation — compares the RUNNING runti
 
 ```bash
 ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
-pid=$(systemctl --user show hive -p MainPID --value)
+pid=$(systemctl --user show hive -p MainPID --value 2>/dev/null || true)
 if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
-  keyval=$(printf '%s\n' "$envlines" | grep '^LOVYOU_API_KEY=' | head -1 | cut -d= -f2-)
+  keyval=$(printf '%s\n' "$envlines" | grep '^LOVYOU_API_KEY=' | head -1 | cut -d= -f2- || true)   # no match is the expected local-only case: never trip errexit/pipefail
   if [ -n "$keyval" ]; then
     echo "runtime is PRODUCTION-CONNECTED (non-empty LOVYOU_API_KEY) — if the user approved the production posture, this MATCHES; otherwise STOP the unit now"
   else
@@ -468,7 +468,7 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # serving a DIFFERENT database. `down -v` destroys the whole cluster volume,
 # so require ZERO client connections across ALL databases; anything still
 # connected is the operator's to stop explicitly.
-conns=$(docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null)   # maintenance DB: this recovery path must not depend on the hive DB it recreates
+conns=$(docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null || true)   # maintenance DB: this recovery path must not depend on the hive DB it recreates
 if [ "$conns" = "0" ]; then
   # The && chain is load-bearing: if the repo path is missing or unmounted, a
   # bare cd would leave the shell in the CALLER's directory and `docker compose

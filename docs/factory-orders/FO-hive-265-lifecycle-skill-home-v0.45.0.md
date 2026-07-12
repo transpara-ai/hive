@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.44.0
+version: 0.45.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -472,6 +472,17 @@ the new head surfaced three operational defects, repaired in both dialects:
   the current shell) now save/disable/restore the xtrace flag around the
   sourcing (`case $- in *x*) …`), and every authenticated curl runs in a
   `( set +x; … )` subshell — both dialects, all nine credential-touching
+  sites.
+
+### Round-14 fresh-head repair (v0.45.0)
+
+- **cb — expected-failure assignments never trip errexit/pipefail.** Under
+  `set -e -o pipefail`, an absent `LOVYOU_API_KEY` (the normal local-only
+  case) made the probe's grep pipeline abort the subshell before the verdict
+  printed; the same pattern affected the actor, split-form catalog-flag,
+  connection-count, and MainPID assignments. Every command-substitution
+  whose failure is an expected, HANDLED case is now guarded (`|| true`), so
+  the fail-closed verdict branches actually run — both dialects, all probe
   sites.
 
 ## Non-Goals
