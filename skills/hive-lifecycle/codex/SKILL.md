@@ -495,14 +495,12 @@ pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|fact
 sleep 3
 pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
-# Manual APIs also write the chain — sweep them, then GATE the reset on
-# quiescence. The broad argv pattern is safe here: a false match only ABORTS.
-# Name-exact (comm) kills cover go-run children AND direct binaries; the
-# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
-# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
-# No name-based kills here: our units were stopped above, and ANY other
-# client still attached shows up in the database refusal list below for the
-# operator to stop.
+# The runtime loops above require BOTH a supported Hive verb in argv and an
+# exact/versioned Hive or go-run comm identity. A `go test ./cmd/...` or
+# `go build ./cmd/...` process has no runtime verb after its Hive path and is
+# never signaled. Do not add bare-name kills for manual APIs: our units were
+# stopped above, and any other client still attached shows up in the database
+# refusal list below for the operator to stop.
 # Quiescence is adjudicated by the DATABASE, not by enumerating client
 # process names — any enumeration is incomplete (localapi, social-server,
 # psql, future services), and killing by bare name could hit an instance
