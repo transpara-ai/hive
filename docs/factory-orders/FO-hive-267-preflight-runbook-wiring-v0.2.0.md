@@ -3,7 +3,7 @@ doc_id: FO-HIVE-267-PREFLIGHT-RUNBOOK-WIRING
 title: Factory Order — Wire the hive-lifecycle Dialect Runbooks to the Tested Unit-Posture Verifier
 doc_type: factory-order
 status: proposal
-version: 0.1.0
+version: 0.2.0
 created: 2026-07-12
 updated: 2026-07-12
 owner: Michael Saucier
@@ -64,13 +64,20 @@ remains in force.
   operator decision: `credential_posture=PRESENT` = production-connected (stop
   the unit unless that posture was approved); `ABSENT`/`EMPTY` = local-only;
   nonzero exit / `overall=UNKNOWN` = fail closed (if local-only was intended,
-  stop the unit). The runbook never re-derives credential posture for
+  stop the unit). The guidance states each posture's provenance per the
+  verifier's contract: credential posture from the RUNNING process's
+  environment; autonomy posture from the CONFIGURED merged `ExecStart`, not
+  the live argv — a unit changed since start can run different flags, so live
+  autonomy is treated as unproven and deferred to the human gate when the two
+  could differ (v0.2.0). The runbook never re-derives credential posture for
   `hive.service` from shell.
 - **R3 — Human-gate semantics preserved, not weakened.** The pre-start human
   gate is unchanged: explicit current-turn approval naming both postures
   before `systemctl --user start|restart hive`; worst-case
-  production-connected assumption pre-start (the verifier reads the RUNNING
-  process, so it is verification-only and cannot pre-clear a start); the
+  production-connected assumption pre-start (the verifier requires a running
+  `MainPID` and fails closed otherwise, so it is verification-only and cannot
+  pre-clear a start; its credential posture reads the running process while
+  autonomy posture reflects the configured merged `ExecStart` — v0.2.0); the
   foreground local-only alternative remains. Secret-safety is preserved or
   improved: the verifier never prints credential values (asserted by its
   merged tests), and removing the shell probe removes the only place a
@@ -83,6 +90,25 @@ remains in force.
   Claude-dialect file (one-physical-copy invariant from FO-HIVE-265 R2). The
   test is written first and observed RED against the unedited runbooks, then
   GREEN after the edits.
+
+## CFAR Round 1 Repair (v0.2.0)
+
+CFAR round 1 (Codex, PR #283 head `07bc172d`) found one P1: the runbooks'
+post-start guidance broadened the verifier's configured-unit autonomy report
+into confirmation of the RUNNING process's autonomy ("compares the RUNNING
+runtime against the posture the user approved"), which is false when
+`ExecStart` and live argv differ (unit edited/reloaded after start, wrapper
+expansion) — the verifier derives autonomy solely from
+`systemctl show -p ExecStart` and reads the running process only for
+credential presence. Accepted and repaired doc-side per the finding's
+scoping option: both dialects and R2/R3 above now state per-posture
+provenance, and live autonomy is deferred to the human gate whenever the
+configured unit may have changed since start. Extending the verifier to
+reconcile `/proc/<MainPID>/cmdline` was rejected for this slice: it is a
+verifier contract change (Non-Goal 1) and the configured-vs-live gap is
+PR #277's explicitly accepted, bounded residual (its ready-state CFAR,
+disposition 1). If live-argv reconciliation is wanted, that is a new
+governed slice against the verifier.
 
 ## Non-Goals
 

@@ -80,15 +80,15 @@ fi
 
 1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `LOVYOU_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
 2. For a local-only runtime, do NOT start the unit at all — use the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form under **On-demand Runtime** below, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
-3. After any approved start, confirm the running process matches the posture the user approved (verifier below) — verification only; it cannot undo the first reconciliation cycle.
+3. After any approved start, run the verifier below to check the approved posture — verification only; it cannot undo the first reconciliation cycle.
 
-Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved, via the tested read-only verifier (fail-closed, whole-domain tests; it judges `LOVYOU_API_KEY` presence/emptiness only and never prints its value, so no secret transits a shell variable here):
+Post-start (or post-restart) posture confirmation via the tested read-only verifier (fail-closed, whole-domain tests). Provenance differs per posture: credential posture reads the RUNNING process (`LOVYOU_API_KEY` presence/emptiness only from `/proc/<MainPID>/environ`; the value is never printed, and no secret transits a shell variable here), while autonomy posture reads the CONFIGURED merged `ExecStart` — not the live argv — so a unit edited, reloaded, or wrapper-expanded since start can run different flags than reported:
 
 ```bash
 ( cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit )
 ```
 
-Reading the report: `credential_posture=PRESENT` is PRODUCTION-CONNECTED — if the user approved the production posture this MATCHES, otherwise STOP the unit now; `ABSENT` or `EMPTY` is local-only (an empty value leaves the Site client disabled). `autonomy_posture` restates the effective `--approve-requests`/`--approve-roles` flags (`FULL` = both). A nonzero exit with `overall=UNKNOWN` is fail-closed — unit, autonomy, or credential state was unreadable; if local-only was intended, STOP the unit.
+Reading the report: `credential_posture=PRESENT` is PRODUCTION-CONNECTED — if the user approved the production posture this MATCHES, otherwise STOP the unit now; `ABSENT` or `EMPTY` is local-only (an empty value leaves the Site client disabled). `autonomy_posture` reports the configured merged `ExecStart`'s `--approve-requests`/`--approve-roles` flags (`FULL` = both) — configured-unit posture, not proof of the live process's flags; if the unit may have changed since start (edit, reload, wrapper), treat live autonomy as UNPROVEN and fall back to the human gate (stop the unit if in doubt). A nonzero exit with `overall=UNKNOWN` is fail-closed — unit, autonomy, or credential state was unreadable; if local-only was intended, STOP the unit.
 
 ## Hive Down
 
