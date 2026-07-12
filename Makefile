@@ -1,4 +1,4 @@
-.PHONY: build test vet verify verify-canonical-paths
+.PHONY: build test vet verify verify-canonical-paths verify-hive-lifecycle-skill
 
 CANONICAL_REPOS_ROOT := /Transpara/transpara-ai/repos
 LEGACY_REPOS_ROOT := /Transpara/transpara-ai/data/repos
@@ -32,4 +32,7 @@ verify-canonical-paths:
 		exit $$status; \
 	fi
 
-verify: verify-canonical-paths build test vet
+verify-hive-lifecycle-skill:
+	bash scripts/verify-hive-lifecycle-skill.sh
+
+verify: verify-canonical-paths verify-hive-lifecycle-skill build test vet

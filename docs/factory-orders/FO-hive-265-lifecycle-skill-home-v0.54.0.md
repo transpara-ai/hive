@@ -3,13 +3,14 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.53.0
+version: 0.54.0
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-12
 owner: Michael Saucier
-steward: claude
+steward: codex
 primary_repo: transpara-ai/hive
 source_issue: transpara-ai/hive#265
+repair_issue: transpara-ai/hive#274
 authority: repository documentation/skill-source preservation only; no Hive start/stop/restart, daemon launch, runtime execution, service restart, deploy, public exposure, private fetch, authentication change, protected settings change, production EventGraph read/query/write, Work runtime write, Test 001 GREEN, production go-live, value allocation, autonomy increase, or wiki work
 ---
 
@@ -20,6 +21,7 @@ authority: repository documentation/skill-source preservation only; no Hive star
 | Source | Pin | Role |
 |---|---|---|
 | [transpara-ai/hive#265](https://github.com/transpara-ai/hive/issues/265) | issue body as of 2026-07-11 (labels `cc:intake`, `cc:pr-deferred`, `cc:protected-action`, `cc:civilization-presence`, `cc:needs-human-scope`) | Raw intake — the governed tracker for the Codex skill port |
+| [transpara-ai/hive#274](https://github.com/transpara-ai/hive/issues/274) | issue body as created 2026-07-12 under Michael's current-turn instruction to fix anything required in merged PR #267 | Post-merge safety repair intake for implicit source targeting, infrastructure/runtime separation, and versioned runtime detection |
 | Michael Saucier, in-session operator scope verdict, 2026-07-11 | "Claude and Codex versions of a particular feature together in the same repo … choose the correct home for the feature … differences subdivided (as of today) into Claude and Codex subfolders … may grow to various dialects" | Channel A human scope decision this FO implements; supplies the `needs-human-scope` answer |
 | `~/.claude/skills/hive-lifecycle/SKILL.md` | immutable seed pin: git blob `d4f8b8a1772a6810eb1d808902df7cae20e53da2` (the dialect as first committed at `7e649d6`; runbook lineage: hive PR #259) | Claude dialect seed |
 | `~/.codex/skills/hive-lifecycle/` (`SKILL.md`, `agents/openai.yaml`) | immutable seed pins: git blobs `da3dcef568eef77e82a0a1ba9555a28416cc88c6` (SKILL.md) and `22ee02b5541293bf479f64ba903e79ead278e9a6` (openai.yaml), the port as first committed at `7e649d6`; validated by the Codex skill validator per #265 kickoff evidence | Codex dialect seeds |
@@ -40,7 +42,8 @@ authority: repository documentation/skill-source preservation only; no Hive star
   the local port cited above. Both dialects diverge from their seeds ONLY by
   the enumerated R7 safety repairs PLUS the fresh-head CFAR repair set
   (bf–cf and successors, each enumerated in the versioned repair sections
-  below); any content delta outside those enumerated sets is a defect. No
+  below) PLUS the v0.54.0 post-merge safety repair section; any content delta
+  outside those enumerated sets is a defect. No
   dialect content exists twice in the repo. (v0.49.0 truth-up: without this
   clause the Factory Order rejected its own delivered files.)
   (v0.2.0: revised from committing a second Claude copy after IAR found the
@@ -52,7 +55,10 @@ authority: repository documentation/skill-source preservation only; no Hive star
   discovery metadata (`agents/openai.yaml`).
 - **R4 — Safety posture preserved.** Both dialects default to read-only
   help/status; mutating lifecycle actions require explicit user intent in the
-  current turn; no `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` use.
+  current turn; `hive up` remains infrastructure-only; every runtime verb
+  receives an explicit validated Operate target instead of inheriting the
+  canonical Hive checkout through the CLI's `.` default; no
+  `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` use.
 - **R5 — No private addresses or secrets.** No literal private-network
   addresses (hostnames/`localhost` only; a loopback literal is permitted only
   inside a verbatim quote of actual log output) and no non-default credentials
@@ -592,24 +598,56 @@ the new head surfaced three operational defects, repaired in both dialects:
   scratch before reading `$-`. Both dialects; full-fence `bash -n` audit at
   zero failures.
 
+## Post-Merge Safety Repairs (v0.54.0)
+
+- **cp — implicit source-repository targeting is removed.** The Hive CLI
+  defaults `--repo` to the current directory. Both dialects change into the
+  canonical Hive checkout before their runtime examples, so omitting the flag
+  made Hive itself the Operate target. Every `civilization`, `pipeline`,
+  `role`, and `council` example now uses one explicit `TARGET_REPO`. The
+  preflight requires a Git repository, rejects a target backed by Hive's git
+  common directory (including any Hive worktree), rejects dirty state, and
+  records the exact target head before launch.
+- **cq — `hive up` cannot launch Civilization.** The Claude dialect's Up fence
+  previously contained a foreground daemon as an “optional” third step. That
+  crossed a plain infrastructure request into runtime execution. The launch is
+  removed; both dialects now state that Up starts only Postgres and the two API
+  services, while runtime requires a separate explicit request.
+- **cr — versioned runtime binaries are lifecycle-visible.** The prior process
+  predicate required an argv token ending exactly in `hive` and a `comm` of
+  exactly `hive` or `go`. It therefore missed the actual Test 001 binary shape
+  `/tmp/hive-test001-67-b928942 civilization run`. Status, Down, Restart,
+  Clean Slate, and Nuclear pre-stop paths now require both a supported runtime
+  verb in argv and a `comm` allowlist of exact `hive`, versioned
+  `hive-*`/`hive_*`, or the `go run` driver.
+- **cs — semantic invariants are executable.** The new
+  `scripts/verify-hive-lifecycle-skill.sh` validates every shell fence, rejects
+  the legacy process predicate and `--repo .`, requires explicit target guards
+  in both dialects, proves positive/negative argv and `comm` fixtures, and
+  proves the Claude Hive Up fence contains no runtime launch. `make verify`
+  runs this guard before the Go build/test/vet gates.
+
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
 - No changes to the skill's commands or semantics beyond the reviewed safety
-  repairs enumerated in R7 and the versioned fresh-head repair sections —
-  every other content diff from the cited sources is a defect.
+  repairs enumerated in R7, the versioned fresh-head repair sections, and the
+  v0.54.0 post-merge repair section — every other content diff from the cited
+  sources is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 
 ## Verification Plan
 
 - `python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/hive-lifecycle/codex` → valid.
+- `bash scripts/verify-hive-lifecycle-skill.sh` → all target, process,
+  infrastructure/runtime-separation, and shell-fence invariants pass.
 - `diff` of committed dialect files against their cited seeds → only the
   enumerated R7 repairs and the versioned fresh-head repairs differ.
 - Private-address/secret scan over `skills/` with `grep -R` (follows the
   `claude` symlink) → no matches outside verbatim log quotes.
 - `git diff --check` clean; repo build/tests unaffected (no Go changes).
-- IAR then CFAR (Codex reviewer; Claude author) at the exact PR head; merge
+- IAR then CFAR (Claude reviewer; Codex author) at the exact PR head; merge
   consideration remains Michael's.
 
 ## Non-Authorizations

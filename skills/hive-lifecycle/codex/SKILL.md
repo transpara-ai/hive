@@ -15,6 +15,7 @@ Default to read-only inspection. Start, stop, restart, clean slate, runtime laun
 - For `hive status`, run only read-only probes.
 - For `hive up`, `hive down`, `hive restart`, `run the hive`, or `clean slate`, perform only the named operation and state what was changed.
 - Treat the runtime as on-demand. Do not start `hive.service` unless the user explicitly asks for the runtime or daemon.
+- Never rely on a runtime verb's default repository. `civilization`, `pipeline`, `role`, and `council` default to the current directory; from the canonical Hive checkout that would make Hive itself the Operate target. Require an explicit, validated `--repo` target for every run.
 - Do not set `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY`; those break the Claude CLI subscription path.
 - Do not use public-internet exposure, deploy, service restart, runtime execution, Hive wake/start/action APIs, production EventGraph writes, protected settings changes, Test 001 GREEN, autonomy increase, value allocation, or wiki work unless separately authorized.
 - Prefer hostnames and `localhost`; do not introduce literal private network addresses in work products.
@@ -117,7 +118,7 @@ if [ "$hive_state" = "active" ]; then
   echo "hive.service: active"
 elif [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
   echo "hive.service: ${hive_state:-unreadable} — pending auto-restart or transition; treat as a MANAGED runtime"
-elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # comm-verified like the kill loops: argv mentions alone are not a runtime
+elif hive_pids=$(pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # argv verb + comm identity; includes versioned binaries such as hive-test001-*
   echo "manual runtime: RUNNING"
   printf '%s\n' "$hive_pids" | xargs -r ps -o pid=,comm= -p 2>/dev/null   # PIDs + executable names only — full argv may contain sensitive --idea text or credential assignments
 else
@@ -184,11 +185,11 @@ systemctl --user stop hive 2>/dev/null || true
 # the port check below can read clear moments before a full-autonomy relaunch.
 hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null || true)
 case "$hive_state" in inactive|failed) : ;; *) echo "hive.service is still ${hive_state:-unreadable} after stop — a queued relaunch may fire; re-run: systemctl --user stop hive, then re-check";; esac
-# Identity-verified kills: comm must be hive|go, so a stray argv match (an
-# editor, grep, or agent session mentioning the pattern) is never signaled.
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
+# Identity-verified kills: comm must be exact/versioned Hive or the go-run
+# driver, so a stray argv match is never signaled.
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done
 sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 
 systemctl --user stop hive-ops-api work-server
 
@@ -249,7 +250,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "(credential + autonomy postures). To cancel a queued auto-restart after approval:"
     echo "  systemctl --user stop hive   # then re-read ActiveState to CONFIRM before relying on it"
     [ "$restart_status" -eq 0 ] && restart_status=2   # the requested restart is INCOMPLETE pending the human decision
-  elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # comm-verified like the kill loops
+  elif hive_pids=$(pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # argv verb + comm identity; includes versioned binaries
     # Do NOT terminate yet — killing first loses the workload and its
     # governance flags with nothing to relaunch. Get the user's original
     # command (argv is never echoed: it may contain sensitive --idea text or
@@ -357,18 +358,31 @@ Runtime execution is not a status check. Run only after explicit user request.
 # runtime against the live database.
 ( cd /Transpara/transpara-ai/repos/hive || exit
 
+# Every runtime verb defaults --repo to the current directory. Because this
+# block runs from the canonical Hive checkout, omitting --repo would make Hive
+# itself the Operate target. Require an explicit clean target and reject every
+# worktree backed by Hive's own git common directory.
+TARGET_REPO=/absolute/path/to/clean-disposable-target
+target_common=$(git -C "$TARGET_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && target_common=$(realpath -e "$target_common" 2>/dev/null) || { echo "TARGET_REPO is not a Git repository — NOT launching"; exit 1; }
+hive_common=$(git -C /Transpara/transpara-ai/repos/hive rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && hive_common=$(realpath -e "$hive_common" 2>/dev/null) || { echo "canonical Hive checkout unavailable — NOT launching"; exit 1; }
+[ "$target_common" != "$hive_common" ] || { echo "TARGET_REPO is Hive or one of its worktrees — NOT launching"; exit 1; }
+[ -z "$(git -C "$TARGET_REPO" status --porcelain)" ] || { echo "TARGET_REPO is dirty — NOT launching"; exit 1; }
+echo "Operate target: $TARGET_REPO at $(git -C "$TARGET_REPO" rev-parse HEAD)"
+
 LOVYOU_API_KEY= go run ./cmd/hive civilization run \
   --human Michael \
   --idea "..." \
+  --repo "$TARGET_REPO" \
   --store postgres://hive:hive@localhost:5432/hive
 
 LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
   --human Michael \
+  --repo "$TARGET_REPO" \
   --store postgres://hive:hive@localhost:5432/hive
 
-LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
-LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run --api http://localhost:8082 --repo .
-LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
+LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo "$TARGET_REPO"
+LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run --api http://localhost:8082 --repo "$TARGET_REPO"
+LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --repo "$TARGET_REPO" --topic "..."
 )
 ```
 
@@ -410,6 +424,7 @@ Flag reminders:
 - `civilization daemon`: same except the seed flag is `--seed-spec`; there is no `--idea` or `--spec`.
 - Warning: `--spec`/`--seed-spec` are NOT local-only seeds — both call the remote ingest path before the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`); a blank credential fails after possible bootstrap activity and a real one writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); these flags need explicit ingest/production authorization plus a deliberate `--api`/credential pairing.
 - `pipeline` and `role`: `--api`, `--space`, `--repo`, `--agent-id`; no `--human` or `--idea`.
+- `council`: `--api`, `--space`, `--repo`, `--topic`, `--catalog`; no `--catalog-reload-interval`.
 - Always confirm with `go run ./cmd/hive <verb> --help` when composing a new invocation.
 
 ## Operator Actions
@@ -455,10 +470,10 @@ This removes telemetry snapshots but keeps the event chain. Use only when explic
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive 2>/dev/null || true
 sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 
 docker exec hive-postgres-1 psql -U hive -d hive -c "
   DELETE FROM telemetry_agent_snapshots;
@@ -473,9 +488,9 @@ This destroys the event chain. Do not run it unless the user explicitly asks for
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done
 sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # Manual APIs also write the chain — sweep them, then GATE the reset on
 # quiescence. The broad argv pattern is safe here: a false match only ABORTS.

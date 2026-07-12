@@ -7,6 +7,8 @@ description: "Manage the transpara-ai hive stack lifecycle on nucbuntu — the s
 
 Start, stop, restart, and inspect the transpara-ai hive stack on **nucbuntu**. The APIs run as **systemd `--user` services** over a Dockerized Postgres; the multi-agent runtime is started on demand.
 
+Infrastructure and runtime are separate intents: `hive up` starts only Postgres and the API services. Never launch the Civilization runtime unless the user separately requests it. Every runtime verb must receive an explicit, validated `--repo` target because its default is the current directory and this runbook executes from the canonical Hive checkout.
+
 > On-prem / private (no public URLs). The Claude CLI path needs no key; the default mixed catalog also routes some roles to OpenRouter — see **Authentication**.
 
 ## Hive Help
@@ -70,43 +72,14 @@ else
   echo "postgres not ready — NOT starting services; fix postgres first"
 fi
 
-# 3. (Optional) the multi-agent runtime — on demand, foreground for visibility.
-#    GATED on Postgres readiness like step 2: launching the daemon with a Postgres
-#    store while the DB is down only produces a crashing runtime.
-#    DEFAULT is human-in-the-loop: authority requests + role proposals BLOCK for approval.
-#    catalog-mixed.yaml routes reviewer/strategist to OpenRouter → needs OPENROUTER_API_KEY
-#    This omits --catalog → built-in CLAUDE-only defaults (Max plan, no provider keys);
-#    add `--catalog ./catalog-mixed.yaml --catalog-reload-interval 1m` ONLY if a local
-#    Ollama model is running AND OPENROUTER_API_KEY is set.
-if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
-  # && chain: a missing checkout must not launch a runtime from the caller's directory
-  cd /Transpara/transpara-ai/repos/hive &&
-  LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
-      --human Michael \
-      --store postgres://hive:hive@localhost:5432/hive
-else
-  echo "postgres not ready — NOT launching the runtime"
-fi
-#   Full autonomy (auto-approve everything) is an EXPLICIT opt-in: add
-#       --approve-requests --approve-roles
-#   The packaged unit `systemctl --user start hive` runs in FULL-AUTONOMY mode —
-#   its ExecStart already includes --approve-requests --approve-roles.
-#   ⚠ the runtime's webhook binds :8081 on ALL interfaces with an
-#   UNAUTHENTICATED event-writing POST /event (bind is not flag-configurable);
-#   launching the runtime on a host reachable by untrusted peers needs the
-#   user's explicit acknowledgment of that exposure or host-level firewalling.
-#   ⚠ civilization run/daemon default their Site API to https://transpara.ai:
-#   an ambient LOVYOU_API_KEY enables a reconciliation loop + task-completion
-#   mirror posts against PRODUCTION. The blank LOVYOU_API_KEY= prefix disables
-#   that client for local runs; production crossing needs explicit user
-#   authorization. hive.service start/restart is a PROTECTED ACTION — see the
-#   human gate below; do not attempt automated unit forensics.
 ```
+
+`Hive Up` is infrastructure-only. Runtime startup, full-autonomy flags, webhook exposure, target-repository selection, and Site credential posture are separate protected decisions handled under **On-demand Runtime** below.
 
 **hive.service start/restart is a protected action — a human gate, not automated forensics.** A shell runbook cannot reliably prove a systemd unit safe: environment sources, ExecStart wrappers, exec phases, and variable expansion all provide places for authority to hide, and a mechanical verifier belongs in a tested Go subcommand (tracked as separate work), not here. Before `systemctl --user start|restart hive`:
 
 1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `LOVYOU_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
-2. For a local-only runtime, do NOT start the unit at all — use the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form above, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
+2. For a local-only runtime, do NOT start the unit at all — use the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form under **On-demand Runtime** below, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
 3. After any approved start, confirm the running process matches the posture the user approved (probe below) — verification only; it cannot undo the first reconciliation cycle.
 
 Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved (this variable's value only; it is a bearer credential, so only presence/emptiness is judged and the value itself is never printed):
@@ -138,11 +111,11 @@ systemctl --user stop hive 2>/dev/null                    # if started as the un
 # the port check below can read clear moments before a full-autonomy relaunch.
 hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null || true)
 case "$hive_state" in inactive|failed) : ;; *) echo "hive.service is still ${hive_state:-unreadable} after stop — a queued relaunch may fire; re-run: systemctl --user stop hive, then re-check";; esac
-# Identity-verified kills: comm must be hive|go, so a stray argv match (an
-# editor, grep, or agent session mentioning the pattern) is never signaled.
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done   # graceful; matches `go run` parent and compiled child
+# Identity-verified kills: comm must be exact/versioned Hive or the go-run
+# driver, so a stray argv match is never signaled.
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done   # argv verb + comm identity; includes versioned binaries such as hive-test001-*
 sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done   # sweep any survivor
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done   # sweep any survivor
 systemctl --user stop hive-ops-api work-server
 # Stray MANUAL services are the OPERATOR's to stop — they know what they
 # launched, and a name-only kill could hit an unrelated binary that merely
@@ -197,7 +170,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
     echo "(credential + autonomy postures). To cancel a queued auto-restart after approval:"
     echo "  systemctl --user stop hive   # then re-read ActiveState to CONFIRM before relying on it"
     [ "$restart_status" -eq 0 ] && restart_status=2   # the requested restart is INCOMPLETE pending the human decision
-  elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # comm-verified like the kill loops
+  elif hive_pids=$(pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then   # argv verb + comm identity; includes versioned binaries
     # Do NOT terminate yet — killing first would lose the workload and its
     # governance flags with nothing to relaunch. Get the user's original
     # command (argv is never echoed: it may contain sensitive --idea text or
@@ -232,7 +205,7 @@ echo "=== hive runtime (systemd unit OR manual go-run) ==="
 hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)   # merged-property read: is-active reads `activating (auto-restart)` as stopped
 if [ "$hive_state" = "active" ]; then echo "hive.service: active"
 elif [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then echo "hive.service: ${hive_state:-unreadable} — pending auto-restart or transition; treat as a MANAGED runtime"
-elif hive_pids=$(pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then echo "manual runtime: RUNNING"   # comm-verified
+elif hive_pids=$(pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) echo "$pid";; esac; done) && [ -n "$hive_pids" ]; then echo "manual runtime: RUNNING"   # argv verb + comm identity; includes versioned binaries
 else echo "runtime: stopped"; fi
 ss -tlnp 2>/dev/null | grep -q ':8081 ' && echo "hive webhook :8081: listening" || echo "hive webhook :8081: not listening"
 
@@ -348,13 +321,25 @@ Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `
 # from the caller's directory — a stale checkout would launch the wrong
 # runtime against the live database.
 ( cd /Transpara/transpara-ai/repos/hive || exit
+
+# Every runtime verb defaults --repo to the current directory. Because this
+# block runs from the canonical Hive checkout, omitting --repo would make Hive
+# itself the Operate target. Require an explicit clean target and reject every
+# worktree backed by Hive's own git common directory.
+TARGET_REPO=/absolute/path/to/clean-disposable-target
+target_common=$(git -C "$TARGET_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && target_common=$(realpath -e "$target_common" 2>/dev/null) || { echo "TARGET_REPO is not a Git repository — NOT launching"; exit 1; }
+hive_common=$(git -C /Transpara/transpara-ai/repos/hive rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && hive_common=$(realpath -e "$hive_common" 2>/dev/null) || { echo "canonical Hive checkout unavailable — NOT launching"; exit 1; }
+[ "$target_common" != "$hive_common" ] || { echo "TARGET_REPO is Hive or one of its worktrees — NOT launching"; exit 1; }
+[ -z "$(git -C "$TARGET_REPO" status --porcelain)" ] || { echo "TARGET_REPO is dirty — NOT launching"; exit 1; }
+echo "Operate target: $TARGET_REPO at $(git -C "$TARGET_REPO" rev-parse HEAD)"
+
 LOVYOU_API_KEY= go run ./cmd/hive civilization run    --human Michael --idea "…" \
-       --store postgres://hive:hive@localhost:5432/hive                      # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
+       --repo "$TARGET_REPO" --store postgres://hive:hive@localhost:5432/hive   # one-shot multi-agent (--store required to persist; omit only for a throwaway in-memory run)
 LOVYOU_API_KEY= go run ./cmd/hive civilization daemon --human Michael \
-       --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
-LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
-LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run     --api http://localhost:8082 --repo .   # single agent
-LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
+       --repo "$TARGET_REPO" --store postgres://hive:hive@localhost:5432/hive   # long-running (add --approve-requests --approve-roles for full autonomy)
+LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo "$TARGET_REPO"   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
+LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run     --api http://localhost:8082 --repo "$TARGET_REPO"   # single agent
+LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --repo "$TARGET_REPO" --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 # ⚠ council ALWAYS attempts to POST up to 2000 chars of the deliberation report
 #   to its --api endpoint (api.New never returns nil — an empty/wrong key merely
 #   fails auth AFTER the report has been transmitted). --api DEFAULTS to
@@ -367,7 +352,7 @@ go run ./cmd/hive ingest --priority normal '<file.md>'   # registered-repo API f
 )
 ```
 
-Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). ⚠ `--spec`/`--seed-spec` are NOT local-only seeds: both call the remote ingest path BEFORE the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`) — with the blank credential the command fails after possible bootstrap activity, and with a credential it writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); `--spec`/`--seed-spec` need explicit ingest/production authorization plus a deliberate `--api`/credential pairing. `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). Always confirm with `go run ./cmd/hive <verb> --help`.
+Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). ⚠ `--spec`/`--seed-spec` are NOT local-only seeds: both call the remote ingest path BEFORE the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`) — with the blank credential the command fails after possible bootstrap activity, and with a credential it writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); `--spec`/`--seed-spec` need explicit ingest/production authorization plus a deliberate `--api`/credential pairing. `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). `council`: `--api`, `--space`, `--repo`, `--topic`, and `--catalog` (no `--catalog-reload-interval`). Always confirm with `go run ./cmd/hive <verb> --help`.
 
 ## Operator Actions
 
@@ -397,9 +382,9 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive 2>/dev/null; sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
@@ -413,9 +398,9 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done   # kill any manual go-run runtime first (comm-verified)
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -INT "$pid" 2>/dev/null;; esac; done   # argv verb + comm identity; includes versioned binaries
 sleep 3
-pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
+pgrep -f '(^|/)[^ ]*[h]ive[^ ]* (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|hive-*|hive_*|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
 # No name-based kills here: our units were stopped above, and ANY other
 # client still attached shows up in the database refusal list below for the
