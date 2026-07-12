@@ -404,7 +404,13 @@ if [ "$conns" = "0" ]; then
   # The && chain is load-bearing: if the repo path is missing or unmounted, a
   # bare cd would leave the shell in the CALLER's directory and `docker compose
   # down -v` would destroy an unrelated project's volumes.
-  cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
+  # Postgres is left DOWN deliberately: a zero-session snapshot does not
+  # prove client processes are gone, and a survivor reconnecting to a
+  # freshly recreated database would find it unmigrated (clients migrate at
+  # THEIR startup). Recovery is the normal Hive Up flow, run explicitly
+  # after any remaining clients are stopped or deliberately restarted.
+  cd /Transpara/transpara-ai/repos/hive && docker compose down -v &&
+    echo "cluster volume destroyed; postgres left DOWN — stop/restart clients, then bring the stack back with the Hive Up flow"
 else
   echo "postgres reports ${conns:-unreadable} live client connection(s) — NOT resetting; stop these first:"
   docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
