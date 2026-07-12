@@ -162,7 +162,8 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 # EVERYTHING below is gated on Postgres readiness — restarting services or the
 # runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
-  systemctl --user restart work-server hive-ops-api
+  systemctl --user restart work-server hive-ops-api || echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"
+  systemctl --user is-active work-server hive-ops-api || echo "^ a service is NOT active after restart — do not report success"
   # The hive runtime is on-demand (unit disabled). `restart` would START the disabled
   # unit and launch the daemon unexpectedly — so bounce it ONLY if already running.
   # Explicit if/else so a real restart FAILURE surfaces (not masked as "not running"):
@@ -229,7 +230,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
-( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status )
+( set +x 2>/dev/null; printf 'header = "Authorization: Bearer %s"\n' "${WORK_API_KEY:-}" | curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -K - http://localhost:8080/telemetry/status )   # bearer via stdin config: argv is world-readable in /proc
 )
 ```
 
@@ -279,8 +280,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
 
 ```bash
-( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
-     http://localhost:8085/api/hive/operator-projection | jq . )   # jq INSIDE the subshell: the relaxed pipefail must cover the whole pipeline
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; printf 'header = "Authorization: Bearer %s"\n' "${HIVE_OPS_API_KEY:-dev}" | curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -K - http://localhost:8085/api/hive/operator-projection | jq . )   # bearer via stdin config (argv is world-readable in /proc); jq inside the relaxed subshell
 ```
 
 ### work-server — `http://localhost:8080` (Bearer `WORK_API_KEY`)
@@ -298,7 +298,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq . )
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; printf 'header = "Authorization: Bearer %s"\n' "${WORK_API_KEY:-}" | curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -K - http://localhost:8080/telemetry/status | jq . )   # bearer via stdin config (argv is world-readable in /proc)
 ```
 
 ## Model Catalog
@@ -437,7 +437,7 @@ fi
 |---|---|---|
 | Service `activating (auto-restart)` | Postgres down — DB connection fails on start | inspect `journalctl --user -u hive-ops-api`; propose starting Postgres and wait for explicit user confirmation |
 | `curl :8085` / `:8080` connection refused | that service not running / crash-looping | `systemctl --user status <svc>`; see crash-loop diagnosis |
-| `401 unauthorized` from `:8085` | missing/wrong bearer | add `-H "Authorization: Bearer $HIVE_OPS_API_KEY"` (default `dev`) |
+| `401 unauthorized` from `:8085` | missing/wrong bearer | send the bearer via stdin config as in the probe examples (never in argv) |
 | "Invalid API key" on all agents | `ANTHROPIC_API_KEY`/`HIVE_ANTHROPIC_API_KEY` set | `unset` them; remove from shell profile |
 | All agents `$0.000` cost | runtime just started, no iterations yet | wait 2–3 min |
 | Port `:8080` conflict on start | another process bound it | `lsof -i :8080`; stop the conflict |

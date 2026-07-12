@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.49.0
+version: 0.50.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -538,6 +538,19 @@ the new head surfaced three operational defects, repaired in both dialects:
   unreadable-state branch never ran; both dialects' Restart fences now open
   with the same contract subshell as the other flows, and the full-fence
   `bash -n` audit stays at zero failures.
+
+### Round-19 fresh-head repairs (v0.50.0)
+
+- **ci — bearers never enter argv.** Process arguments are world-readable in
+  `/proc` on default Linux, so `-H "Authorization: Bearer $KEY"` exposed the
+  bearer to any local user for the request's lifetime; every authenticated
+  curl now passes the header through a curl config on STDIN (`-K -`), and
+  the troubleshooting prose teaches the same idiom. Both dialects, zero
+  argv bearers remaining (grep-verified).
+- **cj — restart mutations propagate failure.** Under the relaxed block
+  contract a failed `systemctl restart` continued silently and the block
+  exited 0; the mutating commands now carry explicit failure arms and a
+  resulting-state report so automation can never observe a false success.
 
 ## Non-Goals
 
