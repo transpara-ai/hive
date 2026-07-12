@@ -168,6 +168,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
 else
   echo "postgres not ready — NOT starting services; fix postgres first"
 fi
+)
 ```
 
 Do not start the multi-agent runtime as part of ordinary `hive up` unless the user explicitly asks for runtime/daemon execution.
@@ -177,6 +178,7 @@ Do not start the multi-agent runtime as part of ordinary `hive up` unless the us
 Stop the runtime first, then API services. Do not stop Postgres unless the user asks for full compose down.
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 systemctl --user stop hive 2>/dev/null || true
 # Identity-verified kills: comm must be hive|go, so a stray argv match (an
 # editor, grep, or agent session mentioning the pattern) is never signaled.
@@ -195,6 +197,7 @@ for name in work-server hive-ops-api; do
 done
 
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound; inspect before clearing it" || echo "ports clear"
+)
 ```
 
 Full Postgres stop, only when explicitly requested:
@@ -299,8 +302,8 @@ The probe reads this one variable's value (an operator actor id, not a secret) b
 Read-only probes:
 
 ```bash
-( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection ) | jq .
-( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status ) | jq .
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection | jq . )   # jq INSIDE the subshell: the relaxed pipefail must cover the whole pipeline
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status | jq . )
 ```
 
 ## Model Catalog
@@ -436,6 +439,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 This removes telemetry snapshots but keeps the event chain. Use only when explicitly requested.
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive 2>/dev/null || true
 sleep 3
@@ -445,6 +449,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
   DELETE FROM telemetry_agent_snapshots;
   DELETE FROM telemetry_hive_snapshots;
   DELETE FROM telemetry_event_stream;"
+)
 ```
 
 ## Nuclear Option
@@ -452,6 +457,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 This destroys the event chain. Do not run it unless the user explicitly asks for a destructive database reset and acknowledges that events, tasks, and audit trail are erased.
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 sleep 3
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
@@ -486,6 +492,7 @@ else
   echo "postgres reports ${conns:-unreadable} live client connection(s) — NOT resetting; stop these first:"
   docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
 fi
+)
 ```
 
 ## Common Problems

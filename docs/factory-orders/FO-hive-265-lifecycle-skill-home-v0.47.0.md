@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.46.0
+version: 0.47.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -495,6 +495,21 @@ the new head surfaced three operational defects, repaired in both dialects:
   check converts its expected no-match into an explicit success message
   (`|| echo "clean — …"`); and the standalone authenticated-probe subshells
   relax errexit/pipefail alongside the existing xtrace guard. Both dialects.
+
+### Round-16 fresh-head repairs (v0.47.0)
+
+- **cd — the block contract extended to the mutating flows.** A no-match
+  `pgrep` (nothing running — the normal case) aborted Hive Down mid-way in
+  strict shells, leaving services half-stopped; Clean Slate and the Nuclear
+  Option shared the pattern. All three now open with the same explicit
+  contract subshell as the Status block. Stale comment generations in the
+  nuclear block were pruned in the same pass, and every contract fence was
+  audited for balanced closers (an earlier misplaced closer on the Restart
+  fence was found and corrected during that audit).
+- **ce — `jq` moved inside the probe subshells.** The relaxed pipefail lived
+  in the left subshell while the outer strict shell evaluated `( … ) | jq`,
+  so the protection was ineffective; the pipeline now runs entirely inside
+  the relaxed subshell.
 
 ## Non-Goals
 

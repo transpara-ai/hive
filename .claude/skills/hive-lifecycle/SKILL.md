@@ -130,6 +130,7 @@ fi
 ## Hive Down
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 # Stop the runtime first, then the API services.
 systemctl --user stop hive 2>/dev/null                    # if started as the unit
 # Identity-verified kills: comm must be hive|go, so a stray argv match (an
@@ -146,6 +147,7 @@ for name in work-server hive-ops-api; do
   pgrep -x "$name" | while read -r pid; do printf 'manual %s candidate: pid=%s exe=%s\n' "$name" "$pid" "$(readlink /proc/"$pid"/exe 2>/dev/null || echo unreadable)"; done
 done
 lsof -i :8080 -i :8081 -i :8085 2>/dev/null && echo "^ a port is still bound — inspect (may be non-hive) and clear it manually" || echo "ports clear"
+)
 # Postgres usually stays up (data persists). Full stop:
 #   cd /Transpara/transpara-ai/repos/hive && docker compose down
 ```
@@ -276,7 +278,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 
 ```bash
 ( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
-     http://localhost:8085/api/hive/operator-projection ) | jq .
+     http://localhost:8085/api/hive/operator-projection | jq . )   # jq INSIDE the subshell: the relaxed pipefail must cover the whole pipeline
 ```
 
 ### work-server — `http://localhost:8080` (Bearer `WORK_API_KEY`)
@@ -294,7 +296,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status ) | jq .
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq . )
 ```
 
 ## Model Catalog
@@ -379,6 +381,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose logs -f postgres
 ## Clean Slate (nuke telemetry, keep the chain)
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive 2>/dev/null; sleep 3
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
@@ -386,6 +389,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
     DELETE FROM telemetry_agent_snapshots;
     DELETE FROM telemetry_hive_snapshots;
     DELETE FROM telemetry_event_stream;"
+)
 ```
 
 ## Nuclear Option (destroys the event chain)
@@ -393,19 +397,14 @@ docker exec hive-postgres-1 psql -U hive -d hive -c "
 **WARNING: erases all events / tasks / audit trail. Only for a corrupted chain.**
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done   # kill any manual go-run runtime first (comm-verified)
 sleep 3
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -KILL "$pid" 2>/dev/null;; esac; done
 systemctl --user stop hive hive-ops-api work-server 2>/dev/null
-# Manual APIs also write the chain — sweep them, then GATE the reset on
-# quiescence. The broad argv pattern is safe here: a false match only ABORTS.
-# Name-exact (comm) kills cover go-run children AND direct binaries; the
-# go-run driver exits with its child. No argv matching: a `go test ./cmd/...`
-# or `go build ./cmd/...` job must never be killed by a lifecycle sweep.
 # No name-based kills here: our units were stopped above, and ANY other
 # client still attached shows up in the database refusal list below for the
-# operator to stop.
-# Quiescence is adjudicated by the DATABASE, not by enumerating client
+# operator to stop. Quiescence is adjudicated by the DATABASE, not by enumerating client
 # process names — any enumeration is incomplete (localapi, social-server,
 # psql, future services), and killing by bare name could hit an instance
 # serving a DIFFERENT database. `down -v` destroys the whole cluster volume,
@@ -427,6 +426,7 @@ else
   echo "postgres reports ${conns:-unreadable} live client connection(s) — NOT resetting; stop these first:"
   docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
 fi
+)
 ```
 
 ## Common Problems
