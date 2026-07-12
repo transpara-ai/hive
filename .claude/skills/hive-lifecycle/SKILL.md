@@ -325,12 +325,15 @@ Only `catalog-mixed.yaml` is checked into `repos/hive` (a missing, uncommitted `
 # Every runtime verb defaults --repo to the current directory. Because this
 # block runs from the canonical Hive checkout, omitting --repo would make Hive
 # itself the Operate target. Require an explicit clean target and reject every
-# worktree backed by Hive's own git common directory.
+# worktree backed by Hive's own git common directory. An independent full clone
+# has a different common directory, so choose a disposable non-Hive project;
+# the common-dir guard protects the canonical checkout and its worktrees.
 TARGET_REPO=/absolute/path/to/clean-disposable-target
 target_common=$(git -C "$TARGET_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && target_common=$(realpath -e "$target_common" 2>/dev/null) || { echo "TARGET_REPO is not a Git repository — NOT launching"; exit 1; }
 hive_common=$(git -C /Transpara/transpara-ai/repos/hive rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && hive_common=$(realpath -e "$hive_common" 2>/dev/null) || { echo "canonical Hive checkout unavailable — NOT launching"; exit 1; }
 [ "$target_common" != "$hive_common" ] || { echo "TARGET_REPO is Hive or one of its worktrees — NOT launching"; exit 1; }
-[ -z "$(git -C "$TARGET_REPO" status --porcelain)" ] || { echo "TARGET_REPO is dirty — NOT launching"; exit 1; }
+target_status=$(git -C "$TARGET_REPO" status --porcelain 2>/dev/null) || { echo "TARGET_REPO status is unreadable — NOT launching"; exit 1; }
+[ -z "$target_status" ] || { echo "TARGET_REPO is dirty — NOT launching"; exit 1; }
 echo "Operate target: $TARGET_REPO at $(git -C "$TARGET_REPO" rev-parse HEAD)"
 
 LOVYOU_API_KEY= go run ./cmd/hive civilization run    --human Michael --idea "…" \
@@ -355,6 +358,8 @@ go run ./cmd/hive ingest --priority normal '<file.md>'   # registered-repo API f
 The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated event-writing `POST /event` (the bind address is not flag-configurable); launching the runtime on a host reachable by untrusted peers requires the user's explicit acknowledgment of that exposure or host-level firewalling.
 
 `civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
+
+The default runtime posture is human-in-the-loop: authority requests and role proposals wait for approval. Full autonomy is an explicit opt-in with `--approve-requests --approve-roles`; do not add those flags without the user's explicit current-turn authorization.
 
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). ⚠ `--spec`/`--seed-spec` are NOT local-only seeds: both call the remote ingest path BEFORE the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`) — with the blank credential the command fails after possible bootstrap activity, and with a credential it writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); `--spec`/`--seed-spec` need explicit ingest/production authorization plus a deliberate `--api`/credential pairing. `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). `council`: `--api`, `--space`, `--repo`, `--topic`, and `--catalog` (no `--catalog-reload-interval`). Always confirm with `go run ./cmd/hive <verb> --help`.
 

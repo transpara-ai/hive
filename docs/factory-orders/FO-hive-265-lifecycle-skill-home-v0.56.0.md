@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.55.0
+version: 0.56.0
 created: 2026-07-11
 updated: 2026-07-12
 owner: Michael Saucier
@@ -42,9 +42,9 @@ authority: repository documentation/skill-source preservation only; no Hive star
   the local port cited above. Both dialects diverge from their seeds ONLY by
   the enumerated R7 safety repairs PLUS the fresh-head CFAR repair set
   (bf–cf and successors, each enumerated in the versioned repair sections
-  below) PLUS the v0.54.0 post-merge safety repair section and v0.55.0 draft
-  CFAR repair section; any content delta outside those enumerated sets is a
-  defect. No
+  below) PLUS the v0.54.0 post-merge safety, v0.55.0 draft CFAR, and v0.56.0
+  residual-repair sections; any content delta outside those enumerated sets is
+  a defect. No
   dialect content exists twice in the repo. (v0.49.0 truth-up: without this
   clause the Factory Order rejected its own delivered files.)
   (v0.2.0: revised from committing a second Claude copy after IAR found the
@@ -649,13 +649,31 @@ the new head surfaced three operational defects, repaired in both dialects:
   process. The target guard assumes Git 2.31 or newer for `--path-format`, which
   the nucbuntu deployment satisfies; an older Git fails closed before launch.
 
+## Repaired-Head CFAR Residual Repairs (v0.56.0)
+
+- **cw — target cleanliness fails closed on probe error.** A bare or unreadable
+  Git target can satisfy `rev-parse --git-common-dir` while `git status` fails
+  with empty stdout. The former substitution-only check mistook that output for
+  clean. Both dialects now require `git status` itself to succeed before testing
+  its captured output, so dirty and unreadable targets are distinct stop paths.
+- **cx — the remaining target boundary and autonomy posture are explicit.** A
+  separate full Hive clone has its own git common directory and therefore is
+  not mechanically identical to the canonical checkout; the runbook now tells
+  operators to choose a disposable non-Hive project. The Claude dialect also
+  restores the prominent human-in-the-loop default and current-turn gate on
+  full-autonomy flags beside its runtime examples.
+- **cy — the dual process gate has class fixtures.** Positive cases now cover
+  `factory`, `council`, `pipeline`, and `--human`, while the negative set proves
+  that `hive-ops-api` name-prefix membership alone is insufficient without a
+  supported runtime verb.
+
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
 - No changes to the skill's commands or semantics beyond the reviewed safety
   repairs enumerated in R7, the versioned fresh-head repair sections, and the
-  v0.54.0 post-merge plus v0.55.0 draft CFAR repair sections — every other
-  content diff from the cited sources is a defect.
+  v0.54.0 post-merge, v0.55.0 draft CFAR, and v0.56.0 residual-repair sections
+  — every other content diff from the cited sources is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 

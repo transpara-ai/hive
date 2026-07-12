@@ -37,7 +37,7 @@ for skill in "$claude_skill" "$codex_skill"; do
   repo_arg_count=$(grep -Fc -- '--repo "$TARGET_REPO"' "$skill" || true)
   [ "$repo_arg_count" -ge 5 ] || fail "expected explicit target on civilization/pipeline/role/council examples in $skill (found $repo_arg_count)"
   grep -Fq 'rev-parse --path-format=absolute --git-common-dir' "$skill" || fail "Hive worktree rejection missing from $skill"
-  grep -Fq 'status --porcelain' "$skill" || fail "clean-target check missing from $skill"
+  grep -Fq 'target_status=$(git -C "$TARGET_REPO" status --porcelain 2>/dev/null) ||' "$skill" || fail "fail-closed target-status check missing from $skill"
   if grep -Fq -- '--repo .' "$skill"; then
     fail "current-directory Operate target remains in $skill"
   fi
@@ -60,14 +60,19 @@ for argv in \
   'go run ./cmd/hive civilization run' \
   '/tmp/go-build123/exe/hive civilization daemon' \
   '/tmp/hive-test001-67-b928942 civilization run' \
-  '/tmp/hive_debug role reviewer run'; do
+  '/tmp/hive_debug role reviewer run' \
+  '/tmp/hive-test factory scan' \
+  '/tmp/hive-test council topic' \
+  '/tmp/hive-test pipeline run' \
+  '/tmp/hive-test --human Michael'; do
   grep -Eq "$runtime_pattern" <<<"$argv" || fail "runtime predicate missed: $argv"
 done
 
 for argv in \
   'codex reviewing text hive civilization run' \
   '/usr/bin/hivemind status' \
-  'grep hive civilization'; do
+  'grep hive civilization' \
+  '/usr/bin/hive-ops-api --port 8085'; do
   if grep -Eq "$runtime_pattern" <<<"$argv"; then
     fail "runtime predicate false-positive: $argv"
   fi
