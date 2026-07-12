@@ -94,4 +94,13 @@ for comm in codex grep hivemind; do
   fi
 done
 
+# Council was the only example newly given an explicit target in this repair.
+# Prove both the public CLI surface and the source handoff: accepting --repo is
+# insufficient if the parsed value is discarded before runCouncilCmd.
+council_help=$(go run -buildvcs=false ./cmd/hive council --help 2>&1) || fail "council --help failed"
+grep -Eq '^[[:space:]]+-repo string$' <<<"$council_help" || fail "council --help does not expose -repo"
+grep -Eq '^[[:space:]]+-space string$' <<<"$council_help" || fail "council --help does not expose -space"
+grep -Fq 'repo := fs.Lookup("repo").Value.String()' "$repo_root/cmd/hive/router.go" || fail "council does not read the parsed repo flag"
+grep -Fq 'return runCouncilCmd(space, apiBase, repo, budget, topic, catalog)' "$repo_root/cmd/hive/router.go" || fail "council does not pass repo into runCouncilCmd"
+
 printf 'hive-lifecycle skill invariants: PASS\n'

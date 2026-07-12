@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.57.0
+version: 0.58.0
 created: 2026-07-11
 updated: 2026-07-12
 owner: Michael Saucier
@@ -43,8 +43,8 @@ authority: repository documentation/skill-source preservation only; no Hive star
   the enumerated R7 safety repairs PLUS the fresh-head CFAR repair set
   (bf–cf and successors, each enumerated in the versioned repair sections
   below) PLUS the v0.54.0 post-merge safety, v0.55.0 draft CFAR, v0.56.0
-  residual-repair, and v0.57.0 final-evidence sections; any content delta
-  outside those enumerated sets is a defect. No
+  residual-repair, v0.57.0 final-evidence, and v0.58.0 executable-proof
+  sections; any content delta outside those enumerated sets is a defect. No
   dialect content exists twice in the repo. (v0.49.0 truth-up: without this
   clause the Factory Order rejected its own delivered files.)
   (v0.2.0: revised from committing a second Claude copy after IAR found the
@@ -677,14 +677,24 @@ the new head surfaced three operational defects, repaired in both dialects:
   contradictory “No argv matching” claim, while preserving the rule against
   bare-name API kills.
 
+## Executable Council Target Proof (v0.58.0)
+
+- **da — council target support is CI evidence, not an assertion.** The
+  invariant runs the read-only `council --help` path with VCS stamping disabled
+  for linked-worktree portability and requires exact `-repo` and `-space`
+  entries. It also binds the public flag surface to source use by requiring
+  `cmd/hive/router.go` to read the parsed `repo` value and pass it into
+  `runCouncilCmd`. This clears the final CFAR evidence condition without
+  launching council, contacting a model, or performing a lifecycle mutation.
+
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
 - No changes to the skill's commands or semantics beyond the reviewed safety
   repairs enumerated in R7, the versioned fresh-head repair sections, and the
   v0.54.0 post-merge, v0.55.0 draft CFAR, v0.56.0 residual-repair, and v0.57.0
-  final-evidence sections — every other content diff from the cited sources is
-  a defect.
+  final-evidence plus v0.58.0 executable-proof sections — every other content
+  diff from the cited sources is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 
