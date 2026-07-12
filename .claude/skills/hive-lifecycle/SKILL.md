@@ -352,6 +352,10 @@ go run ./cmd/hive ingest --priority normal '<file.md>'   # registered-repo API f
 )
 ```
 
+The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated event-writing `POST /event` (the bind address is not flag-configurable); launching the runtime on a host reachable by untrusted peers requires the user's explicit acknowledgment of that exposure or host-level firewalling.
+
+`civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
+
 Flags are **per-verb**. `civilization run`: `--human` (required), `--idea`/`--spec` (seed), `--store` (or `DATABASE_URL`), `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`. `civilization daemon`: the same **except** its seed flag is `--seed-spec` (there is no `--idea`/`--spec`). ⚠ `--spec`/`--seed-spec` are NOT local-only seeds: both call the remote ingest path BEFORE the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`) — with the blank credential the command fails after possible bootstrap activity, and with a credential it writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); `--spec`/`--seed-spec` need explicit ingest/production authorization plus a deliberate `--api`/credential pairing. `pipeline`/`role`: `--api`, `--space`, `--repo`, `--agent-id` (no `--human`/`--idea`; for the local stack pass `--api http://localhost:8082`). `council`: `--api`, `--space`, `--repo`, `--topic`, and `--catalog` (no `--catalog-reload-interval`). Always confirm with `go run ./cmd/hive <verb> --help`.
 
 ## Operator Actions

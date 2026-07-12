@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.54.0
+version: 0.55.0
 created: 2026-07-11
 updated: 2026-07-12
 owner: Michael Saucier
@@ -42,8 +42,9 @@ authority: repository documentation/skill-source preservation only; no Hive star
   the local port cited above. Both dialects diverge from their seeds ONLY by
   the enumerated R7 safety repairs PLUS the fresh-head CFAR repair set
   (bf–cf and successors, each enumerated in the versioned repair sections
-  below) PLUS the v0.54.0 post-merge safety repair section; any content delta
-  outside those enumerated sets is a defect. No
+  below) PLUS the v0.54.0 post-merge safety repair section and v0.55.0 draft
+  CFAR repair section; any content delta outside those enumerated sets is a
+  defect. No
   dialect content exists twice in the repo. (v0.49.0 truth-up: without this
   clause the Factory Order rejected its own delivered files.)
   (v0.2.0: revised from committing a second Claude copy after IAR found the
@@ -627,13 +628,34 @@ the new head surfaced three operational defects, repaired in both dialects:
   proves the Claude Hive Up fence contains no runtime launch. `make verify`
   runs this guard before the Go build/test/vet gates.
 
+## Draft CFAR Repairs (v0.55.0)
+
+- **ct — runtime exposure warnings remain where the pointer promises.** The
+  v0.54.0 Claude Up repair removed the daemon command and its attached
+  warnings, then pointed operators to On-demand Runtime for webhook exposure
+  and Site credential posture without actually moving those warnings. The
+  Claude On-demand Runtime section now states the all-interface unauthenticated
+  `:8081` webhook and the default production Site API/ambient
+  `LOVYOU_API_KEY` risk beside the surviving runtime examples, matching the
+  Codex dialect.
+- **cu — infrastructure-only and failure diagnostics are symmetric.** The
+  invariant now checks both Claude and Codex Hive Up fences for runtime launch.
+  Its explicit target-count diagnostic also survives the zero-match case under
+  `set -e` instead of exiting opaquely from `grep -c`.
+- **cv — bounded predicate widening and host compatibility are explicit.**
+  Accepting `hive-*`/`hive_*` widens the name surface intentionally so the
+  actual Test 001 binary is controllable; the simultaneous supported-verb argv
+  predicate remains mandatory, so a name alone is never enough to signal a
+  process. The target guard assumes Git 2.31 or newer for `--path-format`, which
+  the nucbuntu deployment satisfies; an older Git fails closed before launch.
+
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
 - No changes to the skill's commands or semantics beyond the reviewed safety
   repairs enumerated in R7, the versioned fresh-head repair sections, and the
-  v0.54.0 post-merge repair section — every other content diff from the cited
-  sources is a defect.
+  v0.54.0 post-merge plus v0.55.0 draft CFAR repair sections — every other
+  content diff from the cited sources is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 

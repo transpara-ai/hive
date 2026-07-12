@@ -34,7 +34,7 @@ for skill in "$claude_skill" "$codex_skill"; do
   grep -Fq "$runtime_pattern" "$skill" || fail "version-aware runtime predicate missing from $skill"
   grep -Fq 'hive|hive-*|hive_*|go)' "$skill" || fail "version-aware comm allowlist missing from $skill"
 
-  repo_arg_count=$(grep -Fc -- '--repo "$TARGET_REPO"' "$skill")
+  repo_arg_count=$(grep -Fc -- '--repo "$TARGET_REPO"' "$skill" || true)
   [ "$repo_arg_count" -ge 5 ] || fail "expected explicit target on civilization/pipeline/role/council examples in $skill (found $repo_arg_count)"
   grep -Fq 'rev-parse --path-format=absolute --git-common-dir' "$skill" || fail "Hive worktree rejection missing from $skill"
   grep -Fq 'status --porcelain' "$skill" || fail "clean-target check missing from $skill"
@@ -43,16 +43,18 @@ for skill in "$claude_skill" "$codex_skill"; do
   fi
 done
 
-claude_up_fence=$(awk '
-  /^## Hive Up[[:space:]]*$/ { in_up=1; next }
-  in_up && /^```bash[[:space:]]*$/ { in_fence=1; next }
-  in_fence && /^```[[:space:]]*$/ { exit }
-  in_fence { print }
-' "$claude_skill")
-[ -n "$claude_up_fence" ] || fail "Claude Hive Up fence not found"
-if grep -Eq 'civilization (run|daemon)|systemctl --user (start|restart) hive([[:space:]]|$)' <<<"$claude_up_fence"; then
-  fail "Claude Hive Up still launches the runtime"
-fi
+for skill in "$claude_skill" "$codex_skill"; do
+  up_fence=$(awk '
+    /^## Hive Up[[:space:]]*$/ { in_up=1; next }
+    in_up && /^```bash[[:space:]]*$/ { in_fence=1; next }
+    in_fence && /^```[[:space:]]*$/ { exit }
+    in_fence { print }
+  ' "$skill")
+  [ -n "$up_fence" ] || fail "Hive Up fence not found in $skill"
+  if grep -Eq 'civilization (run|daemon)|systemctl --user (start|restart) hive([[:space:]]|$)' <<<"$up_fence"; then
+    fail "Hive Up still launches the runtime in $skill"
+  fi
+done
 
 for argv in \
   'go run ./cmd/hive civilization run' \
