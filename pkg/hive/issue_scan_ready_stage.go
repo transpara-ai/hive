@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/work"
@@ -981,6 +982,9 @@ func (r *Runtime) approvedDraftPRAuthorityDecisionForReceipt(receipt TransparaAI
 			if ref := strings.TrimSpace(receipt.AuthorityRequestID); ref != "" && ref != content.RequestID.Value() {
 				lastMismatch = fmt.Errorf("receipt authority_request_id %q does not match approved request %s", ref, content.RequestID.Value())
 				continue
+			}
+			if !content.ExpiresAt.IsZero() && !time.Now().Before(content.ExpiresAt.Value()) {
+				return types.EventID{}, types.EventID{}, DraftPRTarget{}, fmt.Errorf("approved draft PR decision %s for receipt %s#%d expired at %s: refusing authority", ev.ID().Value(), receipt.Repository, receipt.PRNumber, content.ExpiresAt.String())
 			}
 			return ev.ID(), content.RequestID, target, nil
 		}

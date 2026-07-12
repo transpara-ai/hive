@@ -13,6 +13,8 @@ import (
 // main() prints them without an "error:" prefix.
 var errUsage = errors.New("usage")
 
+const defaultLocalAPIBase = "http://localhost:8082"
+
 // routeAndDispatch is the entry point for the subcommand router.
 // It switches on args[0] and delegates to the matching cmd* function.
 // Returns an error listing the available verbs when no verb is given.
@@ -60,6 +62,8 @@ func helpText() string {
 	b.WriteString("  council [--topic ...]    Convene one deliberation\n")
 	b.WriteString("  factory daemon           Always-on governing loop with governed issue-scan controls\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
+	b.WriteString("  factory preflight-hive-unit\n")
+	b.WriteString("                           Read-only hive.service posture verifier\n")
 	b.WriteString("  factory scan-issues      Scan Transpara-AI GitHub issues into a queued run\n")
 	b.WriteString("  factory canary-scan      Level 1 canary issue discovery with parked evidence only\n")
 	b.WriteString("  factory run-issue-scan-stage-role-output\n")
@@ -166,7 +170,7 @@ func cmdPipeline(args []string) error {
 
 func pipelineFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID, storeDSN, repos *string, budget *float64, direct, prMode, worktrees, autoClone *bool) {
 	space = fs.String("space", "hive", "transpara.ai space slug")
-	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
+	apiBase = fs.String("api", defaultLocalAPIBase, "API base URL (local by default; set https://transpara.ai explicitly for production)")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
 	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	storeDSN = fs.String("store", "", "Store DSN (postgres://... or empty for in-memory)")
@@ -227,7 +231,7 @@ func cmdRole(args []string) error {
 
 func roleFlags(fs *flag.FlagSet) (space, apiBase, repo, agentID *string, budget *float64, direct, prMode *bool) {
 	space = fs.String("space", "hive", "transpara.ai space slug")
-	apiBase = fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
+	apiBase = fs.String("api", defaultLocalAPIBase, "API base URL (local by default; set https://transpara.ai explicitly for production)")
 	repo = fs.String("repo", "", "Path to repo (default: current dir)")
 	agentID = fs.String("agent-id", "", "Agent's transpara.ai user ID (filters task assignment)")
 	budget = fs.Float64("budget", 10.0, "Daily budget in USD")
@@ -279,7 +283,7 @@ func cmdIngest(args []string) error {
 func newCouncilFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("council", flag.ContinueOnError)
 	fs.String("space", "hive", "transpara.ai space slug")
-	fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
+	fs.String("api", defaultLocalAPIBase, "API base URL (local by default; set https://transpara.ai explicitly for production)")
 	fs.String("repo", "", "Path to repo (default: current dir)")
 	fs.Float64("budget", 10.0, "Daily budget in USD")
 	fs.String("topic", "", "Focus the council on a specific question")
