@@ -10,7 +10,10 @@ import (
 // The hive-lifecycle runbooks delegate hive.service posture adjudication to
 // the tested verifier subcommand instead of inline shell forensics
 // (FO-HIVE-267-PREFLIGHT-RUNBOOK-WIRING; verifier delivered in PR #277).
-const hiveLifecycleVerifierInvocation = "factory preflight-hive-unit"
+// The assertion binds to the complete executable invocation line inside the
+// runbook's bash fence — prose mentions of the subcommand name alone must
+// never satisfy it, or deleting the fence would go undetected.
+const hiveLifecycleVerifierInvocation = "( cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit )"
 
 func hiveLifecycleDialectRunbooks() []struct{ name, path string } {
 	return []struct{ name, path string }{
@@ -28,18 +31,18 @@ func TestHiveLifecycleRunbooksInvokeTestedUnitPreflight(t *testing.T) {
 			}
 			content := string(raw)
 			if !strings.Contains(content, hiveLifecycleVerifierInvocation) {
-				t.Fatalf("%s dialect never invokes the tested verifier %q for hive.service posture confirmation", tt.name, hiveLifecycleVerifierInvocation)
+				t.Fatalf("%s dialect is missing the executable verifier invocation %q for hive.service posture confirmation (prose mentions do not count)", tt.name, hiveLifecycleVerifierInvocation)
 			}
 			for _, stale := range []string{
 				"tracked as separate work",
 				"tracked separately)",
 			} {
 				if strings.Contains(content, stale) {
-					t.Fatalf("%s dialect still carries the stale verifier promise %q — the verifier exists as `hive %s`", tt.name, stale, hiveLifecycleVerifierInvocation)
+					t.Fatalf("%s dialect still carries the stale verifier promise %q — the verifier exists as `hive factory preflight-hive-unit`", tt.name, stale)
 				}
 			}
 			if strings.Contains(content, "grep '^LOVYOU_API_KEY='") {
-				t.Fatalf("%s dialect re-derives hive.service credential posture with an inline shell probe — that adjudication belongs to `hive %s`", tt.name, hiveLifecycleVerifierInvocation)
+				t.Fatalf("%s dialect re-derives hive.service credential posture with an inline shell probe — that adjudication belongs to `hive factory preflight-hive-unit`", tt.name)
 			}
 		})
 	}
