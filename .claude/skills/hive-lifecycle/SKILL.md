@@ -110,6 +110,7 @@ fi
 Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved (this variable's value only; it is a bearer credential, so only presence/emptiness is judged and the value itself is never printed):
 
 ```bash
+( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
 pid=$(systemctl --user show hive -p MainPID --value)
 if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
   keyval=$(printf '%s\n' "$envlines" | grep '^LOVYOU_API_KEY=' | head -1 | cut -d= -f2-)
@@ -121,6 +122,7 @@ if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/en
 else
   echo "cannot read runtime process environment — posture UNKNOWN; if local-only was intended, STOP the unit"
 fi
+)
 ```
 
 ## Hive Down
@@ -249,6 +251,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > **†** Write routes exist **only in writer mode** — when `hive-ops-api` is started with `HIVE_OPS_HUMAN_ACTOR` set. The default `hive-ops-api.service` does **not** set it — but do **not** assume read-only from the unit file: variables inherited from the systemd `--user` manager don't appear in unit `Environment=` lines. Verify from the running process's effective environment (names only, never values) before treating the API as read-only:
 >
 > ```bash
+> ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
 > pid=$(systemctl --user show hive-ops-api -p MainPID --value)
 > if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
 >   actor=$(printf '%s\n' "$envlines" | grep '^HIVE_OPS_HUMAN_ACTOR=' | head -1 | cut -d= -f2-)
@@ -260,6 +263,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > else
 >   echo "cannot read process environment — mode UNKNOWN"
 > fi
+> )
 > ```
 >
 > The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
@@ -293,6 +297,7 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
 - **hive-ops-api**: `HIVE_OPS_CATALOG` — the unit **resolves to `repos/hive/catalog-mixed.yaml`**; `HIVE_OPS_CATALOG_RELOAD_INTERVAL=1m`. Verify the actual resolved path from the running process's effective environment (this variable's value only — a filepath, not a secret; unrelated values are never printed; `/proc` unreadable = UNKNOWN, fail closed):
 
   ```bash
+  ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
   if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
@@ -307,6 +312,7 @@ The operator API and the runtime select models from a catalog YAML (hot-reloaded
   else
     echo "cannot read process cmdline/environment — catalog UNKNOWN"
   fi
+  )
   ```
 - **hive runtime (daemon)**: `--catalog <path> --catalog-reload-interval 1m`. **`council`** takes `--catalog <path>` only — **no** `--catalog-reload-interval` (e.g. `council --catalog ./catalog-mixed.yaml`).
 

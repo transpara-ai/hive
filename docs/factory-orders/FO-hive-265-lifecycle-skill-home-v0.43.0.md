@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.42.0
+version: 0.43.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -454,6 +454,15 @@ the new head surfaced three operational defects, repaired in both dialects:
   their own startup). The reset no longer auto-restarts Postgres: `down -v`
   leaves the cluster down deliberately, and recovery is the normal Hive Up
   flow run explicitly after clients are stopped or deliberately restarted.
+
+### Round-12 fresh-head repair (v0.43.0)
+
+- **bz — credential probes are xtrace-proof.** Under `set -x`, Bash prints
+  expanded assignments, so probes reading `/proc/<pid>/environ` (posture,
+  writer-mode, catalog) would write bearer values into the transcript
+  despite the value-never-printed guarantee. All six probe blocks (three per
+  dialect) now run inside a subshell that disables xtrace first
+  (`( set +x …; … )`), returning only the non-secret verdict lines.
 
 ## Non-Goals
 

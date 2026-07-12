@@ -261,6 +261,7 @@ fi
 Default `hive-ops-api.service` should be read-only because it does not set `HIVE_OPS_HUMAN_ACTOR`. Confirm before POSTing by inspecting the running process's effective environment — unit `Environment=` lines miss variables inherited from the systemd `--user` manager, so `systemctl show -p Environment` can misreport writer mode as read-only. Check names only, never dump values:
 
 ```bash
+( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
 pid=$(systemctl --user show hive-ops-api -p MainPID --value)
 if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
   actor=$(printf '%s\n' "$envlines" | grep '^HIVE_OPS_HUMAN_ACTOR=' | head -1 | cut -d= -f2-)
@@ -272,6 +273,7 @@ if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/en
 else
   echo "cannot read process environment — mode UNKNOWN; do not POST"
 fi
+)
 ```
 
 The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NUL separators are converted to newlines **inside** the substitution (`tr` is the sole command, so a failed `/proc` read fails the whole condition — no pipeline masks it, and no NUL bytes are lost to command substitution, which strips them). Service down or unreadable — the mode is unknown; do not POST.
@@ -300,6 +302,7 @@ curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Beare
 - `hive-ops-api` uses `HIVE_OPS_CATALOG`. Verify the actual resolved path from the running process's effective environment — this variable's value only (a filepath, not a secret; unrelated values are never printed; `/proc` unreadable = UNKNOWN, fail closed):
 
   ```bash
+  ( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
   pid=$(systemctl --user show hive-ops-api -p MainPID --value)
   if [ "${pid:-0}" -gt 0 ] 2>/dev/null && args=$(tr '\0' '\n' </proc/"$pid"/cmdline 2>/dev/null) && [ -n "$args" ] && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
     # the --catalog/-catalog flag OVERRIDES the env var (Go flags accept one or two dashes; the flag's default is the env value)
@@ -314,6 +317,7 @@ curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Beare
   else
     echo "cannot read process cmdline/environment — catalog UNKNOWN"
   fi
+  )
   ```
 - Hive runtime uses `--catalog <path> --catalog-reload-interval 1m`.
 - `council` accepts `--catalog <path>` only; do not pass `--catalog-reload-interval` to `council`.
@@ -357,6 +361,7 @@ The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated ev
 Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved (this variable's value only; it is a bearer credential, so only presence/emptiness is judged and the value itself is never printed):
 
 ```bash
+( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
 pid=$(systemctl --user show hive -p MainPID --value)
 if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
   keyval=$(printf '%s\n' "$envlines" | grep '^LOVYOU_API_KEY=' | head -1 | cut -d= -f2-)
@@ -368,6 +373,7 @@ if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/en
 else
   echo "cannot read runtime process environment — posture UNKNOWN; if local-only was intended, STOP the unit"
 fi
+)
 ```
 
 Warning: `council` ALWAYS attempts to POST up to 2000 characters of the deliberation report to its `--api` endpoint — `api.New` never returns nil, so an empty or wrong key merely fails authentication AFTER the report has been transmitted. `--api` defaults to `https://transpara.ai`, so only the local `--api` pin keeps the report local. Replacing any ambient remote credential with the non-secret local `dev` credential as shown additionally keeps the remote bearer out of every council agent's prompt (and matches the local API's `--api-key dev`). Remote publishing requires the user's explicit authorization in the current turn.
