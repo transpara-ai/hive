@@ -211,14 +211,15 @@ Restart means true down-to-up for APIs after Postgres is available. Preserve man
 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (a down unit, an unreadable manager) must not abort the block mid-way in strict shells
+restart_failed=0   # diagnostics stay loud AND the block's exit status stays honest
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
 # Everything below is gated on Postgres readiness — restarting services or the
 # runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
-  systemctl --user restart work-server hive-ops-api || echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"
-  systemctl --user is-active work-server hive-ops-api || echo "^ a service is NOT active after restart — do not report success"
+  systemctl --user restart work-server hive-ops-api || { echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"; restart_failed=1; }
+  systemctl --user is-active work-server hive-ops-api || { echo "^ a service is NOT active after restart — do not report success"; restart_failed=1; }
   # Merged-property read, not is-active: a unit in `activating (auto-restart)`
   # reads as "stopped" via is-active, yet systemd will relaunch the encoded
   # (full-autonomy) command shortly — bypassing this gate. Allowlist only the
@@ -252,7 +253,9 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   fi
 else
   echo "postgres not ready — NOT restarting services or runtime; fix postgres first"
+  restart_failed=1
 fi
+exit "$restart_failed"   # subshell exit: strict callers see the truth, the operator's terminal survives
 )
 ```
 

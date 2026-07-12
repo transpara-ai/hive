@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.50.0
+version: 0.51.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -551,6 +551,17 @@ the new head surfaced three operational defects, repaired in both dialects:
   contract a failed `systemctl restart` continued silently and the block
   exited 0; the mutating commands now carry explicit failure arms and a
   resulting-state report so automation can never observe a false success.
+
+### Round-20 fresh-head repair (v0.51.0)
+
+- **ck — the Restart block's exit status is honest.** The v0.50.0 `\|\| echo`
+  arms printed diagnostics but converted failure to success, so callers
+  could report a successful restart despite a failed service. The block now
+  tracks a `restart_failed` flag (set by the restart arm, the post-restart
+  activity check, and the postgres-not-ready branch) and terminates with
+  `exit "$restart_failed"` — a subshell exit, so strict callers see the
+  truth and the operator's terminal survives. Both dialects; full-fence
+  `bash -n` audit remains at zero failures.
 
 ## Non-Goals
 
