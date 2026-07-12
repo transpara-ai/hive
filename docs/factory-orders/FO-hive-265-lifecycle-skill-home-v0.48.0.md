@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.47.0
+version: 0.48.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -510,6 +510,18 @@ the new head surfaced three operational defects, repaired in both dialects:
   in the left subshell while the outer strict shell evaluated `( … ) | jq`,
   so the protection was ineffective; the pipeline now runs entirely inside
   the relaxed subshell.
+
+### Round-17 fresh-head repair (v0.48.0)
+
+- **cf — every fence is valid bash, proven by `bash -n`.** Round 17 caught an
+  orphan subshell closer in the Hive Up fence (a stray from the round-16
+  wrap edits; the round-16 audit checked contract fences for MISSING closers
+  but not all fences for UNMATCHED ones). The closer is removed, and the
+  audit is now class-final: `bash -n` runs against every extracted fence in
+  both dialects (blockquote fences included) — zero failures. Angle-bracket
+  placeholders (`<file>`, `<verb>`, `<name>`) at end-of-line lexed as
+  malformed redirects and are now quoted (`'<file>'`), keeping the
+  placeholder appearance while making the blocks syntactically executable.
 
 ## Non-Goals
 

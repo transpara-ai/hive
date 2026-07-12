@@ -89,7 +89,7 @@ For CLI help, use:
 ```bash
 ( cd /Transpara/transpara-ai/repos/hive || exit   # subshell: a missing checkout stops the block without touching the caller's shell
   go run ./cmd/hive --help
-  go run ./cmd/hive <verb> --help
+  go run ./cmd/hive '<verb>' --help
 )
 ```
 
@@ -168,7 +168,6 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
 else
   echo "postgres not ready — NOT starting services; fix postgres first"
 fi
-)
 ```
 
 Do not start the multi-agent runtime as part of ordinary `hive up` unless the user explicitly asks for runtime/daemon execution.
@@ -352,7 +351,7 @@ LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
   --store postgres://hive:hive@localhost:5432/hive
 
 LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo .
-LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run --api http://localhost:8082 --repo .
+LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run --api http://localhost:8082 --repo .
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "..."
 )
 ```
@@ -403,7 +402,7 @@ Approving proposed roles should use the CLI because it emits the role approval a
 
 ```bash
 ( cd /Transpara/transpara-ai/repos/hive || exit
-  go run ./cmd/approve-role --role <name> --store postgres://hive:hive@localhost:5432/hive
+  go run ./cmd/approve-role --role '<name>' --store postgres://hive:hive@localhost:5432/hive
 )
 ```
 
@@ -411,7 +410,7 @@ Injecting a spec/file requires the runtime webhook to be running:
 
 ```bash
 ( cd /Transpara/transpara-ai/repos/hive || exit
-  go run ./cmd/inject-file --title "..." --priority medium <file>
+  go run ./cmd/inject-file --title "..." --priority medium '<file>'
 )
 ```
 

@@ -338,7 +338,7 @@ LOVYOU_API_KEY= go run ./cmd/hive civilization run    --human Michael --idea "�
 LOVYOU_API_KEY= go run ./cmd/hive civilization daemon --human Michael \
        --store postgres://hive:hive@localhost:5432/hive                      # long-running (add --approve-requests --approve-roles for full autonomy)
 LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run        --api http://localhost:8082 --repo .   # Scout → Builder → Critic (needs the local API up — see "Local / Offline"; no --idea)
-LOVYOU_API_KEY=dev go run ./cmd/hive role <name> run     --api http://localhost:8082 --repo .   # single agent
+LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run     --api http://localhost:8082 --repo .   # single agent
 LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic "…"   # one deliberation (add --catalog ./catalog-mixed.yaml only with Ollama + OPENROUTER_API_KEY)
 # ⚠ council ALWAYS attempts to POST up to 2000 chars of the deliberation report
 #   to its --api endpoint (api.New never returns nil — an empty/wrong key merely
@@ -348,7 +348,7 @@ LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --topic
 #   credential as shown additionally keeps the remote bearer out of every
 #   council agent's prompt (and matches the local API's --api-key dev).
 #   Remote publishing requires the user's explicit authorization in the turn.
-go run ./cmd/hive ingest --priority normal <file.md>   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
+go run ./cmd/hive ingest --priority normal '<file.md>'   # registered-repo API flow: needs LOVYOU_API_KEY (set HIVE_INGEST_SKIP_REPO=1 to skip the repo bootstrap) — check `--help` before use
 )
 ```
 
