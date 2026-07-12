@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.41.0
+version: 0.42.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -440,6 +440,20 @@ the new head surfaced three operational defects, repaired in both dialects:
   running runtime and blocked the restart path. Detection now applies the
   same comm allowlist (`hive|go`) as the kill loops, in both dialects; the
   candidate listings reuse the verified PID set.
+
+### Round-11 fresh-head repairs (v0.42.0)
+
+- **bx — quiescence queried through the maintenance database.** The
+  pg_stat_activity checks connected to the `hive` database — the very
+  database the nuclear path exists to recreate; a dropped or unconnectable
+  hive DB refused the reset forever. Both queries now use the always-present
+  `postgres` maintenance database.
+- **by — Postgres left DOWN after the reset (subtraction).** A zero-session
+  snapshot does not prove client PROCESSES are gone; a survivor reconnecting
+  to a freshly recreated database finds it unmigrated (clients migrate at
+  their own startup). The reset no longer auto-restarts Postgres: `down -v`
+  leaves the cluster down deliberately, and recovery is the normal Hive Up
+  flow run explicitly after clients are stopped or deliberately restarted.
 
 ## Non-Goals
 
