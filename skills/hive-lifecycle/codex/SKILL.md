@@ -179,6 +179,11 @@ Stop the runtime first, then API services. Do not stop Postgres unless the user 
 ```bash
 ( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (nothing running, service already down) must not abort the block mid-way in strict shells
 systemctl --user stop hive 2>/dev/null || true
+# Confirm the unit actually stopped: a failed stop (or one that could not
+# cancel a queued auto-restart) must be REPORTED, not discarded — otherwise
+# the port check below can read clear moments before a full-autonomy relaunch.
+hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null || true)
+case "$hive_state" in inactive|failed) : ;; *) echo "hive.service is still ${hive_state:-unreadable} after stop — a queued relaunch may fire; re-run: systemctl --user stop hive, then re-check";; esac
 # Identity-verified kills: comm must be hive|go, so a stray argv match (an
 # editor, grep, or agent session mentioning the pattern) is never signaled.
 pgrep -f '[h]ive (--human|civilization|pipeline|role|council|factory)' | while read -r pid; do case "$(ps -o comm= -p "$pid")" in hive|go) kill -INT "$pid" 2>/dev/null;; esac; done
@@ -219,7 +224,10 @@ tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; d
 # runtime against a dead DB only produces crash loops; on timeout, stop here.
 if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   systemctl --user restart work-server hive-ops-api || { echo "RESTART FAILED (work-server/hive-ops-api) — inspect: journalctl --user -u work-server -u hive-ops-api"; restart_failed=1; }
-  systemctl --user is-active work-server hive-ops-api || { echo "^ a service is NOT active after restart — do not report success"; restart_failed=1; }
+  for svc in work-server hive-ops-api; do   # per-unit: is-active with multiple units exits 0 if ANY is active
+    svc_state=$(systemctl --user is-active "$svc" 2>/dev/null || true)
+    [ "$svc_state" = "active" ] || { echo "$svc is ${svc_state:-unreadable} after restart — do not report success"; restart_failed=1; }
+  done
   # Merged-property read, not is-active: a unit in `activating (auto-restart)`
   # reads as "stopped" via is-active, yet systemd will relaunch the encoded
   # (full-autonomy) command shortly — bypassing this gate. Allowlist only the

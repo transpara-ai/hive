@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.51.0
+version: 0.52.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -562,6 +562,21 @@ the new head surfaced three operational defects, repaired in both dialects:
   `exit "$restart_failed"` — a subshell exit, so strict callers see the
   truth and the operator's terminal survives. Both dialects; full-fence
   `bash -n` audit remains at zero failures.
+
+### Round-21 fresh-head repairs (v0.52.0)
+
+- **cl — Hive Down confirms the unit actually stopped.** `stop \|\| true`
+  discarded a failed stop (or one that could not cancel a queued
+  auto-restart), so the port check could read clear moments before a
+  full-autonomy relaunch; the Down blocks now re-read `ActiveState` after
+  the stop and REPORT anything other than `inactive\|failed` with the exact
+  re-run instruction. (Clean Slate and Nuclear are compensated elsewhere:
+  a relaunched daemon shows up in the nuclear DB refusal list, and the
+  telemetry nuke is idempotent.)
+- **cm — restart success is judged per unit.** `is-active u1 u2` exits 0 if
+  at least ONE unit is active, so a half-crashed stack reported success;
+  the check is now a per-service loop requiring literally `active` for each,
+  anything else setting `restart_failed`.
 
 ## Non-Goals
 
