@@ -31,7 +31,7 @@ The **Claude CLI** path (Max plan, `~/.claude/.credentials.json`) needs **no Ant
 **CRITICAL — never set these:** `ANTHROPIC_API_KEY`, `HIVE_ANTHROPIC_API_KEY`. They override the working CLI auth and cause "Invalid API key" on every Claude agent. Verify clean:
 
 ```bash
-env | cut -d= -f1 | grep -i anthropic   # names only — never print values; must print nothing
+env | cut -d= -f1 | grep -i anthropic || echo "clean — no ANTHROPIC* variables set"   # names only, never values; nonzero grep is the GOOD case and the || arm keeps strict shells alive
 ```
 
 ⚠ **The default `catalog-mixed.yaml` is a MIXED-provider catalog** (Claude CLI + Codex CLI + Ollama + OpenRouter). Claude/Codex use `subscription` auth and Ollama is `local`, but the **OpenRouter** roles (e.g. `reviewer`, `strategist`) use `auth_mode: api-key` and require **`OPENROUTER_API_KEY`**. For a Claude-CLI-only run with no provider keys, **omit `--catalog`** — the runtime falls back to its built-in Claude defaults (there is no checked-in Claude-only catalog). ⚠ This is DEFAULT ROUTING ONLY: a durable role-model policy stored in Postgres (set via the role-policy endpoint) still overrides the built-in defaults and can route roles to Codex or API-key models — for strict provider isolation, inspect the assembly projection's model selection first and clear or repoint stored role policies.
@@ -202,6 +202,7 @@ fi
 ## Hive Status
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # STATUS BLOCK CONTRACT: nonzero exits below are INFORMATION (a down service, an absent key, a clean env) — never errors; relax strict shells for the whole block
 case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
 [ "${__xt:-}" = 1 ] && set -x; unset __xt
@@ -225,6 +226,7 @@ echo "=== endpoint health ==="
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
 ( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status )
+)
 ```
 
 **Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Diagnose read-only:
@@ -273,7 +275,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
 
 ```bash
-( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
      http://localhost:8085/api/hive/operator-projection ) | jq .
 ```
 
@@ -292,7 +294,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status ) | jq .
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status ) | jq .
 ```
 
 ## Model Catalog

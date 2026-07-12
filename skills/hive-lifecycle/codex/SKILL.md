@@ -40,7 +40,7 @@ WORK_REPO=/Transpara/transpara-ai/repos/work
 Claude CLI subscription auth uses `~/.claude/.credentials.json` and needs no Anthropic API key. Verify the shell is clean before runtime operations:
 
 ```bash
-env | cut -d= -f1 | grep -i anthropic
+env | cut -d= -f1 | grep -i anthropic || echo "clean — no ANTHROPIC* variables set"   # nonzero grep is the GOOD case; the || arm keeps strict shells alive
 ```
 
 Check names only — never print environment values into the transcript. The command should print nothing. If it prints `ANTHROPIC_API_KEY` or `HIVE_ANTHROPIC_API_KEY`, stop and ask the user before changing shell profile files. For the current shell only, unset them before runtime commands:
@@ -98,6 +98,7 @@ For CLI help, use:
 Use this for read-only status checks:
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # STATUS BLOCK CONTRACT: nonzero exits below are INFORMATION (a down service, an absent key, a clean env) — never errors; relax strict shells for the whole block
 case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a
 . /home/transpara/.config/hive/hive.env 2>/dev/null || true
@@ -133,6 +134,7 @@ echo "=== endpoint health ==="
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
 ( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status )
+)
 ```
 
 If `systemctl --user is-active` reports `activating` or `auto-restart`, inspect logs read-only first:
@@ -297,8 +299,8 @@ The probe reads this one variable's value (an operator actor id, not a secret) b
 Read-only probes:
 
 ```bash
-( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection ) | jq .
-( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status ) | jq .
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection ) | jq .
+( set +ex 2>/dev/null; set +o pipefail 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status ) | jq .
 ```
 
 ## Model Catalog

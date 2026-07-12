@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.45.0
+version: 0.46.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -484,6 +484,17 @@ the new head surfaced three operational defects, repaired in both dialects:
   whose failure is an expected, HANDLED case is now guarded (`|| true`), so
   the fail-closed verdict branches actually run — both dialects, all probe
   sites.
+
+### Round-15 fresh-head repair (v0.46.0)
+
+- **cc — strict-shell safety made a BLOCK-LEVEL contract.** Per-line
+  `|| true` guards are unbounded across a runbook where most nonzero exits
+  are information (a down service, a clean env, an absent key). The Status
+  blocks now open with an explicit contract subshell (`set +e`,
+  `set +o pipefail`) covering every probe inside; the clean-environment
+  check converts its expected no-match into an explicit success message
+  (`|| echo "clean — …"`); and the standalone authenticated-probe subshells
+  relax errexit/pipefail alongside the existing xtrace guard. Both dialects.
 
 ## Non-Goals
 
