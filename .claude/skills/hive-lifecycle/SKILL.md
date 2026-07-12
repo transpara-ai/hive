@@ -76,29 +76,19 @@ fi
 
 `Hive Up` is infrastructure-only. Runtime startup, full-autonomy flags, webhook exposure, target-repository selection, and Site credential posture are separate protected decisions handled under **On-demand Runtime** below.
 
-**hive.service start/restart is a protected action — a human gate, not automated forensics.** A shell runbook cannot reliably prove a systemd unit safe: environment sources, ExecStart wrappers, exec phases, and variable expansion all provide places for authority to hide, and a mechanical verifier belongs in a tested Go subcommand (tracked as separate work), not here. Before `systemctl --user start|restart hive`:
+**hive.service start/restart is a protected action — a human gate, not automated forensics.** A shell runbook cannot reliably prove a systemd unit safe: environment sources, ExecStart wrappers, exec phases, and variable expansion all provide places for authority to hide — mechanical posture adjudication lives in the tested, read-only `hive factory preflight-hive-unit` subcommand (PR #277), invoked below, never in shell. Before `systemctl --user start|restart hive`:
 
 1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `LOVYOU_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
 2. For a local-only runtime, do NOT start the unit at all — use the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form under **On-demand Runtime** below, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
-3. After any approved start, confirm the running process matches the posture the user approved (probe below) — verification only; it cannot undo the first reconciliation cycle.
+3. After any approved start, confirm the running process matches the posture the user approved (verifier below) — verification only; it cannot undo the first reconciliation cycle.
 
-Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved (this variable's value only; it is a bearer credential, so only presence/emptiness is judged and the value itself is never printed):
+Post-start (or post-restart) posture confirmation — compares the RUNNING runtime against the posture the user approved, via the tested read-only verifier (fail-closed, whole-domain tests; it judges `LOVYOU_API_KEY` presence/emptiness only and never prints its value, so no secret transits a shell variable here):
 
 ```bash
-( set +x 2>/dev/null   # secret-bearing expansions below must never reach an xtrace transcript
-pid=$(systemctl --user show hive -p MainPID --value 2>/dev/null || true)
-if [ "${pid:-0}" -gt 0 ] 2>/dev/null && envlines=$(tr '\0' '\n' </proc/"$pid"/environ 2>/dev/null) && [ -n "$envlines" ]; then
-  keyval=$(printf '%s\n' "$envlines" | grep '^LOVYOU_API_KEY=' | head -1 | cut -d= -f2- || true)   # no match is the expected local-only case: never trip errexit/pipefail
-  if [ -n "$keyval" ]; then
-    echo "runtime is PRODUCTION-CONNECTED (non-empty LOVYOU_API_KEY) — if the user approved the production posture, this MATCHES; otherwise STOP the unit now"
-  else
-    echo "runtime is local-only (LOVYOU_API_KEY absent or empty — an empty value leaves the Site client disabled)"
-  fi
-else
-  echo "cannot read runtime process environment — posture UNKNOWN; if local-only was intended, STOP the unit"
-fi
-)
+( cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit )
 ```
+
+Reading the report: `credential_posture=PRESENT` is PRODUCTION-CONNECTED — if the user approved the production posture this MATCHES, otherwise STOP the unit now; `ABSENT` or `EMPTY` is local-only (an empty value leaves the Site client disabled). `autonomy_posture` restates the effective `--approve-requests`/`--approve-roles` flags (`FULL` = both). A nonzero exit with `overall=UNKNOWN` is fail-closed — unit, autonomy, or credential state was unreadable; if local-only was intended, STOP the unit.
 
 ## Hive Down
 
@@ -154,9 +144,9 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
   # (full-autonomy) command shortly — bypassing this gate. Allowlist only the
   # provably-stopped states; anything else (incl. unreadable) is MANAGED.
   # Runtime adjudication is a HUMAN gate, not shell forensics (a runbook
-  # cannot reliably prove systemd transition states; the mechanical verifier
-  # belongs in a tested Go subcommand — tracked separately). Read the merged
-  # state, REPORT it verbatim, mutate nothing:
+  # cannot reliably prove systemd transition states; posture reporting lives
+  # in the tested `hive factory preflight-hive-unit` subcommand). Read the
+  # merged state, REPORT it verbatim, mutate nothing:
   hive_state=$(systemctl --user show hive -p ActiveState --value 2>/dev/null)
   hive_sub=$(systemctl --user show hive -p SubState --value 2>/dev/null)
   if [ "$hive_state" != "inactive" ] && [ "$hive_state" != "failed" ]; then
