@@ -59,9 +59,11 @@ API tokens:
 Load tokens for shell probes:
 
 ```bash
+case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a
 . /home/transpara/.config/hive/hive.env 2>/dev/null || true
 set +a
+[ "${__xt:-}" = 1 ] && set -x; unset __xt
 ```
 
 ## Hive Help
@@ -96,9 +98,11 @@ For CLI help, use:
 Use this for read-only status checks:
 
 ```bash
+case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a
 . /home/transpara/.config/hive/hive.env 2>/dev/null || true
 set +a
+[ "${__xt:-}" = 1 ] && set -x; unset __xt
 
 echo "=== services ==="
 systemctl --user is-active work-server hive-ops-api
@@ -128,7 +132,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status )
 ```
 
 If `systemctl --user is-active` reports `activating` or `auto-restart`, inspect logs read-only first:
@@ -293,8 +297,8 @@ The probe reads this one variable's value (an operator actor id, not a secret) b
 Read-only probes:
 
 ```bash
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection | jq .
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status | jq .
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" http://localhost:8085/api/hive/operator-projection ) | jq .
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${WORK_API_KEY:-}" http://localhost:8080/telemetry/status ) | jq .
 ```
 
 ## Model Catalog

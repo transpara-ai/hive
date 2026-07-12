@@ -43,7 +43,9 @@ API bearer tokens (for the endpoints below):
 To run the `curl` examples below from a plain shell, load the tokens first:
 
 ```bash
+case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # populates WORK_API_KEY (HIVE_OPS_API_KEY defaults to `dev`)
+[ "${__xt:-}" = 1 ] && set -x; unset __xt
 ```
 
 ## Hive Up
@@ -200,7 +202,9 @@ fi
 ## Hive Status
 
 ```bash
+case $- in *x*) __xt=1; set +x;; esac   # never trace credential assignments
 set -a; . /home/transpara/.config/hive/hive.env 2>/dev/null; set +a   # load WORK_API_KEY for the telemetry probe
+[ "${__xt:-}" = 1 ] && set -x; unset __xt
 echo "=== services ==="
 systemctl --user is-active work-server hive-ops-api
 systemctl --user --no-pager status work-server hive-ops-api | grep -E 'Active:|Main PID:'
@@ -220,7 +224,7 @@ docker exec hive-postgres-1 psql -U hive -d hive -c 'SELECT count(*) FROM events
 echo "=== endpoint health ==="
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'work-server  /health           HTTP %{http_code}\n' http://localhost:8080/health
 curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'hive-ops-api /health           HTTP %{http_code}\n' http://localhost:8085/health
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -o /dev/null -w 'telemetry    /telemetry/status HTTP %{http_code}\n' -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status )
 ```
 
 **Crash-loop diagnosis.** If `is-active` reports `activating (auto-restart)`, the service is crash-looping — almost always because **Postgres is down** (both `work-server` and `hive-ops-api` fail their DB connection on start). Diagnose read-only:
@@ -269,8 +273,8 @@ cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres   # bring
 > The probe reads this one variable's value (an operator actor id, not a secret) because presence alone over-claims: `opsWriterOptions` stays read-only for an empty or invalid id. NULs are converted to newlines **inside** the substitution — `tr` is the sole command, so a failed `/proc` read fails the whole condition (no pipeline masks it) and no NUL bytes are lost to command substitution (which strips them). Service down or unreadable = mode unknown, fail closed.
 
 ```bash
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
-     http://localhost:8085/api/hive/operator-projection | jq .
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer ${HIVE_OPS_API_KEY:-dev}" \
+     http://localhost:8085/api/hive/operator-projection ) | jq .
 ```
 
 ### work-server — `http://localhost:8080` (Bearer `WORK_API_KEY`)
@@ -288,7 +292,7 @@ curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Beare
 | `GET\|POST /tasks`, `/tasks/{id}/…`, `/phase-gates` | Work task + phase-gate API |
 
 ```bash
-curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status | jq .
+( set +x 2>/dev/null; curl -s --noproxy '*' --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $WORK_API_KEY" http://localhost:8080/telemetry/status ) | jq .
 ```
 
 ## Model Catalog

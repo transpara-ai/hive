@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.43.0
+version: 0.44.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -463,6 +463,16 @@ the new head surfaced three operational defects, repaired in both dialects:
   despite the value-never-printed guarantee. All six probe blocks (three per
   dialect) now run inside a subshell that disables xtrace first
   (`( set +x …; … )`), returning only the non-secret verdict lines.
+
+### Round-13 fresh-head repair (v0.44.0)
+
+- **ca — the xtrace class swept completely.** Round 12's repair covered only
+  the `/proc` probes; sourcing `hive.env` and the authenticated curls also
+  trace credential values under `set -x`. The env loads (which must stay in
+  the current shell) now save/disable/restore the xtrace flag around the
+  sourcing (`case $- in *x*) …`), and every authenticated curl runs in a
+  `( set +x; … )` subshell — both dialects, all nine credential-touching
+  sites.
 
 ## Non-Goals
 
