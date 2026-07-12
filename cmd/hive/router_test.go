@@ -183,6 +183,62 @@ func TestPipelineFlagsDefaultToProposalMode(t *testing.T) {
 	}
 }
 
+func TestContentSendingAPIDefaultsRequireProductionOptIn(t *testing.T) {
+	type flagHarness struct {
+		flags *flag.FlagSet
+		api   func() string
+	}
+	commands := []struct {
+		name string
+		new  func() flagHarness
+	}{
+		{
+			name: "pipeline",
+			new: func() flagHarness {
+				fs := flag.NewFlagSet("pipeline run", flag.ContinueOnError)
+				_, api, _, _, _, _, _, _, _, _, _ := pipelineFlags(fs)
+				return flagHarness{flags: fs, api: func() string { return *api }}
+			},
+		},
+		{
+			name: "role",
+			new: func() flagHarness {
+				fs := flag.NewFlagSet("role builder run", flag.ContinueOnError)
+				_, api, _, _, _, _, _ := roleFlags(fs)
+				return flagHarness{flags: fs, api: func() string { return *api }}
+			},
+		},
+		{
+			name: "council",
+			new: func() flagHarness {
+				fs := newCouncilFlagSet()
+				return flagHarness{flags: fs, api: func() string { return fs.Lookup("api").Value.String() }}
+			},
+		},
+	}
+
+	for _, command := range commands {
+		t.Run(command.name+" default", func(t *testing.T) {
+			harness := command.new()
+			if err := harness.flags.Parse(nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := harness.api(); got != "http://localhost:8082" {
+				t.Fatalf("bare %s --api = %q, want local-only default", command.name, got)
+			}
+		})
+		t.Run(command.name+" explicit production", func(t *testing.T) {
+			harness := command.new()
+			if err := harness.flags.Parse([]string{"--api", "https://transpara.ai"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := harness.api(); got != "https://transpara.ai" {
+				t.Fatalf("explicit %s production opt-in = %q", command.name, got)
+			}
+		})
+	}
+}
+
 func TestCmdRoleRequiresName(t *testing.T) {
 	err := cmdRole(nil)
 	if err == nil || !strings.Contains(err.Error(), "role name") {
