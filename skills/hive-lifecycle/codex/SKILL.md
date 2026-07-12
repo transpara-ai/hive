@@ -210,6 +210,7 @@ cd /Transpara/transpara-ai/repos/hive && docker compose down
 Restart means true down-to-up for APIs after Postgres is available. Preserve manual runtime command flags instead of guessing them.
 
 ```bash
+( set +e 2>/dev/null; set +o pipefail 2>/dev/null   # BLOCK CONTRACT: expected no-match/nonzero exits (a down unit, an unreadable manager) must not abort the block mid-way in strict shells
 cd /Transpara/transpara-ai/repos/hive && docker compose up -d postgres
 tries=60; until docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; do tries=$((tries-1)); [ "$tries" -le 0 ] && { echo "postgres not ready after 60s — inspect: docker compose logs postgres"; break; }; sleep 1; done
 
@@ -251,6 +252,7 @@ if docker exec hive-postgres-1 pg_isready -U hive -q 2>/dev/null; then
 else
   echo "postgres not ready — NOT restarting services or runtime; fix postgres first"
 fi
+)
 ```
 
 ## Endpoint Reference

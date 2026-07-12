@@ -3,7 +3,7 @@ doc_id: FO-HIVE-265-LIFECYCLE-SKILL-HOME
 title: Factory Order — Canonical Versioned Home for the hive-lifecycle Skill (Claude + Codex Dialects)
 doc_type: factory-order
 status: proposal
-version: 0.48.0
+version: 0.49.0
 created: 2026-07-11
 updated: 2026-07-11
 owner: Michael Saucier
@@ -38,9 +38,11 @@ authority: repository documentation/skill-source preservation only; no Hive star
   relative symlink `skills/hive-lifecycle/claude`; the Codex dialect files
   `skills/hive-lifecycle/codex/{SKILL.md, agents/openai.yaml}` are seeded from
   the local port cited above. Both dialects diverge from their seeds ONLY by
-  the enumerated R7 safety repairs; any other content delta is a defect
-  (verification: `diff` against each seed shows exclusively R7 changes). No
-  dialect content exists twice in the repo.
+  the enumerated R7 safety repairs PLUS the fresh-head CFAR repair set
+  (bf–cf and successors, each enumerated in the versioned repair sections
+  below); any content delta outside those enumerated sets is a defect. No
+  dialect content exists twice in the repo. (v0.49.0 truth-up: without this
+  clause the Factory Order rejected its own delivered files.)
   (v0.2.0: revised from committing a second Claude copy after IAR found the
   pre-existing #259 home; moving the physical file out of `.claude/skills/`
   would break Claude Code project-skill auto-discovery, so the symlink points
@@ -523,12 +525,26 @@ the new head surfaced three operational defects, repaired in both dialects:
   malformed redirects and are now quoted (`'<file>'`), keeping the
   placeholder appearance while making the blocks syntactically executable.
 
+### Round-18 fresh-head repairs (v0.49.0)
+
+- **cg — the Factory Order accepts its own delivered files.** R2, Non-Goals,
+  and the Verification Plan declared every non-R7 delta a defect, so after
+  seventeen repair rounds the FO rejected the dialects it governs; the
+  accepted-delta language now includes the enumerated fresh-head repair set
+  alongside R7.
+- **ch — the Restart block joins the strict-shell contract.** A failed
+  `systemctl show` (user manager or D-Bus briefly unavailable) aborted the
+  block after the API services had already restarted, so the documented
+  unreadable-state branch never ran; both dialects' Restart fences now open
+  with the same contract subshell as the other flows, and the full-fence
+  `bash -n` audit stays at zero failures.
+
 ## Non-Goals
 
 - No Hive start/stop/restart, daemon launch, or runtime execution.
 - No changes to the skill's commands or semantics beyond the reviewed safety
-  repairs enumerated in R7 — every other content diff from the cited sources
-  is a defect.
+  repairs enumerated in R7 and the versioned fresh-head repair sections —
+  every other content diff from the cited sources is a defect.
 - No installer tooling or symlink automation (a later slice if wanted).
 - No relocation of other skills; this arc moves exactly one feature.
 
@@ -536,7 +552,7 @@ the new head surfaced three operational defects, repaired in both dialects:
 
 - `python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/hive-lifecycle/codex` → valid.
 - `diff` of committed dialect files against their cited seeds → only the
-  enumerated R7 repairs differ.
+  enumerated R7 repairs and the versioned fresh-head repairs differ.
 - Private-address/secret scan over `skills/` with `grep -R` (follows the
   `claude` symlink) → no matches outside verbatim log quotes.
 - `git diff --check` clean; repo build/tests unaffected (no Go changes).
