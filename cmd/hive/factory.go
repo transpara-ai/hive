@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -234,11 +235,17 @@ func cmdGovernedDaemon(name string, args []string) error {
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
 	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
+	webhookAddr := fs.String("webhook-addr", "", "Webhook listen address (default: loopback 127.0.0.1 at HIVE_LISTENER_PORT or 8081; non-loopback binds require --webhook-require-auth)")
+	webhookRequireAuth := fs.Bool("webhook-require-auth", false, "Require Authorization: Bearer LOVYOU_API_KEY on POST /event (required for non-loopback --webhook-addr)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required")
+	}
+	webhookBearerToken, err := resolveWebhookBearerToken(*webhookAddr, *webhookRequireAuth, os.Getenv("LOVYOU_API_KEY"))
+	if err != nil {
+		return err
 	}
 	if *issueScanInterval > 0 && *approveRequests {
 		return fmt.Errorf("--issue-scan-interval cannot be combined with --approve-requests")
@@ -440,7 +447,36 @@ func cmdGovernedDaemon(name string, args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase, *webhookAddr, webhookBearerToken)
+}
+
+func resolveWebhookBearerToken(addr string, requireAuth bool, apiKey string) (string, error) {
+	if requireAuth {
+		if strings.TrimSpace(apiKey) == "" {
+			return "", fmt.Errorf("LOVYOU_API_KEY is required with --webhook-require-auth")
+		}
+		return apiKey, nil
+	}
+	if webhookAddressIsLoopback(addr) {
+		return "", nil
+	}
+	return "", fmt.Errorf("--webhook-require-auth is required for non-loopback --webhook-addr %q", addr)
+}
+
+func webhookAddressIsLoopback(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 type issueScanFullChainConfig struct {

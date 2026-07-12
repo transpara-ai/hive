@@ -2,8 +2,10 @@ package runner
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -28,9 +30,18 @@ type Dispatcher interface {
 // EventListener receives op events from the site's webhook and dispatches
 // to the right agent. This is the pub/sub backbone — events arrive, agents react.
 type EventListener struct {
-	dispatcher Dispatcher
-	ctx        context.Context
-	port       string
+	dispatcher  Dispatcher
+	ctx         context.Context
+	bearerToken string
+}
+
+// EventListenerConfig controls the webhook listener boundary. Addr is an
+// explicit override; when empty, the listener binds only to loopback at Port.
+// BearerToken is optional for loopback-only development and is never logged.
+type EventListenerConfig struct {
+	Addr        string
+	Port        string
+	BearerToken string
 }
 
 // OpEvent is the JSON payload from the site's webhook.
@@ -49,8 +60,20 @@ type OpEvent struct {
 
 // StartEventListener starts an HTTP server that receives webhook events
 // from the site and dispatches to agents. If d is nil, runs in log-only mode.
-func StartEventListener(ctx context.Context, d Dispatcher, port string) error {
-	el := &EventListener{dispatcher: d, ctx: ctx, port: port}
+func StartEventListener(ctx context.Context, d Dispatcher, config EventListenerConfig) error {
+	server := newEventListenerServer(ctx, d, config)
+
+	go func() {
+		<-ctx.Done()
+		server.Shutdown(context.Background())
+	}()
+
+	log.Printf("[pubsub] listening on %s", server.Addr)
+	return server.ListenAndServe()
+}
+
+func newEventListenerServer(ctx context.Context, d Dispatcher, config EventListenerConfig) *http.Server {
+	el := &EventListener{dispatcher: d, ctx: ctx, bearerToken: config.BearerToken}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /event", el.handleEvent)
@@ -58,21 +81,30 @@ func StartEventListener(ctx context.Context, d Dispatcher, port string) error {
 		w.Write([]byte("ok"))
 	})
 
-	server := &http.Server{
-		Addr:    ":" + port,
+	return &http.Server{
+		Addr:    eventListenerAddress(config),
 		Handler: mux,
 	}
+}
 
-	go func() {
-		<-ctx.Done()
-		server.Shutdown(context.Background())
-	}()
-
-	log.Printf("[pubsub] listening on :%s", port)
-	return server.ListenAndServe()
+func eventListenerAddress(config EventListenerConfig) string {
+	if config.Addr != "" {
+		return config.Addr
+	}
+	port := config.Port
+	if port == "" {
+		port = "8081"
+	}
+	return net.JoinHostPort("127.0.0.1", port)
 }
 
 func (el *EventListener) handleEvent(w http.ResponseWriter, r *http.Request) {
+	if el.bearerToken != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+el.bearerToken)) != 1 {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var op OpEvent
 	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)

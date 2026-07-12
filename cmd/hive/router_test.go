@@ -131,6 +131,54 @@ func TestCmdCivilizationDaemonPreservesLegacySpaceAPIAndApproveRolesFlags(t *tes
 	}
 }
 
+func TestResolveWebhookBearerTokenWholeDomain(t *testing.T) {
+	tests := []struct {
+		name        string
+		addr        string
+		requireAuth bool
+		apiKey      string
+		wantToken   string
+		wantErr     string
+	}{
+		{name: "default loopback ignores ambient key", apiKey: "ambient-production-key"},
+		{name: "explicit IPv4 loopback ignores ambient key", addr: "127.0.0.1:8081", apiKey: "ambient-production-key"},
+		{name: "explicit IPv6 loopback ignores ambient key", addr: "[::1]:8081", apiKey: "ambient-production-key"},
+		{name: "localhost ignores ambient key", addr: "localhost:8081", apiKey: "ambient-production-key"},
+		{name: "public wildcard requires auth", addr: ":8081", wantErr: "--webhook-require-auth"},
+		{name: "public IPv4 requires auth", addr: "0.0.0.0:8081", wantErr: "--webhook-require-auth"},
+		{name: "public IPv6 requires auth", addr: "[::]:8081", wantErr: "--webhook-require-auth"},
+		{name: "auth requires key", requireAuth: true, wantErr: "LOVYOU_API_KEY"},
+		{name: "public auth requires key", addr: ":8081", requireAuth: true, wantErr: "LOVYOU_API_KEY"},
+		{name: "loopback explicit auth", requireAuth: true, apiKey: "explicit-key", wantToken: "explicit-key"},
+		{name: "public explicit auth", addr: ":8081", requireAuth: true, apiKey: "explicit-key", wantToken: "explicit-key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveWebhookBearerToken(tt.addr, tt.requireAuth, tt.apiKey)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.wantToken {
+				t.Fatalf("token/error = %q/%v, want %q/nil", got, err, tt.wantToken)
+			}
+		})
+	}
+}
+
+func TestCmdCivilizationDaemonWebhookAuthFlagRequiresKeyBeforeRuntime(t *testing.T) {
+	t.Setenv("LOVYOU_API_KEY", "")
+	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--webhook-require-auth"})
+	if err == nil || !strings.Contains(err.Error(), "LOVYOU_API_KEY") {
+		t.Fatalf("error = %v, want missing LOVYOU_API_KEY refusal", err)
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("--webhook-require-auth was not registered: %v", err)
+	}
+}
+
 func TestCmdCivilizationDaemonDraftPRCreateRequiresGitHubToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--issue-scan-draft-pr-create"})
