@@ -10,10 +10,16 @@ import (
 // The hive-lifecycle runbooks delegate hive.service posture adjudication to
 // the tested verifier subcommand instead of inline shell forensics
 // (FO-HIVE-267-PREFLIGHT-RUNBOOK-WIRING; verifier delivered in PR #277).
-// The assertion binds to the complete executable invocation line inside the
-// runbook's bash fence — prose mentions of the subcommand name alone must
-// never satisfy it, or deleting the fence would go undetected.
-const hiveLifecycleVerifierInvocation = "( cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit )"
+// The assertions bind to the load-bearing lines inside the runbook's bash
+// fence — prose mentions of the subcommand name alone must never satisfy
+// them, or deleting the fence would go undetected. The fail-closed line is
+// the classification every command-level failure (missing checkout, build
+// failure, verifier UNKNOWN) must reach without aborting a strict-shell
+// caller.
+const (
+	hiveLifecycleVerifierInvocation = "cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit"
+	hiveLifecycleVerifierFailClosed = "treat as UNKNOWN, fail closed; if local-only was intended, STOP the unit"
+)
 
 func hiveLifecycleDialectRunbooks() []struct{ name, path string } {
 	return []struct{ name, path string }{
@@ -32,6 +38,9 @@ func TestHiveLifecycleRunbooksInvokeTestedUnitPreflight(t *testing.T) {
 			content := string(raw)
 			if !strings.Contains(content, hiveLifecycleVerifierInvocation) {
 				t.Fatalf("%s dialect is missing the executable verifier invocation %q for hive.service posture confirmation (prose mentions do not count)", tt.name, hiveLifecycleVerifierInvocation)
+			}
+			if !strings.Contains(content, hiveLifecycleVerifierFailClosed) {
+				t.Fatalf("%s dialect is missing the fail-closed classification %q for command-level verifier failures", tt.name, hiveLifecycleVerifierFailClosed)
 			}
 			for _, stale := range []string{
 				"tracked as separate work",

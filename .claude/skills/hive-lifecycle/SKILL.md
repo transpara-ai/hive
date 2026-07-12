@@ -85,7 +85,11 @@ fi
 Post-start (or post-restart) posture confirmation via the tested read-only verifier (fail-closed, whole-domain tests). Provenance differs per posture: credential posture reads the RUNNING process (`LOVYOU_API_KEY` presence/emptiness only from `/proc/<MainPID>/environ`; the value is never printed, and no secret transits a shell variable here), while autonomy posture reads the CONFIGURED merged `ExecStart` — not the live argv — so a unit edited, reloaded, or wrapper-expanded since start can run different flags than reported:
 
 ```bash
-( cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit )
+( set +e 2>/dev/null   # BLOCK CONTRACT: a nonzero verifier exit is fail-closed INFORMATION for the operator, not a script abort
+cd /Transpara/transpara-ai/repos/hive && go run ./cmd/hive factory preflight-hive-unit
+verifier_status=$?
+[ "$verifier_status" -eq 0 ] || echo "verifier exit=$verifier_status — no proven posture (missing checkout, build failure, or overall=UNKNOWN): treat as UNKNOWN, fail closed; if local-only was intended, STOP the unit"
+)
 ```
 
 Reading the report: `credential_posture=PRESENT` is PRODUCTION-CONNECTED — if the user approved the production posture this MATCHES, otherwise STOP the unit now; `ABSENT` or `EMPTY` is local-only (an empty value leaves the Site client disabled). `autonomy_posture` reports the configured merged `ExecStart`'s `--approve-requests`/`--approve-roles` flags (`FULL` = both) — configured-unit posture, not proof of the live process's flags; if the unit may have changed since start (edit, reload, wrapper), treat live autonomy as UNPROVEN and fall back to the human gate (stop the unit if in doubt). A nonzero exit with `overall=UNKNOWN` is fail-closed — unit, autonomy, or credential state was unreadable; if local-only was intended, STOP the unit.

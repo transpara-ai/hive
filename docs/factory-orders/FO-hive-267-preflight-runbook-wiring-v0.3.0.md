@@ -3,7 +3,7 @@ doc_id: FO-HIVE-267-PREFLIGHT-RUNBOOK-WIRING
 title: Factory Order — Wire the hive-lifecycle Dialect Runbooks to the Tested Unit-Posture Verifier
 doc_type: factory-order
 status: proposal
-version: 0.2.0
+version: 0.3.0
 created: 2026-07-12
 updated: 2026-07-12
 owner: Michael Saucier
@@ -64,7 +64,11 @@ remains in force.
   operator decision: `credential_posture=PRESENT` = production-connected (stop
   the unit unless that posture was approved); `ABSENT`/`EMPTY` = local-only;
   nonzero exit / `overall=UNKNOWN` = fail closed (if local-only was intended,
-  stop the unit). The guidance states each posture's provenance per the
+  stop the unit). The invocation is wrapped in the runbooks' BLOCK CONTRACT
+  subshell so every command-level failure (missing checkout, build failure)
+  is explicitly classified as UNKNOWN/fail-closed for the operator without
+  aborting a strict-shell caller (v0.3.0). The guidance states each posture's
+  provenance per the
   verifier's contract: credential posture from the RUNNING process's
   environment; autonomy posture from the CONFIGURED merged `ExecStart`, not
   the live argv — a unit changed since start can run different flags, so live
@@ -109,6 +113,24 @@ verifier contract change (Non-Goal 1) and the configured-vs-live gap is
 PR #277's explicitly accepted, bounded residual (its ready-state CFAR,
 disposition 1). If live-argv reconciliation is wanted, that is a new
 governed slice against the verifier.
+
+## CFAR Round 3 Repair (v0.3.0)
+
+CFAR round 3 (Codex, head `e91614d9`) found one P1: the bare verifier
+invocation did not fail closed at the command level — a missing checkout or
+`go run` build failure exits nonzero without emitting `overall=UNKNOWN`, and
+in a `set -e` caller any nonzero exit (including the verifier's own UNKNOWN)
+aborts the flow before the operator can act on the STOP guidance, after the
+protected unit has already started. Accepted and repaired: both dialects wrap
+the invocation in the runbooks' established BLOCK CONTRACT subshell, capture
+the exit status, and classify every nonzero outcome as UNKNOWN/fail-closed
+with explicit STOP guidance; the consistency test now also asserts the
+fail-closed classification line (mutation-verified alongside the invocation
+line). CFAR round 2 (head `89783b4`) had separately found the consistency
+test's substring assertion satisfiable by prose alone with the executable
+fence deleted; repaired by binding the assertion to the executable invocation
+line (test-only change; no FO requirement text changed, so no bump was
+recorded for that round).
 
 ## Non-Goals
 
