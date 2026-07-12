@@ -458,7 +458,7 @@ systemctl --user stop hive hive-ops-api work-server 2>/dev/null || true
 # serving a DIFFERENT database. `down -v` destroys the whole cluster volume,
 # so require ZERO client connections across ALL databases; anything still
 # connected is the operator's to stop explicitly.
-conns=$(docker exec hive-postgres-1 psql -U hive -d hive -Atc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null)
+conns=$(docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null)   # maintenance DB: this recovery path must not depend on the hive DB it recreates
 if [ "$conns" = "0" ]; then
   # The && chain is load-bearing: if the repo path is missing or unmounted, a
   # bare cd would leave the shell in the CALLER's directory and `docker compose
@@ -466,7 +466,7 @@ if [ "$conns" = "0" ]; then
   cd /Transpara/transpara-ai/repos/hive && docker compose down -v && docker compose up -d postgres
 else
   echo "postgres reports ${conns:-unreadable} live client connection(s) — NOT resetting; stop these first:"
-  docker exec hive-postgres-1 psql -U hive -d hive -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
+  docker exec hive-postgres-1 psql -U hive -d postgres -Atc "SELECT datname||'  '||coalesce(application_name,'?')||'  pid='||pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null
 fi
 ```
 
