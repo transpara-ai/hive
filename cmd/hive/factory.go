@@ -232,6 +232,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	space := fs.String("space", "hive", "transpara.ai space slug")
 	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
+	webhookAddr := fs.String("webhook-addr", "", "Webhook listen address (default: loopback 127.0.0.1 at HIVE_LISTENER_PORT or 8081; set :8081 only for deliberate network exposure)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -438,7 +439,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase, *webhookAddr)
 }
 
 type issueScanFullChainConfig struct {
