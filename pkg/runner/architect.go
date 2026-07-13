@@ -218,7 +218,7 @@ type architectSubtask struct {
 // milestoneID, when non-empty, is embedded in the curl payload as "causes":[milestoneID]
 // so every created task declares its causal parent (Invariant 2: CAUSALITY).
 func buildArchitectOperateInstruction(context, spaceSlug, milestoneID, apiBase string) string {
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	causesSuffix := ""
 	if milestoneID != "" {
 		causesSuffix = fmt.Sprintf(`,"causes":["%s"]`, milestoneID)

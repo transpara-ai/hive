@@ -93,7 +93,7 @@ func TestRunIngest(t *testing.T) {
 			}
 
 			// Set required env var.
-			t.Setenv("LOVYOU_API_KEY", "test-key")
+			t.Setenv("TRANSPARA_API_KEY", "test-key")
 
 			err := runIngest(specPath, "hive", srv.URL, tt.priority)
 
@@ -136,20 +136,20 @@ func TestRunIngest_MissingAPIKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("LOVYOU_API_KEY", "")
+	t.Setenv("TRANSPARA_API_KEY", "")
 
 	err := runIngest(specPath, "hive", "http://localhost:9999", "high")
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
-	if !strings.Contains(err.Error(), "LOVYOU_API_KEY required") {
-		t.Errorf("error %q should mention LOVYOU_API_KEY", err.Error())
+	if !strings.Contains(err.Error(), "TRANSPARA_API_KEY required") {
+		t.Errorf("error %q should mention TRANSPARA_API_KEY", err.Error())
 	}
 }
 
 func TestRunIngest_MissingFile(t *testing.T) {
 	t.Setenv("HIVE_INGEST_SKIP_REPO", "1")
-	t.Setenv("LOVYOU_API_KEY", "test-key")
+	t.Setenv("TRANSPARA_API_KEY", "test-key")
 	err := runIngest("/nonexistent/spec.md", "hive", "http://localhost:9999", "high")
 	if err == nil {
 		t.Fatal("expected error for missing file")
@@ -166,7 +166,7 @@ func TestRunIngestBlocksRepoBootstrapByDefault(t *testing.T) {
 	if err := os.WriteFile(specPath, []byte("# Needs Repo\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LOVYOU_API_KEY", "test-key")
+	t.Setenv("TRANSPARA_API_KEY", "test-key")
 
 	calledAPI := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

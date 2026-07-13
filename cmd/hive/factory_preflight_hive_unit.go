@@ -154,10 +154,10 @@ func evaluateHiveUnitPreflight(properties hiveUnitProperties, environ []byte, en
 	}
 	report.Credential = hiveUnitCredentialAbsent
 	for _, entry := range bytes.Split(environ, []byte{0}) {
-		if !bytes.HasPrefix(entry, []byte("LOVYOU_API_KEY=")) {
+		if !bytes.HasPrefix(entry, []byte("TRANSPARA_API_KEY=")) {
 			continue
 		}
-		if len(entry) == len("LOVYOU_API_KEY=") {
+		if len(entry) == len("TRANSPARA_API_KEY=") {
 			report.Credential = hiveUnitCredentialEmpty
 		} else {
 			report.Credential = hiveUnitCredentialPresent

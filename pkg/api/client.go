@@ -52,7 +52,7 @@ type OpResponse struct {
 // Client talks to the transpara.ai JSON API.
 type Client struct {
 	base   string // e.g. "https://transpara.ai"
-	apiKey string // LOVYOU_API_KEY (sent as Bearer token)
+	apiKey string // TRANSPARA_API_KEY (sent as Bearer token)
 	http   *http.Client
 }
 

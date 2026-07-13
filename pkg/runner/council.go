@@ -107,7 +107,7 @@ func RunCouncil(ctx context.Context, cfg Config) error {
 
 			if canOperate {
 				// Operate mode: agent can search knowledge, read code, check the board.
-				apiKey := os.Getenv("LOVYOU_API_KEY")
+				apiKey := os.Getenv("TRANSPARA_API_KEY")
 				instruction := buildCouncilOperateInstruction(m.role, m.prompt, cfg.CouncilTopic, cfg.SpaceSlug, apiKey, cfg.APIBase)
 				result, err := op.Operate(ctx, decision.OperateTask{
 					WorkDir:     cfg.HiveDir,

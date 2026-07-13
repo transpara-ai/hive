@@ -236,14 +236,14 @@ func cmdGovernedDaemon(name string, args []string) error {
 	space := fs.String("space", "hive", "transpara.ai space slug")
 	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	webhookAddr := fs.String("webhook-addr", "", "Webhook listen address (default: loopback 127.0.0.1 at HIVE_LISTENER_PORT or 8081; non-loopback binds require --webhook-require-auth)")
-	webhookRequireAuth := fs.Bool("webhook-require-auth", false, "Require Authorization: Bearer LOVYOU_API_KEY on POST /event (required for non-loopback --webhook-addr)")
+	webhookRequireAuth := fs.Bool("webhook-require-auth", false, "Require Authorization: Bearer TRANSPARA_API_KEY on POST /event (required for non-loopback --webhook-addr)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required")
 	}
-	webhookBearerToken, err := resolveWebhookBearerToken(*webhookAddr, *webhookRequireAuth, os.Getenv("LOVYOU_API_KEY"))
+	webhookBearerToken, err := resolveWebhookBearerToken(*webhookAddr, *webhookRequireAuth, os.Getenv("TRANSPARA_API_KEY"))
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 func resolveWebhookBearerToken(addr string, requireAuth bool, apiKey string) (string, error) {
 	if requireAuth {
 		if strings.TrimSpace(apiKey) == "" {
-			return "", fmt.Errorf("LOVYOU_API_KEY is required with --webhook-require-auth")
+			return "", fmt.Errorf("TRANSPARA_API_KEY is required with --webhook-require-auth")
 		}
 		return apiKey, nil
 	}

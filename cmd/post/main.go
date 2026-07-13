@@ -6,13 +6,13 @@
 //
 // Configuration via environment variables:
 //
-//	LOVYOU_API_KEY   — required. Bearer token for transpara.ai API.
-//	LOVYOU_BASE_URL  — optional. Defaults to https://transpara.ai.
+//	TRANSPARA_API_KEY   — required. Bearer token for transpara.ai API.
+//	TRANSPARA_BASE_URL  — optional. Defaults to https://transpara.ai.
 //
 // Usage:
 //
 //	cd /c/src/matt/transpara3/hive
-//	LOVYOU_API_KEY=lv_... go run ./cmd/post/
+//	TRANSPARA_API_KEY=lv_... go run ./cmd/post/
 package main
 
 import (
@@ -31,13 +31,13 @@ import (
 )
 
 func main() {
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "LOVYOU_API_KEY not set, skipping post")
+		fmt.Fprintln(os.Stderr, "TRANSPARA_API_KEY not set, skipping post")
 		return
 	}
 
-	baseURL := os.Getenv("LOVYOU_BASE_URL")
+	baseURL := os.Getenv("TRANSPARA_BASE_URL")
 	if baseURL == "" {
 		baseURL = "https://transpara.ai"
 	}

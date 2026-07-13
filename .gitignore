@@ -17,3 +17,6 @@ hive.exe~
 # Loop runtime state (regenerated every daemon cycle)
 loop/daemon.status
 loop/diagnostics.jsonl
+
+# Operator-local MCP config variants (may carry values) — never commit (FO R5/D2)
+loop/*.local.json

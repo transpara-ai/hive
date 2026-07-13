@@ -64,12 +64,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("LOVYOU_API_KEY not set")
+		return fmt.Errorf("TRANSPARA_API_KEY not set")
 	}
 
-	baseURL := strings.TrimRight(os.Getenv("LOVYOU_BASE_URL"), "/")
+	baseURL := strings.TrimRight(os.Getenv("TRANSPARA_BASE_URL"), "/")
 	if baseURL == "" {
 		baseURL = "https://transpara.ai"
 	}

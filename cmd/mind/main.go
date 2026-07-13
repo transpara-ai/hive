@@ -18,7 +18,7 @@
 //	{
 //	  "command": "/c/src/matt/transpara3/hive/mcp-graph.exe",
 //	  "args": [],
-//	  "env": {"LOVYOU_API_KEY": "lv_...", "LOVYOU_SPACE": "hive"}
+//	  "env": {"TRANSPARA_API_KEY": "lv_...", "TRANSPARA_SPACE": "hive"}
 //	}
 //
 // Requires ANTHROPIC_API_KEY in the environment.
