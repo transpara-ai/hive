@@ -44,18 +44,24 @@ makes the window zero for the managed services.
    if it references the key; add `hive.service` only with current-turn approval).
    *Check:* `systemctl --user is-active work-server.service` → `active`.
 
-3. **Confirm the credential posture under the new name (per restarted unit).**
-   Run the hive-unit preflight (`hive factory preflight-hive-unit` with the
-   deployed binary) against a unit that was restarted in step 2 — a unit still
-   running on the pre-rename environment reports the new key absent.
-   *Check:* credential posture reports **PRESENT** under `TRANSPARA_API_KEY`
-   (field `transpara_api_key=present`).
+3. **Confirm the credential posture for `hive.service` (only if you restarted it).**
+   `hive factory preflight-hive-unit` probes **`hive.service` specifically** — it
+   takes no unit argument and does not mutate the unit. Run it only after
+   `hive.service` has been restarted onto the renamed `hive.env`; against an
+   unrestarted `hive.service` it reports the stale/absent posture.
+   *Check (restarted `hive.service` only):* credential posture reports **PRESENT**
+   under `TRANSPARA_API_KEY` (field `transpara_api_key=present`). If you did not
+   restart `hive.service`, skip this step and rely on step 4's direct per-unit
+   check for the services you did restart (e.g. `work-server.service`).
 
-4. **Confirm no legacy name remains in the effective unit environment (names only).**
-   For each running unit, read `/proc/<MainPID>/environ` and list variable names
-   only (never print values):
-   `tr '\0' '\n' < /proc/$(systemctl --user show -p MainPID --value work-server.service)/environ | cut -d= -f1 | grep '^LOVYOU_'`
-   *Check:* no `LOVYOU_` name in the effective environment (empty output).
+4. **Verify each restarted unit's effective environment directly (names only).**
+   This is the authoritative per-unit check — it covers `work-server.service`,
+   which the `hive.service`-scoped preflight in step 3 does not. For **each unit
+   you restarted in step 2**, read its `/proc/<MainPID>/environ` and list variable
+   names only (never print values); substitute the unit name:
+   `tr '\0' '\n' < /proc/$(systemctl --user show -p MainPID --value work-server.service)/environ | cut -d= -f1 | grep -E '^(LOVYOU_|TRANSPARA_API_KEY$)'`
+   *Check (per restarted unit):* the output lists `TRANSPARA_API_KEY` and **no**
+   `LOVYOU_` name.
 
 5. **Re-sync the local skill installs from the repo** (FO-265 `rsync -a --delete`
    convention; adjust the source path to your checkout):
@@ -75,9 +81,10 @@ makes the window zero for the managed services.
 
 ## Post-migration acceptance
 
-Per service, **after it has been restarted onto the renamed `hive.env`** (step 2):
-the preflight posture reads **PRESENT** under `TRANSPARA_API_KEY`, and **no
-`LOVYOU_` name** appears in that unit's effective `/proc/<MainPID>/environ`.
+Per service, **after it has been restarted onto the renamed `hive.env`** (step 2),
+its effective `/proc/<MainPID>/environ` shows `TRANSPARA_API_KEY` present and **no
+`LOVYOU_` name** (step 4's direct check; for `hive.service` the step-3 preflight is
+an equivalent scoped check).
 
 A still-running service that was **not** restarted (e.g. `hive.service` when its
 approval-gated restart is deferred) keeps the old environment in `/proc` and is
