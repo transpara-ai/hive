@@ -42,6 +42,9 @@ func TestHiveLifecycleRunbooksInvokeTestedUnitPreflight(t *testing.T) {
 			if !strings.Contains(content, hiveLifecycleVerifierFailClosed) {
 				t.Fatalf("%s dialect is missing the fail-closed classification %q for command-level verifier failures", tt.name, hiveLifecycleVerifierFailClosed)
 			}
+			if strings.Contains(content, "LOVYOU_") {
+				t.Fatalf("%s dialect still carries retired LOVYOU_ environment-family text after canonical TRANSPARA_ reconciliation", tt.name)
+			}
 			for _, stale := range []string{
 				"tracked as separate work",
 				"tracked separately)",

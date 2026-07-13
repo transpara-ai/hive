@@ -91,7 +91,8 @@ remains in force.
   `cmd/hive` reads both dialect files and asserts, per dialect: (a) the file
   invokes `factory preflight-hive-unit`; (b) the stale promise phrases from R1
   are absent; (c) neither the canonical `grep '^TRANSPARA_API_KEY='` probe nor
-  the retired `grep '^LOVYOU_API_KEY='` spelling remains inline; and (d)
+  the retired `grep '^LOVYOU_API_KEY='` spelling remains inline; (d) no
+  retired `LOVYOU_` family text remains anywhere in either dialect; and (e)
   the `skills/hive-lifecycle/claude` symlink still resolves to the physical
   Claude-dialect file (one-physical-copy invariant from FO-HIVE-265 R2). The
   test is written first and observed RED against the unedited runbooks, then
@@ -145,7 +146,8 @@ per-posture provenance caveat, Human approval gate, and foreground alternative,
 while taking canonical main's `TRANSPARA_API_KEY` name everywhere. The
 consistency test now rejects inline credential probes under both the canonical
 and retired names so neither spelling can silently reintroduce shell
-adjudication. No verifier, service, runtime, or autonomy behavior changes.
+adjudication, and rejects any retired `LOVYOU_` family text in either runbook.
+No verifier, service, runtime, or autonomy behavior changes.
 
 ## Non-Goals
 
