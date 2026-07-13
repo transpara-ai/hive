@@ -77,7 +77,9 @@ makes the window zero for the managed services.
    Ensure any local copy of `loop/mcp-graph.json` carries no credential value and
    no `LOVYOU_` name, and that `TRANSPARA_API_KEY` is supplied via the environment
    (not the JSON — the child inherits it).
-   *Check:* the local MCP config has no `LOVYOU_` name and no committed credential.
+   *Check:* for each local copy `<f>`,
+   `grep -cE 'LOVYOU_|lv_[0-9a-f]{16,}' "<f>"` → `0` (a count — never prints the
+   value); and `python3 -c "import json,sys;print('TRANSPARA_API_KEY' in json.load(open(sys.argv[1])).get('env',{}))" "<f>"` → `False` (key not embedded in the JSON).
 
 ## Post-migration acceptance
 
