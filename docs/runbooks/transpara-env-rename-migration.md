@@ -3,10 +3,16 @@
 **Executed by the operator only, after this PR merges. Never run by CI or the PR itself.**
 
 After merge, a freshly built binary reads the `TRANSPARA_*` names while the live
-nucbuntu deployment still exports `LOVYOU_API_KEY`. In that window every affected
-path is fail-closed or default-safe (required-error, skip-with-notice, Site
-client disabled, built-in defaults) — never a new fail-open. This runbook makes
-the window zero for the managed services.
+nucbuntu deployment still exports `LOVYOU_API_KEY`. In that window the
+key-*gated* paths (ingest, pipeline, role, civilization, webhook) are
+fail-closed or default-safe (required-error, skip-with-notice, Site client
+disabled, built-in defaults). **Exception — `cmd/mcp-graph`:** the changed
+`loop/mcp-graph.json` supplies neither the new key nor a local base URL, so
+`mcp-graph` defaults to `https://transpara.ai` and its `apiGet`/`apiPost`
+transmit even with an empty key — MCP tool input can reach production during
+this window. Before starting, set a local `TRANSPARA_BASE_URL` for `mcp-graph`
+or avoid MCP tool operations until the migration below completes. This runbook
+makes the window zero for the managed services.
 
 ## Affected units and files (resolved live 2026-07-13 — re-verify before running)
 
@@ -38,10 +44,12 @@ the window zero for the managed services.
    if it references the key; add `hive.service` only with current-turn approval).
    *Check:* `systemctl --user is-active work-server.service` → `active`.
 
-3. **Confirm the credential posture under the new name.**
+3. **Confirm the credential posture under the new name (per restarted unit).**
    Run the hive-unit preflight (`hive factory preflight-hive-unit` with the
-   deployed binary).
-   *Check:* credential posture reports **PRESENT** under `TRANSPARA_API_KEY`.
+   deployed binary) against a unit that was restarted in step 2 — a unit still
+   running on the pre-rename environment reports the new key absent.
+   *Check:* credential posture reports **PRESENT** under `TRANSPARA_API_KEY`
+   (field `transpara_api_key=present`).
 
 4. **Confirm no legacy name remains in the effective unit environment (names only).**
    For each running unit, read `/proc/<MainPID>/environ` and list variable names
@@ -52,7 +60,11 @@ the window zero for the managed services.
 5. **Re-sync the local skill installs from the repo** (FO-265 `rsync -a --delete`
    convention; adjust the source path to your checkout):
    `rsync -a --delete <repo>/.claude/skills/hive-lifecycle/ ~/.claude/skills/hive-lifecycle/`
-   `rsync -a --delete <repo>/skills/hive-lifecycle/codex/ ~/.codex/skills/hive-lifecycle/codex/`
+   `rsync -a --delete <repo>/skills/hive-lifecycle/codex/ ~/.codex/skills/hive-lifecycle/`
+   The Codex dialect's files under `skills/hive-lifecycle/codex/` install to the
+   skill **root** `~/.codex/skills/hive-lifecycle/` (per `skills/README.md`) — a
+   nested `…/codex/` target would leave the active root `SKILL.md` stale and able
+   to blank `LOVYOU_API_KEY` while `TRANSPARA_API_KEY` is live.
    *Check:* `grep -RE 'LOVYOU_' ~/.claude/skills/hive-lifecycle ~/.codex/skills/hive-lifecycle` → no matches.
 
 6. **Update operator-local MCP config copies.**
@@ -63,8 +75,15 @@ the window zero for the managed services.
 
 ## Post-migration acceptance
 
-The preflight posture reads **PRESENT** under `TRANSPARA_API_KEY`, and **no
-`LOVYOU_` name** appears in any effective unit environment.
+Per service, **after it has been restarted onto the renamed `hive.env`** (step 2):
+the preflight posture reads **PRESENT** under `TRANSPARA_API_KEY`, and **no
+`LOVYOU_` name** appears in that unit's effective `/proc/<MainPID>/environ`.
+
+A still-running service that was **not** restarted (e.g. `hive.service` when its
+approval-gated restart is deferred) keeps the old environment in `/proc` and is
+explicitly **not yet migrated** — its steps 3–4 checks are expected to still show
+the legacy name and must not be read as failure; restart it (with current-turn
+approval) before asserting its acceptance.
 
 ## Not covered here (separate operator actions)
 

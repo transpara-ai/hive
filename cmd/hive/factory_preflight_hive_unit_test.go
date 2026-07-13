@@ -191,6 +191,13 @@ func TestRunHiveUnitPreflightRedactsPresentCredentialValue(t *testing.T) {
 	if !strings.Contains(out, "credential_posture=PRESENT") {
 		t.Fatalf("output missing PRESENT credential posture: %s", out)
 	}
+	// The machine-readable credential field is renamed with the variable (FO R1).
+	if !strings.Contains(out, "transpara_api_key=present") {
+		t.Fatalf("output missing renamed credential field transpara_api_key: %s", out)
+	}
+	if strings.Contains(out, "lovyou_api_key") {
+		t.Fatalf("output still emits the legacy lovyou_api_key field: %s", out)
+	}
 	for _, secretMaterial := range []string{"super-secret", "TRANSPARA_API_KEY="} {
 		if strings.Contains(out, secretMaterial) {
 			t.Fatalf("output disclosed %q: %s", secretMaterial, out)

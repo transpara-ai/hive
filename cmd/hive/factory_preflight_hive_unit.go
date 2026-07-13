@@ -199,7 +199,7 @@ func hiveUnitExecStartHasFlag(execStart, flagName string) bool {
 func writeUnknownHiveUnitPreflight(stdout io.Writer) {
 	fmt.Fprintln(stdout, "unit_posture=UNKNOWN active_state=UNKNOWN sub_state=UNKNOWN exec_start=UNKNOWN main_pid=UNKNOWN")
 	fmt.Fprintln(stdout, "autonomy_posture=UNKNOWN approve_requests=UNKNOWN approve_roles=UNKNOWN")
-	fmt.Fprintln(stdout, "credential_posture=UNKNOWN lovyou_api_key=UNKNOWN")
+	fmt.Fprintln(stdout, "credential_posture=UNKNOWN transpara_api_key=UNKNOWN")
 	fmt.Fprintln(stdout, "overall=UNKNOWN")
 }
 
@@ -210,7 +210,7 @@ func writeHiveUnitPreflightReport(stdout io.Writer, report hiveUnitPreflightRepo
 		fmt.Fprintf(stdout, "unit_posture=KNOWN active_state=%s sub_state=%s exec_start=present main_pid=%d\n", report.ActiveState, report.SubState, report.MainPID)
 	}
 	fmt.Fprintf(stdout, "autonomy_posture=%s approve_requests=%t approve_roles=%t\n", hiveUnitAutonomyPosture(report), report.ApproveRequests, report.ApproveRoles)
-	fmt.Fprintf(stdout, "credential_posture=%s lovyou_api_key=%s\n", report.Credential, strings.ToLower(string(report.Credential)))
+	fmt.Fprintf(stdout, "credential_posture=%s transpara_api_key=%s\n", report.Credential, strings.ToLower(string(report.Credential)))
 	if report.Unknown {
 		fmt.Fprintln(stdout, "overall=UNKNOWN")
 	} else {
