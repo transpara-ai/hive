@@ -91,8 +91,8 @@ func TestEvaluateHiveUnitPreflightCoversCredentialPostures(t *testing.T) {
 		unknown bool
 	}{
 		{name: "absent", environ: []byte("PATH=/usr/bin\x00"), want: hiveUnitCredentialAbsent},
-		{name: "empty", environ: []byte("LOVYOU_API_KEY=\x00PATH=/usr/bin\x00"), want: hiveUnitCredentialEmpty},
-		{name: "present", environ: []byte("LOVYOU_API_KEY=super-secret\x00"), want: hiveUnitCredentialPresent},
+		{name: "empty", environ: []byte("TRANSPARA_API_KEY=\x00PATH=/usr/bin\x00"), want: hiveUnitCredentialEmpty},
+		{name: "present", environ: []byte("TRANSPARA_API_KEY=super-secret\x00"), want: hiveUnitCredentialPresent},
 		{name: "unreadable", err: errors.New("permission denied"), want: hiveUnitCredentialUnknown, unknown: true},
 		{name: "empty input", environ: nil, want: hiveUnitCredentialUnknown, unknown: true},
 	}
@@ -147,7 +147,7 @@ func TestRunHiveUnitPreflightUsesOnlyReadOnlyMergedPropertyProbe(t *testing.T) {
 		if path != "/proc/42/environ" {
 			return nil, fmt.Errorf("unexpected read path %q", path)
 		}
-		return []byte("LOVYOU_API_KEY=\x00PATH=/usr/bin\x00"), nil
+		return []byte("TRANSPARA_API_KEY=\x00PATH=/usr/bin\x00"), nil
 	}
 	var stdout bytes.Buffer
 	if err := runHiveUnitPreflight(context.Background(), &stdout, runner, readFile); err != nil {
@@ -171,7 +171,7 @@ func TestRunHiveUnitPreflightUsesOnlyReadOnlyMergedPropertyProbe(t *testing.T) {
 			t.Fatalf("output missing %q: %s", want, out)
 		}
 	}
-	if strings.Contains(out, "LOVYOU_API_KEY=") {
+	if strings.Contains(out, "TRANSPARA_API_KEY=") {
 		t.Fatalf("output disclosed credential material: %s", out)
 	}
 }
@@ -181,7 +181,7 @@ func TestRunHiveUnitPreflightRedactsPresentCredentialValue(t *testing.T) {
 		return []byte("ActiveState=active\nSubState=running\nExecStart={ path=/usr/local/bin/hive ; argv[]=/usr/local/bin/hive civilization daemon ; }\nMainPID=42\n"), nil
 	}
 	readFile := func(string) ([]byte, error) {
-		return []byte("LOVYOU_API_KEY=super-secret\x00PATH=/usr/bin\x00"), nil
+		return []byte("TRANSPARA_API_KEY=super-secret\x00PATH=/usr/bin\x00"), nil
 	}
 	var stdout bytes.Buffer
 	if err := runHiveUnitPreflight(context.Background(), &stdout, runner, readFile); err != nil {
@@ -191,7 +191,14 @@ func TestRunHiveUnitPreflightRedactsPresentCredentialValue(t *testing.T) {
 	if !strings.Contains(out, "credential_posture=PRESENT") {
 		t.Fatalf("output missing PRESENT credential posture: %s", out)
 	}
-	for _, secretMaterial := range []string{"super-secret", "LOVYOU_API_KEY="} {
+	// The machine-readable credential field is renamed with the variable (FO R1).
+	if !strings.Contains(out, "transpara_api_key=present") {
+		t.Fatalf("output missing renamed credential field transpara_api_key: %s", out)
+	}
+	if strings.Contains(out, "lovyou_api_key") {
+		t.Fatalf("output still emits the legacy lovyou_api_key field: %s", out)
+	}
+	for _, secretMaterial := range []string{"super-secret", "TRANSPARA_API_KEY="} {
 		if strings.Contains(out, secretMaterial) {
 			t.Fatalf("output disclosed %q: %s", secretMaterial, out)
 		}
@@ -255,5 +262,21 @@ func TestFactoryPreflightHiveUnitIsRegisteredAndDiscoverable(t *testing.T) {
 	err := cmdFactory([]string{"preflight-hive-unit", "unexpected"})
 	if err == nil || !strings.Contains(err.Error(), "no positional arguments") {
 		t.Fatalf("registered command should reject positional arguments before probing systemd, got %v", err)
+	}
+}
+
+// TestPreflightPrefixCollisionSafety proves the credential probe's trailing '='
+// in the TRANSPARA_API_KEY= match prefix excludes sibling names: a variable that
+// merely shares the prefix (TRANSPARA_API_KEY_BACKUP) must not be read as the
+// credential (FO R4, packet D3/AC-4). Absent at the design base bf3f126.
+func TestPreflightPrefixCollisionSafety(t *testing.T) {
+	report := evaluateHiveUnitPreflight(hiveUnitProperties{
+		ActiveState: "active",
+		SubState:    "running",
+		ExecStart:   "/usr/local/bin/hive civilization daemon",
+		MainPID:     42,
+	}, []byte("TRANSPARA_API_KEY_BACKUP=super-secret\x00PATH=/usr/bin\x00"), nil)
+	if report.Credential != hiveUnitCredentialAbsent {
+		t.Fatalf("sibling name TRANSPARA_API_KEY_BACKUP read as credential %q, want ABSENT", report.Credential)
 	}
 }

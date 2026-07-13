@@ -112,7 +112,7 @@ func (r *Runner) reviewCommit(ctx context.Context, c commit) {
 	op, canOperate := r.cfg.Provider.(decision.IOperator)
 	var content string
 	if canOperate {
-		apiKey := os.Getenv("LOVYOU_API_KEY")
+		apiKey := os.Getenv("TRANSPARA_API_KEY")
 		causesSuffix := ""
 		if len(buildCauses) > 0 {
 			causesSuffix = fmt.Sprintf(`,"causes":["%s"]`, buildCauses[0])

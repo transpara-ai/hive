@@ -190,7 +190,7 @@ The agents communicate via transpara.ai's existing JSON API:
 ```go
 type APIClient struct {
     base   string // "https://transpara.ai"
-    apiKey string // LOVYOU_API_KEY (Bearer token)
+    apiKey string // TRANSPARA_API_KEY (Bearer token)
 }
 
 // Tasks

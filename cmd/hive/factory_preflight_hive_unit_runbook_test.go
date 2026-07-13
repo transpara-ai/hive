@@ -50,8 +50,13 @@ func TestHiveLifecycleRunbooksInvokeTestedUnitPreflight(t *testing.T) {
 					t.Fatalf("%s dialect still carries the stale verifier promise %q — the verifier exists as `hive factory preflight-hive-unit`", tt.name, stale)
 				}
 			}
-			if strings.Contains(content, "grep '^LOVYOU_API_KEY='") {
-				t.Fatalf("%s dialect re-derives hive.service credential posture with an inline shell probe — that adjudication belongs to `hive factory preflight-hive-unit`", tt.name)
+			for _, inlineProbe := range []string{
+				"grep '^TRANSPARA_API_KEY='",
+				"grep '^LOVYOU_API_KEY='",
+			} {
+				if strings.Contains(content, inlineProbe) {
+					t.Fatalf("%s dialect re-derives hive.service credential posture with inline shell probe %q — that adjudication belongs to `hive factory preflight-hive-unit`", tt.name, inlineProbe)
+				}
 			}
 		})
 	}

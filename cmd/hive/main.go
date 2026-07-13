@@ -131,9 +131,9 @@ func runIngest(specPath, space, apiBase, priority string) error {
 	}
 
 	// Resolve API key.
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("LOVYOU_API_KEY required")
+		return fmt.Errorf("TRANSPARA_API_KEY required")
 	}
 
 	payload, err := json.Marshal(map[string]string{
@@ -441,13 +441,13 @@ func runRunner(role, space, apiBase, repoPath string, budget float64, agentID st
 	defer stop()
 
 	// Resolve API key.
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
 		if strings.Contains(apiBase, "localhost") || strings.Contains(apiBase, "127.0.0.1") {
 			apiKey = "dev"
-			log.Printf("[pipeline] no LOVYOU_API_KEY — using 'dev' for local API")
+			log.Printf("[pipeline] no TRANSPARA_API_KEY — using 'dev' for local API")
 		} else {
-			return fmt.Errorf("LOVYOU_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
+			return fmt.Errorf("TRANSPARA_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
 		}
 	}
 
@@ -507,7 +507,7 @@ func runCouncilCmd(space, apiBase, repoPath string, budget float64, topic, catal
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	client := api.New(apiBase, apiKey) // nil-safe if no key
 
 	if repoPath == "" {
@@ -598,13 +598,13 @@ func runPipeline(space, apiBase, repoPath string, budget float64, agentID string
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
 		if strings.Contains(apiBase, "localhost") || strings.Contains(apiBase, "127.0.0.1") {
 			apiKey = "dev"
-			log.Printf("[pipeline] no LOVYOU_API_KEY — using 'dev' for local API")
+			log.Printf("[pipeline] no TRANSPARA_API_KEY — using 'dev' for local API")
 		} else {
-			return fmt.Errorf("LOVYOU_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
+			return fmt.Errorf("TRANSPARA_API_KEY required (set env or use --api http://localhost:8082 for local mode)")
 		}
 	}
 
@@ -1281,7 +1281,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		go pruner.Start(ctx)
 	}
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	var siteClient *api.Client
 	if apiKey != "" {
 		siteClient = api.New(apiBase, apiKey)
@@ -1350,7 +1350,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 			fmt.Fprintf(os.Stderr, "Reconciliation: polling %s/api/hive/site-ops for space=%s\n", apiBase, space)
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "Reconciliation: skipped (need --store, LOVYOU_API_KEY, and --space)")
+		fmt.Fprintln(os.Stderr, "Reconciliation: skipped (need --store, TRANSPARA_API_KEY, and --space)")
 	}
 
 	var scannerWG sync.WaitGroup

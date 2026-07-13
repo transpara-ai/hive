@@ -147,10 +147,11 @@ func TestResolveWebhookBearerTokenWholeDomain(t *testing.T) {
 		{name: "public wildcard requires auth", addr: ":8081", wantErr: "--webhook-require-auth"},
 		{name: "public IPv4 requires auth", addr: "0.0.0.0:8081", wantErr: "--webhook-require-auth"},
 		{name: "public IPv6 requires auth", addr: "[::]:8081", wantErr: "--webhook-require-auth"},
-		{name: "auth requires key", requireAuth: true, wantErr: "LOVYOU_API_KEY"},
-		{name: "public auth requires key", addr: ":8081", requireAuth: true, wantErr: "LOVYOU_API_KEY"},
+		{name: "auth requires key", requireAuth: true, wantErr: "TRANSPARA_API_KEY"},
+		{name: "public auth requires key", addr: ":8081", requireAuth: true, wantErr: "TRANSPARA_API_KEY"},
 		{name: "loopback explicit auth", requireAuth: true, apiKey: "explicit-key", wantToken: "explicit-key"},
 		{name: "public explicit auth", addr: ":8081", requireAuth: true, apiKey: "explicit-key", wantToken: "explicit-key"},
+		{name: "auth rejects whitespace-only key", requireAuth: true, apiKey: "   \t ", wantErr: "TRANSPARA_API_KEY"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -169,10 +170,10 @@ func TestResolveWebhookBearerTokenWholeDomain(t *testing.T) {
 }
 
 func TestCmdCivilizationDaemonWebhookAuthFlagRequiresKeyBeforeRuntime(t *testing.T) {
-	t.Setenv("LOVYOU_API_KEY", "")
+	t.Setenv("TRANSPARA_API_KEY", "")
 	err := cmdCivilization([]string{"daemon", "--human", "Michael", "--webhook-require-auth"})
-	if err == nil || !strings.Contains(err.Error(), "LOVYOU_API_KEY") {
-		t.Fatalf("error = %v, want missing LOVYOU_API_KEY refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "TRANSPARA_API_KEY") {
+		t.Fatalf("error = %v, want missing TRANSPARA_API_KEY refusal", err)
 	}
 	if strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatalf("--webhook-require-auth was not registered: %v", err)

@@ -3,13 +3,13 @@ doc_id: FO-HIVE-267-PREFLIGHT-RUNBOOK-WIRING
 title: Factory Order — Wire the hive-lifecycle Dialect Runbooks to the Tested Unit-Posture Verifier
 doc_type: factory-order
 status: proposal
-version: 0.3.0
+version: 0.4.0
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-13
 owner: Michael Saucier
-steward: claude
+steward: codex
 primary_repo: transpara-ai/hive
-source_issue: channel A operator directive 2026-07-12 (sha256 e67e9f0e4b3dbb2e557e3ebf9bc22a685225583d38ba0f64a53e93fb1a80599f); lineage transpara-ai/hive#267; verifier delivery transpara-ai/hive#277
+source_issue: channel A operator directive 2026-07-12 (sha256 e67e9f0e4b3dbb2e557e3ebf9bc22a685225583d38ba0f64a53e93fb1a80599f); lineage transpara-ai/hive#267; verifier delivery transpara-ai/hive#277; canonical-main reconciliation transpara-ai/hive#285
 authority: repository documentation/skill-source and test-only changes; no hive.service start/stop/restart, daemon launch, runtime execution, service restart, deploy, public exposure, authentication change, protected settings change, production EventGraph read/query/write, Work runtime write, Test 001 GREEN, value allocation, autonomy increase, or wiki work
 ---
 
@@ -22,6 +22,7 @@ authority: repository documentation/skill-source and test-only changes; no hive.
 | Operator directive, Michael Saucier, 2026-07-12 | content sha256 `e67e9f0e4b3dbb2e557e3ebf9bc22a685225583d38ba0f64a53e93fb1a80599f` (verbatim text archived below) | Channel A raw intake: implement the unit preflight as a tested Go subcommand, then "shrink both dialect runbooks to invoke it" |
 | [transpara-ai/hive#267](https://github.com/transpara-ai/hive/pull/267) | merged; runbook lineage per FO-HIVE-265-LIFECYCLE-SKILL-HOME v0.58.0 | CFAR lineage: the rounds that first hardened, then deliberately **removed**, the inline bash preflight — replacing it with a human gate, a minimal post-start posture probe, and the promise "a mechanical verifier belongs in a tested Go subcommand (tracked as separate work)" |
 | [transpara-ai/hive#277](https://github.com/transpara-ai/hive/pull/277) | merge commit `77739de059e81112b4337d51d7e3a7ebd0684ff1` (commits `f057496`, `e97c0b0`); Codex-authored, Claude CFAR pass at draft head `e97c0b0` and ready head `03ea9b6` | Delivered verifier: `hive factory preflight-hive-unit` — read-only merged-property + `/proc/<MainPID>/environ` posture report, fail-closed, whole-domain table-driven tests |
+| [transpara-ai/hive#285](https://github.com/transpara-ai/hive/issues/285) | issue-first reconciliation authority against canonical main commit `3026eed6e710de54ceded0421ebb6d5b688441e8` | Preserve PR #283's reviewed verifier wiring while adopting the merged `TRANSPARA_API_KEY` family and rerunning exact-head review |
 | `.claude/skills/hive-lifecycle/SKILL.md` | git blob `15a34bfc69d3bf68307e57176151eda6f0beb462` at `bf3f126` (origin/main) | Claude dialect physical file (feature home reaches it via the `skills/hive-lifecycle/claude` symlink per FO-HIVE-265 R2) — pre-change state this FO amends |
 | `skills/hive-lifecycle/codex/SKILL.md` | git blob `3b8ca8ffa6885fef016b10da6bfffb05f1d1f0b0` at `bf3f126` (origin/main) | Codex dialect physical file — pre-change state this FO amends |
 
@@ -58,7 +59,7 @@ remains in force.
 - **R2 — Post-start posture confirmation invokes the verifier.** In both
   dialects, the post-start (post-restart) posture-confirmation block replaces
   the inline shell probe (`systemctl … MainPID` + `tr '\0' '\n'
-  </proc/$pid/environ` + `grep '^LOVYOU_API_KEY='`) with an invocation of the
+  </proc/$pid/environ` + `grep '^TRANSPARA_API_KEY='`) with an invocation of the
   tested subcommand (`go run ./cmd/hive factory preflight-hive-unit` from the
   hive checkout), plus interpretation guidance mapping its output to the
   operator decision: `credential_posture=PRESENT` = production-connected (stop
@@ -89,7 +90,8 @@ remains in force.
 - **R4 — Consistency is tested (VERIFIED invariant).** A table-driven test in
   `cmd/hive` reads both dialect files and asserts, per dialect: (a) the file
   invokes `factory preflight-hive-unit`; (b) the stale promise phrases from R1
-  are absent; (c) no inline `grep '^LOVYOU_API_KEY='` probe remains; and (d)
+  are absent; (c) neither the canonical `grep '^TRANSPARA_API_KEY='` probe nor
+  the retired `grep '^LOVYOU_API_KEY='` spelling remains inline; and (d)
   the `skills/hive-lifecycle/claude` symlink still resolves to the physical
   Claude-dialect file (one-physical-copy invariant from FO-HIVE-265 R2). The
   test is written first and observed RED against the unedited runbooks, then
@@ -132,6 +134,19 @@ fence deleted; repaired by binding the assertion to the executable invocation
 line (test-only change; no FO requirement text changed, so no bump was
 recorded for that round).
 
+## Canonical-Main Reconciliation (v0.4.0)
+
+While PR #283 awaited merge, Hive PR #284 advanced canonical `main` to
+`3026eed6e710de54ceded0421ebb6d5b688441e8` and renamed the environment family
+from `LOVYOU_*` to `TRANSPARA_*`. Hive #285 supplies issue-first authority for
+the bounded reconciliation. The merge conflicts are resolved by retaining PR
+#283's tested-verifier invocation, command-level fail-closed classification,
+per-posture provenance caveat, Human approval gate, and foreground alternative,
+while taking canonical main's `TRANSPARA_API_KEY` name everywhere. The
+consistency test now rejects inline credential probes under both the canonical
+and retired names so neither spelling can silently reintroduce shell
+adjudication. No verifier, service, runtime, or autonomy behavior changes.
+
 ## Non-Goals
 
 - No change to the verifier itself (`cmd/hive/factory_preflight_hive_unit.go`)
@@ -150,7 +165,7 @@ recorded for that round).
 - `go test ./cmd/hive -count=1` — RED before the runbook edits (new
   consistency test fails on all stale markers), GREEN after.
 - `go vet ./...` and `staticcheck ./cmd/hive` clean.
-- `LOVYOU_API_KEY= make verify` clean.
+- `TRANSPARA_API_KEY= make verify` clean.
 - `git diff --check` clean; both dialect diffs reviewed for R3 (no gate
   weakening) at IAR and CFAR.
 

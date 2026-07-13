@@ -79,7 +79,7 @@ func (r *Runner) runSpawner(ctx context.Context) {
 		return
 	}
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 
 	// List existing agent definitions.
 	var agentFiles []string

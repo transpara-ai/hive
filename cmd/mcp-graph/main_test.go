@@ -297,3 +297,23 @@ func TestErrResult(t *testing.T) {
 		t.Fatalf("wrong text: %q", r.Content[0].Text)
 	}
 }
+
+// TestNewServerDefaults pins the built-in defaults newServer applies when the
+// (renamed) environment variables are unset: base URL falls back to the remote
+// default and space to "hive"; an unset key stays empty (FO R3, packet AC-9).
+func TestNewServerDefaults(t *testing.T) {
+	t.Setenv("TRANSPARA_API_KEY", "")
+	t.Setenv("TRANSPARA_BASE_URL", "")
+	t.Setenv("TRANSPARA_SPACE", "")
+
+	s := newServer()
+	if s.baseURL != "https://transpara.ai" {
+		t.Errorf("baseURL = %q, want https://transpara.ai", s.baseURL)
+	}
+	if s.defSpace != "hive" {
+		t.Errorf("defSpace = %q, want hive", s.defSpace)
+	}
+	if s.apiKey != "" {
+		t.Errorf("apiKey = %q, want empty", s.apiKey)
+	}
+}

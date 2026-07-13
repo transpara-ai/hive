@@ -42,9 +42,9 @@ func (r *Runner) runObserver(ctx context.Context) {
 	}
 
 	// Build the observation instruction.
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
-		log.Printf("[observer] LOVYOU_API_KEY not set; graph integrity audit will be skipped")
+		log.Printf("[observer] TRANSPARA_API_KEY not set; graph integrity audit will be skipped")
 	}
 	instruction := buildObserverInstruction(r.cfg.RepoPath, r.cfg.SpaceSlug, apiKey, claimsSummary, r.cfg.APIBase)
 
@@ -248,7 +248,7 @@ func buildPart2Instruction(spaceSlug, apiKey, claimsSummary, apiBase string) str
 	if apiKey == "" {
 		return `## Part 2: Graph Integrity Audit
 
-(Skipped — LOVYOU_API_KEY not set. Authenticated requests require an API key.)`
+(Skipped — TRANSPARA_API_KEY not set. Authenticated requests require an API key.)`
 	}
 
 	groundTruth := ""

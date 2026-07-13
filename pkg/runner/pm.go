@@ -62,7 +62,7 @@ func (r *Runner) runPM(ctx context.Context) {
 		return
 	}
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	slug := r.cfg.SpaceSlug
 
 	// Build repo list from registry.

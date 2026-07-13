@@ -73,7 +73,7 @@ func (r *Runner) runScoutOperate(ctx context.Context, op decision.IOperator) {
 ## Target repo: %s
 
 Write the report. Be specific — name files, functions, and exact changes.`,
-		os.Getenv("LOVYOU_API_KEY"), r.cfg.APIBase, r.cfg.SpaceSlug, r.cfg.RepoPath)
+		os.Getenv("TRANSPARA_API_KEY"), r.cfg.APIBase, r.cfg.SpaceSlug, r.cfg.RepoPath)
 
 	result, err := op.Operate(ctx, decision.OperateTask{
 		WorkDir:     r.cfg.RepoPath,

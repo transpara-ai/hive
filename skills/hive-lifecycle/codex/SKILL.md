@@ -372,34 +372,34 @@ target_status=$(git -C "$TARGET_REPO" status --porcelain 2>/dev/null) || { echo 
 [ -z "$target_status" ] || { echo "TARGET_REPO is dirty — NOT launching"; exit 1; }
 echo "Operate target: $TARGET_REPO at $(git -C "$TARGET_REPO" rev-parse HEAD)"
 
-LOVYOU_API_KEY= go run ./cmd/hive civilization run \
+TRANSPARA_API_KEY= go run ./cmd/hive civilization run \
   --human Michael \
   --idea "..." \
   --repo "$TARGET_REPO" \
   --store postgres://hive:hive@localhost:5432/hive
 
-LOVYOU_API_KEY= go run ./cmd/hive civilization daemon \
+TRANSPARA_API_KEY= go run ./cmd/hive civilization daemon \
   --human Michael \
   --repo "$TARGET_REPO" \
   --store postgres://hive:hive@localhost:5432/hive
 
-LOVYOU_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo "$TARGET_REPO"
-LOVYOU_API_KEY=dev go run ./cmd/hive role '<name>' run --api http://localhost:8082 --repo "$TARGET_REPO"
-LOVYOU_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --repo "$TARGET_REPO" --topic "..."
+TRANSPARA_API_KEY=dev go run ./cmd/hive pipeline run --api http://localhost:8082 --repo "$TARGET_REPO"
+TRANSPARA_API_KEY=dev go run ./cmd/hive role '<name>' run --api http://localhost:8082 --repo "$TARGET_REPO"
+TRANSPARA_API_KEY=dev go run ./cmd/hive council --api http://localhost:8082 --repo "$TARGET_REPO" --topic "..."
 )
 ```
 
 The runtime's webhook binds `:8081` on ALL interfaces with an unauthenticated event-writing `POST /event` (the bind address is not flag-configurable); launching the runtime on a host reachable by untrusted peers requires the user's explicit acknowledgment of that exposure or host-level firewalling.
 
-`civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `LOVYOU_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `LOVYOU_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
+`civilization run`/`civilization daemon` also default their Site API to `https://transpara.ai`: with an ambient `TRANSPARA_API_KEY` present they enable a reconciliation loop and task-completion mirror posts against production. The blank `TRANSPARA_API_KEY=` prefix above disables that client for local runs; crossing to the production Site API requires the user's explicit authorization.
 
 `hive.service` start/restart is a **protected action — a human gate, not automated forensics**. A shell runbook cannot reliably prove a systemd unit safe: environment sources, ExecStart wrappers, exec phases, and variable expansion all provide places for authority to hide — mechanical posture adjudication lives in the tested, read-only `hive factory preflight-hive-unit` subcommand (PR #277), invoked below, never in shell. Before `systemctl --user start|restart hive`:
 
-1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `LOVYOU_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
-2. For a local-only runtime, do NOT start the unit at all — use the foreground `LOVYOU_API_KEY= go run ./cmd/hive civilization daemon …` form above, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
+1. Obtain the user's explicit current-turn approval naming BOTH postures: credential (an ambient `TRANSPARA_API_KEY` anywhere in the unit's effective configuration means production Site integration) and autonomy (the packaged unit's `ExecStart` includes `--approve-requests --approve-roles`, so starting it RESUMES FULL AUTONOMY).
+2. For a local-only runtime, do NOT start the unit at all — use the foreground `TRANSPARA_API_KEY= go run ./cmd/hive civilization daemon …` form above, where both postures are explicit in the command itself. The unit's reconciliation loop begins its first cycle immediately on start, before any post-start check can run, so pre-start approval must always cover the worst-case production-connected posture.
 3. After any approved start, run the verifier below to check the approved posture — verification only; it cannot undo the first reconciliation cycle.
 
-Post-start (or post-restart) posture confirmation via the tested read-only verifier (fail-closed, whole-domain tests). Provenance differs per posture: credential posture reads the RUNNING process (`LOVYOU_API_KEY` presence/emptiness only from `/proc/<MainPID>/environ`; the value is never printed, and no secret transits a shell variable here), while autonomy posture reads the CONFIGURED merged `ExecStart` — not the live argv — so a unit edited, reloaded, or wrapper-expanded since start can run different flags than reported:
+Post-start (or post-restart) posture confirmation via the tested read-only verifier (fail-closed, whole-domain tests). Provenance differs per posture: credential posture reads the RUNNING process (`TRANSPARA_API_KEY` presence/emptiness only from `/proc/<MainPID>/environ`; the value is never printed, and no secret transits a shell variable here), while autonomy posture reads the CONFIGURED merged `ExecStart` — not the live argv — so a unit edited, reloaded, or wrapper-expanded since start can run different flags than reported:
 
 ```bash
 ( set +e 2>/dev/null   # BLOCK CONTRACT: a nonzero verifier exit is fail-closed INFORMATION for the operator, not a script abort
@@ -419,7 +419,7 @@ Flag reminders:
 
 - `civilization run`: `--human`, `--idea` or `--spec`, `--store`, `--repo`, `--catalog`, `--approve-requests`, `--approve-roles`.
 - `civilization daemon`: same except the seed flag is `--seed-spec`; there is no `--idea` or `--spec`.
-- Warning: `--spec`/`--seed-spec` are NOT local-only seeds — both call the remote ingest path before the runtime starts (repository bootstrap, then a required `LOVYOU_API_KEY` and a POST to `--api`, default `https://transpara.ai`); a blank credential fails after possible bootstrap activity and a real one writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); these flags need explicit ingest/production authorization plus a deliberate `--api`/credential pairing.
+- Warning: `--spec`/`--seed-spec` are NOT local-only seeds — both call the remote ingest path before the runtime starts (repository bootstrap, then a required `TRANSPARA_API_KEY` and a POST to `--api`, default `https://transpara.ai`); a blank credential fails after possible bootstrap activity and a real one writes remotely. Seed locally with `--idea` (run) or post-start `inject-file` (daemon); these flags need explicit ingest/production authorization plus a deliberate `--api`/credential pairing.
 - `pipeline` and `role`: `--api`, `--space`, `--repo`, `--agent-id`; no `--human` or `--idea`.
 - `council`: `--api`, `--space`, `--repo`, `--topic`, `--catalog`; no `--catalog-reload-interval`.
 - Always confirm with `go run ./cmd/hive <verb> --help` when composing a new invocation.
