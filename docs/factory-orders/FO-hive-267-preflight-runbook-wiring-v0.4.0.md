@@ -94,7 +94,9 @@ remains in force.
   the retired `grep '^LOVYOU_API_KEY='` spelling remains inline; (d) no
   retired `LOVYOU_` family text remains anywhere in either dialect; and (e)
   the `skills/hive-lifecycle/claude` symlink still resolves to the physical
-  Claude-dialect file (one-physical-copy invariant from FO-HIVE-265 R2). The
+  Claude-dialect file (one-physical-copy invariant from FO-HIVE-265 R2); and
+  (f) the operator-facing output-to-decision vocabulary remains present for
+  `credential_posture=PRESENT`, `autonomy_posture`, and `overall=UNKNOWN`. The
   test is written first and observed RED against the unedited runbooks, then
   GREEN after the edits.
 
@@ -147,7 +149,11 @@ while taking canonical main's `TRANSPARA_API_KEY` name everywhere. The
 consistency test now rejects inline credential probes under both the canonical
 and retired names so neither spelling can silently reintroduce shell
 adjudication, and rejects any retired `LOVYOU_` family text in either runbook.
-No verifier, service, runtime, or autonomy behavior changes.
+The exact-head reconciliation CFAR also required the test to pin the
+operator-facing interpretation tokens (`credential_posture=PRESENT`,
+`autonomy_posture`, and `overall=UNKNOWN`) so the documented output-to-decision
+mapping cannot disappear while the executable invocation remains. No verifier,
+service, runtime, or autonomy behavior changes.
 
 ## Non-Goals
 

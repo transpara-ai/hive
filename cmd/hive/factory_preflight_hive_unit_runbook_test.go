@@ -42,6 +42,15 @@ func TestHiveLifecycleRunbooksInvokeTestedUnitPreflight(t *testing.T) {
 			if !strings.Contains(content, hiveLifecycleVerifierFailClosed) {
 				t.Fatalf("%s dialect is missing the fail-closed classification %q for command-level verifier failures", tt.name, hiveLifecycleVerifierFailClosed)
 			}
+			for _, interpretationToken := range []string{
+				"credential_posture=PRESENT",
+				"autonomy_posture",
+				"overall=UNKNOWN",
+			} {
+				if !strings.Contains(content, interpretationToken) {
+					t.Fatalf("%s dialect is missing verifier interpretation token %q; operators must retain the output-to-decision mapping", tt.name, interpretationToken)
+				}
+			}
 			if strings.Contains(content, "LOVYOU_") {
 				t.Fatalf("%s dialect still carries retired LOVYOU_ environment-family text after canonical TRANSPARA_ reconciliation", tt.name)
 			}
