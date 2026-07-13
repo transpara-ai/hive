@@ -246,7 +246,7 @@ func (r *Runner) runReflector(ctx context.Context) {
 
 // runReflectorOperate uses Operate() — searches knowledge, reads graph, writes reflections.
 func (r *Runner) runReflectorOperate(ctx context.Context, op decision.IOperator) {
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 
 	// Look up the build and critique node IDs to embed as causes in the curl templates.
 	// This satisfies Invariant 2 (CAUSALITY) for the reflection and lesson claims.

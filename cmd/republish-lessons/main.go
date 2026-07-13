@@ -7,7 +7,7 @@
 // Usage:
 //
 //	cd /c/src/matt/transpara3/hive
-//	LOVYOU_API_KEY=lv_... go run ./cmd/republish-lessons/
+//	TRANSPARA_API_KEY=lv_... go run ./cmd/republish-lessons/
 package main
 
 import (
@@ -26,9 +26,9 @@ var baseURL = "https://transpara.ai"
 const spaceSlug = "hive"
 
 func main() {
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "LOVYOU_API_KEY not set")
+		fmt.Fprintln(os.Stderr, "TRANSPARA_API_KEY not set")
 		os.Exit(1)
 	}
 

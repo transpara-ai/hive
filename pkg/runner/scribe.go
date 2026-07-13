@@ -40,7 +40,7 @@ func (r *Runner) runScribe(ctx context.Context) {
 		return
 	}
 
-	apiKey := os.Getenv("LOVYOU_API_KEY")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
 	latestTranscript := transcripts[len(transcripts)-1]
 
 	instruction := fmt.Sprintf(`You are the Scribe. Read the design conversation transcript and extract reasoning the hive needs to learn from.

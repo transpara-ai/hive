@@ -97,4 +97,4 @@ export PATH="/c/Users/matt_/go-sdk/go/bin:/c/Users/matt_/sdk/go/bin:/c/Users/mat
 - templ: `/c/Users/matt_/go/bin/templ`
 - go build: `go.exe build -buildvcs=false`
 - Deploy: `cd site && ./deploy.sh`
-- API key: set LOVYOU_API_KEY for agent identity
+- API key: set TRANSPARA_API_KEY for agent identity

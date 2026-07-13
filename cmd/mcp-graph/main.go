@@ -14,13 +14,13 @@
 //
 // Configuration via environment variables:
 //
-//	LOVYOU_API_KEY   — required. Bearer token for transpara.ai API.
-//	LOVYOU_BASE_URL  — optional. Defaults to https://transpara.ai.
-//	LOVYOU_SPACE     — optional. Default space slug. Defaults to "hive".
+//	TRANSPARA_API_KEY   — required. Bearer token for transpara.ai API.
+//	TRANSPARA_BASE_URL  — optional. Defaults to https://transpara.ai.
+//	TRANSPARA_SPACE     — optional. Default space slug. Defaults to "hive".
 //
 // Usage:
 //
-//	LOVYOU_API_KEY=lv_... ./mcp-graph
+//	TRANSPARA_API_KEY=lv_... ./mcp-graph
 package main
 
 import (
@@ -110,12 +110,12 @@ type server struct {
 }
 
 func newServer() *server {
-	apiKey := os.Getenv("LOVYOU_API_KEY")
-	baseURL := strings.TrimRight(os.Getenv("LOVYOU_BASE_URL"), "/")
+	apiKey := os.Getenv("TRANSPARA_API_KEY")
+	baseURL := strings.TrimRight(os.Getenv("TRANSPARA_BASE_URL"), "/")
 	if baseURL == "" {
 		baseURL = "https://transpara.ai"
 	}
-	defSpace := os.Getenv("LOVYOU_SPACE")
+	defSpace := os.Getenv("TRANSPARA_SPACE")
 	if defSpace == "" {
 		defSpace = "hive"
 	}
