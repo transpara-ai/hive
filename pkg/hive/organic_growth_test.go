@@ -1342,6 +1342,97 @@ func TestOrganicDaemonRecoveryStartsOnceWithoutDefinitionDuplication(t *testing.
 		nextRestart[0].NormalizedRole != "recovery-observer" {
 		t.Fatalf("second-restart recovery plan = %+v", nextRestart)
 	}
+
+	if _, err := rt.graph.Record(
+		EventTypeAgentSpawned,
+		rt.humanID,
+		AgentSpawnedContent{
+			Name:      "recovery-observer",
+			Role:      "recovery-observer",
+			Model:     candidates[0].ProposalContent.Model,
+			ActorID:   candidates[0].Spawned.Content().(AgentSpawnedContent).ActorID,
+			Recovered: true,
+		},
+		[]types.EventID{candidates[0].Definition.ID()},
+		rt.convID,
+		rt.signer,
+	); err != nil {
+		t.Fatalf("record duplicate recovered spawn contradiction: %v", err)
+	}
+	if _, err := rt.loadOrganicRecoveryCandidates(); err == nil ||
+		!strings.Contains(err.Error(), "duplicate recovered spawns") {
+		t.Fatalf("duplicate recovered spawn error = %v", err)
+	}
+}
+
+func TestOrganicRecoveryRejectsRecoveredSpawnCausingSameRunDefinition(t *testing.T) {
+	rt := newOrganicTestRuntime(t)
+	cto := registerOrganicSource(t, rt, "cto")
+	spawner := registerOrganicSource(t, rt, "spawner")
+	guardian := registerOrganicSource(t, rt, "guardian")
+	allocator := registerOrganicSource(t, rt, "allocator")
+	recordOrganicTuple(t, rt, cto, spawner, guardian, allocator, "same-run-recovery-observer", false)
+
+	provider := &organicTestProvider{
+		runtime: rt,
+		role:    "same-run-recovery-observer",
+		seen:    make(chan bool, 1),
+	}
+	rt.providerFactory = func(intelligence.Config) (intelligence.Provider, error) {
+		return provider, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := rt.processOrganicApprovedRoles(ctx); err != nil {
+		t.Fatalf("fresh organic admission: %v", err)
+	}
+	select {
+	case <-provider.seen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fresh actor did not evaluate")
+	}
+	cancel()
+	rt.dynamic.CancelAll()
+	rt.dynamic.Wait()
+
+	definitions := authorityRequestsByType[RoleDefinitionContent](t, rt, EventTypeRoleDefinition)
+	if len(definitions) != 1 {
+		t.Fatalf("fresh definition count = %d, want 1", len(definitions))
+	}
+	definitionEvents, err := eventsByConversationChronological(rt.store, rt.convID)
+	if err != nil {
+		t.Fatalf("read fresh conversation: %v", err)
+	}
+	var definition event.Event
+	for _, ev := range definitionEvents {
+		if content, ok := ev.Content().(RoleDefinitionContent); ok &&
+			normalizeOrganicRole(content.Name) == "same-run-recovery-observer" {
+			definition = ev
+			break
+		}
+	}
+	if definition.ID().IsZero() {
+		t.Fatal("fresh definition event not found")
+	}
+	if _, err := rt.graph.Record(
+		EventTypeAgentSpawned,
+		rt.humanID,
+		AgentSpawnedContent{
+			Name:      "same-run-recovery-observer",
+			Role:      "same-run-recovery-observer",
+			Model:     "claude-haiku-4-5-20251001",
+			ActorID:   "contradictory-recovery-actor",
+			Recovered: true,
+		},
+		[]types.EventID{definition.ID()},
+		rt.convID,
+		rt.signer,
+	); err != nil {
+		t.Fatalf("record same-run recovery contradiction: %v", err)
+	}
+	if _, err := rt.loadOrganicRecoveryCandidates(); err == nil ||
+		!strings.Contains(err.Error(), "references same-run definition") {
+		t.Fatalf("same-run recovery definition error = %v", err)
+	}
 }
 
 func TestOrganicRecoveryIdentityAmbiguityFailsBeforeNewRunWrites(t *testing.T) {

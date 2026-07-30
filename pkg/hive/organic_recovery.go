@@ -51,6 +51,8 @@ func (r *Runtime) loadOrganicRecoveryCandidates() ([]organicGrowthCandidate, err
 	// A recovered start deliberately does not duplicate the historical role
 	// definition into its new conversation. Follow its exact definition cause
 	// so consecutive daemon restarts recover the same durable creation record.
+	recoveredSpawnsByDefinition := make(map[types.EventID]types.EventID)
+	recoveredSpawnsByRole := make(map[string]types.EventID)
 	for _, ev := range events {
 		spawned, ok := ev.Content().(AgentSpawnedContent)
 		if !ok || !spawned.Recovered {
@@ -79,8 +81,38 @@ func (r *Runtime) loadOrganicRecoveryCandidates() ([]organicGrowthCandidate, err
 			normalizeOrganicRole(spawned.Name) != normalizeOrganicRole(spawned.Role) {
 			return nil, fmt.Errorf("organic recovery spawn %s does not match definition role", ev.ID())
 		}
+		role := normalizeOrganicRole(spawned.Role)
+		if causedDefinition.ConversationID() == priorConversation {
+			return nil, fmt.Errorf(
+				"organic recovery spawn %s references same-run definition %s",
+				ev.ID(),
+				causedDefinition.ID(),
+			)
+		}
+		if prior, duplicate := recoveredSpawnsByDefinition[causedDefinition.ID()]; duplicate {
+			return nil, fmt.Errorf(
+				"organic recovery definition %s has duplicate recovered spawns %s and %s",
+				causedDefinition.ID(),
+				prior,
+				ev.ID(),
+			)
+		}
+		if prior, duplicate := recoveredSpawnsByRole[role]; duplicate {
+			return nil, fmt.Errorf(
+				"organic recovery role %q has duplicate recovered spawns %s and %s",
+				role,
+				prior,
+				ev.ID(),
+			)
+		}
+		recoveredSpawnsByDefinition[causedDefinition.ID()] = ev.ID()
+		recoveredSpawnsByRole[role] = ev.ID()
 		if _, duplicate := seenDefinitions[causedDefinition.ID()]; duplicate {
-			continue
+			return nil, fmt.Errorf(
+				"organic recovery spawn %s duplicates definition %s already materialized in the latest run",
+				ev.ID(),
+				causedDefinition.ID(),
+			)
 		}
 		seenDefinitions[causedDefinition.ID()] = struct{}{}
 		definitions = append(definitions, causedDefinition)
