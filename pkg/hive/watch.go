@@ -15,7 +15,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/telemetry"
 )
 
-const watchPollInterval = 5 * time.Second
+const defaultWatchPollInterval = 5 * time.Second
 
 var (
 	roleApprovedType   = types.MustEventType("hive.role.approved")
@@ -26,30 +26,39 @@ var (
 // watchForApprovedRoles polls the event store for approved role proposals and
 // spawns new agent goroutines as each role is both approved and budgeted.
 // Runs as a goroutine alongside RunConcurrent() until ctx is cancelled.
-func (r *Runtime) watchForApprovedRoles(ctx context.Context) {
-	ticker := time.NewTicker(watchPollInterval)
+func (r *Runtime) watchForApprovedRoles(ctx context.Context) error {
+	interval := r.approvedRolePollInterval
+	if interval <= 0 {
+		interval = defaultWatchPollInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			if r.approveRoles {
 				r.autoApproveProposedRoles(ctx)
 			}
-			r.processApprovedRoles(ctx)
+			if err := r.processApprovedRoles(ctx); err != nil {
+				return err
+			}
 		}
 	}
 }
 
 // processApprovedRoles is the polling body of watchForApprovedRoles.
 // Separated for testability with mock events.
-func (r *Runtime) processApprovedRoles(ctx context.Context) {
+func (r *Runtime) processApprovedRoles(ctx context.Context) error {
+	if r.bootstrapProfile == BootstrapProfileOrganicV1 {
+		return r.processOrganicApprovedRoles(ctx)
+	}
 	approvedPage, err := r.store.ByType(roleApprovedType, 100, types.None[types.Cursor]())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "watchForApprovedRoles: query approved roles: %v\n", err)
-		return
+		return nil
 	}
 
 	for _, approvedEv := range approvedPage.Items() {
@@ -83,7 +92,7 @@ func (r *Runtime) processApprovedRoles(ctx context.Context) {
 		}
 
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 
 		target := "agent:" + name
@@ -111,6 +120,7 @@ func (r *Runtime) processApprovedRoles(ctx context.Context) {
 			// Don't track — allow retry on next poll.
 		}
 	}
+	return nil
 }
 
 // findRoleProposal searches the event store for a hive.role.proposed event

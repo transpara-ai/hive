@@ -233,6 +233,9 @@ func cmdGovernedDaemon(name string, args []string) error {
 	fs.Var(&readyPRReviewRunnerArgs, "issue-scan-ready-pr-review-runner-arg", "Argument passed to --issue-scan-ready-pr-review-runner (repeatable)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
+	bootstrapProfile := fs.String("bootstrap-profile", string(hive.BootstrapProfileFull), "Bootstrap profile: full|organic-v1")
+	approveActions := repeatedStringFlag{}
+	fs.Var(&approveActions, "approve-action", "Auto-approve one exact known protected action (repeatable)")
 	space := fs.String("space", "hive", "transpara.ai space slug")
 	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	webhookAddr := fs.String("webhook-addr", "", "Webhook listen address (default: loopback 127.0.0.1 at HIVE_LISTENER_PORT or 8081; non-loopback binds require --webhook-require-auth)")
@@ -242,6 +245,10 @@ func cmdGovernedDaemon(name string, args []string) error {
 	}
 	if *human == "" {
 		return fmt.Errorf("--human is required")
+	}
+	profile, growthPolicyVersion, maximumDynamicActors, actions, err := parseBootstrapRuntimeFlags(*bootstrapProfile, approveActions, *approveRequests)
+	if err != nil {
+		return err
 	}
 	webhookBearerToken, err := resolveWebhookBearerToken(*webhookAddr, *webhookRequireAuth, os.Getenv("TRANSPARA_API_KEY"))
 	if err != nil {
@@ -447,7 +454,7 @@ func cmdGovernedDaemon(name string, args []string) error {
 		}
 	}
 	// loop=true → Keepalive=true: the governing loop never exits on quiescence.
-	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase, *webhookAddr, webhookBearerToken)
+	return runLegacy(*human, "", *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *repo, *repoWorkspaceRoot, *catalog, *catalogReloadInterval, true, issueScanStageRoleRunner, issueScanImplementationRunner, issueScanReviewRunner, issueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester, issueScanDraftPRCreator, issueScanReadyPRRunner, issueScanScanner, *space, *apiBase, *webhookAddr, webhookBearerToken)
 }
 
 func resolveWebhookBearerToken(addr string, requireAuth bool, apiKey string) (string, error) {

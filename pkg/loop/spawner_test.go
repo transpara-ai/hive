@@ -84,6 +84,7 @@ func validSpawnCtx() *SpawnContext {
 	return &SpawnContext{
 		Iteration:          20,
 		HasPendingProposal: false,
+		HasGenuineGap:      true,
 		AgentRoster:        []string{"guardian", "sysmon", "allocator", "cto"},
 		RecentRejections:   map[string]int{},
 	}
@@ -203,6 +204,17 @@ func TestValidateSpawnCommand_PendingProposal(t *testing.T) {
 	err := validateSpawnCommand(cmd, ctx)
 	if err == nil {
 		t.Error("expected pending proposal error, got nil")
+	}
+}
+
+func TestValidateSpawnCommand_RequiresGenuineGap(t *testing.T) {
+	cmd := validSpawnCmd()
+	ctx := validSpawnCtx()
+	ctx.HasGenuineGap = false
+
+	err := validateSpawnCommand(cmd, ctx)
+	if err == nil {
+		t.Fatal("proposal without a genuine observed gap was accepted")
 	}
 }
 

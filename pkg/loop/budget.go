@@ -131,7 +131,8 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 			break
 		}
 	}
-	if !found {
+	preAdmission := !found && l.isPreAdmissionRoleBudget(cmd)
+	if !found && !preAdmission {
 		return fmt.Errorf("unknown agent: %s", cmd.Agent)
 	}
 
@@ -185,7 +186,7 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 
 	// 7. Pool headroom for increases — an ITERATION-pool concept: a duration
 	// increase consumes no iteration headroom (v14-F3c).
-	if cmd.Action == "increase" && cmd.Resource != "duration" {
+	if cmd.Action == "increase" && cmd.Resource != "duration" && !preAdmission {
 		totalPool := reg.TotalPool()
 		totalUsed := reg.TotalUsed()
 		headroom := totalPool - totalUsed
@@ -211,6 +212,38 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	floor, ceiling := cfg.BudgetFloor, cfg.BudgetCeiling
 	if resource == "duration" {
 		floor, ceiling = cfg.DurationFloorMin, cfg.DurationCeilingMin
+	}
+	if l.isPreAdmissionRoleBudget(cmd) {
+		newMax := cmd.Amount
+		if newMax < floor {
+			newMax = floor
+		}
+		if newMax > ceiling {
+			newMax = ceiling
+		}
+		content := event.AgentBudgetAdjustedContent{
+			AgentID:        l.agent.ID(),
+			AgentName:      cmd.Agent,
+			Action:         cmd.Action,
+			Resource:       resource,
+			PreviousBudget: 0,
+			NewBudget:      newMax,
+			Delta:          newMax,
+			Reason:         cmd.Reason,
+			PoolRemaining:  reg.TotalPool() - reg.TotalUsed(),
+		}
+		if err := l.agent.EmitBudgetAdjusted(content); err != nil {
+			return fmt.Errorf("emit pre-admission budget.adjusted: %w", err)
+		}
+		l.adjustmentHistory = append(l.adjustmentHistory, budget.AdjustmentRecord{
+			Agent:     cmd.Agent,
+			Iteration: iteration,
+			Delta:     newMax,
+			Reason:    cmd.Reason,
+		})
+		fmt.Printf("[%s] pre-admission budget granted: %s iterations set %d reason=%q\n",
+			l.agent.Name(), cmd.Agent, newMax, cmd.Reason)
+		return nil
 	}
 
 	// Compute delta based on action.
@@ -283,6 +316,72 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	fmt.Printf("[%s] budget adjusted: %s %s %s %+d (%d→%d) reason=%q\n",
 		l.agent.Name(), cmd.Agent, resource, cmd.Action, actualDelta, prev, newMax, cmd.Reason)
 	return nil
+}
+
+func (l *Loop) isPreAdmissionRoleBudget(cmd *BudgetCommand) bool {
+	if !l.config.AllowPreAdmissionRoleBudget ||
+		l.agent == nil ||
+		string(l.agent.Role()) != "allocator" ||
+		cmd.Action != "set" ||
+		(cmd.Resource != "" && cmd.Resource != "iterations") {
+		return false
+	}
+	reg := l.config.BudgetRegistry
+	if reg == nil {
+		return false
+	}
+	for _, entry := range reg.Snapshot() {
+		if entry.Name == cmd.Agent {
+			return false
+		}
+	}
+	cursor := types.None[types.Cursor]()
+	var events []event.Event
+	for {
+		page, err := l.agent.Graph().Store().ByConversation(
+			l.agent.ConversationID(),
+			200,
+			cursor,
+		)
+		if err != nil {
+			return false
+		}
+		events = append(events, page.Items()...)
+		if !page.HasMore() {
+			break
+		}
+		cursor = page.Cursor()
+	}
+	for left, right := 0, len(events)-1; left < right; left, right = left+1, right-1 {
+		events[left], events[right] = events[right], events[left]
+	}
+	proposalIndex := -1
+	for i, ev := range events {
+		content, ok := ev.Content().(event.RoleProposedContent)
+		if ok && content.Name == cmd.Agent {
+			proposalIndex = i
+		}
+	}
+	if proposalIndex < 0 {
+		return false
+	}
+	for _, ev := range events[proposalIndex+1:] {
+		switch content := ev.Content().(type) {
+		case event.RoleApprovedContent:
+			if content.Name == cmd.Agent {
+				return true
+			}
+		case event.RoleRejectedContent:
+			if content.Name == cmd.Agent {
+				return false
+			}
+		case event.RoleProposedContent:
+			if content.Name == cmd.Agent {
+				return false
+			}
+		}
+	}
+	return false
 }
 
 // enrichBudgetObservation appends pre-computed budget metrics to the

@@ -34,6 +34,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/loop"
 	"github.com/transpara-ai/hive/pkg/membrane"
 	"github.com/transpara-ai/hive/pkg/resources"
+	"github.com/transpara-ai/hive/pkg/safety"
 	"github.com/transpara-ai/hive/pkg/telemetry"
 	"github.com/transpara-ai/work"
 )
@@ -45,6 +46,7 @@ type Runtime struct {
 	actors       actor.IActorStore
 	graph        *graph.Graph
 	humanID      types.ActorID
+	humanName    string
 	defs         []AgentDef
 	membraneDefs []membrane.MembraneConfig
 
@@ -96,6 +98,17 @@ type Runtime struct {
 	// Dynamic agent lifecycle tracker (agents spawned after boot).
 	dynamic *dynamicAgentTracker
 
+	// bootstrapActors binds constitutional role names to the immutable ActorIDs
+	// constructed for this runtime. Organic tuple validation must never infer
+	// source authority from mutable actor display names.
+	bootstrapActorsMu sync.RWMutex
+	bootstrapActors   map[string]types.ActorID
+
+	// organicSpawnHook is a test-only failure-injection seam. Production
+	// runtimes leave it nil.
+	organicSpawnHook         func(stage string) error
+	approvedRolePollInterval time.Duration
+
 	// Bridge actor for synchronous site-op anchors. Constructed lazily on
 	// first AnchorSiteOp call via bridgeOnce. bridgeMu serialises emit+read
 	// pairs against LastEvent() so concurrent webhooks each observe their
@@ -105,14 +118,18 @@ type Runtime struct {
 	bridgeMu    sync.Mutex
 
 	// Options.
-	approveRequests       bool
-	approveRoles          bool
-	repoPath              string
-	repoWorkspaceRoot     string
-	loop                  bool
-	isolateRunTasks       bool
-	catalogPath           string
-	catalogReloadInterval time.Duration
+	approveRequests              bool
+	approveRoles                 bool
+	bootstrapProfile             BootstrapProfile
+	growthPolicyVersion          string
+	maximumDynamicActors         int
+	automaticallyApprovedActions map[safety.ProtectedAction]struct{}
+	repoPath                     string
+	repoWorkspaceRoot            string
+	loop                         bool
+	isolateRunTasks              bool
+	catalogPath                  string
+	catalogReloadInterval        time.Duration
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -122,6 +139,10 @@ type Config struct {
 	HumanID                              types.ActorID
 	ApproveRequests                      bool                                 // --approve-requests: auto-approve authority requests
 	ApproveRoles                         bool                                 // --approve-roles: auto-approve role proposals
+	BootstrapProfile                     BootstrapProfile                     // full (default) or organic-v1
+	GrowthPolicyVersion                  string                               // organic-v1 for the bounded organic policy
+	MaximumDynamicActors                 int                                  // 0 is legacy-unbounded for full; organic-v1 requires 3
+	AutomaticallyApprovedActions         []safety.ProtectedAction             // exact protected-action allowlist
 	RepoPath                             string                               // --repo: path to repo for Operate
 	RepoWorkspaceRoot                    string                               // parent directory containing Transpara-AI repo checkouts for issue-scan targets
 	Loop                                 bool                                 // --loop: agents block on bus instead of quiescing
@@ -149,6 +170,13 @@ type Config struct {
 
 // New creates a new hive Runtime.
 func New(ctx context.Context, cfg Config) (*Runtime, error) {
+	// Validate the complete bootstrap and protected-action posture before graph
+	// startup, actor registration, or construction of Work stores. This is the
+	// pre-write admission boundary for organic-v1.
+	bootstrapProfile, automaticallyApprovedActions, err := validateBootstrapConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.IssueScanDraftPRAuthorityRequester != nil && cfg.ApproveRequests {
 		return nil, fmt.Errorf("IssueScanDraftPRAuthorityRequester cannot be combined with ApproveRequests")
 	}
@@ -175,10 +203,14 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	RegisterWithRegistry(registry)
 	work.RegisterWithRegistry(registry)
 
-	// Register the system actor for infrastructure events.
-	systemID, err := registerSystemActor(cfg.Actors)
-	if err != nil {
-		return nil, fmt.Errorf("register system actor: %w", err)
+	// Preserve the full profile's historical New-time system registration.
+	// Organic defers this mutation until its complete recovery preflight.
+	var systemID types.ActorID
+	if bootstrapProfile != BootstrapProfileOrganicV1 {
+		systemID, err = registerSystemActor(cfg.Actors)
+		if err != nil {
+			return nil, fmt.Errorf("register system actor: %w", err)
+		}
 	}
 
 	// Create event factory for the task store.
@@ -191,11 +223,17 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	tasks := work.NewTaskStore(cfg.Store, factory, signer)
 	phaseGates := work.NewPhaseGateStore(cfg.Store, factory, signer)
 
+	actionSet := make(map[safety.ProtectedAction]struct{}, len(automaticallyApprovedActions))
+	for _, action := range automaticallyApprovedActions {
+		actionSet[action] = struct{}{}
+	}
+
 	return &Runtime{
 		store:                                cfg.Store,
 		actors:                               cfg.Actors,
 		graph:                                g,
 		humanID:                              cfg.HumanID,
+		humanName:                            human.DisplayName(),
 		systemID:                             systemID,
 		signer:                               signer,
 		factory:                              factory,
@@ -204,6 +242,10 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		phaseGates:                           phaseGates,
 		approveRequests:                      cfg.ApproveRequests,
 		approveRoles:                         cfg.ApproveRoles,
+		bootstrapProfile:                     bootstrapProfile,
+		growthPolicyVersion:                  cfg.GrowthPolicyVersion,
+		maximumDynamicActors:                 cfg.MaximumDynamicActors,
+		automaticallyApprovedActions:         actionSet,
 		repoPath:                             cfg.RepoPath,
 		repoWorkspaceRoot:                    cfg.RepoWorkspaceRoot,
 		loop:                                 cfg.Loop,
@@ -224,6 +266,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		telemetryWriter:                      cfg.TelemetryWriter,
 		apiClient:                            cfg.APIClient,
 		providerFactory:                      intelligence.New,
+		bootstrapActors:                      make(map[string]types.ActorID),
 	}, nil
 }
 
@@ -310,13 +353,60 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	if len(r.defs) == 0 {
 		return fmt.Errorf("no agents registered")
 	}
+	if err := r.validateRegisteredBootstrapRoster(); err != nil {
+		return err
+	}
 
 	start := time.Now()
 
+	// Resolve the model catalog and validate daemon recovery before emitting the
+	// new run-start event. Organic recovery ambiguity is a startup failure, not
+	// a partially written new run.
+	modelSelectionManager, err := NewOperatorModelSelectionManager(r.catalogPath, start.UTC(), r.catalogReloadInterval > 0)
+	if err != nil {
+		return fmt.Errorf("custom catalog: %w", err)
+	}
+	r.modelSelectionManager = modelSelectionManager
+	r.setResolver(modelSelectionManager.Snapshot().Resolver)
+	modelSelection := modelSelectionManager.Snapshot()
+	var organicRecoveryCandidates []organicGrowthCandidate
+	if r.bootstrapProfile == BootstrapProfileOrganicV1 && !r.isolateRunTasks {
+		organicRecoveryCandidates, err = r.loadOrganicRecoveryCandidates()
+		if err != nil {
+			return fmt.Errorf("organic-v1 recovery preflight: %w", err)
+		}
+	}
+	// Reserve every recovered actor against the bounded runtime before the
+	// system actor, run-start event, or bootstrap actors can be persisted.
+	// This is the last no-write recovery-plan boundary.
+	r.dynamic = newDynamicAgentTracker(r.maximumDynamicActors)
+	for _, candidate := range organicRecoveryCandidates {
+		if result := r.dynamic.Reserve(candidate.NormalizedRole); result != dynamicSlotReserved {
+			return fmt.Errorf("organic-v1 recovery could not reserve role %q: %v", candidate.NormalizedRole, result)
+		}
+	}
+	// System actor registration is intentionally after the complete organic
+	// recovery preflight. Invalid historical tuples, identities, roles, models,
+	// or capacity therefore fail before this run mutates either durable store.
+	if r.systemID.IsZero() {
+		r.systemID, err = registerSystemActor(r.actors)
+		if err != nil {
+			return fmt.Errorf("register system actor: %w", err)
+		}
+	}
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
 	// Emit run started event.
 	r.emit(EventTypeRunStarted, RunStartedContent{
-		Idea:     seedIdea,
-		RepoPath: r.repoPath,
+		Idea:                         seedIdea,
+		RepoPath:                     r.repoPath,
+		BootstrapProfile:             r.bootstrapProfile,
+		BootstrapRoles:               agentDefRoles(r.defs),
+		GrowthPolicyVersion:          r.growthPolicyVersion,
+		MaximumDynamicActors:         r.maximumDynamicActors,
+		AutomaticallyApprovedActions: protectedActionStringsFromSet(r.automaticallyApprovedActions),
 	})
 
 	// Create a seed task from the idea if provided.
@@ -344,31 +434,21 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	// Create the budget registry for cross-agent visibility.
 	r.budgetRegistry = resources.NewBudgetRegistry()
 
-	// Create the dynamic agent tracker (manages post-boot spawned agents).
-	r.dynamic = newDynamicAgentTracker()
-
 	// Initialize model resolver for agent spawning. Optional hot reload affects
 	// future resolver lookups (for example dynamic role spawns); already-created
 	// provider instances are not silently swapped mid-loop.
-	modelSelectionManager, err := NewOperatorModelSelectionManager(r.catalogPath, start.UTC(), r.catalogReloadInterval > 0)
-	if err != nil {
-		return fmt.Errorf("custom catalog: %w", err)
-	}
-	r.modelSelectionManager = modelSelectionManager
-	r.setResolver(modelSelectionManager.Snapshot().Resolver)
-	modelSelection := modelSelectionManager.Snapshot()
 	if r.catalogPath != "" {
 		fmt.Fprintf(os.Stderr, "Model catalog: %s (merged with defaults, reload=%s)\n", r.catalogPath, modelSelection.ReloadMode)
 	}
 	if r.catalogPath != "" && r.catalogReloadInterval > 0 {
-		go r.runCatalogReloadLoop(ctx, r.catalogReloadInterval)
+		go r.runCatalogReloadLoop(runCtx, r.catalogReloadInterval)
 	}
-	if progress, err := r.progressIssueScanLifecycleContext(ctx); err != nil {
+	if progress, err := r.progressIssueScanLifecycleContext(runCtx); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: initial issue-scan lifecycle progress failed closed: %v\n", err)
 	} else {
 		logIssueScanLifecycleProgress("Initial issue-scan progress", progress)
 	}
-	go r.runRunLaunchDispatchLoop(ctx, effectiveRunLaunchDispatchInterval(r.runLaunchDispatchInterval))
+	go r.runRunLaunchDispatchLoop(runCtx, effectiveRunLaunchDispatchInterval(r.runLaunchDispatchInterval))
 
 	// Wire budget registry into telemetry writer now that it exists.
 	if r.telemetryWriter != nil {
@@ -382,7 +462,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Knowledge: replayed %d active insights from chain\n", r.knowledgeStore.ActiveCount())
 	}
-	go knowledge.RunPruner(ctx, r.knowledgeStore, 15*time.Minute)
+	go knowledge.RunPruner(runCtx, r.knowledgeStore, 15*time.Minute)
 
 	// Subscribe to live knowledge events on the bus.
 	knowledgePattern := types.MustSubscriptionPattern("knowledge.*")
@@ -411,7 +491,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		convID:  r.convID,
 	}
 	distiller := knowledge.NewDistiller(r.store, r.knowledgeStore, emitter, 5*time.Minute)
-	go distiller.Run(ctx)
+	go distiller.Run(runCtx)
 	fmt.Fprintf(os.Stderr, "Knowledge: distiller started (5m interval)\n")
 
 	// --- Checkpoint recovery ---
@@ -505,10 +585,11 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		taskWorkspace = r.repoPath
 	}
 	for _, def := range r.defs {
-		agent, resolvedModel, err := r.spawnAgent(ctx, def)
+		agent, resolvedModel, err := r.spawnAgent(runCtx, def)
 		if err != nil {
 			return fmt.Errorf("spawn %s: %w", def.Name, err)
 		}
+		r.bindBootstrapActor(def.Role, agent.ID())
 
 		// Create the budget tracker and register it for cross-agent visibility.
 		budgetCfg := resources.BudgetConfig{
@@ -534,13 +615,14 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 		}
 
 		cfg := loop.Config{
-			Agent:          agent,
-			HumanID:        r.humanID,
-			Budget:         budgetCfg,
-			BudgetInstance: agentBudget,
-			BudgetRegistry: r.budgetRegistry,
-			Bus:            r.graph.Bus(),
-			Task:           seedIdea,
+			Agent:                       agent,
+			HumanID:                     r.humanID,
+			Budget:                      budgetCfg,
+			BudgetInstance:              agentBudget,
+			BudgetRegistry:              r.budgetRegistry,
+			AllowPreAdmissionRoleBudget: r.bootstrapProfile == BootstrapProfileOrganicV1,
+			Bus:                         r.graph.Bus(),
+			Task:                        seedIdea,
 
 			// Task coordination.
 			TaskStore:              r.tasks,
@@ -599,21 +681,53 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	// Start telemetry writer and event stream capture before agents run.
 	if r.telemetryWriter != nil {
-		go r.telemetryWriter.Start(ctx)
+		go r.telemetryWriter.Start(runCtx)
 		r.telemetryWriter.SubscribeToBus(r.graph.Bus())
 		fmt.Fprintf(os.Stderr, "Telemetry: writer started (%d agents registered)\n", r.telemetryWriter.Agents())
+	}
+
+	// Recovery loops are validated and all slots are reserved before any loop
+	// starts. Each loop is then attached behind its own barrier, emits one
+	// recovered spawn event, and only then becomes runnable.
+	for _, candidate := range organicRecoveryCandidates {
+		if err := r.startOrganicCandidate(runCtx, candidate, true, false); err != nil {
+			r.dynamic.CancelAll()
+			r.dynamic.Wait()
+			return fmt.Errorf("recover organic role %q: %w", candidate.NormalizedRole, err)
+		}
 	}
 
 	// TODO: wire hive summary capture trigger here (bus subscription for run-boundary events).
 
 	// Watch for approved role proposals and spawn new agents mid-session.
-	go r.watchForApprovedRoles(ctx)
+	watchCtx, stopWatcher := context.WithCancel(runCtx)
+	watcherDone := make(chan struct{})
+	watcherErr := make(chan error, 1)
+	go func() {
+		defer close(watcherDone)
+		if err := r.watchForApprovedRoles(watchCtx); err != nil {
+			watcherErr <- err
+			cancelRun()
+		}
+	}()
 
 	// Run all bootstrap agents concurrently.
-	results := loop.RunConcurrent(ctx, configs)
+	results := loop.RunConcurrent(runCtx, configs)
 
-	// Wait for any dynamically spawned agents to finish.
+	// Stop admission, cancel every owned dynamic loop, and join it before run
+	// completion. Joining cannot race a later watcher admission.
+	stopWatcher()
+	<-watcherDone
+	r.dynamic.CancelAll()
 	r.dynamic.Wait()
+	var admissionErr error
+	select {
+	case admissionErr = <-watcherErr:
+	default:
+	}
+	if admissionErr != nil {
+		return admissionErr
+	}
 
 	// Report results and emit stop events.
 	fmt.Fprintf(os.Stderr, "\n── Results ──\n")
@@ -631,8 +745,12 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 	dur := time.Since(start)
 	r.emit(EventTypeRunCompleted, RunCompletedContent{
-		AgentCount: len(r.defs),
-		DurationMs: dur.Milliseconds(),
+		AgentCount:                 len(r.defs),
+		DurationMs:                 dur.Milliseconds(),
+		BootstrapActorCount:        len(r.defs),
+		RecoveredDynamicActorCount: r.dynamic.RecoveredCount(),
+		NewDynamicActorCount:       r.dynamic.NewCount(),
+		DynamicActorCount:          r.dynamic.Count(),
 	})
 
 	fmt.Fprintf(os.Stderr, "\nCompleted in %s\n", dur.Round(time.Second))
@@ -678,16 +796,55 @@ func applyPerCallBudgetFloor(cfg intelligence.Config, floor float64) intelligenc
 // spawnAgent creates a hiveagent.Agent from an AgentDef.
 // It returns the agent and the resolved model name so callers can pass it to telemetry.
 func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, error) {
-	identity, err := prepareAgentIdentity(def)
+	agent, resolvedModel, identity, err := r.constructAgent(ctx, def)
 	if err != nil {
 		return nil, "", err
+	}
+
+	r.emit(EventTypeAgentSpawned, AgentSpawnedContent{
+		Name:    def.Name,
+		Role:    def.Role,
+		Model:   resolvedModel,
+		ActorID: agent.ID().Value(),
+	})
+	if err := r.emitAgentIdentityRegistered(agent.ID(), def, identity); err != nil {
+		return nil, "", fmt.Errorf("record identity provenance: %w", err)
+	}
+
+	// Emit role definition as a first-class event (queryable, versionable).
+	if def.RoleDefinition != nil {
+		origin := "spawned"
+		if def.RoleDefinition.Tier != "" {
+			origin = "bootstrap" // bootstrap agents always have RoleDefinition.Tier set
+		}
+		r.emit(EventTypeRoleDefinition, RoleDefinitionContent{
+			Name:        def.RoleDefinition.Name,
+			Description: def.RoleDefinition.Description,
+			Category:    def.RoleDefinition.Category,
+			Tier:        def.RoleDefinition.Tier,
+			CanOperate:  def.RoleDefinition.CanOperate,
+			Origin:      origin,
+		})
+	}
+
+	return agent, resolvedModel, nil
+}
+
+// constructAgent creates and registers an Agent without emitting Hive lifecycle
+// events. Bootstrap spawning calls it through spawnAgent, preserving historical
+// event order. Organic hot-add uses it to establish a dynamic-only start barrier
+// and emit definition/identity/spawn evidence in the governed order.
+func (r *Runtime) constructAgent(ctx context.Context, def AgentDef) (*hiveagent.Agent, string, preparedAgentIdentity, error) {
+	identity, err := prepareAgentIdentity(def)
+	if err != nil {
+		return nil, "", preparedAgentIdentity{}, err
 	}
 
 	// Resolve model/provider through the precedence chain, including any
 	// Hive-owned durable role policy recorded through the ops API.
 	resolved, err := r.resolveAgentModel(def)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve model for %s: %w", def.Name, err)
+		return nil, "", preparedAgentIdentity{}, fmt.Errorf("resolve model for %s: %w", def.Name, err)
 	}
 	cfg := modelconfig.ToIntelligenceConfig(resolved, def.SystemPrompt)
 	// The default model catalog leaves the per-call budget unset (MaxBudgetUSD=0),
@@ -698,7 +855,7 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 	cfg = applyPerCallBudgetFloor(cfg, defaultPerCallBudgetUSD)
 	provider, err := r.newProvider(cfg)
 	if err != nil {
-		return nil, "", fmt.Errorf("provider: %w", err)
+		return nil, "", preparedAgentIdentity{}, fmt.Errorf("provider: %w", err)
 	}
 
 	// Decision 5b warning.
@@ -723,38 +880,12 @@ func (r *Runtime) spawnAgent(ctx context.Context, def AgentDef) (*hiveagent.Agen
 		ConversationID: r.convID,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("create agent: %w", err)
+		return nil, "", preparedAgentIdentity{}, fmt.Errorf("create agent: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "  ↳ %s (%s) using %s/%s [%s] [%s]\n",
 		def.Name, def.Role, resolved.Provider, resolved.Model, resolved.AuthMode, agent.ID().Value())
-	r.emit(EventTypeAgentSpawned, AgentSpawnedContent{
-		Name:    def.Name,
-		Role:    def.Role,
-		Model:   resolved.Model,
-		ActorID: agent.ID().Value(),
-	})
-	if err := r.emitAgentIdentityRegistered(agent.ID(), def, identity); err != nil {
-		return nil, "", fmt.Errorf("record identity provenance: %w", err)
-	}
-
-	// Emit role definition as a first-class event (queryable, versionable).
-	if def.RoleDefinition != nil {
-		origin := "spawned"
-		if def.RoleDefinition.Tier != "" {
-			origin = "bootstrap" // bootstrap agents always have RoleDefinition.Tier set
-		}
-		r.emit(EventTypeRoleDefinition, RoleDefinitionContent{
-			Name:        def.RoleDefinition.Name,
-			Description: def.RoleDefinition.Description,
-			Category:    def.RoleDefinition.Category,
-			Tier:        def.RoleDefinition.Tier,
-			CanOperate:  def.RoleDefinition.CanOperate,
-			Origin:      origin,
-		})
-	}
-
-	return agent, resolved.Model, nil
+	return agent, resolved.Model, identity, nil
 }
 
 func (r *Runtime) emitAgentIdentityRegistered(agentID types.ActorID, def AgentDef, identity preparedAgentIdentity) error {

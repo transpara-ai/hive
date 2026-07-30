@@ -1201,9 +1201,20 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr, webhookBearerToken string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, bootstrapProfile hive.BootstrapProfile, growthPolicyVersion string, maximumDynamicActors int, automaticallyApprovedActions []safety.ProtectedAction, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr, webhookBearerToken string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Validate before opening or bootstrapping either EventGraph or Work state.
+	if err := hive.ValidateBootstrapConfig(hive.Config{
+		ApproveRequests:              approveRequests,
+		BootstrapProfile:             bootstrapProfile,
+		GrowthPolicyVersion:          growthPolicyVersion,
+		MaximumDynamicActors:         maximumDynamicActors,
+		AutomaticallyApprovedActions: automaticallyApprovedActions,
+	}); err != nil {
+		return err
+	}
 
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_URL")
@@ -1293,6 +1304,10 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		HumanID:                            humanID,
 		ApproveRequests:                    approveRequests,
 		ApproveRoles:                       approveRoles,
+		BootstrapProfile:                   bootstrapProfile,
+		GrowthPolicyVersion:                growthPolicyVersion,
+		MaximumDynamicActors:               maximumDynamicActors,
+		AutomaticallyApprovedActions:       automaticallyApprovedActions,
 		RepoPath:                           repoPath,
 		RepoWorkspaceRoot:                  repoWorkspaceRoot,
 		IsolateRunTasks:                    !loop,
@@ -1313,7 +1328,11 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		return fmt.Errorf("runtime: %w", err)
 	}
 
-	for _, def := range hive.StarterAgents(humanName) {
+	starterAgents, err := hive.StarterAgentsForProfile(humanName, bootstrapProfile)
+	if err != nil {
+		return err
+	}
+	for _, def := range starterAgents {
 		if err := rt.Register(def); err != nil {
 			return fmt.Errorf("register %s: %w", def.Name, err)
 		}

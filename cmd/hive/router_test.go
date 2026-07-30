@@ -4,6 +4,9 @@ import (
 	"flag"
 	"strings"
 	"testing"
+
+	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 func TestRouteAndDispatchNoArgs(t *testing.T) {
@@ -45,6 +48,53 @@ func TestCmdCivilizationRunRequiresHuman(t *testing.T) {
 	err := cmdCivilization([]string{"run"})
 	if err == nil || !strings.Contains(err.Error(), "--human") {
 		t.Fatalf("expected --human required error, got: %v", err)
+	}
+}
+
+func TestCivilizationRunRejectsBootstrapProfileBeforeSpecIngest(t *testing.T) {
+	err := cmdCivilization([]string{
+		"run",
+		"--human", "Michael",
+		"--bootstrap-profile", "unknown",
+		"--spec", "/nonexistent/spec.md",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown bootstrap profile") {
+		t.Fatalf("error = %v, want bootstrap-profile rejection before spec ingest", err)
+	}
+}
+
+func TestOrganicBootstrapFlagsUseExactDeduplicatedAction(t *testing.T) {
+	profile, policy, maximum, actions, err := parseBootstrapRuntimeFlags(
+		"organic-v1",
+		[]string{"agent.spawn.persistent", "agent.spawn.persistent"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("parse organic flags: %v", err)
+	}
+	if profile != hive.BootstrapProfileOrganicV1 ||
+		policy != hive.OrganicV1GrowthPolicyVersion ||
+		maximum != hive.OrganicV1MaximumDynamicActors ||
+		len(actions) != 1 ||
+		actions[0] != safety.ActionAgentSpawnPersistent {
+		t.Fatalf("parsed organic flags = %q %q %d %#v", profile, policy, maximum, actions)
+	}
+}
+
+func TestOrganicBootstrapFlagsRejectBroadApprovalAndUnknownAction(t *testing.T) {
+	if _, _, _, _, err := parseBootstrapRuntimeFlags(
+		"organic-v1",
+		[]string{"agent.spawn.persistent"},
+		true,
+	); err == nil || !strings.Contains(err.Error(), "broad ApproveRequests") {
+		t.Fatalf("broad organic approval error = %v", err)
+	}
+	if _, _, _, _, err := parseBootstrapRuntimeFlags(
+		"organic-v1",
+		[]string{"agent.spawn.everything"},
+		false,
+	); err == nil || !strings.Contains(err.Error(), "unknown protected action") {
+		t.Fatalf("unknown action error = %v", err)
 	}
 }
 

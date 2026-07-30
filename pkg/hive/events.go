@@ -25,6 +25,7 @@ var (
 	EventTypeIssueScanRunParked               = types.MustEventType("hive.issuescan.run.parked")
 	EventTypeIssueScanReviewCapacityThrottled = types.MustEventType("hive.issuescan.review.capacity.throttled")
 	EventTypeModelRolePolicyUpdated           = types.MustEventType("hive.model.role.policy.updated")
+	EventTypeGrowthLimitReached               = types.MustEventType("hive.growth.limit.reached")
 )
 
 func allHiveEventTypes() []types.EventType {
@@ -37,6 +38,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeFactoryRunRequested, EventTypeFactoryArtifactCreated,
 		EventTypeIssueScanRunParked, EventTypeIssueScanReviewCapacityThrottled,
 		EventTypeModelRolePolicyUpdated,
+		EventTypeGrowthLimitReached,
 		// Agent loop heartbeat (pkg/checkpoint).
 		checkpoint.EventTypeAgentHeartbeat,
 		// Site webhook bridge events (dispatch.go).
@@ -56,8 +58,13 @@ func (hiveContent) Accept(event.EventContentVisitor) {}
 // RunStartedContent is emitted when a hive run begins.
 type RunStartedContent struct {
 	hiveContent
-	Idea     string `json:"Idea,omitempty"`
-	RepoPath string `json:"RepoPath,omitempty"`
+	Idea                         string           `json:"Idea,omitempty"`
+	RepoPath                     string           `json:"RepoPath,omitempty"`
+	BootstrapProfile             BootstrapProfile `json:"BootstrapProfile,omitempty"`
+	BootstrapRoles               []string         `json:"BootstrapRoles,omitempty"`
+	GrowthPolicyVersion          string           `json:"GrowthPolicyVersion,omitempty"`
+	MaximumDynamicActors         int              `json:"MaximumDynamicActors,omitempty"`
+	AutomaticallyApprovedActions []string         `json:"AutomaticallyApprovedActions,omitempty"`
 }
 
 func (c RunStartedContent) EventTypeName() string { return "hive.run.started" }
@@ -65,9 +72,13 @@ func (c RunStartedContent) EventTypeName() string { return "hive.run.started" }
 // RunCompletedContent is emitted when a hive run ends.
 type RunCompletedContent struct {
 	hiveContent
-	AgentCount int     `json:"AgentCount"`
-	DurationMs int64   `json:"DurationMs"`
-	TotalCost  float64 `json:"TotalCost"`
+	AgentCount                 int     `json:"AgentCount"`
+	DurationMs                 int64   `json:"DurationMs"`
+	TotalCost                  float64 `json:"TotalCost"`
+	BootstrapActorCount        int     `json:"BootstrapActorCount,omitempty"`
+	RecoveredDynamicActorCount int     `json:"RecoveredDynamicActorCount,omitempty"`
+	NewDynamicActorCount       int     `json:"NewDynamicActorCount,omitempty"`
+	DynamicActorCount          int     `json:"DynamicActorCount,omitempty"`
 }
 
 func (c RunCompletedContent) EventTypeName() string { return "hive.run.completed" }
@@ -75,13 +86,31 @@ func (c RunCompletedContent) EventTypeName() string { return "hive.run.completed
 // AgentSpawnedContent is emitted when an agent starts running.
 type AgentSpawnedContent struct {
 	hiveContent
-	Name    string `json:"Name"`
-	Role    string `json:"Role"`
-	Model   string `json:"Model"`
-	ActorID string `json:"ActorID"`
+	Name      string `json:"Name"`
+	Role      string `json:"Role"`
+	Model     string `json:"Model"`
+	ActorID   string `json:"ActorID"`
+	Recovered bool   `json:"Recovered,omitempty"`
 }
 
 func (c AgentSpawnedContent) EventTypeName() string { return "hive.agent.spawned" }
+
+// GrowthLimitReachedContent records the idempotent refusal of an otherwise
+// correlatable organic-v1 proposal after all three dynamic slots are occupied.
+type GrowthLimitReachedContent struct {
+	hiveContent
+	GrowthPolicyVersion  string               `json:"GrowthPolicyVersion"`
+	MaximumDynamicActors int                  `json:"MaximumDynamicActors"`
+	DynamicActorCount    int                  `json:"DynamicActorCount"`
+	NormalizedRole       string               `json:"NormalizedRole"`
+	ProposalID           types.EventID        `json:"ProposalID"`
+	ConversationID       types.ConversationID `json:"ConversationID"`
+	Outcome              string               `json:"Outcome"`
+}
+
+func (c GrowthLimitReachedContent) EventTypeName() string {
+	return "hive.growth.limit.reached"
+}
 
 // AgentIdentityRegisteredContent records the DF-SPEC-0003 identity
 // registration projection Hive needs for operator/audit views. It stores only
@@ -344,6 +373,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.issuescan.run.parked", event.Unmarshal[IssueScanRunParkedContent])
 	event.RegisterContentUnmarshaler("hive.issuescan.review.capacity.throttled", event.Unmarshal[IssueScanReviewCapacityThrottledContent])
 	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
+	event.RegisterContentUnmarshaler("hive.growth.limit.reached", event.Unmarshal[GrowthLimitReachedContent])
 	registerPhase3ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }

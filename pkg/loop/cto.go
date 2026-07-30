@@ -147,8 +147,8 @@ func (c *CTOCooldowns) InitCTOFromRecovery(state *checkpoint.CTORecoveredState) 
 // Returns nil if valid, descriptive error if rejected.
 func validateGapCommand(cmd *GapCommand, iteration int, cooldowns *CTOCooldowns, cfg CTOConfig) error {
 	// 1. Stabilization window.
-	if iteration <= cfg.StabilizationWindow {
-		return fmt.Errorf("stabilization window active (iteration %d ≤ %d)", iteration, cfg.StabilizationWindow)
+	if iteration < cfg.StabilizationWindow {
+		return fmt.Errorf("stabilization window active (iteration %d < %d)", iteration, cfg.StabilizationWindow)
 	}
 
 	// 2. Valid category (case-insensitive — LLM may output any case).
@@ -183,8 +183,8 @@ func validateGapCommand(cmd *GapCommand, iteration int, cooldowns *CTOCooldowns,
 // Returns nil if valid, descriptive error if rejected.
 func validateDirectiveCommand(cmd *DirectiveCommand, iteration int, cooldowns *CTOCooldowns, cfg CTOConfig) error {
 	// 1. Stabilization window.
-	if iteration <= cfg.StabilizationWindow {
-		return fmt.Errorf("stabilization window active (iteration %d ≤ %d)", iteration, cfg.StabilizationWindow)
+	if iteration < cfg.StabilizationWindow {
+		return fmt.Errorf("stabilization window active (iteration %d < %d)", iteration, cfg.StabilizationWindow)
 	}
 
 	// 2. Target cooldown.
