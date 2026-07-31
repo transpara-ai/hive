@@ -72,13 +72,14 @@ func (r *Runtime) authorizeProtectedAction(req protectedActionRequest) (types.Ev
 		return types.EventID{}, fmt.Errorf("record authority request for %s: %w", req.Action, err)
 	}
 
-	if !r.approveRequests {
+	exactActionApproval := r.automaticallyApproves(req.Action)
+	if !r.approveRequests && !exactActionApproval {
 		return requestID, safety.AuthorityError{Action: req.Action, Outcome: outcome}
 	}
 	if !safety.ApprovalAllowsAction(req.Action, req.Action) {
 		return requestID, safety.AuthorityError{Action: req.Action, Outcome: safety.Forbidden}
 	}
-	if _, err := r.recordAuthorityDecision(requestID, req); err != nil {
+	if _, err := r.recordAuthorityDecision(requestID, req, exactActionApproval); err != nil {
 		return requestID, fmt.Errorf("record authority decision for %s: %w", req.Action, err)
 	}
 	return requestID, nil
@@ -147,7 +148,7 @@ func (r *Runtime) recordProtectedActionLocalEmulation(req protectedActionLocalEm
 		return blockedProtectedActionLocalEmulation(result, "missing authority decision for approved local emulation")
 	}
 
-	decisionID, err := r.recordAuthorityDecision(requestID, authorityReq)
+	decisionID, err := r.recordAuthorityDecision(requestID, authorityReq, false)
 	if err != nil {
 		return blockedProtectedActionLocalEmulation(result, "record authority decision for %s: %v", req.Action, err)
 	}
@@ -222,8 +223,12 @@ func (r *Runtime) recordAuthorityRequest(req protectedActionRequest) (types.Even
 	return stored.ID(), nil
 }
 
-func (r *Runtime) recordAuthorityDecision(requestID types.EventID, req protectedActionRequest) (types.EventID, error) {
+func (r *Runtime) recordAuthorityDecision(requestID types.EventID, req protectedActionRequest, exactActionApproval ...bool) (types.EventID, error) {
 	scope := authorityScope(req)
+	rationale := "auto-approved via --approve-requests"
+	if len(exactActionApproval) > 0 && exactActionApproval[0] {
+		rationale = "auto-approved via exact --approve-action allowlist"
+	}
 	content := AuthorityDecisionRecordedContent{
 		DecisionID:       requestID.Value(),
 		RequestID:        requestID,
@@ -234,7 +239,7 @@ func (r *Runtime) recordAuthorityDecision(requestID types.EventID, req protected
 		ApprovedAction:   string(req.Action),
 		Scope:            scope,
 		EvidenceReviewed: req.EvidenceReviewed,
-		Rationale:        "auto-approved via --approve-requests",
+		Rationale:        rationale,
 	}
 	// Use r.graph.Record (not the store-only helper) so the event is published to
 	// the in-process bus. Live subscribers — the telemetry writer and the agent

@@ -105,6 +105,7 @@ func (s *spawnerState) update(events []event.Event) {
 type SpawnContext struct {
 	Iteration          int
 	HasPendingProposal bool
+	HasGenuineGap      bool
 	AgentRoster        []string                  // agent names from BudgetRegistry.Snapshot()
 	RecentRejections   map[string]int            // role name → iteration when rejected
 	Catalog            *modelconfig.ModelCatalog // model catalog for validation
@@ -197,15 +198,16 @@ func parseSpawnCommand(response string) *SpawnCommand {
 // is violated, nil if the proposal is safe to emit.
 //
 // Rules enforced (from design spec section 7):
-//  1. Stabilization window: first 20 iterations are observe-only
+//  1. Stabilization window: iterations 1-19 are observe-only; 20 may propose
 //  2. Pending proposal: only one proposal in-flight at a time
-//  3. Name: valid kebab-case, no collision with existing roster
-//  4. Model: must exist in the model catalog (alias or full ID)
-//  5. MaxIterations: 10–200
-//  6. Prompt: >= 100 characters
-//  7. WatchPatterns: non-empty, no bare wildcard ("*")
-//  8. Rejection cooldown: 50-iteration wait after rejection of same name
-//  9. CanOperate: must be false (trust must be earned first)
+//  3. Genuine gap: at least one CTO gap was observed in this run
+//  4. Name: valid kebab-case, no collision with existing roster
+//  5. Model: must exist in the model catalog (alias or full ID)
+//  6. MaxIterations: 10–200
+//  7. Prompt: >= 100 characters
+//  8. WatchPatterns: non-empty, no bare wildcard ("*")
+//  9. Rejection cooldown: 50-iteration wait after rejection of same name
+//  10. CanOperate: must be false (trust must be earned first)
 func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 	// 1. Stabilization window.
 	if ctx.Iteration < 20 {
@@ -217,7 +219,13 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 		return fmt.Errorf("proposal already pending: wait for approval or rejection before proposing another")
 	}
 
-	// 3. Name validation.
+	// 3. A proposal is a response to a genuine CTO gap observed by this loop,
+	// never a speculative role invention.
+	if !ctx.HasGenuineGap {
+		return fmt.Errorf("no genuine hive.gap.detected event observed in this run")
+	}
+
+	// 4. Name validation.
 	if !isValidRoleName(cmd.Name) {
 		return fmt.Errorf("invalid role name %q: must be kebab-case, 2-50 chars, not reserved", cmd.Name)
 	}
@@ -225,7 +233,7 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 		return fmt.Errorf("role %q already exists in agent roster", cmd.Name)
 	}
 
-	// 4. Model validation.
+	// 5. Model validation.
 	cat := ctx.Catalog
 	if cat == nil {
 		cat = modelconfig.DefaultCatalog()
@@ -234,17 +242,17 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 		return fmt.Errorf("invalid model %q: not found in model catalog", cmd.Model)
 	}
 
-	// 5. MaxIterations bounds.
+	// 6. MaxIterations bounds.
 	if cmd.MaxIterations < 10 || cmd.MaxIterations > 200 {
 		return fmt.Errorf("invalid max_iterations %d: must be 10-200", cmd.MaxIterations)
 	}
 
-	// 6. Prompt length.
+	// 7. Prompt length.
 	if len(cmd.Prompt) < 100 {
 		return fmt.Errorf("prompt too short (%d chars): must be >= 100", len(cmd.Prompt))
 	}
 
-	// 7. WatchPatterns.
+	// 8. WatchPatterns.
 	if len(cmd.WatchPatterns) == 0 {
 		return fmt.Errorf("watch_patterns must be non-empty: specify which events this role handles")
 	}
@@ -254,12 +262,12 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 		}
 	}
 
-	// 8. Rejection cooldown (50 iterations).
+	// 9. Rejection cooldown (50 iterations).
 	if ctx.RecentlyRejected(cmd.Name, 50) {
 		return fmt.Errorf("role %q was recently rejected: wait 50 iterations before reproposing", cmd.Name)
 	}
 
-	// 9. CanOperate blocked for all spawned roles.
+	// 10. CanOperate blocked for all spawned roles.
 	if cmd.CanOperate {
 		return fmt.Errorf("can_operate must be false: new roles must earn trust before operating on files")
 	}
@@ -398,6 +406,7 @@ func (l *Loop) buildSpawnContext() *SpawnContext {
 	ctx := &SpawnContext{
 		Iteration:          l.spawnerState.iteration,
 		HasPendingProposal: l.spawnerState.pendingProposal != "",
+		HasGenuineGap:      len(l.spawnerState.processedGaps) > 0,
 		RecentRejections:   l.spawnerState.recentRejections,
 		Catalog:            l.config.Catalog,
 	}

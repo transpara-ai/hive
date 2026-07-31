@@ -131,12 +131,16 @@ func TestValidateGapCommand_StabilizationBlocks(t *testing.T) {
 	cooldowns := NewCTOCooldowns()
 	cmd := &GapCommand{Category: "technical", MissingRole: "reviewer", Evidence: "test", Severity: "medium"}
 
-	// Iteration at or below stabilization window should be rejected.
-	for _, iter := range []int{1, 5, 15} {
+	// Iterations through 14 are observe-only; iteration 15 is the first
+	// admissible gap boundary.
+	for _, iter := range []int{1, 5, 14} {
 		err := validateGapCommand(cmd, iter, cooldowns, cfg)
 		if err == nil {
 			t.Errorf("iteration %d: expected error during stabilization window, got nil", iter)
 		}
+	}
+	if err := validateGapCommand(cmd, 15, cooldowns, cfg); err != nil {
+		t.Fatalf("iteration 15 should admit a genuine gap: %v", err)
 	}
 }
 
@@ -207,7 +211,7 @@ func TestValidateDirectiveCommand_StabilizationBlocks(t *testing.T) {
 	cooldowns := NewCTOCooldowns()
 	cmd := &DirectiveCommand{Target: "strategist", Action: "slow down", Reason: "test", Priority: "low"}
 
-	for _, iter := range []int{1, 10, 15} {
+	for _, iter := range []int{1, 10, 14} {
 		err := validateDirectiveCommand(cmd, iter, cooldowns, cfg)
 		if err == nil {
 			t.Errorf("iteration %d: expected error during stabilization window, got nil", iter)

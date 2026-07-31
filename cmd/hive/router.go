@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/safety"
 )
 
 // errUsage marks errors that are usage messages, not real failures.
@@ -127,6 +130,9 @@ func cmdCivilizationRun(args []string) error {
 	catalog := fs.String("catalog", "", "Custom YAML model catalog (merged with built-in defaults)")
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
+	bootstrapProfile := fs.String("bootstrap-profile", string(hive.BootstrapProfileFull), "Bootstrap profile: full|organic-v1")
+	approveActions := repeatedStringFlag{}
+	fs.Var(&approveActions, "approve-action", "Auto-approve one exact known protected action (repeatable)")
 	space := fs.String("space", "hive", "transpara.ai space slug")
 	apiBase := fs.String("api", "https://transpara.ai", "transpara.ai API base URL")
 	if err := fs.Parse(args); err != nil {
@@ -135,16 +141,52 @@ func cmdCivilizationRun(args []string) error {
 	if *human == "" {
 		return fmt.Errorf("--human is required")
 	}
+	profile, growthPolicyVersion, maximumDynamicActors, actions, err := parseBootstrapRuntimeFlags(*bootstrapProfile, approveActions, *approveRequests)
+	if err != nil {
+		return err
+	}
 	if *spec != "" {
 		if err := runIngest(*spec, *space, *apiBase, "high"); err != nil {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
 }
 
 func cmdCivilizationDaemon(args []string) error {
 	return cmdGovernedDaemon("civilization daemon", args)
+}
+
+func parseBootstrapRuntimeFlags(profileValue string, actionValues []string, approveRequests bool) (hive.BootstrapProfile, string, int, []safety.ProtectedAction, error) {
+	profile := hive.BootstrapProfile(profileValue)
+	if err := profile.Validate(); err != nil {
+		return "", "", 0, nil, err
+	}
+	actions := make([]safety.ProtectedAction, len(actionValues))
+	for i, value := range actionValues {
+		actions[i] = safety.ProtectedAction(value)
+	}
+	normalized, err := hive.NormalizeProtectedActions(actions)
+	if err != nil {
+		return "", "", 0, nil, err
+	}
+	growthPolicyVersion := ""
+	maximumDynamicActors := 0
+	if profile == hive.BootstrapProfileOrganicV1 {
+		growthPolicyVersion = hive.OrganicV1GrowthPolicyVersion
+		maximumDynamicActors = hive.OrganicV1MaximumDynamicActors
+	}
+	cfg := hive.Config{
+		BootstrapProfile:             profile,
+		GrowthPolicyVersion:          growthPolicyVersion,
+		MaximumDynamicActors:         maximumDynamicActors,
+		AutomaticallyApprovedActions: normalized,
+		ApproveRequests:              approveRequests,
+	}
+	if err := hive.ValidateBootstrapConfig(cfg); err != nil {
+		return "", "", 0, nil, err
+	}
+	return profile, growthPolicyVersion, maximumDynamicActors, normalized, nil
 }
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────

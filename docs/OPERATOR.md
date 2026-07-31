@@ -22,6 +22,43 @@ go run ./cmd/hive civilization run --human Matt --store "postgres://..." --idea 
 
 The pipeline runs: Research → Design → Simplify → Build → Review → Test → Integrate. The Guardian checks integrity after every phase.
 
+### Bounded Organic Bootstrap (`organic-v1`)
+
+`organic-v1` starts only the constitutional kernel, in this exact order:
+Guardian, SysMon, Allocator, CTO, and Spawner. It may add at most three dynamic
+actors. Every dynamically admitted actor is permanently non-operating
+(`CanOperate=false`); this profile does not grant repository, deployment, merge,
+governance, budget-policy, or other protected authority.
+
+Use a singleton daemon for recovery and point only that process at the
+persistent store:
+
+```bash
+go run ./cmd/hive civilization daemon \
+  --human Michael \
+  --store "postgres://..." \
+  --bootstrap-profile organic-v1 \
+  --approve-action agent.spawn.persistent
+```
+
+The exact `--approve-action agent.spawn.persistent` allowlist is the only
+automatic protected action admitted by this posture. Do not add
+`--approve-requests`; organic startup rejects that broad authority. Do not use
+`--approve-roles` for the governed posture: Guardian approval and an Allocator
+iteration grant must be independently recorded before runtime admission.
+
+Run no second Hive daemon against the same organic store. On daemon restart,
+Hive validates the latest explicitly recorded organic run and reserves all
+recovered actors against the three-actor cap before writing the new run. A
+missing tuple, identity ambiguity, invalid model, duplicate role, or excess
+candidate stops startup. `civilization run` is an isolated execution path and
+does not recover organic dynamic actors.
+
+At capacity, an otherwise valid fourth proposal records exactly one
+`hive.growth.limit.reached` rejection for that run/proposal/policy tuple. It
+does not create a definition, identity, budget registration, goroutine, or
+spawned actor.
+
 ### What You'll See
 
 1. **Authority requests** — agents asking permission for actions

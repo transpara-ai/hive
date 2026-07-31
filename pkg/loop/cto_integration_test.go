@@ -278,3 +278,36 @@ func TestGapCommandInLoop(t *testing.T) {
 		t.Errorf("MissingRole = %q, want %q", content.MissingRole, "reviewer")
 	}
 }
+
+func TestOrganicCTOStabilizationBoundaryThroughRealLoop(t *testing.T) {
+	t.Setenv("CTO_STABILIZATION_WINDOW", "15")
+	const gapCommand = `/gap {"category":"technical","missing_role":"incident-observer","evidence":"unhandled event class persisted","severity":"serious"}`
+	responses := make([]string, 15)
+	for i := 0; i < 14; i++ {
+		responses[i] = gapCommand
+	}
+	responses[14] = gapCommand + "\n" + `/signal {"signal":"TASK_DONE"}`
+
+	provider := newMockProvider(responses...)
+	agent := testHiveAgent(t, provider, "cto", "organic-boundary-cto")
+	l, err := New(Config{
+		Agent:   agent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 15},
+		Task:    "observe the unhandled event class",
+	})
+	if err != nil {
+		t.Fatalf("new CTO loop: %v", err)
+	}
+	result := l.Run(context.Background())
+	if result.Iterations != 15 || result.Reason != StopTaskDone {
+		t.Fatalf("CTO result = %+v, want TASK_DONE at iteration 15", result)
+	}
+	page, err := agent.Graph().Store().ByType(event.EventTypeGapDetected, 10, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("read gaps: %v", err)
+	}
+	if len(page.Items()) != 1 {
+		t.Fatalf("gap count = %d, want exactly one at iteration 15", len(page.Items()))
+	}
+}

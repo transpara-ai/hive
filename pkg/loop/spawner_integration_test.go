@@ -14,9 +14,12 @@ package loop
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/actor"
+	"github.com/transpara-ai/eventgraph/go/pkg/decision"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
@@ -26,6 +29,28 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/hive/pkg/resources"
 )
+
+type organicSpawnerBoundaryProvider struct {
+	calls   atomic.Int32
+	ready   chan struct{}
+	release chan struct{}
+}
+
+func (p *organicSpawnerBoundaryProvider) Name() string  { return "scripted" }
+func (p *organicSpawnerBoundaryProvider) Model() string { return "scripted-organic" }
+func (p *organicSpawnerBoundaryProvider) Reason(_ context.Context, _ string, _ []event.Event) (decision.Response, error) {
+	iteration := p.calls.Add(1)
+	if iteration == 1 {
+		close(p.ready)
+		<-p.release
+	}
+	response := `/spawn {"name":"incident-observer","model":"haiku","watch_patterns":["work.task.created"],"can_operate":false,"max_iterations":30,"prompt":"You uphold the soul statement and inspect the unhandled event class. Attach all findings as structured task comments while remaining non-operating.","reason":"observed event class has no handler"}`
+	if iteration == 20 {
+		response += "\n" + `/signal {"signal":"TASK_DONE"}`
+	}
+	score, _ := types.NewScore(0.9)
+	return decision.NewResponse(response, score, decision.TokenUsage{}), nil
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Helpers specific to integration tests
@@ -475,6 +500,88 @@ func TestCompleteProtocolFlow(t *testing.T) {
 		if proposed.Name != approved.Name {
 			t.Errorf("proposal name %q != approval name %q", proposed.Name, approved.Name)
 		}
+	}
+}
+
+func TestOrganicSpawnerStabilizationAndGenuineGapThroughRealLoop(t *testing.T) {
+	sharedGraph := testSharedGraph(t)
+	convID := types.MustConversationID("conv_organic_spawner_boundary")
+	provider := &organicSpawnerBoundaryProvider{
+		ready:   make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	ctoAgent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:           hiveagent.Role("cto"),
+		Name:           "cto-organic-boundary",
+		Graph:          sharedGraph,
+		Provider:       newMockProvider(`/signal {"signal":"IDLE"}`),
+		ConversationID: convID,
+	})
+	if err != nil {
+		t.Fatalf("CTO agent: %v", err)
+	}
+	spawnerAgent, err := hiveagent.New(context.Background(), hiveagent.Config{
+		Role:           hiveagent.Role("spawner"),
+		Name:           "spawner-organic-boundary",
+		Graph:          sharedGraph,
+		Provider:       provider,
+		ConversationID: convID,
+	})
+	if err != nil {
+		t.Fatalf("Spawner agent: %v", err)
+	}
+	l, err := New(Config{
+		Agent:   spawnerAgent,
+		HumanID: humanID(),
+		Budget:  resources.BudgetConfig{MaxIterations: 20},
+		Bus:     sharedGraph.Bus(),
+		Task:    "observe and respond to a genuine gap",
+	})
+	if err != nil {
+		t.Fatalf("new Spawner loop: %v", err)
+	}
+
+	resultCh := make(chan Result, 1)
+	go func() {
+		resultCh <- l.Run(context.Background())
+	}()
+	select {
+	case <-provider.ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Spawner loop did not reach its first real evaluation")
+	}
+	if err := ctoAgent.EmitGapDetected(event.NewGapDetectedContent(
+		event.GapCategoryTechnical,
+		"incident-observer",
+		"unhandled event class persisted through observation",
+		event.SeverityLevelSerious,
+	)); err != nil {
+		t.Fatalf("emit genuine CTO gap: %v", err)
+	}
+	// EventBus delivery is asynchronous; keep the provider behind the first
+	// evaluation until the gap has entered the subscriber queue.
+	time.Sleep(10 * time.Millisecond)
+	close(provider.release)
+
+	var result Result
+	select {
+	case result = <-resultCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Spawner loop did not terminate at iteration 20")
+	}
+	if result.Iterations != 20 || result.Reason != StopTaskDone {
+		t.Fatalf("Spawner result = %+v, want TASK_DONE at iteration 20", result)
+	}
+	page, err := sharedGraph.Store().ByType(event.EventTypeRoleProposed, 100, types.None[types.Cursor]())
+	if err != nil {
+		t.Fatalf("read proposals: %v", err)
+	}
+	if len(page.Items()) != 1 {
+		t.Fatalf("proposal count = %d, want exactly one at iteration 20", len(page.Items()))
+	}
+	content := page.Items()[0].Content().(event.RoleProposedContent)
+	if content.Name != "incident-observer" || content.CanOperate {
+		t.Fatalf("organic proposal = %+v", content)
 	}
 }
 

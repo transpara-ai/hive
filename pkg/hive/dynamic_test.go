@@ -2,6 +2,8 @@ package hive
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -85,6 +87,88 @@ func TestDynamicAgentTracker_Wait(t *testing.T) {
 		// pass
 	case <-ctx.Done():
 		t.Fatal("Wait() did not return")
+	}
+}
+
+func TestDynamicAgentTracker_ConcurrentCap(t *testing.T) {
+	d := newDynamicAgentTracker(OrganicV1MaximumDynamicActors)
+	names := []string{"alpha", "beta", "gamma", "delta"}
+	results := make(chan dynamicSlotResult, len(names))
+	var callers sync.WaitGroup
+	for _, name := range names {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			results <- d.Reserve(name)
+		}()
+	}
+	callers.Wait()
+	close(results)
+
+	reserved := 0
+	limited := 0
+	for result := range results {
+		switch result {
+		case dynamicSlotReserved:
+			reserved++
+		case dynamicSlotLimitReached:
+			limited++
+		}
+	}
+	if reserved != OrganicV1MaximumDynamicActors || limited != 1 {
+		t.Fatalf("reserved=%d limited=%d, want 3 and 1", reserved, limited)
+	}
+	if got := d.OccupiedCount(); got != OrganicV1MaximumDynamicActors {
+		t.Fatalf("occupied count = %d, want %d", got, OrganicV1MaximumDynamicActors)
+	}
+}
+
+func TestDynamicAgentTracker_LimitEventFailureCanRetryButCommitCannot(t *testing.T) {
+	d := newDynamicAgentTracker(OrganicV1MaximumDynamicActors)
+	const key = "conversation|proposal|organic-v1"
+	if !d.BeginLimitEvent(key) {
+		t.Fatal("first limit-event claim was refused")
+	}
+	if d.BeginLimitEvent(key) {
+		t.Fatal("concurrent limit-event claim was admitted")
+	}
+	d.FinishLimitEvent(key, false)
+	if !d.BeginLimitEvent(key) {
+		t.Fatal("failed limit-event write did not become retryable")
+	}
+	d.FinishLimitEvent(key, true)
+	if d.BeginLimitEvent(key) {
+		t.Fatal("committed limit-event tuple became writable again")
+	}
+}
+
+func TestDynamicAgentTracker_RecoveryAndNewCapacityCombinations(t *testing.T) {
+	for recovered := 0; recovered <= OrganicV1MaximumDynamicActors; recovered++ {
+		t.Run(fmt.Sprintf("%d+%d", recovered, OrganicV1MaximumDynamicActors-recovered), func(t *testing.T) {
+			d := newDynamicAgentTracker(OrganicV1MaximumDynamicActors)
+			for i := 0; i < OrganicV1MaximumDynamicActors; i++ {
+				name := fmt.Sprintf("actor-%d", i)
+				if result := d.Reserve(name); result != dynamicSlotReserved {
+					t.Fatalf("reserve %s = %v", name, result)
+				}
+				if !d.Attach(name, func() {}, i < recovered) {
+					t.Fatalf("attach %s failed", name)
+				}
+				d.Done()
+			}
+			if d.Count() != OrganicV1MaximumDynamicActors ||
+				d.RecoveredCount() != recovered ||
+				d.NewCount() != OrganicV1MaximumDynamicActors-recovered {
+				t.Fatalf(
+					"counts total=%d recovered=%d new=%d",
+					d.Count(), d.RecoveredCount(), d.NewCount(),
+				)
+			}
+			if result := d.Reserve("fourth"); result != dynamicSlotLimitReached {
+				t.Fatalf("fourth reserve = %v, want limit", result)
+			}
+			d.Wait()
+		})
 	}
 }
 

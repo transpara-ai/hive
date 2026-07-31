@@ -212,6 +212,12 @@ type Config struct {
 	// When set, observation enrichment can query all agents' budget states.
 	BudgetRegistry *resources.BudgetRegistry
 
+	// AllowPreAdmissionRoleBudget permits the Allocator to emit one
+	// iteration-form "set" grant for a proposed role that has a later Guardian
+	// approval but no registry entry yet. It is enabled only by the bounded
+	// organic runtime; no target Budget is created until admission commits.
+	AllowPreAdmissionRoleBudget bool
+
 	// ActorResolver maps actor IDs to display names for task context.
 	// Optional. When nil, task context omits creator information.
 	ActorResolver func(types.ActorID) string

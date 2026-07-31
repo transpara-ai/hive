@@ -374,13 +374,27 @@ func StarterRoleDefinitions() map[string]*modelconfig.RoleDefinition {
 // Boot order matters: guardian first (integrity), sysmon second (health
 // monitoring), allocator third (budget management), then the work agents.
 func StarterAgents(humanName string) []AgentDef {
+	agents, err := StarterAgentsForProfile(humanName, BootstrapProfileFull)
+	if err != nil {
+		panic(err)
+	}
+	return agents
+}
+
+// StarterAgentsForProfile returns the exact bootstrap roster for an explicit
+// typed profile. The full roster is the historical compatibility roster;
+// organic-v1 is the irreducible governance and growth kernel.
+func StarterAgentsForProfile(humanName string, profile BootstrapProfile) ([]AgentDef, error) {
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
 	mission := func(rolePrompt string) string {
 		return fmt.Sprintf(missionTemplate, humanName, humanName) + rolePrompt
 	}
 
 	roles := StarterRoleDefinitions()
 
-	return []AgentDef{
+	full := []AgentDef{
 		{
 			Name:           "guardian",
 			Role:           "guardian",
@@ -581,7 +595,8 @@ Categories: Leadership, Technical, Process, Staffing, Capability
 When work agents need course correction, emit:
 /directive {"target":"<agent-or-all>","action":"<what>","reason":"<why>","priority":"Low|Medium|High|Critical"}
 
-First 15 iterations are observe-only. Build your mental model.
+Iterations 1-14 are observe-only. At iteration 15, a genuine observed gap may
+be emitted. Build your mental model before that boundary.
 Minimum 15 iterations between /gap in same category.
 Minimum 5 iterations between /directive to same target.
 
@@ -630,7 +645,7 @@ Their prompts must include: "Attach deliverables as /task comment with the full
 document body. Reference what you produced in your /task complete summary."
 
 CONSTRAINTS:
-- First 20 iterations: observe only (stabilization window)
+- Iterations 1-19: observe only (stabilization window); at iteration 20 you may propose for a genuine observed gap
 - Only one proposal in-flight at a time
 - Wait for approved/rejected before proposing another
 - No bare wildcard ("*") in watch_patterns
@@ -1006,4 +1021,12 @@ observe contradicting evidence.
 			MaxDuration:   4 * time.Hour,
 		},
 	}
+	if profile == BootstrapProfileFull {
+		return full, nil
+	}
+
+	const organicKernelSize = 5
+	organic := make([]AgentDef, organicKernelSize)
+	copy(organic, full[:organicKernelSize])
+	return organic, nil
 }
