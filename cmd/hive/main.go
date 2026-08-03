@@ -1201,17 +1201,18 @@ func findHiveDir() string {
 
 // ─── Legacy runtime mode ────────────────────────────────────────────
 
-func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, bootstrapProfile hive.BootstrapProfile, growthPolicyVersion string, maximumDynamicActors int, automaticallyApprovedActions []safety.ProtectedAction, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr, webhookBearerToken string) error {
+func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, bootstrapProfile hive.BootstrapProfile, growthPolicyVersion string, maximumDynamicActors int, automaticallyApprovedActions []safety.ProtectedAction, minimumIterationsBeforeQuiescence int, repoPath, repoWorkspaceRoot, catalogPath string, catalogReloadInterval time.Duration, loop bool, issueScanStageRoleRunner hive.IssueScanStageRoleOutputRunner, issueScanImplementationRunner hive.IssueScanImplementationRunner, issueScanReviewRunner hive.IssueScanAdversarialReviewRunner, issueScanBlockerRepairRunner hive.IssueScanBlockerRepairRunner, issueScanDraftPRAuthorityRequester hive.IssueScanDraftPRAuthorityRequester, issueScanDraftPRCreator work.Epic11PullRequestCreator, issueScanReadyPRRunner hive.IssueScanReadyPRRunner, issueScanScanner *issueScanScannerConfig, space, apiBase, webhookAddr, webhookBearerToken string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// Validate before opening or bootstrapping either EventGraph or Work state.
 	if err := hive.ValidateBootstrapConfig(hive.Config{
-		ApproveRequests:              approveRequests,
-		BootstrapProfile:             bootstrapProfile,
-		GrowthPolicyVersion:          growthPolicyVersion,
-		MaximumDynamicActors:         maximumDynamicActors,
-		AutomaticallyApprovedActions: automaticallyApprovedActions,
+		ApproveRequests:                   approveRequests,
+		BootstrapProfile:                  bootstrapProfile,
+		GrowthPolicyVersion:               growthPolicyVersion,
+		MaximumDynamicActors:              maximumDynamicActors,
+		AutomaticallyApprovedActions:      automaticallyApprovedActions,
+		MinimumIterationsBeforeQuiescence: minimumIterationsBeforeQuiescence,
 	}); err != nil {
 		return err
 	}
@@ -1313,6 +1314,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 		IsolateRunTasks:                    !loop,
 		CatalogPath:                        catalogPath,
 		CatalogReloadInterval:              catalogReloadInterval,
+		MinimumIterationsBeforeQuiescence:  minimumIterationsBeforeQuiescence,
 		Loop:                               loop,
 		IssueScanStageRoleOutputRunner:     issueScanStageRoleRunner,
 		IssueScanImplementationRunner:      issueScanImplementationRunner,

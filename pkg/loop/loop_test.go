@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,6 +224,110 @@ func TestLoopQuiescence(t *testing.T) {
 	result := l.Run(context.Background())
 	if result.Reason != StopQuiescence {
 		t.Errorf("reason = %s, want %s", result.Reason, StopQuiescence)
+	}
+	if got := provider.callCount.Load(); got != 2 {
+		t.Errorf("provider calls = %d, want 2 with the default zero floor", got)
+	}
+}
+
+func TestLoopMinimumIterationsBeforeQuiescence(t *testing.T) {
+	provider := newMockProvider("/signal {\"signal\": \"IDLE\"}")
+	agent := testAgent(t, provider)
+
+	s := store.NewInMemoryStore()
+	eventBus := bus.NewEventBus(s, 16)
+	defer eventBus.Close()
+
+	l, err := New(Config{
+		Agent:                             agent,
+		HumanID:                           humanID(),
+		Budget:                            resources.BudgetConfig{MaxIterations: 10},
+		Bus:                               eventBus,
+		QuiescenceDelay:                   time.Millisecond,
+		MinimumIterationsBeforeQuiescence: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := l.Run(context.Background())
+	if result.Reason != StopQuiescence || result.Iterations != 4 {
+		t.Fatalf("result = %s after %d iterations, want quiescence after 4", result.Reason, result.Iterations)
+	}
+	if got := provider.callCount.Load(); got != 4 {
+		t.Fatalf("provider calls = %d, want 4", got)
+	}
+}
+
+func TestLoopMinimumIterationsBeforeQuiescenceCancellation(t *testing.T) {
+	provider := newMockProvider("/signal {\"signal\": \"IDLE\"}")
+	agent := testAgent(t, provider)
+	s := store.NewInMemoryStore()
+	eventBus := bus.NewEventBus(s, 16)
+	defer eventBus.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	l, err := New(Config{
+		Agent:                             agent,
+		HumanID:                           humanID(),
+		Budget:                            resources.BudgetConfig{MaxIterations: 10},
+		Bus:                               eventBus,
+		QuiescenceDelay:                   time.Minute,
+		MinimumIterationsBeforeQuiescence: 4,
+		OnIteration: func(iteration int, _ string) {
+			if iteration == 2 {
+				cancel()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := l.Run(ctx)
+	if result.Reason != StopCancelled || result.Iterations != 2 {
+		t.Fatalf("result = %s after %d iterations, want cancelled after 2", result.Reason, result.Iterations)
+	}
+}
+
+func TestLoopMinimumIterationsBeforeQuiescenceWakeResetsConsecutiveIdle(t *testing.T) {
+	provider := newMockProvider("/signal {\"signal\": \"IDLE\"}")
+	agent := testAgent(t, provider)
+	var l *Loop
+	var err error
+	l, err = New(Config{
+		Agent:                             agent,
+		HumanID:                           humanID(),
+		Budget:                            resources.BudgetConfig{MaxIterations: 10},
+		QuiescenceDelay:                   time.Millisecond,
+		MinimumIterationsBeforeQuiescence: 3,
+		OnIteration: func(iteration int, _ string) {
+			if iteration == 2 {
+				l.wake <- struct{}{}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := l.Run(context.Background())
+	if result.Reason != StopQuiescence || result.Iterations != 4 {
+		t.Fatalf("result = %s after %d iterations, want reset then quiescence after 4", result.Reason, result.Iterations)
+	}
+}
+
+func TestLoopRejectsNegativeMinimumIterationsBeforeQuiescence(t *testing.T) {
+	provider := newMockProvider("/signal {\"signal\": \"IDLE\"}")
+	agent := testAgent(t, provider)
+	_, err := New(Config{
+		Agent:                             agent,
+		HumanID:                           humanID(),
+		Budget:                            resources.BudgetConfig{MaxIterations: 10},
+		MinimumIterationsBeforeQuiescence: -1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be non-negative") {
+		t.Fatalf("negative floor error = %v", err)
 	}
 }
 
