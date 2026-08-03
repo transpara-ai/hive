@@ -63,6 +63,32 @@ func TestCivilizationRunRejectsBootstrapProfileBeforeSpecIngest(t *testing.T) {
 	}
 }
 
+func TestCivilizationRunRejectsInvalidQuiescenceFloorBeforeSpecIngest(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string
+		floor   string
+		want    string
+	}{
+		{name: "negative", profile: "organic-v1", floor: "-1", want: "must be non-negative"},
+		{name: "full profile", profile: "full", floor: "1", want: "only by the organic-v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cmdCivilization([]string{
+				"run",
+				"--human", "Michael",
+				"--bootstrap-profile", tt.profile,
+				"--minimum-iterations-before-quiescence", tt.floor,
+				"--spec", "/nonexistent/spec.md",
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q before spec ingest", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestOrganicBootstrapFlagsUseExactDeduplicatedAction(t *testing.T) {
 	profile, policy, maximum, actions, err := parseBootstrapRuntimeFlags(
 		"organic-v1",

@@ -118,18 +118,19 @@ type Runtime struct {
 	bridgeMu    sync.Mutex
 
 	// Options.
-	approveRequests              bool
-	approveRoles                 bool
-	bootstrapProfile             BootstrapProfile
-	growthPolicyVersion          string
-	maximumDynamicActors         int
-	automaticallyApprovedActions map[safety.ProtectedAction]struct{}
-	repoPath                     string
-	repoWorkspaceRoot            string
-	loop                         bool
-	isolateRunTasks              bool
-	catalogPath                  string
-	catalogReloadInterval        time.Duration
+	approveRequests                   bool
+	approveRoles                      bool
+	bootstrapProfile                  BootstrapProfile
+	growthPolicyVersion               string
+	maximumDynamicActors              int
+	automaticallyApprovedActions      map[safety.ProtectedAction]struct{}
+	repoPath                          string
+	repoWorkspaceRoot                 string
+	loop                              bool
+	isolateRunTasks                   bool
+	catalogPath                       string
+	catalogReloadInterval             time.Duration
+	minimumIterationsBeforeQuiescence int
 }
 
 // Config holds the configuration needed to create a Runtime.
@@ -149,6 +150,7 @@ type Config struct {
 	IsolateRunTasks                      bool                                 // one-shot runs: restrict task perception and mutation to this run conversation/repo
 	CatalogPath                          string                               // --catalog: custom YAML catalog file (merged with defaults)
 	CatalogReloadInterval                time.Duration                        // reload --catalog for future spawns; 0 disables
+	MinimumIterationsBeforeQuiescence    int                                  // one-shot organic bootstrap loop quiescence floor; 0 preserves current behavior
 	RunLaunchDispatchInterval            time.Duration                        // dispatch queued run-launch requests; <0 disables
 	IssueScanStageRoleOutputRunner       IssueScanStageRoleOutputRunner       // optional planning-stage issue-scan role-output runner
 	IssueScanImplementationRunner        IssueScanImplementationRunner        // optional concrete issue-scan implementation runner
@@ -252,6 +254,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		isolateRunTasks:                      cfg.IsolateRunTasks,
 		catalogPath:                          cfg.CatalogPath,
 		catalogReloadInterval:                cfg.CatalogReloadInterval,
+		minimumIterationsBeforeQuiescence:    cfg.MinimumIterationsBeforeQuiescence,
 		runLaunchDispatchInterval:            cfg.RunLaunchDispatchInterval,
 		issueScanStageRoleOutputRunner:       cfg.IssueScanStageRoleOutputRunner,
 		issueScanImplementationRunner:        cfg.IssueScanImplementationRunner,
@@ -625,20 +628,21 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			Task:                        seedIdea,
 
 			// Task coordination.
-			TaskStore:              r.tasks,
-			PhaseGateStore:         r.phaseGates,
-			ConvID:                 r.convID,
-			TaskScope:              taskScope,
-			TaskWorkspace:          taskWorkspace,
-			OnTaskCompleted:        r.handleTaskCompletion,
-			OnTaskCommandsExecuted: r.progressIssueScanLifecycleAfterTaskCommands,
-			OnReviewCompleted:      r.progressIssueScanLifecycleAfterReview,
-			CanOperate:             def.CanOperate,
-			RepoPath:               r.repoPath,
-			TaskOperateProvider:    r.taskOperateProviderFor(def),
-			TaskWorkspaceProvider:  r.taskWorkspaceProviderFor(def),
-			Keepalive:              r.loop,
-			KnowledgeStore:         r.knowledgeStore,
+			TaskStore:                         r.tasks,
+			PhaseGateStore:                    r.phaseGates,
+			ConvID:                            r.convID,
+			TaskScope:                         taskScope,
+			TaskWorkspace:                     taskWorkspace,
+			OnTaskCompleted:                   r.handleTaskCompletion,
+			OnTaskCommandsExecuted:            r.progressIssueScanLifecycleAfterTaskCommands,
+			OnReviewCompleted:                 r.progressIssueScanLifecycleAfterReview,
+			CanOperate:                        def.CanOperate,
+			RepoPath:                          r.repoPath,
+			TaskOperateProvider:               r.taskOperateProviderFor(def),
+			TaskWorkspaceProvider:             r.taskWorkspaceProviderFor(def),
+			Keepalive:                         r.loop,
+			MinimumIterationsBeforeQuiescence: r.minimumIterationsBeforeQuiescence,
+			KnowledgeStore:                    r.knowledgeStore,
 			CostSummaryFunc: func() string {
 				resolver := r.currentResolver()
 				entries := r.budgetRegistry.Snapshot()

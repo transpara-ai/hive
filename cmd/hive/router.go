@@ -131,6 +131,7 @@ func cmdCivilizationRun(args []string) error {
 	approveRequests := fs.Bool("approve-requests", false, "Auto-approve authority requests")
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	bootstrapProfile := fs.String("bootstrap-profile", string(hive.BootstrapProfileFull), "Bootstrap profile: full|organic-v1")
+	minimumIterationsBeforeQuiescence := fs.Int("minimum-iterations-before-quiescence", 0, "Minimum bootstrap evaluations before an organic-v1 run may stop for quiescence")
 	approveActions := repeatedStringFlag{}
 	fs.Var(&approveActions, "approve-action", "Auto-approve one exact known protected action (repeatable)")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -145,12 +146,22 @@ func cmdCivilizationRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := hive.ValidateBootstrapConfig(hive.Config{
+		ApproveRequests:                   *approveRequests,
+		BootstrapProfile:                  profile,
+		GrowthPolicyVersion:               growthPolicyVersion,
+		MaximumDynamicActors:              maximumDynamicActors,
+		AutomaticallyApprovedActions:      actions,
+		MinimumIterationsBeforeQuiescence: *minimumIterationsBeforeQuiescence,
+	}); err != nil {
+		return err
+	}
 	if *spec != "" {
 		if err := runIngest(*spec, *space, *apiBase, "high"); err != nil {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *minimumIterationsBeforeQuiescence, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
 }
 
 func cmdCivilizationDaemon(args []string) error {

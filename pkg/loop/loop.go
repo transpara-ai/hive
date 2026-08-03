@@ -115,6 +115,12 @@ type Config struct {
 	// declaring quiescence. Defaults to 5 seconds.
 	QuiescenceDelay time.Duration
 
+	// MinimumIterationsBeforeQuiescence delays only a quiescence stop until
+	// the loop has completed at least this many evaluations. Below the floor,
+	// an otherwise quiescent loop uses the normal paced event wait and then
+	// continues. Zero preserves the historical behavior.
+	MinimumIterationsBeforeQuiescence int
+
 	// OnIteration is called after each loop iteration (for monitoring).
 	// Optional.
 	OnIteration func(iteration int, response string)
@@ -363,6 +369,9 @@ type Loop struct {
 func New(cfg Config) (*Loop, error) {
 	if cfg.Agent == nil {
 		return nil, fmt.Errorf("agent is required")
+	}
+	if cfg.MinimumIterationsBeforeQuiescence < 0 {
+		return nil, fmt.Errorf("minimum iterations before quiescence must be non-negative, got %d", cfg.MinimumIterationsBeforeQuiescence)
 	}
 	if cfg.ObservationWindow <= 0 {
 		cfg.ObservationWindow = 20
@@ -916,6 +925,19 @@ func (l *Loop) Run(ctx context.Context) Result {
 		if l.isQuiescent(response) {
 			consecutiveEmpty++
 			if consecutiveEmpty >= 2 {
+				if iteration < l.config.MinimumIterationsBeforeQuiescence {
+					// Preserve the existing paced wait below the configured floor.
+					// A wake makes the next evaluation non-consecutive; a timeout
+					// preserves consecutiveEmpty so the loop cannot claim renewed
+					// work. Cancellation keeps the normal cancelled result.
+					if l.waitForEvents(ctx) {
+						consecutiveEmpty = 0
+					}
+					if ctx.Err() != nil {
+						return l.result(StopCancelled, iteration, "context cancelled")
+					}
+					continue
+				}
 				// Wait for new events from bus or timeout.
 				if l.config.Bus != nil {
 					if l.waitForEvents(ctx) {

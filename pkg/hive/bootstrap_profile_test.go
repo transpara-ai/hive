@@ -116,6 +116,8 @@ func TestPrewriteRejectRunsBeforeGraphOrWorkDependencies(t *testing.T) {
 	tests := []Config{
 		{BootstrapProfile: BootstrapProfile("unknown")},
 		{AutomaticallyApprovedActions: []safety.ProtectedAction{"unknown.action"}},
+		{MinimumIterationsBeforeQuiescence: -1},
+		{MinimumIterationsBeforeQuiescence: 1},
 		{
 			BootstrapProfile:             BootstrapProfileOrganicV1,
 			GrowthPolicyVersion:          OrganicV1GrowthPolicyVersion,
@@ -128,6 +130,28 @@ func TestPrewriteRejectRunsBeforeGraphOrWorkDependencies(t *testing.T) {
 		if _, err := New(context.Background(), cfg); err == nil {
 			t.Fatalf("case %d reached nil graph/actor dependencies instead of pre-write rejection", i)
 		}
+	}
+}
+
+func TestOrganicMinimumIterationsBeforeQuiescenceIsBoundedAndWired(t *testing.T) {
+	actors := actor.NewInMemoryActorStore()
+	humanID := registerTestHuman(t, actors, "OrganicOperator")
+	rt, err := New(t.Context(), Config{
+		Store:                             store.NewInMemoryStore(),
+		Actors:                            actors,
+		HumanID:                           humanID,
+		BootstrapProfile:                  BootstrapProfileOrganicV1,
+		GrowthPolicyVersion:               OrganicV1GrowthPolicyVersion,
+		MaximumDynamicActors:              OrganicV1MaximumDynamicActors,
+		AutomaticallyApprovedActions:      []safety.ProtectedAction{safety.ActionAgentSpawnPersistent},
+		MinimumIterationsBeforeQuiescence: 30,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.graph.Close() })
+	if rt.minimumIterationsBeforeQuiescence != 30 {
+		t.Fatalf("runtime floor = %d, want 30", rt.minimumIterationsBeforeQuiescence)
 	}
 }
 
