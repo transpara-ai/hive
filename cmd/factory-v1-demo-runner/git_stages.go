@@ -579,16 +579,27 @@ func (r *demoRunner) requiredChecks(ctx context.Context, repository repositoryCo
 			return nil, false, err
 		}
 	}
-	passing := true
+	if len(checks) == 0 {
+		// Some repositories intentionally have no branch-protection-required
+		// checks. Fall back to the complete reported check set, but never accept
+		// a vacuous empty set as green.
+		result, commandErr = r.gh(ctx, repository.Root, "pr", "checks", strconv.Itoa(number), "--repo", repository.Identity, "--json", "name,state,bucket,link")
+		if strings.TrimSpace(result.Stdout) != "" {
+			if err := json.Unmarshal([]byte(result.Stdout), &checks); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	passing := len(checks) > 0
 	for _, check := range checks {
 		if strings.ToLower(check.Bucket) != "pass" {
 			passing = false
 		}
 	}
-	if commandErr != nil && len(checks) == 0 {
+	if commandErr != nil {
 		return checks, false, commandErr
 	}
-	return checks, passing && commandErr == nil, commandErr
+	return checks, passing, nil
 }
 
 func (r *demoRunner) git(ctx context.Context, dir string, args ...string) (commandResult, error) {
@@ -614,7 +625,7 @@ func branchName(request factoryv1.RunRequest) string {
 }
 
 func evidenceRelativePath(request factoryv1.RunRequest) string {
-	return "docs/factory-v1-demo/" + safeOrderID(request.Order.DocID) + ".md"
+	return "factory-v1-demo/" + safeOrderID(request.Order.DocID) + ".md"
 }
 
 func renderDemoEvidence(request factoryv1.RunRequest) string {

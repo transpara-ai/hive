@@ -286,6 +286,18 @@ type githubFlowCommander struct {
 	mergeCalls int
 }
 
+type noRequiredChecksCommander struct {
+	calls int
+}
+
+func (c *noRequiredChecksCommander) Run(_ context.Context, _ string, _ string, args ...string) (commandResult, error) {
+	c.calls++
+	if containsString(args, "--required") {
+		return commandResult{}, errors.New("no required checks configured")
+	}
+	return commandResult{Stdout: `[{"name":"verify","state":"SUCCESS","bucket":"pass","link":"https://checks.invalid/verify"}]`}, nil
+}
+
 func (c *githubFlowCommander) Run(ctx context.Context, dir, executable string, args ...string) (commandResult, error) {
 	if executable == c.git && len(args) >= 3 && args[0] == "remote" && args[1] == "get-url" {
 		return commandResult{Stdout: "https://github.com/" + c.identity + ".git\n"}, nil
@@ -407,6 +419,55 @@ func privateTempDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestDesignContractPinsDeterministicEffectAuthorityValidationAndGates(t *testing.T) {
+	repositoryRoot := t.TempDir()
+	request := testRunRequest(t, repositoryRoot, factoryv1.StageDesign)
+	runner := &demoRunner{config: testConfig(t, repositoryRoot)}
+	design := runner.renderDesign(request)
+
+	for _, want := range []string{
+		"- Intake channel: `completed_factory_order`",
+		"- Deterministic branch: `" + branchName(request) + "`",
+		"- Bounded output: `" + evidenceRelativePath(request) + "`",
+		"- Exact output SHA-256: `" + factoryv1.HashText(renderDemoEvidence(request)) + "`",
+		"- Human actor: `human-actor`",
+		"- Allowed action: `repo.pull_request.mark_ready`",
+		"- Named validation argv: `[\"git\",\"diff\",\"--check\"]`",
+		"CFADA consumes an independent-family artifact binding this exact design Git blob with zero blockers.",
+		"CFAR consumes an independent-family artifact binding that same exact PR head with zero blockers.",
+		"Human Review is terminal: the runner will not merge, deploy, publish, or mutate the protected/default branch.",
+		"Operation #86 path/state/evidence",
+		"~~~~markdown\n" + renderDemoEvidence(request) + "~~~~",
+	} {
+		if !strings.Contains(design, want) {
+			t.Fatalf("design lacks exact contract fragment %q\n%s", want, design)
+		}
+	}
+	for _, forbidden := range []string{"attempt_id", "event_id", "occurred_at", "elapsed_ms", "work_artifact_id"} {
+		if strings.Contains(design, forbidden) || strings.Contains(renderDemoEvidence(request), forbidden) {
+			t.Fatalf("deterministic design/output contains volatile field %q", forbidden)
+		}
+	}
+	if strings.HasPrefix(evidenceRelativePath(request), "docs/") {
+		t.Fatalf("evidence path %q is inside a repository publication root", evidenceRelativePath(request))
+	}
+}
+
+func TestRequiredChecksFallsBackToNonEmptyReportedChecks(t *testing.T) {
+	commands := &noRequiredChecksCommander{}
+	runner := &demoRunner{config: config{GHExecutable: "gh"}, commands: commands}
+	checks, passing, err := runner.requiredChecks(context.Background(), repositoryConfig{Root: t.TempDir(), Identity: "transpara-ai/docs"}, 283)
+	if err != nil {
+		t.Fatalf("requiredChecks fallback: %v", err)
+	}
+	if !passing || len(checks) != 1 || checks[0].Name != "verify" {
+		t.Fatalf("checks=%+v passing=%v, want one passing reported check", checks, passing)
+	}
+	if commands.calls != 2 {
+		t.Fatalf("gh calls=%d, want required query plus all-check fallback", commands.calls)
+	}
 }
 
 func runGitTest(t *testing.T, dir, executable string, args ...string) string {

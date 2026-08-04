@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1" // Git object identity is SHA-1 in the configured v1 repositories.
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,7 +31,7 @@ type reviewerArtifact struct {
 
 func (r *demoRunner) executeDesign(request factoryv1.RunRequest) (factoryv1.RunResult, map[string]string, error) {
 	path := r.designPath(request)
-	content := []byte(renderDesign(request))
+	content := []byte(r.renderDesign(request))
 	if existing, err := os.ReadFile(path); err == nil {
 		if !reflect.DeepEqual(existing, content) {
 			return r.blocked(request, "design_conflict", "The deterministic private design path contains different bytes.", "Resolve the conflicting design artifact."), map[string]string{"design_path": path}, nil
@@ -54,7 +55,7 @@ func (r *demoRunner) reconcileDesign(request factoryv1.RunRequest) (factoryv1.Re
 	if err != nil {
 		return factoryv1.ReconcileResult{}, err
 	}
-	if string(content) != renderDesign(request) {
+	if string(content) != r.renderDesign(request) {
 		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "design_conflict", "The private design bytes conflict with the deterministic design.", "Resolve the design conflict.")}, nil
 	}
 	result := r.passed(request, factoryv1.Evidence{Kind: "design", Reference: path, DesignBlobSHA: gitBlobSHA(content), SHA256: factoryv1.HashText(string(content))})
@@ -196,28 +197,68 @@ func (r *demoRunner) requireDesign(request factoryv1.RunRequest) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if string(content) != renderDesign(request) {
+	if string(content) != r.renderDesign(request) {
 		return "", errors.New("deterministic design content conflicts")
 	}
 	return gitBlobSHA(content), nil
 }
 
-func renderDesign(request factoryv1.RunRequest) string {
+func (r *demoRunner) renderDesign(request factoryv1.RunRequest) string {
 	var b strings.Builder
+	repository := r.config.Repositories[request.Order.TargetRepository]
+	evidenceContent := renderDemoEvidence(request)
 	fmt.Fprintf(&b, "# Factory v1 demonstration design: %s\n\n", oneLine(request.Order.Title))
 	fmt.Fprintf(&b, "- Order: `%s@%s`\n", request.Order.DocID, request.Order.Version)
 	fmt.Fprintf(&b, "- Document SHA-256: `%s`\n", request.DocumentSHA256)
+	fmt.Fprintf(&b, "- Intake channel: `%s`\n", request.Order.Channel)
 	fmt.Fprintf(&b, "- Target repository: `%s`\n", request.Order.TargetRepository)
-	fmt.Fprintf(&b, "- Bounded output: `docs/factory-v1-demo/%s.md`\n\n", safeOrderID(request.Order.DocID))
+	fmt.Fprintf(&b, "- Deterministic branch: `%s`\n", branchName(request))
+	fmt.Fprintf(&b, "- Bounded output: `%s`\n", evidenceRelativePath(request))
+	fmt.Fprintf(&b, "- Exact output SHA-256: `%s`\n\n", factoryv1.HashText(evidenceContent))
+	b.WriteString("## Immutable source and Human authority\n\n")
+	for _, source := range request.Order.SourceReferences {
+		fmt.Fprintf(&b, "- Source `%s`: identity `%s`, URI `%s`, SHA-256 `%s`\n", oneLine(source.Kind), oneLine(source.Identity), oneLine(source.URI), source.SHA256)
+	}
+	fmt.Fprintf(&b, "- Human actor: `%s`\n", oneLine(request.Order.Authority.ActorID))
+	fmt.Fprintf(&b, "- Non-production only: `%t`\n", request.Order.Authority.NonProductionOnly)
+	for _, action := range request.Order.Authority.AllowedActions {
+		fmt.Fprintf(&b, "- Allowed action: `%s`\n", oneLine(action))
+	}
+	for _, target := range request.Order.Authority.TargetRepositories {
+		fmt.Fprintf(&b, "- Authorized target: `%s`\n", oneLine(target))
+	}
+	fmt.Fprintf(&b, "- Bounded budget: attempts `%d`, tokens `%d`, cost micros `%d`\n", request.Order.Budget.MaxAttempts, request.Order.Budget.MaxTokens, request.Order.Budget.MaxCostMicros)
 	b.WriteString("## Requirements covered\n\n")
 	for _, requirement := range request.Order.Requirements {
-		fmt.Fprintf(&b, "- `%s`: %s\n", oneLine(requirement.ID), oneLine(requirement.Statement))
+		fmt.Fprintf(&b, "- `%s`: %s — rationale: %s\n", oneLine(requirement.ID), oneLine(requirement.Statement), oneLine(requirement.Rationale))
 	}
+	b.WriteString("\nEvery sentence and refinement in each requirement above is normative. CFADA and CFAR must independently report zero blockers, and restart-safe evidence means the same document SHA converges on the exact branch, output path, commit, and pull request without force-push or duplication.\n")
 	b.WriteString("\n## Acceptance covered\n\n")
 	for _, criterion := range request.Order.AcceptanceCriteria {
-		fmt.Fprintf(&b, "- `%s`: %s — verify with %s\n", oneLine(criterion.ID), oneLine(criterion.Statement), oneLine(criterion.VerificationMethod))
+		fmt.Fprintf(&b, "- `%s` (`%s`): %s — verify with %s\n", oneLine(criterion.ID), oneLine(criterion.RiskClass), oneLine(criterion.Statement), oneLine(criterion.VerificationMethod))
 	}
-	b.WriteString("\n## Decision\n\nCreate one deterministic evidence markdown file on a non-default branch, validate it with the configured named tests, and stop at an exact-head ready pull request for Human Review. No merge, deployment, default-branch write, or unrelated file change is authorized.\n")
+	b.WriteString("\n## Exact validation\n\n")
+	for _, command := range repository.TestCommands {
+		raw, _ := json.Marshal(command)
+		fmt.Fprintf(&b, "- Named validation argv: `%s`\n", string(raw))
+	}
+	b.WriteString("- GitHub check policy: require a non-empty reported check set at the exact PR head; every required check must pass when required checks are configured, otherwise every reported check must pass. Recheck after the draft-to-ready transition.\n")
+	b.WriteString("- Diff policy: the worktree and committed diff may contain only the exact bounded output path, and validation must leave the worktree clean.\n")
+	b.WriteString("\n## Exact deterministic output bytes\n\n")
+	b.WriteString("The output is rendered only from the immutable order title, tuple, document SHA, channel, and target. Attempt IDs, event IDs, timestamps, elapsed time, Work IDs, and other run-specific values are forbidden. Exact bytes follow.\n\n~~~~markdown\n")
+	b.WriteString(evidenceContent)
+	b.WriteString("~~~~\n")
+	b.WriteString("\n## Ordered gate and effect plan\n\n")
+	b.WriteString("1. IADA records same-family blocker-free validation of this exact design.\n")
+	b.WriteString("2. CFADA consumes an independent-family artifact binding this exact design Git blob with zero blockers.\n")
+	b.WriteString("3. Human Design Review binds the exact order ID, version, document SHA, Human actor, credential-source identity, authorization sentence, and source event.\n")
+	b.WriteString("4. Write Code creates only the exact output on the deterministic non-default branch, validates before and after commit, and pushes without force.\n")
+	b.WriteString("5. Create Draft PR binds one open draft PR to the exact branch, base, and implementation head.\n")
+	b.WriteString("6. IAR validates the exact implementation head with zero blockers.\n")
+	b.WriteString("7. CFAR consumes an independent-family artifact binding that same exact PR head with zero blockers.\n")
+	b.WriteString("8. Mark PR Ready requires the exact unchanged head and the check policy above, then records one open non-draft PR.\n")
+	b.WriteString("9. Human Review is terminal: the runner will not merge, deploy, publish, or mutate the protected/default branch.\n")
+	b.WriteString("\n## Non-authorizations and separation\n\nNo unrelated file, repository setting, branch protection, merge, deployment, release, public publication, credential value, production service, or Operation #86 path/state/evidence may be changed. The top-level `factory-v1-demo/` output is outside the Docusaurus `docs/` publication root and is acceptance evidence only.\n")
 	return b.String()
 }
 
