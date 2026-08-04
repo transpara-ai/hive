@@ -171,6 +171,14 @@ func (l *Loop) readOrganicGovernanceState() (organicGovernanceState, error) {
 			if state.role == "" || normalizeOrganicGovernanceRole(content.AgentName) != state.role {
 				continue
 			}
+			// Once the exact pre-admission grant exists, later adjustments with
+			// a non-zero previous budget are ordinary post-admission allocation
+			// events. They retain private-chain causality and are deliberately
+			// outside this one governance tuple. A second zero-origin set still
+			// represents a duplicate pre-admission grant and fails below.
+			if state.budgetCount == 1 && content.PreviousBudget != 0 {
+				continue
+			}
 			state.budgetCount++
 			if state.approval.ID().IsZero() || !state.rejection.ID().IsZero() {
 				return state, fmt.Errorf("budget %s has no unique prior Guardian approval", ev.ID())
@@ -271,11 +279,15 @@ func (l *Loop) enrichOrganicGovernanceObservation(obs string) (string, error) {
 	if !l.config.EnforceOrganicGovernanceCausality {
 		return obs, nil
 	}
+	role := string(l.agent.Role())
+	if role != "spawner" && role != "guardian" && role != "allocator" {
+		return obs, nil
+	}
 	state, err := l.readOrganicGovernanceState()
 	if err != nil {
 		return "", err
 	}
-	switch string(l.agent.Role()) {
+	switch role {
 	case "spawner":
 		if state.gap.ID().IsZero() {
 			return obs, nil

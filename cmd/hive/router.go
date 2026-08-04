@@ -149,6 +149,7 @@ func cmdCivilizationRun(args []string) error {
 	}
 	if err := hive.ValidateBootstrapConfig(hive.Config{
 		ApproveRequests:                   *approveRequests,
+		ApproveRoles:                      *approveRoles,
 		BootstrapProfile:                  profile,
 		GrowthPolicyVersion:               growthPolicyVersion,
 		MaximumDynamicActors:              maximumDynamicActors,

@@ -16,6 +16,7 @@ type organicGovernanceFixture struct {
 	cto, spawner, guardian, allocator *hiveagent.Agent
 	spawnerLoop, guardianLoop         *Loop
 	allocatorLoop                     *Loop
+	registry                          *resources.BudgetRegistry
 	resolver                          func(types.ActorID) string
 }
 
@@ -65,6 +66,7 @@ func newOrganicGovernanceFixture(t *testing.T) *organicGovernanceFixture {
 		t.Fatal(err)
 	}
 	f.allocatorLoop = allocatorLoop
+	f.registry = reg
 	return f
 }
 
@@ -137,6 +139,61 @@ func TestOrganicGovernanceDirectEdgesSurviveInterveningAgentEvaluations(t *testi
 	}
 	if !exactSingleCause(state.budget, state.approval.ID()) {
 		t.Fatalf("budget causes = %v, want only %s", state.budget.Causes(), state.approval.ID())
+	}
+}
+
+func TestOrganicGovernancePreservesOrdinaryPostAdmissionBudgetCausality(t *testing.T) {
+	f := newOrganicGovernanceFixture(t)
+	f.emitGap(t, "Dependency Remediation Owner")
+	cmd := dependencyOwnerSpawnCommand()
+	if err := f.spawnerLoop.emitRoleProposed(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.guardianLoop.emitRoleApproved(&ApproveCommand{Name: cmd.Name, Reason: "approved"}); err != nil {
+		t.Fatal(err)
+	}
+	preAdmission := &BudgetCommand{Agent: cmd.Name, Action: "set", Resource: "iterations", Amount: cmd.MaxIterations, Reason: "bounded pre-admission grant"}
+	if err := f.allocatorLoop.applyBudgetAdjustment(preAdmission, 20); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.allocatorLoop.readOrganicGovernanceState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.registry.Register(cmd.Name, resources.NewBudget(resources.BudgetConfig{MaxIterations: cmd.MaxIterations}), cmd.MaxIterations, "mock")
+	ordinary := &BudgetCommand{Agent: cmd.Name, Action: "increase", Resource: "iterations", Amount: 5, Reason: "ordinary post-admission adjustment"}
+	if err := f.allocatorLoop.applyBudgetAdjustment(ordinary, 30); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.allocatorLoop.readOrganicGovernanceState()
+	if err != nil {
+		t.Fatalf("ordinary post-admission adjustment poisoned projection: %v", err)
+	}
+	if after.budgetCount != 1 || after.budget.ID() != before.budget.ID() {
+		t.Fatalf("governance budget changed after ordinary adjustment: count=%d id=%s", after.budgetCount, after.budget.ID())
+	}
+	page, err := f.allocator.Graph().Store().ByType(types.MustEventType("agent.budget.adjusted"), 10, types.None[types.Cursor]())
+	if err != nil || len(page.Items()) != 2 {
+		t.Fatalf("budget events = %d, err=%v", len(page.Items()), err)
+	}
+	ordinaryEvent := page.Items()[0]
+	if exactSingleCause(ordinaryEvent, before.approval.ID()) || !exactSingleCause(ordinaryEvent, before.budget.ID()) {
+		t.Fatalf("ordinary budget causes = %v, want private predecessor %s", ordinaryEvent.Causes(), before.budget.ID())
+	}
+}
+
+func TestOrganicGovernanceNormalizerMatchesAdmissionCorpus(t *testing.T) {
+	tests := map[string]string{
+		"Dependency Remediation Owner": "dependency-remediation-owner",
+		"dependency_remediation_owner": "dependency-remediation-owner",
+		"  DEPENDENCY---Owner  ":       "dependency-owner",
+		"audit/API owner":              "audit-api-owner",
+		"---":                          "",
+	}
+	for input, want := range tests {
+		if got := normalizeOrganicGovernanceRole(input); got != want {
+			t.Errorf("normalize(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

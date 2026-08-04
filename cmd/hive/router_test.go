@@ -101,6 +101,20 @@ func TestCivilizationRunRejectsOrganicCausalityOutsideOrganicProfileBeforeSpecIn
 	}
 }
 
+func TestCivilizationRunRejectsAutoRoleApprovalWithOrganicCausalityBeforeSpecIngest(t *testing.T) {
+	err := cmdCivilization([]string{
+		"run",
+		"--human", "Michael",
+		"--bootstrap-profile", "organic-v1",
+		"--approve-roles",
+		"--enforce-organic-governance-causality",
+		"--spec", "/nonexistent/spec.md",
+	})
+	if err == nil || !strings.Contains(err.Error(), "ApproveRoles is incompatible") {
+		t.Fatalf("error = %v, want auto-role incompatibility before spec ingest", err)
+	}
+}
+
 func TestOrganicBootstrapFlagsUseExactDeduplicatedAction(t *testing.T) {
 	profile, policy, maximum, actions, err := parseBootstrapRuntimeFlags(
 		"organic-v1",

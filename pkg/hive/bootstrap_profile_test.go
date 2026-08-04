@@ -72,6 +72,10 @@ func TestOrganicConfigRejectsBroadOrIncoherentSettings(t *testing.T) {
 		mutate func(*Config)
 	}{
 		{"broad approval", func(cfg *Config) { cfg.ApproveRequests = true }},
+		{"trial auto role approval", func(cfg *Config) {
+			cfg.EnforceOrganicGovernanceCausality = true
+			cfg.ApproveRoles = true
+		}},
 		{"wrong cap", func(cfg *Config) { cfg.MaximumDynamicActors = 4 }},
 		{"wrong policy", func(cfg *Config) { cfg.GrowthPolicyVersion = "organic-v2" }},
 		{"broad action", func(cfg *Config) {

@@ -1208,6 +1208,7 @@ func runLegacy(humanName, idea, dsn string, approveRequests, approveRoles bool, 
 	// Validate before opening or bootstrapping either EventGraph or Work state.
 	if err := hive.ValidateBootstrapConfig(hive.Config{
 		ApproveRequests:                   approveRequests,
+		ApproveRoles:                      approveRoles,
 		BootstrapProfile:                  bootstrapProfile,
 		GrowthPolicyVersion:               growthPolicyVersion,
 		MaximumDynamicActors:              maximumDynamicActors,
