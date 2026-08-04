@@ -572,34 +572,102 @@ func (r *demoRunner) queryOpenPR(ctx context.Context, repository repositoryConfi
 }
 
 func (r *demoRunner) requiredChecks(ctx context.Context, repository repositoryConfig, number int) ([]checkView, bool, error) {
-	result, commandErr := r.gh(ctx, repository.Root, "pr", "checks", strconv.Itoa(number), "--repo", repository.Identity, "--required", "--json", "name,state,bucket,link")
-	var checks []checkView
-	if strings.TrimSpace(result.Stdout) != "" {
-		if err := json.Unmarshal([]byte(result.Stdout), &checks); err != nil {
-			return nil, false, err
-		}
+	policyResult, err := r.gh(ctx, repository.Root, "api", "repos/"+repository.Identity+"/branches/"+repository.BaseBranch+"/protection/required_status_checks")
+	if err != nil {
+		return nil, false, fmt.Errorf("read required-check policy: %w", err)
 	}
-	if len(checks) == 0 {
-		// Some repositories intentionally have no branch-protection-required
-		// checks. Fall back to the complete reported check set, but never accept
-		// a vacuous empty set as green.
-		result, commandErr = r.gh(ctx, repository.Root, "pr", "checks", strconv.Itoa(number), "--repo", repository.Identity, "--json", "name,state,bucket,link")
-		if strings.TrimSpace(result.Stdout) != "" {
-			if err := json.Unmarshal([]byte(result.Stdout), &checks); err != nil {
-				return nil, false, err
-			}
-		}
+	var policy struct {
+		Contexts []string `json:"contexts"`
 	}
-	passing := len(checks) > 0
-	for _, check := range checks {
-		if strings.ToLower(check.Bucket) != "pass" {
+	if err := json.Unmarshal([]byte(policyResult.Stdout), &policy); err != nil {
+		return nil, false, fmt.Errorf("decode required-check policy: %w", err)
+	}
+	contexts := uniqueNonEmpty(policy.Contexts)
+	if len(contexts) == 0 {
+		return nil, false, errors.New("required-check policy is empty")
+	}
+
+	rollupResult, err := r.gh(ctx, repository.Root, "pr", "view", strconv.Itoa(number), "--repo", repository.Identity, "--json", "statusCheckRollup")
+	if err != nil {
+		return nil, false, fmt.Errorf("read exact-head check rollup: %w", err)
+	}
+	var rollup struct {
+		StatusCheckRollup []struct {
+			Name       string `json:"name"`
+			Context    string `json:"context"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			State      string `json:"state"`
+			DetailsURL string `json:"detailsUrl"`
+			TargetURL  string `json:"targetUrl"`
+		} `json:"statusCheckRollup"`
+	}
+	if err := json.Unmarshal([]byte(rollupResult.Stdout), &rollup); err != nil {
+		return nil, false, fmt.Errorf("decode exact-head check rollup: %w", err)
+	}
+	reported := make(map[string]checkView, len(rollup.StatusCheckRollup))
+	for _, item := range rollup.StatusCheckRollup {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = strings.TrimSpace(item.Context)
+		}
+		if name == "" {
+			continue
+		}
+		state := strings.ToUpper(strings.TrimSpace(item.State))
+		status := strings.ToUpper(strings.TrimSpace(item.Status))
+		conclusion := strings.ToUpper(strings.TrimSpace(item.Conclusion))
+		bucket := "pending"
+		if state == "SUCCESS" || (status == "COMPLETED" && conclusion == "SUCCESS") {
+			bucket = "pass"
+		} else if state != "PENDING" && state != "EXPECTED" && status == "COMPLETED" {
+			bucket = "fail"
+		}
+		link := strings.TrimSpace(item.DetailsURL)
+		if link == "" {
+			link = strings.TrimSpace(item.TargetURL)
+		}
+		reported[name] = checkView{Name: name, State: valueOr(conclusion, state, status), Bucket: bucket, Link: link}
+	}
+	checks := make([]checkView, 0, len(contexts))
+	passing := true
+	for _, contextName := range contexts {
+		check, ok := reported[contextName]
+		if !ok {
+			check = checkView{Name: contextName, State: "EXPECTED", Bucket: "pending"}
+		}
+		if check.Bucket != "pass" {
 			passing = false
 		}
-	}
-	if commandErr != nil {
-		return checks, false, commandErr
+		checks = append(checks, check)
 	}
 	return checks, passing, nil
+}
+
+func uniqueNonEmpty(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func valueOr(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (r *demoRunner) git(ctx context.Context, dir string, args ...string) (commandResult, error) {

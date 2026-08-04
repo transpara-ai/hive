@@ -228,7 +228,7 @@ func (r *demoRunner) renderDesign(request factoryv1.RunRequest) string {
 		fmt.Fprintf(&b, "- Authorized target: `%s`\n", oneLine(target))
 	}
 	fmt.Fprintf(&b, "- Bounded budget: attempts `%d`, tokens `%d`, cost micros `%d`\n", request.Order.Budget.MaxAttempts, request.Order.Budget.MaxTokens, request.Order.Budget.MaxCostMicros)
-	b.WriteString("## Requirements covered\n\n")
+	b.WriteString("\n## Requirements covered\n\n")
 	for _, requirement := range request.Order.Requirements {
 		fmt.Fprintf(&b, "- `%s`: %s — rationale: %s\n", oneLine(requirement.ID), oneLine(requirement.Statement), oneLine(requirement.Rationale))
 	}
@@ -242,7 +242,7 @@ func (r *demoRunner) renderDesign(request factoryv1.RunRequest) string {
 		raw, _ := json.Marshal(command)
 		fmt.Fprintf(&b, "- Named validation argv: `%s`\n", string(raw))
 	}
-	b.WriteString("- GitHub check policy: require a non-empty reported check set at the exact PR head; every required check must pass when required checks are configured, otherwise every reported check must pass. Recheck after the draft-to-ready transition.\n")
+	b.WriteString("- GitHub check policy: read the exact non-empty required context list from the target base branch protection API, require every configured context to appear and pass in the exact PR-head rollup, and fail closed when policy or rollup evidence is absent, empty, malformed, pending, or failing. Recheck after the draft-to-ready transition.\n")
 	b.WriteString("- Diff policy: the worktree and committed diff may contain only the exact bounded output path, and validation must leave the worktree clean.\n")
 	b.WriteString("\n## Exact deterministic output bytes\n\n")
 	b.WriteString("The output is rendered only from the immutable order title, tuple, document SHA, channel, and target. Attempt IDs, event IDs, timestamps, elapsed time, Work IDs, and other run-specific values are forbidden. Exact bytes follow.\n\n~~~~markdown\n")
