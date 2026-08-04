@@ -1,0 +1,7 @@
+Normalize your immediately preceding independent CFADA review, appended below,
+to the supplied CFADA JSON schema. Do not change its substantive judgment,
+claims, evidence, blocker count, risks, or non-authorizations. Add the missing
+fixed metadata: author_provider_id=codex-cli,
+reviewer_family=Ollama/Qwen/Alibaba, reviewer_provider_id=ollama-qwen, and
+required_reviewer_family_satisfied=true. Add a schema-valid disposition to
+each claim based on your own preceding review. Return one JSON object only.
