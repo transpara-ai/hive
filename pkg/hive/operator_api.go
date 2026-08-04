@@ -34,6 +34,7 @@ type operatorServerOptions struct {
 	writer            *operatorDecisionWriter
 	runWriter         *operatorRunLaunchWriter
 	modelPolicyWriter *operatorModelRolePolicyWriter
+	factoryV1         *FactoryV1OperatorService
 	projectionOptions []OperatorProjectionOption
 	modelSelection    OperatorModelSelectionSource
 }
@@ -167,6 +168,9 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 			}
 			handleOperatorModelRolePolicyUpdate(w, r, s, writer, options.modelSelection)
 		})
+	}
+	if options.factoryV1 != nil {
+		registerFactoryV1OperatorRoutes(mux, apiKey, options.factoryV1)
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

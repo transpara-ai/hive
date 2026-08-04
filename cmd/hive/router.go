@@ -42,6 +42,8 @@ func routeAndDispatch(args []string) error {
 		return cmdCouncil(rest)
 	case "factory":
 		return cmdFactory(rest)
+	case "factory-v1":
+		return cmdFactoryV1(rest)
 	case "-h", "--help", "help":
 		fmt.Println(helpText())
 		return nil
@@ -64,6 +66,7 @@ func helpText() string {
 	b.WriteString("  ingest <file>            Post a markdown spec as a task\n")
 	b.WriteString("  council [--topic ...]    Convene one deliberation\n")
 	b.WriteString("  factory daemon           Always-on governing loop with governed issue-scan controls\n")
+	b.WriteString("  factory-v1 daemon        Durable three-worker TLC v1 loop and issue normalizer\n")
 	b.WriteString("  factory order            Submit one Order into the running daemon\n")
 	b.WriteString("  factory preflight-hive-unit\n")
 	b.WriteString("                           Read-only hive.service posture verifier\n")
