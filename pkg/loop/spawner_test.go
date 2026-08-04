@@ -7,6 +7,7 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/actor"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/graph"
+	"github.com/transpara-ai/eventgraph/go/pkg/modelconfig"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 
@@ -88,6 +89,20 @@ func validSpawnCtx() *SpawnContext {
 		AgentRoster:        []string{"guardian", "sysmon", "allocator", "cto"},
 		RecentRejections:   map[string]int{},
 	}
+}
+
+func modelAliasTestCatalog(t *testing.T) *modelconfig.ModelCatalog {
+	t.Helper()
+	catalog, err := modelconfig.NewCatalog([]modelconfig.ModelCatalogEntry{
+		{ID: "gpt-5.5", Aliases: []string{"codex"}},
+		{ID: "intermediate"},
+		{ID: "a"},
+		{ID: "b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -237,6 +252,76 @@ func TestValidateSpawnCommand_InvalidModel(t *testing.T) {
 	err := validateSpawnCommand(cmd, ctx)
 	if err == nil {
 		t.Error("expected invalid model error, got nil")
+	}
+}
+
+func TestResolveSpawnModel_AppliesOneExactAliasBeforeCatalogLookup(t *testing.T) {
+	catalog := modelAliasTestCatalog(t)
+
+	got, err := resolveSpawnModel("sonnet", catalog, map[string]string{"sonnet": "gpt-5.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gpt-5.5" {
+		t.Fatalf("resolved model = %q, want gpt-5.5", got)
+	}
+
+	direct, err := resolveSpawnModel("gpt-5.5", catalog, map[string]string{"sonnet": "gpt-5.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct != "gpt-5.5" {
+		t.Fatalf("direct model = %q, want gpt-5.5", direct)
+	}
+
+	ordinaryAlias, err := resolveSpawnModel("codex", catalog, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordinaryAlias != "gpt-5.5" {
+		t.Fatalf("ordinary alias = %q, want gpt-5.5", ordinaryAlias)
+	}
+}
+
+func TestResolveSpawnModel_FailsClosedAndNeverRecurses(t *testing.T) {
+	catalog := modelAliasTestCatalog(t)
+
+	if _, err := resolveSpawnModel("sonnet", catalog, map[string]string{"sonnet": "missing"}); err == nil {
+		t.Fatal("unknown remap target was accepted")
+	}
+
+	chain, err := resolveSpawnModel("sonnet", catalog, map[string]string{
+		"sonnet":       "intermediate",
+		"intermediate": "gpt-5.5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chain != "intermediate" {
+		t.Fatalf("chained remap recursed: got %q, want intermediate", chain)
+	}
+
+	cycle, err := resolveSpawnModel("a", catalog, map[string]string{"a": "b", "b": "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cycle != "b" {
+		t.Fatalf("cyclic remap recursed: got %q, want b", cycle)
+	}
+}
+
+func TestValidateSpawnCommand_UsesModelAliasSnapshot(t *testing.T) {
+	cmd := validSpawnCmd()
+	ctx := validSpawnCtx()
+	ctx.Catalog = modelAliasTestCatalog(t)
+	ctx.ModelAliases = map[string]string{"sonnet": "gpt-5.5"}
+
+	if err := validateSpawnCommand(cmd, ctx); err != nil {
+		t.Fatalf("configured alias was rejected: %v", err)
+	}
+	ctx.ModelAliases = map[string]string{"sonnet": "missing"}
+	if err := validateSpawnCommand(cmd, ctx); err == nil {
+		t.Fatal("unknown configured alias target was accepted")
 	}
 }
 
