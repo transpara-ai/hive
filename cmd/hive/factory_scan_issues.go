@@ -449,7 +449,10 @@ func scanGitHubIssues(ctx context.Context, repos []string, limit int, labels []s
 }
 
 func scanGitHubRepoIssues(ctx context.Context, repo string, limit int, labels []string) ([]hive.GitHubIssueCandidate, error) {
-	args := []string{"issue", "list", "--repo", repo, "--state", "open", "--limit", fmt.Sprintf("%d", limit), "--json", "number,title,url,body,state,stateReason,labels"}
+	// gh 2.45, the pinned CLI on the acceptance host, does not expose the
+	// optional stateReason GraphQL field for issue list/view. Open scans do not
+	// need it, and the parsers already treat an absent reason as empty.
+	args := []string{"issue", "list", "--repo", repo, "--state", "open", "--limit", fmt.Sprintf("%d", limit), "--json", "number,title,url,body,state,labels"}
 	for _, label := range labels {
 		if trimmed := strings.TrimSpace(label); trimmed != "" {
 			args = append(args, "--label", trimmed)
@@ -482,7 +485,7 @@ func scanGitHubIssueTargetState(ctx context.Context, repo string, number int) (h
 	if number <= 0 {
 		return hive.IssueScanTargetState{}, fmt.Errorf("issue number must be greater than zero")
 	}
-	args := []string{"issue", "view", strconv.Itoa(number), "--repo", repo, "--json", "number,url,state,stateReason,labels"}
+	args := []string{"issue", "view", strconv.Itoa(number), "--repo", repo, "--json", "number,url,state,labels"}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	output, err := cmd.Output()
 	if err != nil {
