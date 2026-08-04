@@ -1,0 +1,56 @@
+{
+  "gate": "IADA",
+  "packet_id": "HIVE-CIVILIZATION-DARK-FACTORY-V1-FAST-TRACK",
+  "packet_path": "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.2.md",
+  "packet_blob_sha": "6a8b94dbc577214b5f859f97e05fd41cb695c700",
+  "packet_version": "1.0.2",
+  "repo": "transpara-ai/hive",
+  "author_family": "OpenAI/Codex",
+  "source_records": [
+    "/home/transpara/.codex/attachments/dd7bf64a-c49a-4a33-86a4-09ec672a5a79/pasted-text-1.txt#sha256:c20bcfe317dd82a870893be4978991ba54725442a48739515807521fd08db38a",
+    "/home/transpara/transpara-ai/repos/.adversarial-review/civilization-next-gates/20260804T200316Z-civilization-dark-factory-v1-fast-track-checkpoint.md",
+    ".adversarial-design/20260804T211900Z-civilization-dark-factory-v1-cfada/reviewer-raw-invalid.json"
+  ],
+  "canonical_records": [
+    "docs/factory-orders/FO-hive-civilization-dark-factory-v1-v1.0.0.md#blob:228bb3cb17be0a4a3aa378768a24beafe1430428",
+    "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.2.md#blob:6a8b94dbc577214b5f859f97e05fd41cb695c700"
+  ],
+  "result": "pass",
+  "blocker_count": 0,
+  "findings": [
+    {
+      "id": "IADA-001",
+      "severity": "major",
+      "finding": "The design must not claim transactional exactly-once behavior across EventGraph, Work, Git, and GitHub.",
+      "disposition": "accepted_fixed",
+      "evidence": "The scheduler defines deterministic attempts, reconcile-before-retry, conflict blocking, and effect idempotency while rejecting a distributed-transaction claim."
+    },
+    {
+      "id": "IADA-002",
+      "severity": "major",
+      "finding": "The v1 service must not inherit or republish tracked credential-looking configuration found during checkpoint audit.",
+      "disposition": "accepted_fixed",
+      "evidence": "The topology requires fresh mode-0600 configuration, forbids reading hive/loop/config.env, and requires a secret-safe audit."
+    },
+    {
+      "id": "IADA-003",
+      "severity": "note",
+      "finding": "The exact independent reviewer named by the packet must be available and able to emit the governed schema.",
+      "disposition": "accepted_fixed",
+      "evidence": "After two preserved nonconforming Ollama/Qwen attempts, Claude CLI became authenticated and passed a non-mutating output probe; v1.0.2 binds the eligible Claude/Anthropic family."
+    }
+  ],
+  "residual_risks": [
+    "GitHub effects are reconciled and idempotent but cannot be transactionally committed with local EventGraph and Work state.",
+    "The v1 scheduler is intentionally single-instance; multi-host leader election remains v2.",
+    "The demonstration supports one author family and one independent reviewer family.",
+    "The installed governance cache has a noncanonical bytecode extra; gate evidence binds exact source files and result artifacts instead of claiming manifest parity."
+  ],
+  "non_authorizations": [
+    "No production deployment or CanOperate expansion.",
+    "No direct default-branch push, branch-protection change, or merge of demonstration PRs.",
+    "No mutation or reuse of Operation #86 or other consumed evidence.",
+    "No credential reuse, disclosure, or evidence fabrication.",
+    "No value allocation or residual-risk closure."
+  ]
+}

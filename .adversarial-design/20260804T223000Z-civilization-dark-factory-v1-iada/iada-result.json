@@ -1,0 +1,54 @@
+{
+  "gate": "IADA",
+  "packet_id": "HIVE-CIVILIZATION-DARK-FACTORY-V1-FAST-TRACK",
+  "packet_path": "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.4.md",
+  "packet_blob_sha": "c8dce50077d6e1af9cf0080a37b1fe688e981db9",
+  "packet_version": "1.0.4",
+  "repo": "transpara-ai/hive",
+  "author_family": "OpenAI/Codex",
+  "source_records": [
+    "/home/transpara/.codex/attachments/dd7bf64a-c49a-4a33-86a4-09ec672a5a79/pasted-text-1.txt#sha256:c20bcfe317dd82a870893be4978991ba54725442a48739515807521fd08db38a",
+    ".adversarial-design/20260804T214200Z-civilization-dark-factory-v1-cfada/result.md",
+    ".adversarial-design/20260804T220500Z-civilization-dark-factory-v1-cfada/result.md"
+  ],
+  "canonical_records": [
+    "docs/factory-orders/FO-hive-civilization-dark-factory-v1-v1.0.0.md#blob:228bb3cb17be0a4a3aa378768a24beafe1430428",
+    "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.4.md#blob:c8dce50077d6e1af9cf0080a37b1fe688e981db9"
+  ],
+  "result": "pass",
+  "blocker_count": 0,
+  "findings": [
+    {
+      "id": "IADA-001",
+      "severity": "minor",
+      "finding": "The v1.0.3 projection contract omitted intake channel and approval-basis labeling.",
+      "disposition": "accepted_fixed",
+      "evidence": "Packet v1.0.4 names intake channel and human_approval_basis with receipt in the canonical projection."
+    },
+    {
+      "id": "IADA-002",
+      "severity": "minor",
+      "finding": "Fixed service ports needed a fail-closed ownership preflight.",
+      "disposition": "accepted_fixed",
+      "evidence": "Packet v1.0.4 forbids adopting an existing listener and validates supervisor PID/executable hashes."
+    },
+    {
+      "id": "IADA-003",
+      "severity": "minor",
+      "finding": "Critical R11/R12 acceptance procedures lacked named executable proofs.",
+      "disposition": "accepted_fixed",
+      "evidence": "Packet v1.0.4 names TestFactoryV1Operation86Immutability and TestFactoryV1SecretSafeIsolation."
+    }
+  ],
+  "residual_risks": [
+    "GitHub effects are idempotently reconciled, not transactionally committed with local stores.",
+    "The v1 scheduler is intentionally single-instance.",
+    "The installed governance cache has one noncanonical bytecode extra."
+  ],
+  "non_authorizations": [
+    "No production deployment or CanOperate expansion.",
+    "No branch-protection change or merge of demonstration PRs.",
+    "No mutation or reuse of Operation #86 evidence.",
+    "No credential reuse, disclosure, or evidence fabrication."
+  ]
+}

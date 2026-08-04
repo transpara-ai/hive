@@ -46,6 +46,7 @@ func allHiveEventTypes() []types.EventType {
 		EventTypeSiteAssert, EventTypeSiteProgress,
 	}
 	eventTypes = append(eventTypes, phase3EventTypes()...)
+	eventTypes = append(eventTypes, factoryV1EventTypes()...)
 	return eventTypes
 }
 
@@ -375,6 +376,7 @@ func RegisterEventTypes() {
 	event.RegisterContentUnmarshaler("hive.model.role.policy.updated", event.Unmarshal[ModelRolePolicyUpdatedContent])
 	event.RegisterContentUnmarshaler("hive.growth.limit.reached", event.Unmarshal[GrowthLimitReachedContent])
 	registerPhase3ContentUnmarshalers()
+	registerFactoryV1ContentUnmarshalers()
 	event.RegisterContentUnmarshaler("hive.agent.heartbeat", event.Unmarshal[checkpoint.HeartbeatContent])
 }
 

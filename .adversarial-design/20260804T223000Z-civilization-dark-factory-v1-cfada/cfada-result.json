@@ -1,0 +1,119 @@
+{
+  "gate": "CFADA",
+  "packet_id": "HIVE-CIVILIZATION-DARK-FACTORY-V1-FAST-TRACK",
+  "packet_version": "1.0.4",
+  "packet_path": "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.4.md",
+  "packet_blob_sha": "c8dce50077d6e1af9cf0080a37b1fe688e981db9",
+  "repo": "transpara-ai/hive",
+  "author_family": "OpenAI/Codex",
+  "author_provider_id": "codex-cli",
+  "reviewer_family": "Claude/Anthropic",
+  "reviewer_provider_id": "claude-cli",
+  "required_reviewer_family_satisfied": true,
+  "result": "pass",
+  "blocker_count": 0,
+  "source_records": [
+    "/home/transpara/.codex/attachments/dd7bf64a-c49a-4a33-86a4-09ec672a5a79/pasted-text-1.txt#sha256:c20bcfe317dd82a870893be4978991ba54725442a48739515807521fd08db38a",
+    ".adversarial-design/20260804T214200Z-civilization-dark-factory-v1-cfada/result.md",
+    ".adversarial-design/20260804T220500Z-civilization-dark-factory-v1-cfada/result.md",
+    ".adversarial-design/20260804T223000Z-civilization-dark-factory-v1-iada/iada-result.json"
+  ],
+  "canonical_records": [
+    "docs/factory-orders/FO-hive-civilization-dark-factory-v1-v1.0.0.md#blob:228bb3cb17be0a4a3aa378768a24beafe1430428",
+    "docs/designs/civilization-dark-factory-v1-fast-track-v1.0.4.md#blob:c8dce50077d6e1af9cf0080a37b1fe688e981db9"
+  ],
+  "claims": [
+    {
+      "claim": "TLC stage 6 (human_design_review) for the three acceptance-demo orders is satisfied by an already-granted standing Human approval, bound to the pinned source SHA-256, the exact Factory Order blob, and the derived order ID/document hash — not by a runner assertion.",
+      "severity": "blocker",
+      "evidence": "Packet lines 145-152. The binding sentence exists verbatim in the pinned Human source: 'This prompt is Human approval of the v1 product definition and implementation direction. Do not return for repeated design approvals or merge-by-merge authorization inside this exact scope.' The packet fails closed for anything outside those exact bindings ('Any order outside those exact bindings requires a new Human action') and explicitly separates the intervention exercise from design approval. This closes the v1.0.2 CFADA blocker.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "Runner stdout cannot grant authority, select provider family, or override cross-family lineage; family identity comes only from fresh mode-0600 Hive configuration that pins provider IDs, family labels, executable realpaths/SHA-256, model IDs, and separate credential sources.",
+      "severity": "blocker",
+      "evidence": "Packet lines 193-214. Hive independently validates stage predicates and exact-head relationships before appending success, records the invoked binding, and rejects a gate result whose artifact metadata does not match or whose lineage is not cross-family. IADA/IAR are explicitly stated to never substitute for the cross-family gates, satisfying FO R6.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "Operation #86 series evidence remains immutable and is never reused as v1 runtime state, with a pre-mutation baseline capture and post-run recomputation.",
+      "severity": "blocker",
+      "evidence": "Packet lines 20-21, 264-265 (restart touches only fresh v1 processes; does not touch retained Operation #86 stores), harness step 0 (baseline capture before any mutation) and step 11 (recompute baseline plus secret-safe diff audit), lines 287-288, and named proof TestFactoryV1Operation86Immutability at line 304. Traces to FO R11/AC11.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "The v1 stack is credential-safe: it uses fresh mode-0600 runtime configuration, never reads the tracked hive/loop/config.env, and neither reuses nor republishes existing tracked credential-looking values.",
+      "severity": "blocker",
+      "evidence": "Packet lines 198-199, 262-264, residual risk at lines 318-319, non-authorization of 'credential reuse or publication' at lines 324-325, and named proof TestFactoryV1SecretSafeIsolation at line 305. Operator credential is bound to an immutable EventGraph actor ID with per-command scope, and possession is explicitly not an approval outside a command's scope (lines 218-223). Traces to FO R12/AC12.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "The accepted EventGraph event commits before Work seeding, and a Work task with no matching accepted event is quarantined rather than promoted into canonical state.",
+      "severity": "major",
+      "evidence": "Packet lines 101-103. Combined with the immutable (order_id, version, document_sha256) tuple, fail-closed conflict handling, byte-identical idempotent retry (lines 72-76), and the github:<repo>#<issue> single-active-order claim (lines 78-82), this closes the v1.0.2 divergent-canonical-state findings and satisfies FO R4.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "Push targets are bound by normalized repository URL and expected transpara-ai/<repository> owner identity, with remote aliases carrying no authority and pre-push verification failing closed on mismatch.",
+      "severity": "major",
+      "evidence": "Packet lines 205-210. This correctly reconciles the FO constraint 'Use `origin`, never push to `upstream`' (FO line 173) with the repository's own convention that the push remote is `transpara-ai` and `origin` is upstream, without reading tracked loop configuration. Resolving on URL/owner rather than alias name is the only reading that is safe under both conventions.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "Reconcile-before-retry prevents duplicate external effects across restart for every external stage.",
+      "severity": "major",
+      "evidence": "Packet lines 164-177. Draft-PR, review, and readying reconciles explicitly probe external state. The code-stage reconcile names only 'the deterministic branch/worktree and exact commit' and does not state that the remote branch is probed — after a restart with a fresh data root the local worktree may be absent while a push already landed, so reconcile could conclude the effect is missing and re-run. Impact is bounded: stage 8 requires one open draft PR at the exact implementation head and stage 11 requires the same exact reviewed head, so divergence blocks rather than producing a false ready PR.",
+      "disposition": "overstated"
+    },
+    {
+      "claim": "All four minor contract gaps identified by the v1.0.3 CFADA are closed in v1.0.4.",
+      "severity": "minor",
+      "evidence": "Three are fully closed: intake channel and human_approval_basis (standing_scoped/fresh_scoped) with receipt in the projection (lines 234-238); fail-closed listener-ownership preflight that never adopts an existing listener (lines 260-262); named R11/R12 critical tests (lines 304-305). The fourth — visible standing-vs-fresh approval labeling — is closed only at the projection contract layer; the Site rendering enumeration (lines 241-244: intake forms, TLC cards, detail evidence, intervention resolution) does not name the approval-basis label as a rendered element. Site TestFactoryV1MissionControlStates is named but not scoped to that label.",
+      "disposition": "overstated"
+    },
+    {
+      "claim": "Every Factory Order requirement R1-R12 has a named executable verification.",
+      "severity": "minor",
+      "evidence": "Packet lines 292-305 map all twelve requirements to named tests, closing IADA-003. Acceptance-criterion coverage is not 1:1, however: AC10 (final machine-readable evidence report pinning commits, trees, PR heads, tests, service state, and console renders) is carried only by harness steps 10-11 with no named test, and AC4's overlap proof relies on TestFactoryV1SchedulesThreeConcurrently plus harness step 5 rather than a dedicated overlap assertion.",
+      "disposition": "overstated"
+    },
+    {
+      "claim": "AC4 evidence — two timestamped projections bounding a positive overlap interval, each showing all three orders in_flight and actively_executing — demonstrates genuine simultaneous execution.",
+      "severity": "minor",
+      "evidence": "Packet lines 181-184 correctly split in_flight (accepted and non-terminal) from actively_executing (a worker owns a running attempt), closing the v1.0.2 semantic ambiguity. The contract does not require the running attempt identities to be stable across the two samples, so a worker that finished one attempt and began another between samples would satisfy the literal predicate without proving continuous concurrent ownership. Attempt identities are already on the projection, so this is a tightening, not a redesign.",
+      "disposition": "overstated"
+    },
+    {
+      "claim": "Budget counters derived from terminal attempts bound per-order spend and retry depth, with exhaustion blocking the order before any later stage starts.",
+      "severity": "minor",
+      "evidence": "Packet lines 179-181. The attempt preimage (line 161) is delimited and version-scoped but its decimal_ordinal has no stated maximum; the only stated bound on retries is budget exhaustion. Because counters derive from terminal attempts only, an interrupted attempt contributes zero until reconciliation completes it, so mid-attempt spend is under-reported on the projection. Convergence holds — recovery completes the same attempt — and the stage-boundary check limits overshoot to at most one attempt.",
+      "disposition": "supported"
+    },
+    {
+      "claim": "The packet's non-authorization of demonstration-PR merges faithfully reflects the Human source.",
+      "severity": "note",
+      "evidence": "Packet lines 324-326 forbid merge of demonstration PRs unconditionally. The Human source says 'Leave the three demonstration output PRs ready for Human approval unless merging one is itself required to validate the factory,' i.e. it contains a narrow escape hatch the packet removes. FO constraint line 179-180 already fixed the stricter reading. The narrowing is in the safe direction and consistent with FO R10/AC9; it may require a new Human action in a case the source pre-authorized.",
+      "disposition": "supported"
+    }
+  ],
+  "residual_risks": [
+    "Blob and content SHA-256 values could not be independently recomputed in this review session (shell execution was denied); the packet, Factory Order, prior CFADA results, and IADA record were verified by direct file read to match the supplied text byte-for-byte, and the pinned digests are carried forward from the IADA record rather than recomputed here.",
+    "GitHub is an external system; the design provides deterministic reconciliation and effect idempotency, not transactional exactly-once semantics.",
+    "Code-stage reconciliation does not explicitly state remote-branch probing, so a restart with a lost worktree may re-run a stage whose push already landed; downstream exact-head predicates fail closed rather than producing a false ready PR.",
+    "The stage-6 standing Human approval necessarily covers per-order design content the Human has not individually seen, including the runtime-discovered issue-scan order; it is scoped by exact source/Factory Order/order-hash bindings but is a pre-approval of unseen derived designs.",
+    "The v1 runner supports one configured author family and one independent reviewer family for the demonstration; additional providers are v2.",
+    "A single scheduler instance is deliberate for v1; multi-host leader election is v2 and restart recovery is required now.",
+    "The installed governance-package cache has one extra Python bytecode file while all canonical files are byte-identical; full installed-manifest parity is not claimed.",
+    "Potentially live tracked credentials exist outside this design; the v1 stack neither reads nor republishes them and uses fresh isolated configuration."
+  ],
+  "non_authorizations": [
+    "No production deployment, hosting, or CanOperate expansion.",
+    "No default-branch direct push and no branch-protection or required-check changes.",
+    "No merge of the three demonstration PRs; Human Review remains the terminal v1 boundary.",
+    "No mutation, reset, or reuse of Operation #86 or any consumed or failed series as v1 runtime state.",
+    "No credential reuse, copying, or disclosure, and no credential rotation.",
+    "No evidence fabrication, no marking a failed gate as passing, and no fabricated reviewer independence.",
+    "No value allocation and no closure of the residual risks recorded above.",
+    "This review is design-stage only; it does not approve any implementation head, PR, or CFAR outcome, and it does not exercise Human authority."
+  ]
+}

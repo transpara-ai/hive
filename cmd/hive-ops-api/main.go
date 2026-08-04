@@ -9,13 +9,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/store/pgstore"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive"
+	"github.com/transpara-ai/hive/pkg/hive/factoryv1"
 	"github.com/transpara-ai/hive/pkg/social"
 	"github.com/transpara-ai/work"
 )
@@ -57,6 +60,12 @@ func main() {
 	}
 
 	opts, writeMode := opsWriterOptions()
+	if factoryV1Option, factoryV1Mode := factoryV1OpsOption(store); factoryV1Option != nil {
+		opts = append(opts, factoryV1Option)
+		writeMode += ",factory-v1:" + factoryV1Mode
+	} else {
+		writeMode += ",factory-v1:" + factoryV1Mode
+	}
 	opts = append(opts, hive.WithOperatorProjectionModelSelectionSource(modelSelectionManager.Snapshot))
 	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
 	modelSelection := modelSelectionManager.Snapshot()
@@ -69,6 +78,69 @@ func main() {
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
+}
+
+func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, string) {
+	if os.Getenv("HIVE_FACTORY_V1_ENABLED") != "true" {
+		return nil, "disabled"
+	}
+	humanValue := os.Getenv("HIVE_OPS_HUMAN_ACTOR")
+	credentialKeyID := os.Getenv("HIVE_FACTORY_V1_CREDENTIAL_KEY_ID")
+	if humanValue == "" || credentialKeyID == "" {
+		log.Printf("factory v1 routes disabled: HIVE_OPS_HUMAN_ACTOR and HIVE_FACTORY_V1_CREDENTIAL_KEY_ID are required")
+		return nil, "misconfigured"
+	}
+	humanID, err := types.NewActorID(humanValue)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: invalid Human actor: %v", err)
+		return nil, "misconfigured"
+	}
+	registry := event.DefaultRegistry()
+	hive.RegisterWithRegistry(registry)
+	work.RegisterWithRegistry(registry)
+	factory := event.NewEventFactory(registry)
+	seed := "signer:" + humanID.Value()
+	if key := os.Getenv("HIVE_OPS_SIGNING_KEY"); key != "" {
+		seed = key
+	}
+	signer := newOpsSigner(seed)
+	conversation := types.MustConversationID("conv_hive_factory_v1_ops_api")
+	graph, err := hive.NewFactoryV1EventGraphStore(eventStore, factory, signer, humanID, conversation)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: EventGraph adapter: %v", err)
+		return nil, "misconfigured"
+	}
+	workStore, err := hive.NewFactoryV1WorkStore(eventStore, factory, signer, humanID, conversation)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: Work adapter: %v", err)
+		return nil, "misconfigured"
+	}
+	clock := factoryv1.WallClock{}
+	intake, err := factoryv1.NewIntake(graph, workStore, clock)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: intake: %v", err)
+		return nil, "misconfigured"
+	}
+	if err := intake.ReplayAndRepair(context.Background()); err != nil {
+		log.Printf("factory v1 routes disabled: recovery: %v", err)
+		return nil, "recovery-failed"
+	}
+	recoveryGeneration, _ := strconv.Atoi(os.Getenv("HIVE_FACTORY_V1_RECOVERY_GENERATION"))
+	serviceProjection := factoryv1.ServiceProjection{
+		ServiceID: "hive-factory-v1", InstanceID: envOrDefault("HIVE_FACTORY_V1_INSTANCE_ID", "hive-ops-api"),
+		RecoveryGeneration: recoveryGeneration, StartedAt: time.Now().UTC(), Healthy: true,
+	}
+	projector, err := factoryv1.NewProjector(graph, workStore, clock, serviceProjection)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: projector: %v", err)
+		return nil, "misconfigured"
+	}
+	service, err := hive.NewFactoryV1OperatorService(intake, projector, graph, clock, humanID.Value(), credentialKeyID)
+	if err != nil {
+		log.Printf("factory v1 routes disabled: operator service: %v", err)
+		return nil, "misconfigured"
+	}
+	return hive.WithOperatorFactoryV1(service), "enabled"
 }
 
 func registerOpsAPIEventTypes() {
