@@ -2531,6 +2531,59 @@ func TestParseGitHubIssueTargetStateMapsLabelsAndClosedState(t *testing.T) {
 	}
 }
 
+func TestGitHubIssueCommandsAvoidUnsupportedStateReasonField(t *testing.T) {
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "gh")
+	argsPath := filepath.Join(dir, "args")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >>"$GH_ARGS_PATH"
+case "$1 $2" in
+"issue list")
+  printf '%s\n' '[{"number":283,"title":"bounded evidence","url":"https://github.com/transpara-ai/docs/issues/283","body":"acceptance","state":"OPEN","labels":[{"name":"cc:pr-ready"}]}]'
+  ;;
+"issue view")
+  printf '%s\n' '{"number":283,"url":"https://github.com/transpara-ai/docs/issues/283","state":"OPEN","labels":[{"name":"cc:pr-ready"}]}'
+  ;;
+*)
+  exit 1
+  ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_PATH", argsPath)
+
+	issues, err := scanGitHubRepoIssues(context.Background(), "transpara-ai/docs", 10, []string{"cc:pr-ready"})
+	if err != nil {
+		t.Fatalf("scanGitHubRepoIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != 283 {
+		t.Fatalf("issues = %+v, want docs#283", issues)
+	}
+	state, err := scanGitHubIssueTargetState(context.Background(), "transpara-ai/docs", 283)
+	if err != nil {
+		t.Fatalf("scanGitHubIssueTargetState: %v", err)
+	}
+	if state.State != "open" || state.StateReason != "" {
+		t.Fatalf("state = %+v, want open with absent optional reason", state)
+	}
+	invocations, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read gh invocations: %v", err)
+	}
+	got := string(invocations)
+	if strings.Contains(got, "stateReason") {
+		t.Fatalf("gh invocations requested unsupported stateReason field: %q", got)
+	}
+	for _, want := range []string{"number,title,url,body,state,labels", "number,url,state,labels"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("gh invocations = %q, missing %q", got, want)
+		}
+	}
+}
+
 func TestFactoryScanIssuesRejectsNonPRReadyGitHubIssueBeforeFactoryOpen(t *testing.T) {
 	dir := t.TempDir()
 	ghPath := filepath.Join(dir, "gh")
