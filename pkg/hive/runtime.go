@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"strconv"
 	"sync"
@@ -617,6 +618,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 			})
 		}
 
+		loopResolver := r.currentResolver()
 		cfg := loop.Config{
 			Agent:                       agent,
 			HumanID:                     r.humanID,
@@ -656,7 +658,8 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 				summaries := modelconfig.EstimateAgentCostsByModel(resolver.Catalog(), agents, 10_000, 2_000)
 				return modelconfig.FormatCostSummary(summaries)
 			},
-			Catalog: r.currentResolver().Catalog(),
+			Catalog:      loopResolver.Catalog(),
+			ModelAliases: maps.Clone(loopResolver.Defaults().ModelAliases),
 			ActorResolver: func(id types.ActorID) string {
 				a, err := r.actors.Get(id)
 				if err != nil {

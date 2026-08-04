@@ -154,6 +154,35 @@ func TestSpawnCommandToEvent(t *testing.T) {
 	}
 }
 
+func TestSpawnCommandToEvent_AppliesConfiguredModelAlias(t *testing.T) {
+	spawnerAgent := testHiveAgent(t, newMockProvider(), "spawner", "spawner")
+	l := testLoop(t, spawnerAgent)
+	l.config.Catalog = modelAliasTestCatalog(t)
+	l.config.ModelAliases = map[string]string{"sonnet": "gpt-5.5"}
+
+	cmd := validSpawnCmd()
+	if err := l.emitRoleProposed(cmd); err != nil {
+		t.Fatalf("emitRoleProposed: %v", err)
+	}
+
+	page, err := spawnerAgent.Graph().Store().ByType(
+		event.EventTypeRoleProposed, 10, types.None[types.Cursor](),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items()) != 1 {
+		t.Fatalf("got %d proposals, want 1", len(page.Items()))
+	}
+	content := page.Items()[0].Content().(event.RoleProposedContent)
+	if content.Model != "gpt-5.5" {
+		t.Fatalf("proposal model = %q, want gpt-5.5", content.Model)
+	}
+	if content.CanOperate {
+		t.Fatal("proposal crossed CanOperate boundary")
+	}
+}
+
 // ────────────────────────────────────────────────────────────────────
 // b. TestSpawnContextConstruction
 // ────────────────────────────────────────────────────────────────────

@@ -240,6 +240,11 @@ type Config struct {
 	// When nil, falls back to modelconfig.DefaultCatalog().
 	Catalog *modelconfig.ModelCatalog
 
+	// ModelAliases is the resolver-generation snapshot applied exactly once
+	// before Spawner catalog lookup. The runtime passes a clone so loops cannot
+	// mutate resolver-owned configuration.
+	ModelAliases map[string]string
+
 	// RecoveryState holds recovered state from a prior run. When set and Mode
 	// is ModeWarm, the loop seeds iteration counter, skips stabilization, and
 	// injects intent into the first iteration. Nil means first boot.

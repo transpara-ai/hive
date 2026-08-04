@@ -109,6 +109,24 @@ type SpawnContext struct {
 	AgentRoster        []string                  // agent names from BudgetRegistry.Snapshot()
 	RecentRejections   map[string]int            // role name → iteration when rejected
 	Catalog            *modelconfig.ModelCatalog // model catalog for validation
+	ModelAliases       map[string]string         // one-step resolver alias snapshot
+}
+
+// resolveSpawnModel applies the configured resolver alias map exactly once,
+// then resolves the resulting explicit ID or catalog alias. It intentionally
+// has no recursive or tier fallback: absent targets fail closed.
+func resolveSpawnModel(name string, cat *modelconfig.ModelCatalog, aliases map[string]string) (string, error) {
+	if replacement, ok := aliases[name]; ok {
+		name = replacement
+	}
+	if cat == nil {
+		cat = modelconfig.DefaultCatalog()
+	}
+	entry, ok := cat.Lookup(name)
+	if !ok {
+		return "", fmt.Errorf("model %q not found in model catalog", name)
+	}
+	return entry.ID, nil
 }
 
 // RosterContains returns true if name is already in the agent roster.
@@ -234,12 +252,8 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 	}
 
 	// 5. Model validation.
-	cat := ctx.Catalog
-	if cat == nil {
-		cat = modelconfig.DefaultCatalog()
-	}
-	if _, ok := cat.Lookup(cmd.Model); !ok {
-		return fmt.Errorf("invalid model %q: not found in model catalog", cmd.Model)
+	if _, err := resolveSpawnModel(cmd.Model, ctx.Catalog, ctx.ModelAliases); err != nil {
+		return fmt.Errorf("invalid model %q: %w", cmd.Model, err)
 	}
 
 	// 6. MaxIterations bounds.
@@ -283,14 +297,9 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 // SpawnCommand and records it on the event chain via agent.EmitRoleProposed.
 // Model aliases are resolved to canonical catalog IDs before emission.
 func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
-	// Resolve model name via catalog — maps aliases like "sonnet" to full IDs.
-	cat := l.config.Catalog
-	if cat == nil {
-		cat = modelconfig.DefaultCatalog()
-	}
-	resolvedModel := cmd.Model
-	if entry, ok := cat.Lookup(cmd.Model); ok {
-		resolvedModel = entry.ID
+	resolvedModel, err := resolveSpawnModel(cmd.Model, l.config.Catalog, l.config.ModelAliases)
+	if err != nil {
+		return fmt.Errorf("resolve proposed model %q: %w", cmd.Model, err)
 	}
 	content := event.RoleProposedContent{
 		Name:          cmd.Name,
@@ -409,6 +418,7 @@ func (l *Loop) buildSpawnContext() *SpawnContext {
 		HasGenuineGap:      len(l.spawnerState.processedGaps) > 0,
 		RecentRejections:   l.spawnerState.recentRejections,
 		Catalog:            l.config.Catalog,
+		ModelAliases:       l.config.ModelAliases,
 	}
 
 	if reg := l.config.BudgetRegistry; reg != nil {

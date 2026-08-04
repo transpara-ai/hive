@@ -3,6 +3,7 @@ package hive
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -358,6 +359,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 		Keepalive:              r.loop,
 		KnowledgeStore:         r.knowledgeStore,
 		Catalog:                resolver.Catalog(),
+		ModelAliases:           maps.Clone(resolver.Defaults().ModelAliases),
 		ActorResolver: func(id types.ActorID) string {
 			a, err := r.actors.Get(id)
 			if err != nil {
