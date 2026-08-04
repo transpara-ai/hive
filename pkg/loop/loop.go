@@ -224,6 +224,14 @@ type Config struct {
 	// organic runtime; no target Budget is created until admission commits.
 	AllowPreAdmissionRoleBudget bool
 
+	// EnforceOrganicGovernanceCausality binds the organic-v1 governance
+	// sequence to the earliest genuine CTO gap in this conversation. When set,
+	// proposal, decision, and pre-admission budget events use exact, single,
+	// cross-actor causes and their typed decision context is rendered from the
+	// durable event chain. Other profiles retain their historical private-chain
+	// behavior.
+	EnforceOrganicGovernanceCausality bool
+
 	// ActorResolver maps actor IDs to display names for task context.
 	// Optional. When nil, task context omits creator information.
 	ActorResolver func(types.ActorID) string
@@ -1016,6 +1024,12 @@ func (l *Loop) observe(ctx context.Context) (string, error) {
 	enriched = l.enrichCTOObservation(enriched)
 	// Enrich observation with spawn context for Spawner.
 	enriched = l.enrichSpawnObservation(enriched)
+	// Enrich organic governance actors with exact typed, read-only chain state.
+	// A malformed or ambiguous chain fails closed before another model call.
+	enriched, err = l.enrichOrganicGovernanceObservation(enriched)
+	if err != nil {
+		return "", err
+	}
 	// Enrich observation with code review context for Reviewer.
 	enriched = l.enrichReviewObservation(enriched)
 	// Enrich observation with institutional knowledge for ALL agents.

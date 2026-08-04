@@ -60,12 +60,26 @@ func parseRejectCommand(response string) *RejectCommand {
 
 // emitRoleApproved records a Guardian approval for a spawn proposal on the event chain.
 func (l *Loop) emitRoleApproved(cmd *ApproveCommand) error {
+	var proposal event.Event
+	if l.config.EnforceOrganicGovernanceCausality {
+		state, err := l.organicDecisionAnchor(cmd.Name)
+		if err != nil {
+			return fmt.Errorf("validate organic role approval: %w", err)
+		}
+		proposal = state
+	}
 	content := event.RoleApprovedContent{
 		Name:       cmd.Name,
 		ApprovedBy: "guardian",
 		Reason:     cmd.Reason,
 	}
-	if err := l.agent.EmitRoleApproved(content); err != nil {
+	var err error
+	if l.config.EnforceOrganicGovernanceCausality {
+		err = l.agent.EmitRoleApprovedCausedBy(content, proposal.ID())
+	} else {
+		err = l.agent.EmitRoleApproved(content)
+	}
+	if err != nil {
 		return fmt.Errorf("emit hive.role.approved: %w", err)
 	}
 	fmt.Printf("[%s] emitted hive.role.approved (name=%s)\n", l.agent.Name(), cmd.Name)
@@ -74,12 +88,26 @@ func (l *Loop) emitRoleApproved(cmd *ApproveCommand) error {
 
 // emitRoleRejected records a Guardian rejection for a spawn proposal on the event chain.
 func (l *Loop) emitRoleRejected(cmd *RejectCommand) error {
+	var proposal event.Event
+	if l.config.EnforceOrganicGovernanceCausality {
+		state, err := l.organicDecisionAnchor(cmd.Name)
+		if err != nil {
+			return fmt.Errorf("validate organic role rejection: %w", err)
+		}
+		proposal = state
+	}
 	content := event.RoleRejectedContent{
 		Name:       cmd.Name,
 		RejectedBy: "guardian",
 		Reason:     cmd.Reason,
 	}
-	if err := l.agent.EmitRoleRejected(content); err != nil {
+	var err error
+	if l.config.EnforceOrganicGovernanceCausality {
+		err = l.agent.EmitRoleRejectedCausedBy(content, proposal.ID())
+	} else {
+		err = l.agent.EmitRoleRejected(content)
+	}
+	if err != nil {
 		return fmt.Errorf("emit hive.role.rejected: %w", err)
 	}
 	fmt.Printf("[%s] emitted hive.role.rejected (name=%s reason=%q)\n", l.agent.Name(), cmd.Name, cmd.Reason)

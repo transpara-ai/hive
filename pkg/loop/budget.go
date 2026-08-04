@@ -131,7 +131,11 @@ func (l *Loop) validateBudgetCommand(cmd *BudgetCommand, iteration int) error {
 			break
 		}
 	}
-	preAdmission := !found && l.isPreAdmissionRoleBudget(cmd)
+	_, preAdmission, preAdmissionErr := l.preAdmissionRoleBudgetCause(cmd)
+	if preAdmissionErr != nil {
+		return fmt.Errorf("validate pre-admission role budget: %w", preAdmissionErr)
+	}
+	preAdmission = !found && preAdmission
 	if !found && !preAdmission {
 		return fmt.Errorf("unknown agent: %s", cmd.Agent)
 	}
@@ -213,7 +217,11 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	if resource == "duration" {
 		floor, ceiling = cfg.DurationFloorMin, cfg.DurationCeilingMin
 	}
-	if l.isPreAdmissionRoleBudget(cmd) {
+	approval, preAdmission, err := l.preAdmissionRoleBudgetCause(cmd)
+	if err != nil {
+		return fmt.Errorf("validate pre-admission role budget: %w", err)
+	}
+	if preAdmission {
 		newMax := cmd.Amount
 		if newMax < floor {
 			newMax = floor
@@ -232,7 +240,12 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 			Reason:         cmd.Reason,
 			PoolRemaining:  reg.TotalPool() - reg.TotalUsed(),
 		}
-		if err := l.agent.EmitBudgetAdjusted(content); err != nil {
+		if l.config.EnforceOrganicGovernanceCausality {
+			err = l.agent.EmitBudgetAdjustedCausedBy(content, approval.ID())
+		} else {
+			err = l.agent.EmitBudgetAdjusted(content)
+		}
+		if err != nil {
 			return fmt.Errorf("emit pre-admission budget.adjusted: %w", err)
 		}
 		l.adjustmentHistory = append(l.adjustmentHistory, budget.AdjustmentRecord{
@@ -269,14 +282,14 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	}
 
 	var prev, newMax int
-	var err error
+	var adjustErr error
 	if resource == "duration" {
-		prev, newMax, err = reg.AdjustMaxDuration(cmd.Agent, delta, floor, ceiling)
+		prev, newMax, adjustErr = reg.AdjustMaxDuration(cmd.Agent, delta, floor, ceiling)
 	} else {
-		prev, newMax, err = reg.AdjustMaxIterations(cmd.Agent, delta, floor, ceiling)
+		prev, newMax, adjustErr = reg.AdjustMaxIterations(cmd.Agent, delta, floor, ceiling)
 	}
-	if err != nil {
-		return fmt.Errorf("adjust %s: %w", cmd.Agent, err)
+	if adjustErr != nil {
+		return fmt.Errorf("adjust %s: %w", cmd.Agent, adjustErr)
 	}
 
 	// Log if floor/ceiling clamped.
@@ -318,22 +331,38 @@ func (l *Loop) applyBudgetAdjustment(cmd *BudgetCommand, iteration int) error {
 	return nil
 }
 
-func (l *Loop) isPreAdmissionRoleBudget(cmd *BudgetCommand) bool {
+func (l *Loop) preAdmissionRoleBudgetCause(cmd *BudgetCommand) (event.Event, bool, error) {
 	if !l.config.AllowPreAdmissionRoleBudget ||
 		l.agent == nil ||
 		string(l.agent.Role()) != "allocator" ||
 		cmd.Action != "set" ||
 		(cmd.Resource != "" && cmd.Resource != "iterations") {
-		return false
+		return event.Event{}, false, nil
 	}
 	reg := l.config.BudgetRegistry
 	if reg == nil {
-		return false
+		return event.Event{}, false, nil
 	}
 	for _, entry := range reg.Snapshot() {
 		if entry.Name == cmd.Agent {
-			return false
+			return event.Event{}, false, nil
 		}
+	}
+	if l.config.EnforceOrganicGovernanceCausality {
+		state, err := l.readOrganicGovernanceState()
+		if err != nil {
+			return event.Event{}, false, err
+		}
+		if state.proposal.ID().IsZero() || state.approval.ID().IsZero() || !state.rejection.ID().IsZero() {
+			return event.Event{}, false, nil
+		}
+		if cmd.Agent != state.role {
+			return event.Event{}, false, fmt.Errorf("budget target %q does not equal frozen role %q", cmd.Agent, state.role)
+		}
+		if state.budgetCount != 0 {
+			return event.Event{}, false, fmt.Errorf("role %q already has %d pre-admission budget event(s)", state.role, state.budgetCount)
+		}
+		return state.approval, true, nil
 	}
 	cursor := types.None[types.Cursor]()
 	var events []event.Event
@@ -344,7 +373,7 @@ func (l *Loop) isPreAdmissionRoleBudget(cmd *BudgetCommand) bool {
 			cursor,
 		)
 		if err != nil {
-			return false
+			return event.Event{}, false, nil
 		}
 		events = append(events, page.Items()...)
 		if !page.HasMore() {
@@ -363,25 +392,25 @@ func (l *Loop) isPreAdmissionRoleBudget(cmd *BudgetCommand) bool {
 		}
 	}
 	if proposalIndex < 0 {
-		return false
+		return event.Event{}, false, nil
 	}
 	for _, ev := range events[proposalIndex+1:] {
 		switch content := ev.Content().(type) {
 		case event.RoleApprovedContent:
 			if content.Name == cmd.Agent {
-				return true
+				return ev, true, nil
 			}
 		case event.RoleRejectedContent:
 			if content.Name == cmd.Agent {
-				return false
+				return event.Event{}, false, nil
 			}
 		case event.RoleProposedContent:
 			if content.Name == cmd.Agent {
-				return false
+				return event.Event{}, false, nil
 			}
 		}
 	}
-	return false
+	return event.Event{}, false, nil
 }
 
 // enrichBudgetObservation appends pre-computed budget metrics to the

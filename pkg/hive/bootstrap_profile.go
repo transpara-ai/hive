@@ -111,6 +111,12 @@ func validateBootstrapConfig(cfg Config) (BootstrapProfile, []safety.ProtectedAc
 	if cfg.MinimumIterationsBeforeQuiescence != 0 && profile != BootstrapProfileOrganicV1 {
 		return "", nil, fmt.Errorf("minimum iterations before quiescence is supported only by the organic-v1 bootstrap profile")
 	}
+	if cfg.EnforceOrganicGovernanceCausality && profile != BootstrapProfileOrganicV1 {
+		return "", nil, fmt.Errorf("organic governance causality is supported only by the organic-v1 bootstrap profile")
+	}
+	if cfg.EnforceOrganicGovernanceCausality && cfg.ApproveRoles {
+		return "", nil, OrganicConfigError{Reason: "ApproveRoles is incompatible with exact Guardian governance causality"}
+	}
 	if profile != BootstrapProfileOrganicV1 {
 		return profile, actions, nil
 	}

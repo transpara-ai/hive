@@ -297,6 +297,23 @@ func validateSpawnCommand(cmd *SpawnCommand, ctx *SpawnContext) error {
 // SpawnCommand and records it on the event chain via agent.EmitRoleProposed.
 // Model aliases are resolved to canonical catalog IDs before emission.
 func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
+	var gap event.Event
+	if l.config.EnforceOrganicGovernanceCausality {
+		state, err := l.readOrganicGovernanceState()
+		if err != nil {
+			return fmt.Errorf("validate organic role proposal: %w", err)
+		}
+		if state.gap.ID().IsZero() {
+			return fmt.Errorf("validate organic role proposal: no genuine CTO gap")
+		}
+		if state.proposalCount != 0 {
+			return fmt.Errorf("validate organic role proposal: conversation already has %d proposal(s)", state.proposalCount)
+		}
+		if cmd.Name != state.role {
+			return fmt.Errorf("validate organic role proposal: name %q does not equal frozen gap role %q", cmd.Name, state.role)
+		}
+		gap = state.gap
+	}
 	resolvedModel, err := resolveSpawnModel(cmd.Model, l.config.Catalog, l.config.ModelAliases)
 	if err != nil {
 		return fmt.Errorf("resolve proposed model %q: %w", cmd.Model, err)
@@ -311,8 +328,19 @@ func (l *Loop) emitRoleProposed(cmd *SpawnCommand) error {
 		Reason:        cmd.Reason,
 		ProposedBy:    "spawner",
 	}
-	if err := l.agent.EmitRoleProposed(content); err != nil {
+	if l.config.EnforceOrganicGovernanceCausality {
+		err = l.agent.EmitRoleProposedCausedBy(content, gap.ID())
+	} else {
+		err = l.agent.EmitRoleProposed(content)
+	}
+	if err != nil {
 		return fmt.Errorf("emit hive.role.proposed: %w", err)
+	}
+	// The event bus deliberately does not deliver an agent its own events.
+	// Record successful emission synchronously so a second model response cannot
+	// race the durable projection and produce another proposal.
+	if l.config.EnforceOrganicGovernanceCausality && l.spawnerState != nil {
+		l.spawnerState.pendingProposal = cmd.Name
 	}
 	fmt.Printf("[%s] emitted hive.role.proposed (name=%s model=%s)\n",
 		l.agent.Name(), cmd.Name, cmd.Model)
