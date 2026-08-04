@@ -89,6 +89,18 @@ func TestCivilizationRunRejectsInvalidQuiescenceFloorBeforeSpecIngest(t *testing
 	}
 }
 
+func TestCivilizationRunRejectsOrganicCausalityOutsideOrganicProfileBeforeSpecIngest(t *testing.T) {
+	err := cmdCivilization([]string{
+		"run",
+		"--human", "Michael",
+		"--enforce-organic-governance-causality",
+		"--spec", "/nonexistent/spec.md",
+	})
+	if err == nil || !strings.Contains(err.Error(), "only by the organic-v1") {
+		t.Fatalf("error = %v, want organic-profile rejection before spec ingest", err)
+	}
+}
+
 func TestOrganicBootstrapFlagsUseExactDeduplicatedAction(t *testing.T) {
 	profile, policy, maximum, actions, err := parseBootstrapRuntimeFlags(
 		"organic-v1",

@@ -132,6 +132,7 @@ func cmdCivilizationRun(args []string) error {
 	approveRoles := fs.Bool("approve-roles", false, "Auto-approve role proposals")
 	bootstrapProfile := fs.String("bootstrap-profile", string(hive.BootstrapProfileFull), "Bootstrap profile: full|organic-v1")
 	minimumIterationsBeforeQuiescence := fs.Int("minimum-iterations-before-quiescence", 0, "Minimum bootstrap evaluations before an organic-v1 run may stop for quiescence")
+	enforceOrganicGovernanceCausality := fs.Bool("enforce-organic-governance-causality", false, "Require one exact gap-to-proposal-to-decision-to-budget sequence (organic-v1 only)")
 	approveActions := repeatedStringFlag{}
 	fs.Var(&approveActions, "approve-action", "Auto-approve one exact known protected action (repeatable)")
 	space := fs.String("space", "hive", "transpara.ai space slug")
@@ -153,6 +154,7 @@ func cmdCivilizationRun(args []string) error {
 		MaximumDynamicActors:              maximumDynamicActors,
 		AutomaticallyApprovedActions:      actions,
 		MinimumIterationsBeforeQuiescence: *minimumIterationsBeforeQuiescence,
+		EnforceOrganicGovernanceCausality: *enforceOrganicGovernanceCausality,
 	}); err != nil {
 		return err
 	}
@@ -161,7 +163,7 @@ func cmdCivilizationRun(args []string) error {
 			return fmt.Errorf("ingest spec: %w", err)
 		}
 	}
-	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *minimumIterationsBeforeQuiescence, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
+	return runLegacy(*human, *idea, *storeDSN, *approveRequests, *approveRoles, profile, growthPolicyVersion, maximumDynamicActors, actions, *minimumIterationsBeforeQuiescence, *enforceOrganicGovernanceCausality, *repo, *repoWorkspaceRoot, *catalog, 0, false, nil, nil, nil, nil, nil, nil, nil, nil, *space, *apiBase, "", "")
 }
 
 func cmdCivilizationDaemon(args []string) error {

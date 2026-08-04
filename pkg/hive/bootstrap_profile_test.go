@@ -118,6 +118,7 @@ func TestPrewriteRejectRunsBeforeGraphOrWorkDependencies(t *testing.T) {
 		{AutomaticallyApprovedActions: []safety.ProtectedAction{"unknown.action"}},
 		{MinimumIterationsBeforeQuiescence: -1},
 		{MinimumIterationsBeforeQuiescence: 1},
+		{EnforceOrganicGovernanceCausality: true},
 		{
 			BootstrapProfile:             BootstrapProfileOrganicV1,
 			GrowthPolicyVersion:          OrganicV1GrowthPolicyVersion,
