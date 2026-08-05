@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 type pullRequestView struct {
 	Number      int    `json:"number"`
 	URL         string `json:"url"`
+	Body        string `json:"body"`
 	HeadRefOID  string `json:"headRefOid"`
 	HeadRefName string `json:"headRefName"`
 	BaseRefName string `json:"baseRefName"`
@@ -180,7 +182,7 @@ func (r *demoRunner) executeCreateDraftPR(ctx context.Context, request factoryv1
 	}
 	if !found {
 		title := "Factory v1 demo: " + oneLine(request.Order.Title)
-		body := "Automated non-production Factory v1 demonstration output.\n\nOrder: `" + request.Order.DocID + "@" + request.Order.Version + "`\nDocument SHA-256: `" + request.DocumentSHA256 + "`\n\nThis PR remains at the Human Review boundary and must not be auto-merged."
+		body := renderPullRequestBody(request)
 		if _, err := r.gh(ctx, repository.Root, "pr", "create", "--repo", repository.Identity, "--draft", "--head", branch, "--base", repository.BaseBranch, "--title", title, "--body", body); err != nil {
 			return r.blocked(request, "draft_pr_create_failed", err.Error(), "Inspect GitHub state and reconcile the deterministic head branch."), map[string]string{"branch": branch, "head": head}, nil
 		}
@@ -191,6 +193,9 @@ func (r *demoRunner) executeCreateDraftPR(ctx context.Context, request factoryv1
 	}
 	if !view.IsDraft || view.State != "OPEN" || view.BaseRefName != repository.BaseBranch || view.HeadRefOID != head {
 		return r.blocked(request, "draft_pr_exactness_failed", "The PR is not one open draft at the exact implementation head/base.", "Resolve the PR state conflict."), map[string]string{"branch": branch, "head": head}, nil
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return r.blocked(request, "draft_pr_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration in the PR body."), map[string]string{"branch": branch, "head": head, "pr_url": view.URL}, nil
 	}
 	pr := prEvidence(repository, view, head, false)
 	return r.passed(request, factoryv1.Evidence{Kind: "draft_pr", Reference: view.URL, PRHeadSHA: head, PR: &pr}), map[string]string{"branch": branch, "head": head, "pr_number": strconv.Itoa(view.Number), "pr_url": view.URL}, nil
@@ -212,6 +217,9 @@ func (r *demoRunner) reconcileDraftPR(ctx context.Context, request factoryv1.Run
 	if conflict || !view.IsDraft || view.HeadRefOID != head || view.BaseRefName != repository.BaseBranch {
 		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "draft_pr_conflict", "The open PR does not match the one exact draft PR predicate.", "Resolve GitHub PR state.")}, nil
 	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "draft_pr_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration in the PR body.")}, nil
+	}
 	pr := prEvidence(repository, view, head, false)
 	return factoryv1.ReconcileResult{EffectExists: true, Result: r.passed(request, factoryv1.Evidence{Kind: "draft_pr", Reference: view.URL, PRHeadSHA: head, PR: &pr})}, nil
 }
@@ -224,6 +232,9 @@ func (r *demoRunner) executeIAR(ctx context.Context, request factoryv1.RunReques
 	}
 	if !found || conflict {
 		return r.blocked(request, "iar_pr_missing", "IAR cannot identify one open exact-head PR.", "Restore the deterministic draft PR."), nil, nil
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return r.blocked(request, "iar_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration before IAR."), map[string]string{"pr_url": view.URL}, nil
 	}
 	head, err := implementationHead(request.PriorEvidence)
 	if err != nil || view.HeadRefOID != head {
@@ -272,6 +283,9 @@ func (r *demoRunner) reconcileIAR(ctx context.Context, request factoryv1.RunRequ
 	if conflict || view.HeadRefOID != head {
 		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "iar_head_conflict", "The current PR head differs from the IAR-reviewed head.", "Resolve the PR head conflict without rewriting review evidence.")}, nil
 	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "iar_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration before relying on IAR.")}, nil
+	}
 	return factoryv1.ReconcileResult{EffectExists: true, Result: receipt.Result}, nil
 }
 
@@ -288,6 +302,9 @@ func (r *demoRunner) executeMarkReady(ctx context.Context, request factoryv1.Run
 	if !found || conflict || view.HeadRefOID != head {
 		return r.blocked(request, "ready_pr_head_conflict", "The open PR does not match the exact CFAR-reviewed head.", "Resolve the PR/head conflict before readying."), nil, nil
 	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return r.blocked(request, "ready_pr_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration before readying the PR."), map[string]string{"head": head, "pr_url": view.URL}, nil
+	}
 	checks, checksPassing, err := r.requiredChecks(ctx, repository, view.Number)
 	if err != nil || !checksPassing {
 		return r.blocked(request, "required_checks_not_passing", commandErrorText(err, "Required checks are not all passing."), "Wait for or repair required checks without changing the reviewed head."), map[string]string{"head": head, "required_check_count": strconv.Itoa(len(checks))}, nil
@@ -300,6 +317,9 @@ func (r *demoRunner) executeMarkReady(ctx context.Context, request factoryv1.Run
 	view, found, conflict, err = r.queryOpenPR(ctx, repository, branchName(request))
 	if err != nil || !found || conflict || view.IsDraft || view.HeadRefOID != head {
 		return r.blocked(request, "ready_pr_unverified", "The PR is not observably open and non-draft at the reviewed head.", "Repair or reconcile the PR ready transition."), nil, nil
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return r.blocked(request, "ready_pr_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration at the unchanged reviewed head."), map[string]string{"head": head, "pr_url": view.URL}, nil
 	}
 	checks, checksPassing, err = r.requiredChecks(ctx, repository, view.Number)
 	if err != nil || !checksPassing {
@@ -324,6 +344,9 @@ func (r *demoRunner) reconcileReadyPR(ctx context.Context, request factoryv1.Run
 	}
 	if conflict || view.HeadRefOID != head {
 		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "ready_head_conflict", "The ready PR differs from the CFAR-reviewed head.", "Resolve the PR/head conflict.")}, nil
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "ready_pr_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration at the unchanged reviewed head.")}, nil
 	}
 	checks, passing, err := r.requiredChecks(ctx, repository, view.Number)
 	if err != nil || !passing {
@@ -354,6 +377,9 @@ func (r *demoRunner) reconcileHumanReview(ctx context.Context, request factoryv1
 	}
 	if !found || conflict || view.IsDraft || view.HeadRefOID != head {
 		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "human_review_boundary_invalid", "The exact-head ready PR boundary is no longer valid.", "Restore the open non-draft exact-head PR and passing checks.")}, nil
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, view.Body); err != nil {
+		return factoryv1.ReconcileResult{Conflict: true, Result: r.blocked(request, "human_review_issue_correlation_missing", err.Error(), "Restore every declared issue link and GitHub closing declaration before Human review.")}, nil
 	}
 	checks, passing, checkErr := r.requiredChecks(ctx, repository, view.Number)
 	if checkErr != nil || !passing {
@@ -554,7 +580,7 @@ func (r *demoRunner) queryOpenPR(ctx context.Context, repository repositoryConfi
 	if err := r.ensureRepositoryPins(ctx, repository); err != nil {
 		return pullRequestView{}, false, false, err
 	}
-	result, err := r.gh(ctx, repository.Root, "pr", "list", "--repo", repository.Identity, "--head", branch, "--state", "open", "--json", "number,url,headRefOid,headRefName,baseRefName,isDraft,state")
+	result, err := r.gh(ctx, repository.Root, "pr", "list", "--repo", repository.Identity, "--head", branch, "--state", "open", "--json", "number,url,body,headRefOid,headRefName,baseRefName,isDraft,state")
 	if err != nil {
 		return pullRequestView{}, false, false, err
 	}
@@ -569,6 +595,88 @@ func (r *demoRunner) queryOpenPR(ctx context.Context, repository repositoryConfi
 		return pullRequestView{}, true, true, nil
 	}
 	return views[0], true, false, nil
+}
+
+func renderPullRequestBody(request factoryv1.RunRequest) string {
+	var body strings.Builder
+	body.WriteString("Automated non-production Factory v1 demonstration output.\n\n")
+	fmt.Fprintf(&body, "Order: `%s@%s`\n", request.Order.DocID, request.Order.Version)
+	fmt.Fprintf(&body, "Document SHA-256: `%s`", request.DocumentSHA256)
+	if len(request.Order.ResolvedIssues) != 0 {
+		body.WriteString("\n\n## Issues resolved\n\n")
+		for _, issue := range request.Order.ResolvedIssues {
+			fmt.Fprintf(&body, "- [%s#%d](%s) — %s\n", issue.Repository, issue.Number, issue.URI, renderResolvedIssueTitle(issue.Title))
+		}
+		body.WriteString("\n")
+		for _, issue := range request.Order.ResolvedIssues {
+			fmt.Fprintf(&body, "Closes %s\n", issue.URI)
+		}
+	} else {
+		body.WriteString("\n")
+	}
+	body.WriteString("\nThis PR remains at the Human Review boundary and must not be auto-merged.")
+	return body.String()
+}
+
+func validatePullRequestIssueCorrelation(order factoryv1.FactoryOrder, body string) error {
+	lines := make(map[string]struct{})
+	for _, line := range strings.Split(body, "\n") {
+		lines[strings.TrimSpace(line)] = struct{}{}
+	}
+	expectedClosures := make(map[string]struct{}, len(order.ResolvedIssues))
+	for _, issue := range order.ResolvedIssues {
+		expectedClosures["Closes "+issue.URI] = struct{}{}
+	}
+	for _, declaration := range githubClosingDeclarations(body) {
+		if _, ok := expectedClosures[declaration]; !ok {
+			return fmt.Errorf("PR body contains an undeclared or non-canonical GitHub closing declaration: %s", declaration)
+		}
+	}
+	if len(order.ResolvedIssues) == 0 {
+		return nil
+	}
+	if _, ok := lines["## Issues resolved"]; !ok {
+		return errors.New("PR body lacks the explicit Issues resolved section")
+	}
+	for _, issue := range order.ResolvedIssues {
+		linkLine := fmt.Sprintf("- [%s#%d](%s) — %s", issue.Repository, issue.Number, issue.URI, renderResolvedIssueTitle(issue.Title))
+		if _, ok := lines[linkLine]; !ok {
+			return fmt.Errorf("PR body lacks the visible resolved-issue link for %s#%d", issue.Repository, issue.Number)
+		}
+		if _, ok := lines["Closes "+issue.URI]; !ok {
+			return fmt.Errorf("PR body lacks the GitHub closing declaration for %s#%d", issue.Repository, issue.Number)
+		}
+	}
+	return nil
+}
+
+func renderResolvedIssueTitle(title string) string {
+	return "<code>" + html.EscapeString(oneLine(title)) + "</code>"
+}
+
+func githubClosingDeclarations(body string) []string {
+	keywords := map[string]struct{}{
+		"close": {}, "closes": {}, "closed": {},
+		"fix": {}, "fixes": {}, "fixed": {},
+		"resolve": {}, "resolves": {}, "resolved": {},
+	}
+	var declarations []string
+	for _, rawLine := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(rawLine)
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			keyword := strings.ToLower(strings.Trim(fields[i], "-*_:"))
+			if _, ok := keywords[keyword]; !ok {
+				continue
+			}
+			reference := strings.Trim(fields[i+1], "()[]{}<>,.;")
+			if strings.HasPrefix(reference, "#") || strings.Contains(reference, "/issues/") || strings.Contains(reference, "#") {
+				declarations = append(declarations, line)
+				break
+			}
+		}
+	}
+	return declarations
 }
 
 func (r *demoRunner) requiredChecks(ctx context.Context, repository repositoryConfig, number int) ([]checkView, bool, error) {
