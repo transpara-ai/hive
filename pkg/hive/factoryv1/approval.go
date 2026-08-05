@@ -4,9 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// FactoryOrderBlobSHA names the Human-reviewed source blob. Existing governed
+// packets use Git SHA-1 object identities while newer callers may provide a
+// SHA-256 digest. Both are content-addressed bindings; source_sha256 and the
+// canonical document hash remain strictly SHA-256-only.
+var factoryOrderBlobHashPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 type ApprovalBasis string
 
@@ -39,7 +46,7 @@ type StandingApprovalBinding struct {
 }
 
 func (binding StandingApprovalBinding) Bind(document CanonicalDocument, issuedAt time.Time) (HumanApprovalReceipt, error) {
-	if !hexPattern.MatchString(binding.SourceSHA256) || !hexPattern.MatchString(binding.FactoryOrderBlobSHA) {
+	if !hexPattern.MatchString(binding.SourceSHA256) || !factoryOrderBlobHashPattern.MatchString(binding.FactoryOrderBlobSHA) {
 		return HumanApprovalReceipt{}, errors.New("standing approval source and FactoryOrder blob hashes are required")
 	}
 	if strings.TrimSpace(binding.ActorID) == "" || strings.TrimSpace(binding.CredentialKeyID) == "" || strings.TrimSpace(binding.ApprovalSentence) == "" || strings.TrimSpace(binding.ApprovalSourceEventID) == "" {
@@ -74,7 +81,7 @@ func ValidateApprovalReceipt(document CanonicalDocument, receipt HumanApprovalRe
 	if receipt.OrderID != document.Order.DocID || receipt.OrderVersion != document.Order.Version || receipt.DocumentSHA256 != document.SHA256 {
 		return errors.New("approval receipt does not bind the exact accepted order tuple")
 	}
-	if !hexPattern.MatchString(receipt.SourceSHA256) || !hexPattern.MatchString(receipt.FactoryOrderBlobSHA) {
+	if !hexPattern.MatchString(receipt.SourceSHA256) || !factoryOrderBlobHashPattern.MatchString(receipt.FactoryOrderBlobSHA) {
 		return errors.New("approval receipt source or FactoryOrder blob hash is invalid")
 	}
 	if receipt.IssuedAt.IsZero() {

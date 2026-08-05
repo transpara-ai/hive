@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -110,23 +111,45 @@ func (s *FactoryV1EventGraphStore) Append(ctx context.Context, input factoryv1.N
 		return factoryv1.Event{}, fmt.Errorf("%w: key %q already names event %s", factoryv1.ErrIdempotencyConflict, input.IdempotencyKey, existing.event.ID().Value())
 	}
 
-	causes, err := s.eventCauses(input.Causes)
-	if err != nil {
-		return factoryv1.Event{}, err
-	}
 	eventType, err := types.NewEventType(string(input.Type))
 	if err != nil {
 		return factoryv1.Event{}, fmt.Errorf("factory v1 event type: %w", err)
 	}
-	ev, err := s.factory.Create(eventType, s.actor, wanted, causes, s.conv, s.store, s.signer)
-	if err != nil {
-		return factoryv1.Event{}, fmt.Errorf("create factory v1 EventGraph event: %w", err)
+	const maxChainAttempts = 8
+	for attempt := 0; attempt < maxChainAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return factoryv1.Event{}, err
+		}
+		// A concurrent writer may have committed this idempotency key while a
+		// prior append raced on the global EventGraph head.
+		if attempt > 0 {
+			if existing, found, lookupErr := s.byIdempotencyKey(ctx, input.IdempotencyKey); lookupErr != nil {
+				return factoryv1.Event{}, lookupErr
+			} else if found {
+				if factoryV1ContentsEqual(existing.content, wanted) {
+					return coreFactoryV1Event(existing.event, existing.content), nil
+				}
+				return factoryv1.Event{}, fmt.Errorf("%w: key %q already names event %s", factoryv1.ErrIdempotencyConflict, input.IdempotencyKey, existing.event.ID().Value())
+			}
+		}
+		causes, causeErr := s.eventCauses(input.Causes)
+		if causeErr != nil {
+			return factoryv1.Event{}, causeErr
+		}
+		ev, createErr := s.factory.Create(eventType, s.actor, wanted, causes, s.conv, s.store, s.signer)
+		if createErr != nil {
+			return factoryv1.Event{}, fmt.Errorf("create factory v1 EventGraph event: %w", createErr)
+		}
+		appended, appendErr := s.store.Append(ev)
+		if appendErr == nil {
+			return coreFactoryV1Event(appended, wanted), nil
+		}
+		if !strings.Contains(appendErr.Error(), "chain integrity violation") || attempt == maxChainAttempts-1 {
+			return factoryv1.Event{}, fmt.Errorf("append factory v1 EventGraph event: %w", appendErr)
+		}
+		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
-	appended, err := s.store.Append(ev)
-	if err != nil {
-		return factoryv1.Event{}, fmt.Errorf("append factory v1 EventGraph event: %w", err)
-	}
-	return coreFactoryV1Event(appended, wanted), nil
+	return factoryv1.Event{}, errors.New("append factory v1 EventGraph event: exhausted chain retries")
 }
 
 func (s *FactoryV1EventGraphStore) List(ctx context.Context) ([]factoryv1.Event, error) {

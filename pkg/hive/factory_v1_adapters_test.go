@@ -2,12 +2,54 @@ package hive
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/transpara-ai/eventgraph/go/pkg/event"
+	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
 	"github.com/transpara-ai/hive/pkg/hive/factoryv1"
 	workpkg "github.com/transpara-ai/work"
 )
+
+type factoryV1FailOnceChainStore struct {
+	store.Store
+	failed bool
+}
+
+func (s *factoryV1FailOnceChainStore) Append(ev event.Event) (event.Event, error) {
+	if !s.failed {
+		s.failed = true
+		return event.Event{}, errors.New("chain integrity violation: deterministic concurrent-head test")
+	}
+	return s.Store.Append(ev)
+}
+
+func TestFactoryV1EventGraphAppendRetriesConcurrentHeadRace(t *testing.T) {
+	ctx := context.Background()
+	base, factory, signer, actor, conversation := newDecisionTestStore(t)
+	wrapped := &factoryV1FailOnceChainStore{Store: base}
+	graph, err := NewFactoryV1EventGraphStore(wrapped, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := factoryv1.NewEvent{
+		Type: factoryv1.EventIssueAmendmentRecorded, OrderID: "FO-CONCURRENT-HEAD",
+		IdempotencyKey: "concurrent-head-retry", OccurredAt: factoryv1.WallClock{}.Now(),
+		Payload: map[string]string{"result": "converged"},
+	}
+	first, err := graph.Append(ctx, input)
+	if err != nil {
+		t.Fatalf("append after head race: %v", err)
+	}
+	second, err := graph.Append(ctx, input)
+	if err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if first.ID == "" || second.ID != first.ID {
+		t.Fatalf("retry/replay identities = (%q,%q)", first.ID, second.ID)
+	}
+}
 
 func TestFactoryV1DurableAdaptersRestartIdempotency(t *testing.T) {
 	ctx := context.Background()
