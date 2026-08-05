@@ -58,6 +58,17 @@ type SourceReference struct {
 	SHA256   string `json:"sha256"`
 }
 
+// ResolvedIssue is an explicit GitHub issue that the FactoryOrder's output PR
+// is intended to resolve. It is deliberately separate from SourceReference:
+// cited issues provide context, while only resolved issues receive GitHub
+// closing declarations.
+type ResolvedIssue struct {
+	Repository string `json:"repository"`
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	URI        string `json:"uri"`
+}
+
 type AuthorityScope struct {
 	ActorID            string   `json:"actor_id"`
 	AllowedActions     []string `json:"allowed_actions"`
@@ -79,6 +90,7 @@ type FactoryOrder struct {
 	Channel            Channel               `json:"channel"`
 	TargetRepository   string                `json:"target_repository"`
 	SourceReferences   []SourceReference     `json:"source_references"`
+	ResolvedIssues     []ResolvedIssue       `json:"resolved_issues,omitempty"`
 	Requirements       []Requirement         `json:"requirements"`
 	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
 	TestPlan           []string              `json:"test_plan"`
@@ -143,6 +155,7 @@ func ValidateFactoryOrder(order FactoryOrder) error {
 			fields = append(fields, prefix+" sha256 must be 64 lowercase hexadecimal characters")
 		}
 	}
+	validateResolvedIssues(order.ResolvedIssues, &fields)
 	if len(order.Requirements) == 0 {
 		fields = append(fields, "at least one requirement is required")
 	}
@@ -176,6 +189,31 @@ func ValidateFactoryOrder(order FactoryOrder) error {
 		return &ValidationError{Fields: fields}
 	}
 	return nil
+}
+
+func validateResolvedIssues(issues []ResolvedIssue, fields *[]string) {
+	seen := make(map[string]struct{}, len(issues))
+	for i, issue := range issues {
+		prefix := fmt.Sprintf("resolved_issues[%d]", i)
+		if !repoPattern.MatchString(issue.Repository) {
+			*fields = append(*fields, prefix+" repository must be owner/repository")
+		}
+		if issue.Number <= 0 {
+			*fields = append(*fields, prefix+" number must be positive")
+		}
+		if strings.TrimSpace(issue.Title) == "" || strings.ContainsAny(issue.Title, "\r\n") {
+			*fields = append(*fields, prefix+" title must be a non-empty single line")
+		}
+		expectedURI := fmt.Sprintf("https://github.com/%s/issues/%d", issue.Repository, issue.Number)
+		if issue.URI != expectedURI {
+			*fields = append(*fields, prefix+" uri must be the canonical full GitHub issue URL")
+		}
+		key := fmt.Sprintf("%s#%d", strings.ToLower(issue.Repository), issue.Number)
+		if _, exists := seen[key]; exists {
+			*fields = append(*fields, "resolved issues must be unique by repository and number")
+		}
+		seen[key] = struct{}{}
+	}
 }
 
 func validateUniqueRequirements(requirements []Requirement, fields *[]string) {
@@ -262,6 +300,13 @@ func renderFactoryOrder(order FactoryOrder) string {
 	line("## Immutable source references")
 	for _, source := range order.SourceReferences {
 		line(fmt.Sprintf("- %s | %s | %s | sha256:%s", source.Kind, source.Identity, source.URI, source.SHA256))
+	}
+	if len(order.ResolvedIssues) > 0 {
+		line("")
+		line("## Resolved GitHub issues")
+		for _, issue := range order.ResolvedIssues {
+			line(fmt.Sprintf("- %s#%d | %s | %s", issue.Repository, issue.Number, issue.URI, issue.Title))
+		}
 	}
 	renderRequirements(&b, order.Requirements)
 	renderAcceptance(&b, order.AcceptanceCriteria)

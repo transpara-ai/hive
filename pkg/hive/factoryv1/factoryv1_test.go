@@ -41,6 +41,57 @@ func testOrder(id string, channel Channel) FactoryOrder {
 	}
 }
 
+func TestFactoryOrderResolvedIssuesValidationAndCanonicalization(t *testing.T) {
+	t.Parallel()
+	order := testOrder("FO-RESOLVED-ISSUES", ChannelCompletedOrder)
+	withoutIssues, err := Canonicalize(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order.ResolvedIssues = []ResolvedIssue{
+		{Repository: "transpara-ai/docs", Number: 286, Title: "First issue", URI: "https://github.com/transpara-ai/docs/issues/286"},
+		{Repository: "transpara-ai/hive", Number: 297, Title: "Second issue", URI: "https://github.com/transpara-ai/hive/issues/297"},
+	}
+	withIssues, err := Canonicalize(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Resolved GitHub issues",
+		"- transpara-ai/docs#286 | https://github.com/transpara-ai/docs/issues/286 | First issue",
+		"- transpara-ai/hive#297 | https://github.com/transpara-ai/hive/issues/297 | Second issue",
+	} {
+		if !strings.Contains(withIssues.Markdown, want) {
+			t.Fatalf("canonical markdown missing %q:\n%s", want, withIssues.Markdown)
+		}
+	}
+	if strings.Contains(withoutIssues.Markdown, "Resolved GitHub issues") {
+		t.Fatalf("empty resolved issues changed legacy canonical markdown:\n%s", withoutIssues.Markdown)
+	}
+
+	invalid := []ResolvedIssue{
+		{Repository: "docs", Number: 286, Title: "bad repository", URI: "https://github.com/docs/issues/286"},
+		{Repository: "transpara-ai/docs", Number: 0, Title: "bad number", URI: "https://github.com/transpara-ai/docs/issues/0"},
+		{Repository: "transpara-ai/docs", Number: 286, Title: "", URI: "https://github.com/transpara-ai/docs/issues/286"},
+		{Repository: "transpara-ai/docs", Number: 286, Title: "bad URI", URI: "https://example.com/transpara-ai/docs/issues/286"},
+	}
+	for i, issue := range invalid {
+		candidate := testOrder("FO-INVALID-RESOLVED", ChannelCompletedOrder)
+		candidate.ResolvedIssues = []ResolvedIssue{issue}
+		if err := ValidateFactoryOrder(candidate); err == nil {
+			t.Fatalf("invalid resolved issue %d accepted: %+v", i, issue)
+		}
+	}
+	duplicate := testOrder("FO-DUPLICATE-RESOLVED", ChannelCompletedOrder)
+	duplicate.ResolvedIssues = []ResolvedIssue{
+		{Repository: "transpara-ai/docs", Number: 286, Title: "first", URI: "https://github.com/transpara-ai/docs/issues/286"},
+		{Repository: "Transpara-ai/docs", Number: 286, Title: "case-variant duplicate", URI: "https://github.com/Transpara-ai/docs/issues/286"},
+	}
+	if err := ValidateFactoryOrder(duplicate); err == nil {
+		t.Fatal("duplicate resolved issue accepted")
+	}
+}
+
 func testProvider() ProviderBinding {
 	return ProviderBinding{
 		ProviderID: "claude-cli", Family: "Claude/Anthropic", ExecutableRealpath: "/usr/bin/claude",
@@ -104,6 +155,16 @@ func TestFactoryV1AllChannelsCanonicalize(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(issue.Document.Order.ResolvedIssues) != 1 {
+		t.Fatalf("issue scan resolved issues = %+v, want one", issue.Document.Order.ResolvedIssues)
+	}
+	resolved := issue.Document.Order.ResolvedIssues[0]
+	if resolved.Repository != "transpara-ai/hive" || resolved.Number != 101 || resolved.Title != "Bounded issue" || resolved.URI != "https://github.com/transpara-ai/hive/issues/101" {
+		t.Fatalf("issue scan resolved issue = %+v", resolved)
+	}
+	if !strings.Contains(issue.Document.Markdown, "- transpara-ai/hive#101 | https://github.com/transpara-ai/hive/issues/101 | Bounded issue") {
+		t.Fatalf("issue scan canonical markdown lacks resolved issue:\n%s", issue.Document.Markdown)
 	}
 	ideaOrder := testOrder("FO-IDEA", ChannelHumanIdea)
 	if _, err := intake.RecordIdea(ctx, IdeaInput{IdeaID: "idea-1", Note: "initial", Candidate: ideaOrder, ActorID: "human-actor-1"}); err != nil {

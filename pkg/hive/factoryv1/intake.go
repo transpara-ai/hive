@@ -319,6 +319,12 @@ func (i *Intake) NormalizeIssue(ctx context.Context, admission IssueAdmission) (
 	order.Channel = ChannelIssueScan
 	order.TargetRepository = admission.Repository
 	order.SourceReferences = []SourceReference{{Kind: "github_issue", Identity: sourceIdentity, URI: "https://github.com/" + admission.Repository + "/issues/" + fmt.Sprint(admission.IssueNumber), SHA256: sourceSHA}}
+	order.ResolvedIssues = []ResolvedIssue{{
+		Repository: admission.Repository,
+		Number:     admission.IssueNumber,
+		Title:      strings.TrimSpace(admission.Title),
+		URI:        "https://github.com/" + admission.Repository + "/issues/" + fmt.Sprint(admission.IssueNumber),
+	}}
 	return i.accept(ctx, order, AcceptOptions{SourceIdentity: sourceIdentity, SourceEventIDs: []string{admission.LaunchEventID}, ActorID: admission.ActorID})
 }
 

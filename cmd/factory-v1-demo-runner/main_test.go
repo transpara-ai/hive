@@ -202,6 +202,16 @@ func TestPRFlowStopsAtExactHeadHumanReview(t *testing.T) {
 	}
 
 	writeRequest := testRunRequest(t, repositoryRoot, factoryv1.StageWriteCode)
+	writeRequest.Order.ResolvedIssues = []factoryv1.ResolvedIssue{{
+		Repository: "transpara-ai/demo", Number: 42, Title: "Bounded demo issue", URI: "https://github.com/transpara-ai/demo/issues/42",
+	}}
+	document, err := factoryv1.Canonicalize(writeRequest.Order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRequest.OrderMarkdown = document.Markdown
+	writeRequest.DocumentSHA256 = document.SHA256
+	writeRequest.AttemptID, _ = factoryv1.AttemptID(document.SHA256, writeRequest.Stage, writeRequest.Ordinal)
 	writeResult, err := runner.execute(ctx, writeRequest)
 	if err != nil || writeResult.Status != factoryv1.RunnerPassed {
 		t.Fatalf("write result=(%+v,%v)", writeResult, err)
@@ -214,6 +224,22 @@ func TestPRFlowStopsAtExactHeadHumanReview(t *testing.T) {
 	draftResult, err := runner.execute(ctx, draftRequest)
 	if err != nil || draftResult.Status != factoryv1.RunnerPassed || draftResult.Evidence[0].PR == nil || !draftResult.Evidence[0].PR.Draft {
 		t.Fatalf("draft result=(%+v,%v)", draftResult, err)
+	}
+	expectedBody := renderPullRequestBody(draftRequest)
+	if commands.pr.Body != expectedBody {
+		t.Fatalf("created PR body differs:\n--- got ---\n%s\n--- want ---\n%s", commands.pr.Body, expectedBody)
+	}
+	draftReconcile := draftRequest
+	draftReconcile.Operation = "reconcile"
+	commands.pr.Body = "Automated output with correlation removed."
+	missingCorrelation, err := runner.reconcile(ctx, draftReconcile)
+	if err != nil || !missingCorrelation.Conflict {
+		t.Fatalf("missing issue correlation reconcile=(%+v,%v), want conflict", missingCorrelation, err)
+	}
+	commands.pr.Body = expectedBody
+	validCorrelation, err := runner.reconcile(ctx, draftReconcile)
+	if err != nil || !validCorrelation.EffectExists || validCorrelation.Conflict {
+		t.Fatalf("restored issue correlation reconcile=(%+v,%v)", validCorrelation, err)
 	}
 
 	iarPrior := append(append([]factoryv1.Evidence{}, writeResult.Evidence...), draftResult.Evidence...)
@@ -286,6 +312,55 @@ type githubFlowCommander struct {
 	mergeCalls int
 }
 
+func TestRenderPullRequestBodyCorrelatesEveryResolvedIssueOnly(t *testing.T) {
+	t.Parallel()
+	request := testRunRequest(t, t.TempDir(), factoryv1.StageCreateDraftPR)
+	legacyBody := renderPullRequestBody(request)
+	wantLegacyBody := "Automated non-production Factory v1 demonstration output.\n\nOrder: `" + request.Order.DocID + "@" + request.Order.Version + "`\nDocument SHA-256: `" + request.DocumentSHA256 + "`\n\nThis PR remains at the Human Review boundary and must not be auto-merged."
+	if legacyBody != wantLegacyBody {
+		t.Fatalf("FactoryOrder without resolved issues changed its PR body:\n--- got ---\n%s\n--- want ---\n%s", legacyBody, wantLegacyBody)
+	}
+	request.Order.SourceReferences = append(request.Order.SourceReferences, factoryv1.SourceReference{
+		Kind: "github_issue", Identity: "github:transpara-ai/docs#999", URI: "https://github.com/transpara-ai/docs/issues/999", SHA256: strings.Repeat("c", 64),
+	})
+	request.Order.ResolvedIssues = []factoryv1.ResolvedIssue{
+		{Repository: "transpara-ai/docs", Number: 286, Title: "First issue", URI: "https://github.com/transpara-ai/docs/issues/286"},
+		{Repository: "transpara-ai/hive", Number: 297, Title: "Second issue", URI: "https://github.com/transpara-ai/hive/issues/297"},
+	}
+	body := renderPullRequestBody(request)
+	for _, want := range []string{
+		"## Issues resolved",
+		"[transpara-ai/docs#286](https://github.com/transpara-ai/docs/issues/286) — First issue",
+		"Closes https://github.com/transpara-ai/docs/issues/286",
+		"[transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — Second issue",
+		"Closes https://github.com/transpara-ai/hive/issues/297",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Closes https://github.com/transpara-ai/docs/issues/999") {
+		t.Fatalf("source-only issue received a false closing declaration:\n%s", body)
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, body); err != nil {
+		t.Fatalf("valid PR body rejected: %v", err)
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, strings.Replace(body, "Closes https://github.com/transpara-ai/hive/issues/297", "", 1)); err == nil {
+		t.Fatal("missing closing declaration accepted")
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, strings.Replace(body, "- [transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — Second issue", "", 1)); err == nil {
+		t.Fatal("missing visible issue link accepted")
+	}
+	if err := validatePullRequestIssueCorrelation(request.Order, body+"\nFixes https://github.com/transpara-ai/docs/issues/999"); err == nil {
+		t.Fatal("undeclared source-only closing declaration accepted")
+	}
+	withoutResolvedIssues := request.Order
+	withoutResolvedIssues.ResolvedIssues = nil
+	if err := validatePullRequestIssueCorrelation(withoutResolvedIssues, "Closes #999"); err == nil {
+		t.Fatal("closing declaration without resolved-issue metadata accepted")
+	}
+}
+
 type requiredPolicyCommander struct {
 	policy string
 	rollup string
@@ -326,7 +401,13 @@ func (c *githubFlowCommander) Run(ctx context.Context, dir, executable string, a
 			raw, _ := json.Marshal(views)
 			return commandResult{Stdout: string(raw)}, nil
 		case "create":
-			c.pr = pullRequestView{Number: 101, URL: "https://github.com/" + c.identity + "/pull/101", HeadRefOID: c.head, HeadRefName: c.branch, BaseRefName: "main", IsDraft: true, State: "OPEN"}
+			body := ""
+			for i := 2; i+1 < len(args); i++ {
+				if args[i] == "--body" {
+					body = args[i+1]
+				}
+			}
+			c.pr = pullRequestView{Number: 101, URL: "https://github.com/" + c.identity + "/pull/101", HeadRefOID: c.head, HeadRefName: c.branch, BaseRefName: "main", IsDraft: true, State: "OPEN", Body: body}
 			return commandResult{Stdout: c.pr.URL + "\n"}, nil
 		case "checks":
 			return commandResult{Stdout: `[{"name":"verify","state":"SUCCESS","bucket":"pass","link":"https://checks.invalid/verify"}]`}, nil
