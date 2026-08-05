@@ -367,6 +367,32 @@ func TestFactoryV1TLCOrderAndEvidence(t *testing.T) {
 	}
 }
 
+func TestStandingApprovalAcceptsGovernedGitBlobIdentity(t *testing.T) {
+	document, err := Canonicalize(testOrder("FO-GIT-BLOB-APPROVAL", ChannelCompletedOrder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := StandingApprovalBinding{
+		ActorID: "human-actor-1", CredentialKeyID: "operator-key-1",
+		SourceSHA256: strings.Repeat("a", 64), FactoryOrderBlobSHA: strings.Repeat("b", 40),
+		ApprovalSentence: "Human approved the exact governed source blob.", ApprovalSourceEventID: "human-source-event-1",
+	}
+	receipt, err := binding.Bind(document, time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("bind 40-hex Git blob identity: %v", err)
+	}
+	if receipt.FactoryOrderBlobSHA != strings.Repeat("b", 40) {
+		t.Fatalf("FactoryOrder blob identity = %q", receipt.FactoryOrderBlobSHA)
+	}
+	if err := ValidateApprovalReceipt(document, receipt); err != nil {
+		t.Fatalf("validate 40-hex Git blob identity: %v", err)
+	}
+	receipt.FactoryOrderBlobSHA = strings.Repeat("b", 39)
+	if err := ValidateApprovalReceipt(document, receipt); err == nil {
+		t.Fatal("39-hex FactoryOrder blob identity was accepted")
+	}
+}
+
 type interventionRunner struct {
 	provider ProviderBinding
 	mu       sync.Mutex
