@@ -286,6 +286,23 @@ type githubFlowCommander struct {
 	mergeCalls int
 }
 
+type requiredPolicyCommander struct {
+	policy string
+	rollup string
+	calls  int
+}
+
+func (c *requiredPolicyCommander) Run(_ context.Context, _ string, _ string, args ...string) (commandResult, error) {
+	c.calls++
+	if len(args) >= 2 && args[0] == "api" {
+		return commandResult{Stdout: c.policy}, nil
+	}
+	if len(args) >= 2 && args[0] == "pr" && args[1] == "view" {
+		return commandResult{Stdout: c.rollup}, nil
+	}
+	return commandResult{}, errors.New("unexpected check query")
+}
+
 func (c *githubFlowCommander) Run(ctx context.Context, dir, executable string, args ...string) (commandResult, error) {
 	if executable == c.git && len(args) >= 3 && args[0] == "remote" && args[1] == "get-url" {
 		return commandResult{Stdout: "https://github.com/" + c.identity + ".git\n"}, nil
@@ -295,6 +312,9 @@ func (c *githubFlowCommander) Run(ctx context.Context, dir, executable string, a
 	}
 	if len(args) >= 2 && args[0] == "repo" && args[1] == "view" {
 		return commandResult{Stdout: c.identity + "\n"}, nil
+	}
+	if len(args) >= 2 && args[0] == "api" {
+		return commandResult{Stdout: `{"contexts":["verify"]}`}, nil
 	}
 	if len(args) >= 2 && args[0] == "pr" {
 		switch args[1] {
@@ -310,6 +330,8 @@ func (c *githubFlowCommander) Run(ctx context.Context, dir, executable string, a
 			return commandResult{Stdout: c.pr.URL + "\n"}, nil
 		case "checks":
 			return commandResult{Stdout: `[{"name":"verify","state":"SUCCESS","bucket":"pass","link":"https://checks.invalid/verify"}]`}, nil
+		case "view":
+			return commandResult{Stdout: `{"statusCheckRollup":[{"name":"verify","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://checks.invalid/verify"}]}`}, nil
 		case "ready":
 			c.readyCalls++
 			c.pr.IsDraft = false
@@ -407,6 +429,88 @@ func privateTempDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestDesignContractPinsDeterministicEffectAuthorityValidationAndGates(t *testing.T) {
+	repositoryRoot := t.TempDir()
+	request := testRunRequest(t, repositoryRoot, factoryv1.StageDesign)
+	request.AttemptID = "volatile-attempt-marker"
+	request.PriorEvidence = []factoryv1.Evidence{{Reference: "volatile-event-marker", Metadata: map[string]string{"work_artifact_id": "volatile-work-marker"}}}
+	runner := &demoRunner{config: testConfig(t, repositoryRoot)}
+	design := runner.renderDesign(request)
+
+	for _, want := range []string{
+		"- Intake channel: `completed_factory_order`",
+		"- Deterministic branch: `" + branchName(request) + "`",
+		"- Bounded output: `" + evidenceRelativePath(request) + "`",
+		"- Exact output SHA-256: `" + factoryv1.HashText(renderDemoEvidence(request)) + "`",
+		"- Human actor: `human-actor`",
+		"- Source `test`: identity `source:test`, URI `test://source`, SHA-256 `" + strings.Repeat("a", 64) + "`",
+		"- Non-production only: `true`",
+		"- Allowed action: `repo.pull_request.mark_ready`",
+		"- Authorized target: `transpara-ai/demo`",
+		"- Bounded budget: attempts `30`, tokens `1000`, cost micros `1000`",
+		"- `AC1` (`low`): Only the evidence file changes.",
+		"- Named validation argv: `[\"git\",\"diff\",\"--check\"]`",
+		"- GitHub check policy: read the exact non-empty required context list",
+		"- Diff policy: the worktree and committed diff may contain only the exact bounded output path",
+		"CFADA consumes an independent-family artifact binding this exact design Git blob with zero blockers.",
+		"CFAR consumes an independent-family artifact binding that same exact PR head with zero blockers.",
+		"Human Review is terminal: the runner will not merge, deploy, publish, or mutate the protected/default branch.",
+		"Operation #86 path/state/evidence",
+		"~~~~markdown\n" + renderDemoEvidence(request) + "~~~~",
+	} {
+		if !strings.Contains(design, want) {
+			t.Fatalf("design lacks exact contract fragment %q\n%s", want, design)
+		}
+	}
+	for _, forbidden := range []string{"attempt_id", "event_id", "occurred_at", "elapsed_ms", "work_artifact_id", "volatile-attempt-marker", "volatile-event-marker", "volatile-work-marker"} {
+		if strings.Contains(design, forbidden) || strings.Contains(renderDemoEvidence(request), forbidden) {
+			t.Fatalf("deterministic design/output contains volatile field %q", forbidden)
+		}
+	}
+	if strings.HasPrefix(evidenceRelativePath(request), "docs/") {
+		t.Fatalf("evidence path %q is inside a repository publication root", evidenceRelativePath(request))
+	}
+}
+
+func TestRequiredChecksRequireEveryConfiguredContext(t *testing.T) {
+	commands := &requiredPolicyCommander{
+		policy: `{"contexts":["verify","cross-family-adversarial-review"]}`,
+		rollup: `{"statusCheckRollup":[{"name":"verify","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://checks.invalid/verify"}]}`,
+	}
+	runner := &demoRunner{config: config{GHExecutable: "gh"}, commands: commands}
+	checks, passing, err := runner.requiredChecks(context.Background(), repositoryConfig{Root: t.TempDir(), Identity: "transpara-ai/docs", BaseBranch: "main"}, 283)
+	if err != nil {
+		t.Fatalf("requiredChecks: %v", err)
+	}
+	if passing || len(checks) != 2 || checks[0].Bucket != "pass" || checks[1].Name != "cross-family-adversarial-review" || checks[1].Bucket != "pending" {
+		t.Fatalf("checks=%+v passing=%v, want missing required context to fail closed", checks, passing)
+	}
+	if commands.calls != 2 {
+		t.Fatalf("gh calls=%d, want policy and rollup queries", commands.calls)
+	}
+}
+
+func TestRequiredChecksPassExactConfiguredContexts(t *testing.T) {
+	commands := &requiredPolicyCommander{
+		policy: `{"contexts":["verify","cross-family-adversarial-review"]}`,
+		rollup: `{"statusCheckRollup":[{"name":"verify","status":"COMPLETED","conclusion":"SUCCESS"},{"context":"cross-family-adversarial-review","state":"SUCCESS"}]}`,
+	}
+	runner := &demoRunner{config: config{GHExecutable: "gh"}, commands: commands}
+	checks, passing, err := runner.requiredChecks(context.Background(), repositoryConfig{Root: t.TempDir(), Identity: "transpara-ai/docs", BaseBranch: "main"}, 283)
+	if err != nil || !passing || len(checks) != 2 {
+		t.Fatalf("checks=%+v passing=%v err=%v, want exact required contexts passing", checks, passing, err)
+	}
+}
+
+func TestRequiredChecksRejectEmptyPolicy(t *testing.T) {
+	commands := &requiredPolicyCommander{policy: `{"contexts":[]}`}
+	runner := &demoRunner{config: config{GHExecutable: "gh"}, commands: commands}
+	checks, passing, err := runner.requiredChecks(context.Background(), repositoryConfig{Root: t.TempDir(), Identity: "transpara-ai/docs", BaseBranch: "main"}, 283)
+	if err == nil || passing || len(checks) != 0 {
+		t.Fatalf("checks=%+v passing=%v err=%v, want empty policy rejected", checks, passing, err)
+	}
 }
 
 func runGitTest(t *testing.T, dir, executable string, args ...string) string {
