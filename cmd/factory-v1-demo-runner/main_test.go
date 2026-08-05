@@ -324,15 +324,15 @@ func TestRenderPullRequestBodyCorrelatesEveryResolvedIssueOnly(t *testing.T) {
 		Kind: "github_issue", Identity: "github:transpara-ai/docs#999", URI: "https://github.com/transpara-ai/docs/issues/999", SHA256: strings.Repeat("c", 64),
 	})
 	request.Order.ResolvedIssues = []factoryv1.ResolvedIssue{
-		{Repository: "transpara-ai/docs", Number: 286, Title: "First issue", URI: "https://github.com/transpara-ai/docs/issues/286"},
+		{Repository: "transpara-ai/docs", Number: 286, Title: "Fixes #123 on <Windows>", URI: "https://github.com/transpara-ai/docs/issues/286"},
 		{Repository: "transpara-ai/hive", Number: 297, Title: "Second issue", URI: "https://github.com/transpara-ai/hive/issues/297"},
 	}
 	body := renderPullRequestBody(request)
 	for _, want := range []string{
 		"## Issues resolved",
-		"[transpara-ai/docs#286](https://github.com/transpara-ai/docs/issues/286) — First issue",
+		"[transpara-ai/docs#286](https://github.com/transpara-ai/docs/issues/286) — <code>Fixes #123 on &lt;Windows&gt;</code>",
 		"Closes https://github.com/transpara-ai/docs/issues/286",
-		"[transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — Second issue",
+		"[transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — <code>Second issue</code>",
 		"Closes https://github.com/transpara-ai/hive/issues/297",
 	} {
 		if !strings.Contains(body, want) {
@@ -345,10 +345,13 @@ func TestRenderPullRequestBodyCorrelatesEveryResolvedIssueOnly(t *testing.T) {
 	if err := validatePullRequestIssueCorrelation(request.Order, body); err != nil {
 		t.Fatalf("valid PR body rejected: %v", err)
 	}
+	if declarations := githubClosingDeclarations(body); len(declarations) != len(request.Order.ResolvedIssues) {
+		t.Fatalf("closing declarations = %v, want only %d declared issues", declarations, len(request.Order.ResolvedIssues))
+	}
 	if err := validatePullRequestIssueCorrelation(request.Order, strings.Replace(body, "Closes https://github.com/transpara-ai/hive/issues/297", "", 1)); err == nil {
 		t.Fatal("missing closing declaration accepted")
 	}
-	if err := validatePullRequestIssueCorrelation(request.Order, strings.Replace(body, "- [transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — Second issue", "", 1)); err == nil {
+	if err := validatePullRequestIssueCorrelation(request.Order, strings.Replace(body, "- [transpara-ai/hive#297](https://github.com/transpara-ai/hive/issues/297) — <code>Second issue</code>", "", 1)); err == nil {
 		t.Fatal("missing visible issue link accepted")
 	}
 	if err := validatePullRequestIssueCorrelation(request.Order, body+"\nFixes https://github.com/transpara-ai/docs/issues/999"); err == nil {

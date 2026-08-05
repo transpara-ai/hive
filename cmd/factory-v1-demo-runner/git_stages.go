@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -604,7 +605,7 @@ func renderPullRequestBody(request factoryv1.RunRequest) string {
 	if len(request.Order.ResolvedIssues) != 0 {
 		body.WriteString("\n\n## Issues resolved\n\n")
 		for _, issue := range request.Order.ResolvedIssues {
-			fmt.Fprintf(&body, "- [%s#%d](%s) — %s\n", issue.Repository, issue.Number, issue.URI, oneLine(issue.Title))
+			fmt.Fprintf(&body, "- [%s#%d](%s) — %s\n", issue.Repository, issue.Number, issue.URI, renderResolvedIssueTitle(issue.Title))
 		}
 		body.WriteString("\n")
 		for _, issue := range request.Order.ResolvedIssues {
@@ -638,7 +639,7 @@ func validatePullRequestIssueCorrelation(order factoryv1.FactoryOrder, body stri
 		return errors.New("PR body lacks the explicit Issues resolved section")
 	}
 	for _, issue := range order.ResolvedIssues {
-		linkLine := fmt.Sprintf("- [%s#%d](%s) — %s", issue.Repository, issue.Number, issue.URI, oneLine(issue.Title))
+		linkLine := fmt.Sprintf("- [%s#%d](%s) — %s", issue.Repository, issue.Number, issue.URI, renderResolvedIssueTitle(issue.Title))
 		if _, ok := lines[linkLine]; !ok {
 			return fmt.Errorf("PR body lacks the visible resolved-issue link for %s#%d", issue.Repository, issue.Number)
 		}
@@ -647,6 +648,10 @@ func validatePullRequestIssueCorrelation(order factoryv1.FactoryOrder, body stri
 		}
 	}
 	return nil
+}
+
+func renderResolvedIssueTitle(title string) string {
+	return "<code>" + html.EscapeString(oneLine(title)) + "</code>"
 }
 
 func githubClosingDeclarations(body string) []string {
