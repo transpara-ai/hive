@@ -302,6 +302,85 @@ func TestFactoryV1WorkEnumerationRejectsMalformedDuplicateMetadata(t *testing.T)
 	}
 }
 
+func TestFactoryV1WorkEnumerationRejectsDivergentDuplicateMetadata(t *testing.T) {
+	workStore, actor, conversation, link, originalBody := newFactoryV1DuplicateMetadataFixture(t)
+	var divergent factoryV1WorkMetadata
+	if err := json.Unmarshal([]byte(originalBody), &divergent); err != nil {
+		t.Fatal(err)
+	}
+	divergent.DocumentSHA256 = factoryv1.HashText("forged-duplicate-metadata")
+	divergentBody, err := json.Marshal(divergent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := types.NewEventID(link.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workStore.tasks.AddArtifact(actor, taskID, factoryV1WorkMetadataLabel, "application/json", string(divergentBody), []types.EventID{taskID}, conversation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workStore.ListFactoryOrders(context.Background()); err == nil || !strings.Contains(err.Error(), "conflicting duplicate FactoryOrder Work artifact") {
+		t.Fatalf("divergent duplicate error = %v, want fail-closed conflict", err)
+	}
+}
+
+func TestFactoryV1WorkEnumerationAllowsIdenticalDuplicateMetadata(t *testing.T) {
+	workStore, actor, conversation, link, originalBody := newFactoryV1DuplicateMetadataFixture(t)
+	taskID, err := types.NewEventID(link.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workStore.tasks.AddArtifact(actor, taskID, factoryV1WorkMetadataLabel, "application/json", originalBody, []types.EventID{taskID}, conversation); err != nil {
+		t.Fatal(err)
+	}
+	links, err := workStore.ListFactoryOrders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 1 || links[0].OrderID != link.OrderID || links[0].DocumentSHA256 != link.DocumentSHA256 {
+		t.Fatalf("identical duplicate links = %+v, want original link %+v", links, link)
+	}
+}
+
+func newFactoryV1DuplicateMetadataFixture(t *testing.T) (*FactoryV1WorkStore, types.ActorID, types.ConversationID, factoryv1.WorkLink, string) {
+	t.Helper()
+	ctx := context.Background()
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	workpkg.RegisterWithRegistry(factory.Registry)
+	workStore, err := NewFactoryV1WorkStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := eventStore.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("bootstrap head: %v", err)
+	}
+	link, err := workStore.SeedFactoryOrder(ctx, factoryv1.WorkSeed{
+		OrderID: "FO-DUPLICATE-VALIDATION", Version: "1.0.0", DocumentSHA256: factoryv1.HashText("duplicate-validation"),
+		Markdown: "# duplicate validation\n", SourceSHA256: factoryv1.HashText("duplicate-validation-source"),
+		AcceptedEventID: head.Unwrap().ID().Value(), IdempotencyKey: "duplicate-validation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := types.NewEventID(link.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := workStore.tasks.ListArtifacts(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Label == factoryV1WorkMetadataLabel {
+			return workStore, actor, conversation, link, artifact.Body
+		}
+	}
+	t.Fatal("seeded FactoryOrder metadata artifact not found")
+	return workStore, actor, conversation, link, ""
+}
+
 func TestFactoryV1WorkEnumerationPagesBeyondLegacyCeiling(t *testing.T) {
 	ctx := context.Background()
 	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
