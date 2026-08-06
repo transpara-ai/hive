@@ -801,6 +801,52 @@ func TestFactoryV1ReplayTwiceKeepsOneOrphanIntervention(t *testing.T) {
 	}
 }
 
+func TestFactoryV1ReplayRestoresInterventionForQuarantinedOrphan(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := testClock()
+	events := NewInMemoryStore(clock)
+	work := NewInMemoryWorkStore()
+	link, err := work.SeedFactoryOrder(ctx, WorkSeed{
+		OrderID: "FO-ORPHAN-CRASH", Version: "1.0.0", DocumentSHA256: strings.Repeat("c", 64), Markdown: "# orphan after crash\n",
+		SourceSHA256: strings.Repeat("d", 64), AcceptedEventID: "missing-accepted-event", IdempotencyKey: "orphan-crash-seed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reason := "Work FactoryOrder has no matching accepted EventGraph event"
+	if err := work.QuarantineFactoryOrder(ctx, link, reason); err != nil {
+		t.Fatal(err)
+	}
+
+	intake, _ := NewIntake(events, work, clock)
+	for replay := 1; replay <= 2; replay++ {
+		if err := intake.ReplayAndRepair(ctx); err != nil {
+			t.Fatalf("replay %d: %v", replay, err)
+		}
+	}
+	listed, err := events.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	for _, event := range listed {
+		if event.Type != EventInterventionRequested {
+			continue
+		}
+		payload, err := decodeEvent[InterventionRequestedPayload](event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if payload.OrderID == link.OrderID && payload.Kind == "orphan_work" && payload.Prompt == reason {
+			requests++
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("recovered orphan intervention requests = %d, want exactly one", requests)
+	}
+}
+
 func TestFactoryV1ReplayIsolatesAcceptedTupleConflictPerOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

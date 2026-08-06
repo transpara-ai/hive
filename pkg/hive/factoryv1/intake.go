@@ -631,12 +631,24 @@ func (i *Intake) ReplayAndRepair(ctx context.Context) error {
 		return err
 	}
 	for _, link := range links {
+		accepted, acceptedExists := acceptedIDs[link.AcceptedEventID]
+		acceptedIdentityMatches := acceptedExists &&
+			accepted.Document.Order.DocID == link.OrderID && accepted.Document.Order.Version == link.Version
 		if link.Quarantined {
+			kind := "orphan_work"
+			reason := "Work FactoryOrder has no matching accepted EventGraph event"
+			var causes []string
+			if acceptedIdentityMatches {
+				kind = "accepted_tuple_conflict"
+				reason = "Work FactoryOrder conflicts with accepted EventGraph tuple"
+				causes = []string{accepted.Event.ID}
+			}
+			if _, err := i.requestIntervention(ctx, link.OrderID, StageIngestWork, kind, reason, "", causes); err != nil {
+				return err
+			}
 			continue
 		}
-		if accepted, exists := acceptedIDs[link.AcceptedEventID]; exists &&
-			accepted.Document.Order.DocID == link.OrderID && accepted.Document.Order.Version == link.Version &&
-			accepted.Document.SHA256 == link.DocumentSHA256 && !link.Quarantined {
+		if acceptedIdentityMatches && accepted.Document.SHA256 == link.DocumentSHA256 {
 			continue
 		}
 		reason := "Work FactoryOrder has no matching accepted EventGraph event"

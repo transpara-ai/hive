@@ -205,3 +205,41 @@ esac
 		}
 	}
 }
+
+func TestFactoryV1RunnerRejectsTruncatedStderrEvidence(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/jq"); err != nil {
+		t.Skip("/usr/bin/jq is required for the strict JSON runner fixture")
+	}
+	root := t.TempDir()
+	executable := filepath.Join(root, "stderr-overflow-runner.sh")
+	script := `#!/bin/sh
+set -eu
+request=$(cat)
+provider=$(printf '%s' "$request" | /usr/bin/jq -c '.provider')
+i=0
+while [ "$i" -lt 2048 ]; do
+  printf x >&2
+  i=$((i + 1))
+done
+/usr/bin/jq -nc --argjson provider "$provider" '{status:"passed",evidence:[{kind:"fixture",reference:"fixture:passed"}],usage:{tokens:1,cost_micros:1},provider:$provider}'
+`
+	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := factoryV1FileSHA256(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := ResolveFactoryV1ProviderBinding("stderr-overflow-fixture", "Fixture/Independent", executable, digest, "fixture-model-v1", "fixture-credential-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewFactoryV1ExternalRunner([]FactoryV1RunnerProvider{{Binding: binding, Timeout: 5 * time.Second}}, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Execute(context.Background(), factoryv1.RunRequest{Operation: "execute", RepositoryRoot: root, Provider: binding})
+	if err == nil || !strings.Contains(err.Error(), "stderr exceeded 1024 bytes") {
+		t.Fatalf("stderr overflow error = %v, result = %+v", err, result)
+	}
+}

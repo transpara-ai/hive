@@ -240,14 +240,18 @@ func (r *FactoryV1ExternalRunner) invoke(ctx context.Context, request factoryv1.
 	stderr := newFactoryV1BoundedBuffer(r.maxOutput)
 	command.Stdout = stdout
 	command.Stderr = stderr
-	if err := command.Run(); err != nil {
-		if errors.Is(callContext.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("factory v1 provider %q timed out after %s", provider.Binding.ProviderID, provider.Timeout)
-		}
-		return fmt.Errorf("factory v1 provider %q failed (%s): %w", provider.Binding.ProviderID, stderr.sha256(), err)
+	runErr := command.Run()
+	if errors.Is(callContext.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("factory v1 provider %q timed out after %s", provider.Binding.ProviderID, provider.Timeout)
 	}
 	if stdout.exceeded {
 		return fmt.Errorf("factory v1 provider %q stdout exceeded %d bytes", provider.Binding.ProviderID, r.maxOutput)
+	}
+	if stderr.exceeded {
+		return fmt.Errorf("factory v1 provider %q stderr exceeded %d bytes", provider.Binding.ProviderID, r.maxOutput)
+	}
+	if runErr != nil {
+		return fmt.Errorf("factory v1 provider %q failed (%s): %w", provider.Binding.ProviderID, stderr.sha256(), runErr)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	decoder.DisallowUnknownFields()
@@ -303,7 +307,7 @@ func factoryV1FileSHA256(path string) (string, error) {
 }
 
 type factoryV1BoundedBuffer struct {
-	bytes.Buffer
+	buffer   bytes.Buffer
 	limit    int
 	exceeded bool
 }
@@ -314,7 +318,7 @@ func newFactoryV1BoundedBuffer(limit int) *factoryV1BoundedBuffer {
 
 func (b *factoryV1BoundedBuffer) Write(data []byte) (int, error) {
 	original := len(data)
-	remaining := b.limit - b.Len()
+	remaining := b.limit - b.buffer.Len()
 	if remaining <= 0 {
 		b.exceeded = true
 		return original, nil
@@ -323,8 +327,12 @@ func (b *factoryV1BoundedBuffer) Write(data []byte) (int, error) {
 		b.exceeded = true
 		data = data[:remaining]
 	}
-	_, _ = b.Buffer.Write(data)
+	_, _ = b.buffer.Write(data)
 	return original, nil
+}
+
+func (b *factoryV1BoundedBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
 }
 
 func (b *factoryV1BoundedBuffer) sha256() string {
