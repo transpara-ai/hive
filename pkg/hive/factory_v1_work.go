@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -17,6 +18,7 @@ import (
 const (
 	factoryV1WorkMetadataLabel   = "factory_v1_order"
 	factoryV1WorkQuarantineLabel = "factory_v1_quarantine"
+	factoryV1WorkPageSize        = 256
 )
 
 type factoryV1WorkMetadata struct {
@@ -125,47 +127,103 @@ func (s *FactoryV1WorkStore) ListFactoryOrders(ctx context.Context) ([]factoryv1
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	tasks, err := s.tasks.List(10000)
-	if err != nil {
-		return nil, err
+	type artifactRecord struct {
+		id    string
+		label string
+		body  string
+	}
+	artifactsByTask := make(map[types.EventID][]artifactRecord)
+	if err := s.forEachWorkEvent(ctx, work.EventTypeTaskArtifact, func(item event.Event) error {
+		content, ok := item.Content().(work.TaskArtifactContent)
+		if !ok {
+			return nil
+		}
+		artifactsByTask[content.TaskID] = append(artifactsByTask[content.TaskID], artifactRecord{
+			id: item.ID().Value(), label: content.Label, body: content.Body,
+		})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("list Work artifacts: %w", err)
 	}
 	links := make([]factoryv1.WorkLink, 0)
-	for _, task := range tasks {
-		artifacts, err := s.tasks.ListArtifacts(task.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list Work artifacts for %s: %w", task.ID.Value(), err)
+	if err := s.forEachWorkEvent(ctx, work.EventTypeTaskCreated, func(item event.Event) error {
+		if _, ok := item.Content().(work.TaskCreatedContent); !ok {
+			return nil
 		}
+		taskID := item.ID()
+		artifacts := artifactsByTask[taskID]
 		var metadata *factoryV1WorkMetadata
 		var artifactID string
 		quarantined := false
 		for _, artifact := range artifacts {
-			switch artifact.Label {
+			switch artifact.label {
 			case factoryV1WorkMetadataLabel:
 				var candidate factoryV1WorkMetadata
-				if err := json.Unmarshal([]byte(artifact.Body), &candidate); err != nil {
-					return nil, fmt.Errorf("decode FactoryOrder Work artifact %s: %w", artifact.ID.Value(), err)
+				if err := json.Unmarshal([]byte(artifact.body), &candidate); err != nil {
+					return fmt.Errorf("decode FactoryOrder Work artifact %s: %w", artifact.id, err)
 				}
 				if candidate.SchemaVersion != factoryv1.SchemaVersion {
-					return nil, fmt.Errorf("unsupported FactoryOrder Work artifact schema %q", candidate.SchemaVersion)
+					return fmt.Errorf("unsupported FactoryOrder Work artifact schema %q", candidate.SchemaVersion)
+				}
+				if metadata != nil {
+					if !reflect.DeepEqual(*metadata, candidate) {
+						return fmt.Errorf("conflicting duplicate FactoryOrder Work artifact %s", artifact.id)
+					}
+					continue
 				}
 				copy := candidate
 				metadata = &copy
-				artifactID = artifact.ID.Value()
+				artifactID = artifact.id
 			case factoryV1WorkQuarantineLabel:
 				quarantined = true
 			}
 		}
 		if metadata == nil {
-			continue
+			return nil
 		}
 		links = append(links, factoryv1.WorkLink{
-			TaskID: task.ID.Value(), ArtifactID: artifactID, OrderID: metadata.OrderID,
+			TaskID: taskID.Value(), ArtifactID: artifactID, OrderID: metadata.OrderID,
 			Version: metadata.Version, DocumentSHA256: metadata.DocumentSHA256,
 			AcceptedEventID: metadata.AcceptedEventID, Quarantined: quarantined,
 			Metadata: cloneFactoryV1StringMap(metadata.Metadata),
 		})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("list work.task.created events: %w", err)
 	}
 	return links, nil
+}
+
+func (s *FactoryV1WorkStore) forEachWorkEvent(ctx context.Context, eventType types.EventType, visit func(event.Event) error) error {
+	cursor := types.None[types.Cursor]()
+	seenCursors := make(map[string]struct{})
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		page, err := s.store.ByType(eventType, factoryV1WorkPageSize, cursor)
+		if err != nil {
+			return err
+		}
+		for _, item := range page.Items() {
+			if err := visit(item); err != nil {
+				return err
+			}
+		}
+		if !page.HasMore() {
+			return nil
+		}
+		next := page.Cursor()
+		if next.IsNone() || strings.TrimSpace(next.Unwrap().Value()) == "" {
+			return errors.New("Work event page reports more records without a cursor")
+		}
+		value := next.Unwrap().Value()
+		if _, exists := seenCursors[value]; exists {
+			return fmt.Errorf("Work event cursor did not advance: %s", value)
+		}
+		seenCursors[value] = struct{}{}
+		cursor = next
+	}
 }
 
 func (s *FactoryV1WorkStore) QuarantineFactoryOrder(ctx context.Context, link factoryv1.WorkLink, reason string) error {

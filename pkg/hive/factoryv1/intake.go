@@ -618,7 +618,12 @@ func (i *Intake) ReplayAndRepair(ctx context.Context) error {
 		}
 		acceptedIDs[event.ID] = acceptedRecord{Event: event, Payload: payload, Document: payload.Document}
 		if _, seedErr := i.seedWork(ctx, event, payload); seedErr != nil {
-			return seedErr
+			if !errors.Is(seedErr, ErrAcceptedTupleConflict) {
+				return seedErr
+			}
+			if err := i.containAcceptedTupleConflict(ctx, event, payload); err != nil {
+				return err
+			}
 		}
 	}
 	links, err := i.work.ListFactoryOrders(ctx)
@@ -626,9 +631,24 @@ func (i *Intake) ReplayAndRepair(ctx context.Context) error {
 		return err
 	}
 	for _, link := range links {
-		if accepted, exists := acceptedIDs[link.AcceptedEventID]; exists &&
-			accepted.Document.Order.DocID == link.OrderID && accepted.Document.Order.Version == link.Version &&
-			accepted.Document.SHA256 == link.DocumentSHA256 && !link.Quarantined {
+		accepted, acceptedExists := acceptedIDs[link.AcceptedEventID]
+		acceptedIdentityMatches := acceptedExists &&
+			accepted.Document.Order.DocID == link.OrderID && accepted.Document.Order.Version == link.Version
+		if link.Quarantined {
+			kind := "orphan_work"
+			reason := "Work FactoryOrder has no matching accepted EventGraph event"
+			var causes []string
+			if acceptedIdentityMatches {
+				kind = "accepted_tuple_conflict"
+				reason = "Work FactoryOrder conflicts with accepted EventGraph tuple"
+				causes = []string{accepted.Event.ID}
+			}
+			if _, err := i.requestIntervention(ctx, link.OrderID, StageIngestWork, kind, reason, "", causes); err != nil {
+				return err
+			}
+			continue
+		}
+		if acceptedIdentityMatches && accepted.Document.SHA256 == link.DocumentSHA256 {
 			continue
 		}
 		reason := "Work FactoryOrder has no matching accepted EventGraph event"
@@ -638,6 +658,24 @@ func (i *Intake) ReplayAndRepair(ctx context.Context) error {
 		if _, err := i.requestIntervention(ctx, link.OrderID, StageIngestWork, "orphan_work", reason, "", nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (i *Intake) containAcceptedTupleConflict(ctx context.Context, acceptedEvent Event, payload OrderAcceptedPayload) error {
+	order := payload.Document.Order
+	link, err := i.work.GetFactoryOrder(ctx, order.DocID, order.Version)
+	if err != nil {
+		return fmt.Errorf("load conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
+	}
+	reason := "Work FactoryOrder conflicts with accepted EventGraph tuple"
+	if !link.Quarantined {
+		if err := i.work.QuarantineFactoryOrder(ctx, link, reason); err != nil {
+			return fmt.Errorf("quarantine conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
+		}
+	}
+	if _, err := i.requestIntervention(ctx, order.DocID, StageIngestWork, "accepted_tuple_conflict", reason, "", []string{acceptedEvent.ID}); err != nil {
+		return fmt.Errorf("request intervention for conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
 	}
 	return nil
 }

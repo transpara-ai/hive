@@ -307,26 +307,43 @@ func applyTransitions(item *OrderProjection, transitions []StageTransitionPayloa
 }
 
 func deriveGateState(transitions []StageTransitionPayload) string {
-	seenGate := false
+	gates := [...]Stage{StageIADA, StageCFADA, StageIAR, StageCFAR}
+	latest := make(map[Stage]StageTransitionPayload, len(gates))
 	for _, transition := range transitions {
 		switch transition.Stage {
 		case StageIADA, StageCFADA, StageIAR, StageCFAR:
-			seenGate = true
-			if transition.State == TransitionBlocked || transition.State == TransitionHumanRequired {
-				return string(transition.State)
-			}
-			if transition.State == TransitionRunning {
-				return "running"
-			}
-			if transition.State == TransitionPassed {
-				if err := validateStageEvidence(transition.Stage, transition.Evidence); err != nil {
-					return "unavailable"
-				}
-			}
+			latest[transition.Stage] = transition
 		}
 	}
-	if seenGate {
-		return "passed"
+
+	// A later repaired attempt replaces an earlier blocked attempt. Among
+	// current blocking outcomes, the furthest gate in TLC order determines the
+	// truthful operator-facing state.
+	for index := len(gates) - 1; index >= 0; index-- {
+		transition, ok := latest[gates[index]]
+		if ok && (transition.State == TransitionBlocked || transition.State == TransitionHumanRequired) {
+			return string(transition.State)
+		}
+	}
+	for _, gate := range gates {
+		if transition, ok := latest[gate]; ok && transition.State == TransitionRunning {
+			return "running"
+		}
+	}
+
+	passed := 0
+	for _, gate := range gates {
+		transition, ok := latest[gate]
+		if !ok || transition.State != TransitionPassed || validateStageEvidence(gate, transition.Evidence) != nil {
+			continue
+		}
+		passed++
+	}
+	if passed == len(gates) {
+		return "all_required_gates_passed"
+	}
+	if passed > 0 {
+		return "current_gate_passed_later_gates_pending"
 	}
 	return "unavailable"
 }
@@ -363,7 +380,7 @@ func deriveBudget(limit BudgetLimit, transitions []StageTransitionPayload) Budge
 	budget.RemainingAttempts = max(0, budget.MaxAttempts-budget.ConsumedAttempts)
 	budget.RemainingTokens = max(int64(0), budget.MaxTokens-budget.ConsumedTokens)
 	budget.RemainingCostMicros = max(int64(0), budget.MaxCostMicros-budget.ConsumedCostMicros)
-	budget.Exhausted = budget.RemainingAttempts == 0 || (budget.MaxTokens > 0 && budget.RemainingTokens == 0) || (budget.MaxCostMicros > 0 && budget.RemainingCostMicros == 0)
+	budget.Exhausted = budget.RemainingAttempts == 0 || budget.RemainingTokens == 0 || budget.RemainingCostMicros == 0
 	return budget
 }
 

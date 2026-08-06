@@ -50,7 +50,9 @@ func cmdFactoryV1Daemon(args []string) error {
 	authorModel := fs.String("author-model", os.Getenv("FACTORY_V1_AUTHOR_MODEL"), "Pinned author model identity (required)")
 	authorCredentialSource := fs.String("author-credential-source-id", os.Getenv("FACTORY_V1_AUTHOR_CREDENTIAL_SOURCE_ID"), "Author credential-source identity, never the credential value")
 	authorArgs := repeatedStringFlag{}
+	authorEnvironment := repeatedStringFlag{}
 	fs.Var(&authorArgs, "author-runner-arg", "Fixed author runner argument (repeatable)")
+	fs.Var(&authorEnvironment, "author-env-key", "Additional author runner environment key name; values are copied only at process start (repeatable)")
 
 	reviewerRunner := fs.String("reviewer-runner", os.Getenv("FACTORY_V1_REVIEWER_RUNNER"), "Exact independent reviewer runner executable (required)")
 	reviewerRunnerSHA := fs.String("reviewer-runner-sha256", os.Getenv("FACTORY_V1_REVIEWER_RUNNER_SHA256"), "Pinned reviewer runner executable SHA-256 (required)")
@@ -59,7 +61,9 @@ func cmdFactoryV1Daemon(args []string) error {
 	reviewerModel := fs.String("reviewer-model", os.Getenv("FACTORY_V1_REVIEWER_MODEL"), "Pinned independent reviewer model identity (required)")
 	reviewerCredentialSource := fs.String("reviewer-credential-source-id", os.Getenv("FACTORY_V1_REVIEWER_CREDENTIAL_SOURCE_ID"), "Reviewer credential-source identity, never the credential value")
 	reviewerArgs := repeatedStringFlag{}
+	reviewerEnvironment := repeatedStringFlag{}
 	fs.Var(&reviewerArgs, "reviewer-runner-arg", "Fixed reviewer runner argument (repeatable)")
+	fs.Var(&reviewerEnvironment, "reviewer-env-key", "Additional reviewer runner environment key name; values are copied only at process start (repeatable)")
 	standingApprovalFile := fs.String("standing-approval", os.Getenv("FACTORY_V1_STANDING_APPROVAL_FILE"), "Optional strict JSON standing-approval binding file")
 
 	issueScanInterval := fs.Duration("issue-scan-interval", 0, "Legacy GitHub issue scan interval; 0 only normalizes already queued requests")
@@ -108,8 +112,8 @@ func cmdFactoryV1Daemon(args []string) error {
 		return errors.New("author and reviewer families must differ")
 	}
 	runner, err := hive.NewFactoryV1ExternalRunner([]hive.FactoryV1RunnerProvider{
-		{Binding: authorBinding, Args: authorArgs, Timeout: *runnerTimeout},
-		{Binding: reviewerBinding, Args: reviewerArgs, Timeout: *runnerTimeout},
+		{Binding: authorBinding, Args: authorArgs, EnvironmentAllowlist: authorEnvironment, Timeout: *runnerTimeout},
+		{Binding: reviewerBinding, Args: reviewerArgs, EnvironmentAllowlist: reviewerEnvironment, Timeout: *runnerTimeout},
 	}, *runnerOutputLimit)
 	if err != nil {
 		return err

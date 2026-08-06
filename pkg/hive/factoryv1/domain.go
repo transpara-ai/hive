@@ -182,8 +182,8 @@ func ValidateFactoryOrder(order FactoryOrder) error {
 	if order.Budget.MaxAttempts <= 0 {
 		fields = append(fields, "budget.max_attempts must be positive")
 	}
-	if order.Budget.MaxTokens < 0 || order.Budget.MaxCostMicros < 0 {
-		fields = append(fields, "budget token and cost limits cannot be negative")
+	if order.Budget.MaxTokens <= 0 || order.Budget.MaxCostMicros <= 0 {
+		fields = append(fields, "budget token and cost limits must be positive")
 	}
 	if len(fields) != 0 {
 		return &ValidationError{Fields: fields}

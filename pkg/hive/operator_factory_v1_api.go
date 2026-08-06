@@ -92,6 +92,10 @@ func (s *FactoryV1OperatorService) handleIdeaCreate(w http.ResponseWriter, r *ht
 	if request.Candidate != nil {
 		candidate = *request.Candidate
 		candidate.Channel = factoryv1.ChannelHumanIdea
+		if err := factoryv1.ValidateFactoryOrder(candidate); err != nil {
+			writeFactoryV1Error(w, err)
+			return
+		}
 	}
 	result, err := s.Intake.RecordIdea(r.Context(), factoryv1.IdeaInput{IdeaID: ideaID, Note: request.Idea, Candidate: candidate, ActorID: s.HumanActorID})
 	if err != nil {
@@ -153,6 +157,17 @@ func (s *FactoryV1OperatorService) handleIdeaRefine(w http.ResponseWriter, r *ht
 	if request.Candidate != nil {
 		candidate = *request.Candidate
 	} else {
+		var missing []string
+		if len(candidate.Requirements) == 0 {
+			missing = append(missing, "at least one requirement is required")
+		}
+		if len(candidate.SourceReferences) == 0 {
+			missing = append(missing, "at least one immutable source reference is required")
+		}
+		if len(missing) != 0 {
+			writeFactoryV1Error(w, &factoryv1.ValidationError{Fields: missing})
+			return
+		}
 		candidate.Requirements[0].Statement = strings.TrimSpace(candidate.Requirements[0].Statement) + "\n\nRefinement: " + strings.TrimSpace(request.Instruction)
 		candidate.SourceReferences[0].SHA256 = factoryv1.HashText(candidate.SourceReferences[0].SHA256 + "\x00" + request.Instruction)
 	}
