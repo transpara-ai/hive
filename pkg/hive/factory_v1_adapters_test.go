@@ -2,6 +2,7 @@ package hive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -173,6 +174,131 @@ func TestFactoryV1ReplayQuarantinesOrphanWorkOnce(t *testing.T) {
 	}
 	if !quarantined.Quarantined || quarantineCount != 1 {
 		t.Fatalf("orphan quarantine projection=%t artifacts=%d, want true and 1", quarantined.Quarantined, quarantineCount)
+	}
+}
+
+func TestFactoryV1ReplayReconcilesAcceptedConflictAfterOrphanQuarantine(t *testing.T) {
+	ctx := context.Background()
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	workpkg.RegisterWithRegistry(factory.Registry)
+	graph, err := NewFactoryV1EventGraphStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workStore, err := NewFactoryV1WorkStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := eventStore.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("bootstrap head: %v", err)
+	}
+	order := validFactoryV1APIOrder(factoryv1.ChannelCompletedOrder, "FO-ORPHAN-THEN-ACCEPTED", "transpara-ai/hive")
+	document, err := factoryv1.Canonicalize(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := workStore.SeedFactoryOrder(ctx, factoryv1.WorkSeed{
+		OrderID: document.Order.DocID, Version: document.Order.Version,
+		DocumentSHA256: document.SHA256, Markdown: document.Markdown,
+		SourceSHA256:    document.Order.SourceReferences[0].SHA256,
+		AcceptedEventID: head.Unwrap().ID().Value(), IdempotencyKey: "orphan-then-accepted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intake, err := factoryv1.NewIntake(graph, workStore, factoryv1.WallClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := intake.ReplayAndRepair(ctx); err != nil {
+		t.Fatalf("quarantine orphan: %v", err)
+	}
+	accepted, err := graph.Append(ctx, factoryv1.NewEvent{
+		Type: factoryv1.EventOrderAccepted, OrderID: document.Order.DocID,
+		Causes: []string{head.Unwrap().ID().Value()}, IdempotencyKey: "accepted:" + document.Order.DocID + "@" + document.Order.Version,
+		Payload: factoryv1.OrderAcceptedPayload{
+			Document: document, SourceIdentity: "test:late-acceptance",
+			SourceEventIDs: []string{head.Unwrap().ID().Value()}, AcceptedByActorID: actor.Value(),
+			WorkSeedIdempotencyID: "factory-v1-work:" + document.Order.DocID + "@" + document.Order.Version + ":" + document.SHA256,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for replay := 1; replay <= 2; replay++ {
+		if err := intake.ReplayAndRepair(ctx); err != nil {
+			t.Fatalf("accepted-conflict replay %d: %v", replay, err)
+		}
+	}
+	taskID, err := types.NewEventID(link.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := workStore.tasks.ListArtifacts(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quarantines := 0
+	for _, artifact := range artifacts {
+		if artifact.Label == factoryV1WorkQuarantineLabel {
+			quarantines++
+		}
+	}
+	listed, err := graph.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflictRequests := 0
+	for _, candidate := range listed {
+		if candidate.Type != factoryv1.EventInterventionRequested {
+			continue
+		}
+		var payload factoryv1.InterventionRequestedPayload
+		if err := json.Unmarshal(candidate.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.OrderID == document.Order.DocID && payload.Kind == "accepted_tuple_conflict" {
+			conflictRequests++
+			if len(candidate.Causes) != 1 || candidate.Causes[0] != accepted.ID {
+				t.Fatalf("accepted-conflict causes = %+v, want %s", candidate.Causes, accepted.ID)
+			}
+		}
+	}
+	if quarantines != 1 || conflictRequests != 1 {
+		t.Fatalf("quarantines=%d conflict interventions=%d, want one each", quarantines, conflictRequests)
+	}
+}
+
+func TestFactoryV1WorkEnumerationRejectsMalformedDuplicateMetadata(t *testing.T) {
+	ctx := context.Background()
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	workpkg.RegisterWithRegistry(factory.Registry)
+	workStore, err := NewFactoryV1WorkStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := eventStore.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("bootstrap head: %v", err)
+	}
+	link, err := workStore.SeedFactoryOrder(ctx, factoryv1.WorkSeed{
+		OrderID: "FO-DUPLICATE-METADATA", Version: "1.0.0", DocumentSHA256: factoryv1.HashText("duplicate-metadata"),
+		Markdown: "# duplicate metadata\n", SourceSHA256: factoryv1.HashText("duplicate-source"),
+		AcceptedEventID: head.Unwrap().ID().Value(), IdempotencyKey: "duplicate-metadata",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := types.NewEventID(link.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workStore.tasks.AddArtifact(actor, taskID, factoryV1WorkMetadataLabel, "application/json", "{", []types.EventID{taskID}, conversation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workStore.ListFactoryOrders(ctx); err == nil || !strings.Contains(err.Error(), "decode FactoryOrder Work artifact") {
+		t.Fatalf("duplicate metadata error = %v, want decode failure", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -157,15 +158,18 @@ func (s *FactoryV1WorkStore) ListFactoryOrders(ctx context.Context) ([]factoryv1
 		for _, artifact := range artifacts {
 			switch artifact.label {
 			case factoryV1WorkMetadataLabel:
-				if metadata != nil {
-					continue
-				}
 				var candidate factoryV1WorkMetadata
 				if err := json.Unmarshal([]byte(artifact.body), &candidate); err != nil {
 					return fmt.Errorf("decode FactoryOrder Work artifact %s: %w", artifact.id, err)
 				}
 				if candidate.SchemaVersion != factoryv1.SchemaVersion {
 					return fmt.Errorf("unsupported FactoryOrder Work artifact schema %q", candidate.SchemaVersion)
+				}
+				if metadata != nil {
+					if !reflect.DeepEqual(*metadata, candidate) {
+						return fmt.Errorf("conflicting duplicate FactoryOrder Work artifact %s", artifact.id)
+					}
+					continue
 				}
 				copy := candidate
 				metadata = &copy

@@ -669,8 +669,10 @@ func (i *Intake) containAcceptedTupleConflict(ctx context.Context, acceptedEvent
 		return fmt.Errorf("load conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
 	}
 	reason := "Work FactoryOrder conflicts with accepted EventGraph tuple"
-	if err := i.work.QuarantineFactoryOrder(ctx, link, reason); err != nil {
-		return fmt.Errorf("quarantine conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
+	if !link.Quarantined {
+		if err := i.work.QuarantineFactoryOrder(ctx, link, reason); err != nil {
+			return fmt.Errorf("quarantine conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
+		}
 	}
 	if _, err := i.requestIntervention(ctx, order.DocID, StageIngestWork, "accepted_tuple_conflict", reason, "", []string{acceptedEvent.ID}); err != nil {
 		return fmt.Errorf("request intervention for conflicting Work FactoryOrder %s@%s: %w", order.DocID, order.Version, err)
