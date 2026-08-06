@@ -115,6 +115,55 @@ func TestFactoryV1IdeaRefinementSubmission(t *testing.T) {
 	}
 }
 
+func TestFactoryV1IdeaCreateRejectsInvalidCallerCandidateBeforeAppend(t *testing.T) {
+	handler, _, _ := newFactoryV1OperatorTestServer(t)
+	candidate := validFactoryV1APIOrder(factoryv1.ChannelCompletedOrder, "FO-INVALID-IDEA", "transpara-ai/hive")
+	candidate.Requirements = nil
+	response := doFactoryV1Request(t, handler, http.MethodPost, "/api/hive/factory/v1/ideas", map[string]any{
+		"title": "Invalid candidate", "idea": "Must not append", "target_repository": "transpara-ai/hive", "candidate": candidate,
+	})
+	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte(`"error": "validation_failed"`)) {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	projectionResponse := doFactoryV1Request(t, handler, http.MethodGet, "/api/hive/factory/v1/projection", nil)
+	var projection factoryv1.Projection
+	if err := json.Unmarshal(projectionResponse.Body.Bytes(), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.Ideas) != 0 {
+		t.Fatalf("invalid caller candidate appended idea revisions: %+v", projection.Ideas)
+	}
+}
+
+func TestFactoryV1InstructionRefinementGuardsMissingCandidateSlices(t *testing.T) {
+	handler, _, _ := newFactoryV1OperatorTestServer(t)
+	created := doFactoryV1Request(t, handler, http.MethodPost, "/api/hive/factory/v1/ideas", map[string]any{
+		"title": "Guard slices", "idea": "Keep invalid iterative candidates safe", "target_repository": "transpara-ai/hive",
+	})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var idea factoryv1.IdeaCandidate
+	if err := json.Unmarshal(created.Body.Bytes(), &idea); err != nil {
+		t.Fatal(err)
+	}
+	invalid := idea.Candidate
+	invalid.Requirements = nil
+	invalid.SourceReferences = nil
+	refined := doFactoryV1Request(t, handler, http.MethodPost, fmt.Sprintf("/api/hive/factory/v1/ideas/%s/refine", idea.IdeaID), map[string]any{
+		"instruction": "Record the invalid candidate for Human repair.", "candidate": invalid,
+	})
+	if refined.Code != http.StatusOK {
+		t.Fatalf("caller refinement status=%d body=%s", refined.Code, refined.Body.String())
+	}
+	guarded := doFactoryV1Request(t, handler, http.MethodPost, fmt.Sprintf("/api/hive/factory/v1/ideas/%s/refine", idea.IdeaID), map[string]string{
+		"instruction": "This must fail without indexing empty slices.",
+	})
+	if guarded.Code != http.StatusBadRequest || !bytes.Contains(guarded.Body.Bytes(), []byte("at least one requirement")) || !bytes.Contains(guarded.Body.Bytes(), []byte("at least one immutable source reference")) {
+		t.Fatalf("guarded status=%d body=%s", guarded.Code, guarded.Body.String())
+	}
+}
+
 func TestFactoryV1CompletedOrderAdmission(t *testing.T) {
 	handler, _, _ := newFactoryV1OperatorTestServer(t)
 	order := validFactoryV1APIOrder(factoryv1.ChannelCompletedOrder, "FO-DIRECT-001", "transpara-ai/work")

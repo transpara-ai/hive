@@ -92,6 +92,77 @@ func TestFactoryOrderResolvedIssuesValidationAndCanonicalization(t *testing.T) {
 	}
 }
 
+func TestFactoryOrderRequiresPositiveTokenAndCostBudgets(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*FactoryOrder)
+	}{
+		{name: "zero tokens", mutate: func(order *FactoryOrder) { order.Budget.MaxTokens = 0 }},
+		{name: "negative tokens", mutate: func(order *FactoryOrder) { order.Budget.MaxTokens = -1 }},
+		{name: "zero cost", mutate: func(order *FactoryOrder) { order.Budget.MaxCostMicros = 0 }},
+		{name: "negative cost", mutate: func(order *FactoryOrder) { order.Budget.MaxCostMicros = -1 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			order := testOrder("FO-STRICT-BUDGET", ChannelCompletedOrder)
+			test.mutate(&order)
+			if err := ValidateFactoryOrder(order); err == nil || !strings.Contains(err.Error(), "must be positive") {
+				t.Fatalf("validation error = %v, want positive token/cost limit failure", err)
+			}
+		})
+	}
+	historical := deriveBudget(BudgetLimit{MaxAttempts: 1}, nil)
+	if !historical.Exhausted || historical.RemainingTokens != 0 || historical.RemainingCostMicros != 0 {
+		t.Fatalf("historical zero budget projected as unlimited: %+v", historical)
+	}
+}
+
+func TestFactoryV1GateStateUsesLatestRequiredGateTruth(t *testing.T) {
+	t.Parallel()
+	zero := 0
+	passed := func(stage Stage) StageTransitionPayload {
+		evidence := Evidence{Kind: "review", Reference: "test:" + string(stage), BlockerCount: &zero}
+		switch stage {
+		case StageIADA, StageCFADA:
+			evidence.DesignBlobSHA = strings.Repeat("a", 40)
+		case StageIAR, StageCFAR:
+			evidence.PRHeadSHA = strings.Repeat("b", 40)
+			evidence.ReviewedHeadSHA = evidence.PRHeadSHA
+		}
+		if stage == StageCFADA || stage == StageCFAR {
+			evidence.AuthorFamily = "OpenAI/Codex"
+			evidence.ReviewerFamily = "Anthropic/Claude"
+		}
+		return StageTransitionPayload{Stage: stage, State: TransitionPassed, Evidence: []Evidence{evidence}}
+	}
+	state := func(stage Stage, value TransitionState) StageTransitionPayload {
+		return StageTransitionPayload{Stage: stage, State: value}
+	}
+	allPassed := []StageTransitionPayload{passed(StageIADA), passed(StageCFADA), passed(StageIAR), passed(StageCFAR)}
+	tests := []struct {
+		name        string
+		transitions []StageTransitionPayload
+		want        string
+	}{
+		{name: "none", want: "unavailable"},
+		{name: "one valid pass", transitions: []StageTransitionPayload{passed(StageIADA)}, want: "current_gate_passed_later_gates_pending"},
+		{name: "all valid passes", transitions: allPassed, want: "all_required_gates_passed"},
+		{name: "running outranks partial", transitions: []StageTransitionPayload{passed(StageIADA), state(StageCFADA, TransitionRunning)}, want: "running"},
+		{name: "furthest human required", transitions: []StageTransitionPayload{state(StageIADA, TransitionBlocked), state(StageCFADA, TransitionHumanRequired)}, want: "human_required"},
+		{name: "furthest blocked", transitions: []StageTransitionPayload{state(StageIADA, TransitionHumanRequired), state(StageCFADA, TransitionBlocked)}, want: "blocked"},
+		{name: "later repair replaces block", transitions: []StageTransitionPayload{state(StageIADA, TransitionBlocked), passed(StageIADA)}, want: "current_gate_passed_later_gates_pending"},
+		{name: "later block replaces pass", transitions: []StageTransitionPayload{passed(StageIADA), state(StageIADA, TransitionBlocked)}, want: "blocked"},
+		{name: "invalid pass", transitions: []StageTransitionPayload{{Stage: StageIADA, State: TransitionPassed, Evidence: []Evidence{{Kind: "review", Reference: "missing exact blob", BlockerCount: &zero}}}}, want: "unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := deriveGateState(test.transitions); got != test.want {
+				t.Fatalf("gate state = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func testProvider() ProviderBinding {
 	return ProviderBinding{
 		ProviderID: "claude-cli", Family: "Claude/Anthropic", ExecutableRealpath: "/usr/bin/claude",
@@ -727,5 +798,63 @@ func TestFactoryV1ReplayTwiceKeepsOneOrphanIntervention(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("orphan intervention requests = %d, want exactly one", requests)
+	}
+}
+
+func TestFactoryV1ReplayIsolatesAcceptedTupleConflictPerOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := testClock()
+	events := NewInMemoryStore(clock)
+	work := NewInMemoryWorkStore()
+	intake, _ := NewIntake(events, work, clock)
+	first, err := intake.AcceptCompleted(ctx, testOrder("FO-CONFLICT", ChannelCompletedOrder), AcceptOptions{SourceIdentity: "test:conflict", SourceEventIDs: []string{"source:conflict"}, ActorID: "human-actor-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := intake.AcceptCompleted(ctx, testOrder("FO-INDEPENDENT", ChannelCompletedOrder), AcceptOptions{SourceIdentity: "test:independent", SourceEventIDs: []string{"source:independent"}, ActorID: "human-actor-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	work.mu.Lock()
+	conflicting := work.links[workTuple(first.OrderID, first.Version)]
+	conflicting.DocumentSHA256 = strings.Repeat("f", 64)
+	work.links[workTuple(first.OrderID, first.Version)] = conflicting
+	delete(work.links, workTuple(second.OrderID, second.Version))
+	work.mu.Unlock()
+
+	for replay := 1; replay <= 2; replay++ {
+		if err := intake.ReplayAndRepair(ctx); err != nil {
+			t.Fatalf("replay %d: %v", replay, err)
+		}
+	}
+	conflictLink, err := work.GetFactoryOrder(ctx, first.OrderID, first.Version)
+	if err != nil || !conflictLink.Quarantined || conflictLink.Metadata["quarantine_reason"] != "Work FactoryOrder conflicts with accepted EventGraph tuple" {
+		t.Fatalf("conflicting link = %+v, err=%v", conflictLink, err)
+	}
+	independentLink, err := work.GetFactoryOrder(ctx, second.OrderID, second.Version)
+	if err != nil || independentLink.DocumentSHA256 != second.DocumentSHA256 || independentLink.Quarantined {
+		t.Fatalf("independent link was not repaired after conflict: %+v, err=%v", independentLink, err)
+	}
+	listed, err := events.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	for _, event := range listed {
+		if event.Type != EventInterventionRequested {
+			continue
+		}
+		payload, err := decodeEvent[InterventionRequestedPayload](event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if payload.OrderID == first.OrderID && payload.Kind == "accepted_tuple_conflict" {
+			requests++
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("tuple-conflict intervention requests = %d, want exactly one", requests)
 	}
 }

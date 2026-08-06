@@ -3,6 +3,8 @@ package hive
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
@@ -15,6 +17,14 @@ import (
 type factoryV1FailOnceChainStore struct {
 	store.Store
 	failed bool
+}
+
+type factoryV1RepeatingCursorStore struct {
+	store.Store
+}
+
+func (s *factoryV1RepeatingCursorStore) ByType(types.EventType, int, types.Option[types.Cursor]) (types.Page[event.Event], error) {
+	return types.NewPage([]event.Event{}, types.Some(types.MustCursor("repeated-cursor")), true), nil
 }
 
 func (s *factoryV1FailOnceChainStore) Append(ev event.Event) (event.Event, error) {
@@ -163,5 +173,61 @@ func TestFactoryV1ReplayQuarantinesOrphanWorkOnce(t *testing.T) {
 	}
 	if !quarantined.Quarantined || quarantineCount != 1 {
 		t.Fatalf("orphan quarantine projection=%t artifacts=%d, want true and 1", quarantined.Quarantined, quarantineCount)
+	}
+}
+
+func TestFactoryV1WorkEnumerationPagesBeyondLegacyCeiling(t *testing.T) {
+	ctx := context.Background()
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	workpkg.RegisterWithRegistry(factory.Registry)
+	workStore, err := NewFactoryV1WorkStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := eventStore.Head()
+	if err != nil || head.IsNone() {
+		t.Fatalf("bootstrap head: %v", err)
+	}
+	acceptedEventID := head.Unwrap().ID().Value()
+	want := factoryV1WorkPageSize + 1
+	for index := 0; index < want; index++ {
+		orderID := fmt.Sprintf("FO-PAGED-%04d", index)
+		documentSHA := factoryv1.HashText(orderID)
+		if _, err := workStore.SeedFactoryOrder(ctx, factoryv1.WorkSeed{
+			OrderID: orderID, Version: "1.0.0", DocumentSHA256: documentSHA,
+			Markdown: "# " + orderID + "\n", SourceSHA256: factoryv1.HashText("source:" + orderID),
+			AcceptedEventID: acceptedEventID, IdempotencyKey: "paged:" + orderID,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", orderID, err)
+		}
+	}
+	links, err := workStore.ListFactoryOrders(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != want {
+		t.Fatalf("FactoryOrder links = %d, want %d", len(links), want)
+	}
+	seen := make(map[string]factoryv1.WorkLink, len(links))
+	for _, link := range links {
+		seen[link.OrderID] = link
+	}
+	for _, orderID := range []string{"FO-PAGED-0000", fmt.Sprintf("FO-PAGED-%04d", want-1)} {
+		link, ok := seen[orderID]
+		if !ok || link.ArtifactID == "" || link.TaskID == "" || link.DocumentSHA256 == "" {
+			t.Fatalf("paged link %s = %+v, present=%v", orderID, link, ok)
+		}
+	}
+}
+
+func TestFactoryV1WorkEnumerationRejectsNonAdvancingCursor(t *testing.T) {
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	workpkg.RegisterWithRegistry(factory.Registry)
+	workStore, err := NewFactoryV1WorkStore(&factoryV1RepeatingCursorStore{Store: eventStore}, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workStore.ListFactoryOrders(context.Background()); err == nil || !strings.Contains(err.Error(), "did not advance") {
+		t.Fatalf("cursor error = %v, want non-advancing failure", err)
 	}
 }
