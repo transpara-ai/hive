@@ -44,9 +44,16 @@ func (n *FactoryV1IssueNormalizer) RunOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	normalized := 0
+	repairedAccepted := false
 	var normalizeErrors []error
 	for _, request := range requests {
 		if _, alreadyNormalized := normalizedRequestIDs[request.ID().Value()]; alreadyNormalized {
+			if !repairedAccepted {
+				if err := n.intake.ReplayAndRepair(ctx); err != nil {
+					return normalized, fmt.Errorf("repair accepted factory v1 request replay: %w", err)
+				}
+				repairedAccepted = true
+			}
 			continue
 		}
 		content, ok := request.Content().(FactoryRunRequestedContent)
