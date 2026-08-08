@@ -47,7 +47,8 @@ refuses a reused or otherwise mismatched PID.
 `run` is the persistent service-manager entry point. It keeps the supervisor in
 the foreground, verifies exact process/listener ownership every ten seconds,
 and stops the complete stack on TERM. A component failure exits non-zero so a
-service manager configured with `Restart=on-failure` restarts the whole stack.
+service manager configured with `Restart=on-failure` restarts the whole stack;
+the example unit disables the start-rate limit so retries continue indefinitely.
 The Hive daemon runtime snapshot is bound and preflighted on loopback port
 `8084`; fresh and pre-runtime-observation configurations receive the complete
 four-key observation wiring, while partial configurations fail closed.
@@ -55,4 +56,6 @@ four-key observation wiring, while partial configurations fail closed.
 For a user-level systemd deployment, install and adapt
 `civilization-factory-v1.service.example`, then run `systemctl --user enable
 --now civilization-factory-v1.service`. User lingering must be enabled if the
-stack must start without an interactive login.
+stack must start without an interactive login. The example's optional
+`supervisor-launch.env` may supply local command/root overrides; the unit also
+starts when that file is absent.

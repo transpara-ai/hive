@@ -79,13 +79,13 @@ else
   operation_notes+=("comparison_hook_not_configured")
 fi
 
-for port in 5432 8080 8083 8088; do
+while IFS= read -r port; do
   pids=$(factory_v1_listener_pids "$port")
   if [ -n "$pids" ]; then
     ports_safe=fail
     port_notes+=("existing_listener:$port:$(tr '\n' ',' <<<"$pids" | sed 's/,$//')")
   fi
-done
+done < <(factory_v1_required_ports)
 
 overall=pass
 [ "$secret_safe" = pass ] && [ "$operation_safe" = pass ] && [ "$ports_safe" = pass ] || overall=fail

@@ -31,7 +31,7 @@ postgres_data=$runtime_root/postgres/data
 postgres_socket=$runtime_root/postgres/socket
 
 postgres_distribution=${FACTORY_V1_POSTGRES_DISTRIBUTION:-/home/transpara/.local/lib/civilization-tools/postgresql-16.14-0ubuntu0.24.04.1}
-postgres_bin=$postgres_distribution/usr/lib/postgresql/16/bin
+postgres_bin=${FACTORY_V1_POSTGRES_BIN:-$postgres_distribution/usr/lib/postgresql/16/bin}
 postgres_library=$postgres_distribution/usr/lib/x86_64-linux-gnu
 postgres_ld_library_path=$postgres_library${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
@@ -182,6 +182,9 @@ assert_service_inputs() {
     done
     env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/postgres" --version | grep -q 'PostgreSQL) 16\.' || factory_v1_die "bundled PostgreSQL is not major version 16"
   fi
+  if [ -n "${FACTORY_V1_POSTGRES_READY_CMD:-}" ]; then
+    bash -n <<<"$FACTORY_V1_POSTGRES_READY_CMD" || factory_v1_die "PostgreSQL readiness command is not valid shell syntax"
+  fi
 }
 
 owner_file() {
@@ -225,14 +228,13 @@ assert_live_record_pids_owned() {
 }
 
 preflight_ports() {
-  local service port pids
-  for service in "${service_names[@]}"; do
-    port=${service_ports[$service]}
+  local port pids
+  while IFS= read -r port; do
     pids=$(factory_v1_listener_pids "$port")
     if [ -n "$pids" ]; then
       factory_v1_die "preflight refused existing listener on 127.0.0.1:$port (pid(s): $(tr '\n' ',' <<<"$pids" | sed 's/,$//'))"
     fi
-  done
+  done < <(factory_v1_required_ports)
 }
 
 write_owner_record() {
@@ -339,6 +341,10 @@ start_postgres() {
     service_commands[postgres]=$command
     service_roots[postgres]=${FACTORY_V1_POSTGRES_ROOT:-$runtime_root}
     start_command_service postgres
+    if [ -n "${FACTORY_V1_POSTGRES_READY_CMD:-}" ]; then
+      main_pid=$(jq -er '.main.pid' "$(owner_file postgres)")
+      wait_for_postgres_ready "$main_pid"
+    fi
     return
   fi
 
@@ -351,16 +357,26 @@ start_postgres() {
   assert_loopback_listener postgres "$listener_pid" 5432
   write_owner_record postgres "$main_pid" "$listener_pid" "$command"
 
-	local deadline=$((SECONDS + ${FACTORY_V1_START_TIMEOUT_SECONDS:-45}))
-	while ! env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/pg_isready" -q -h "$postgres_socket" -p 5432 -d postgres; do
-		kill -0 "$main_pid" 2>/dev/null || factory_v1_die "postgres exited before accepting connections; inspect $log_dir/postgres.log"
-		[ "$SECONDS" -lt "$deadline" ] || factory_v1_die "postgres timed out waiting to accept connections; inspect $log_dir/postgres.log"
-		sleep 0.2
-	done
+  wait_for_postgres_ready "$main_pid"
 
   if ! env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/psql" -h "$postgres_socket" -p 5432 -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='factory_v1'" | grep -qx 1; then
     env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/createdb" -h "$postgres_socket" -p 5432 factory_v1
   fi
+}
+
+wait_for_postgres_ready() {
+  local main_pid=$1 deadline=$((SECONDS + ${FACTORY_V1_START_TIMEOUT_SECONDS:-45})) ready=false
+  while [ "$ready" != true ]; do
+    if [ -n "${FACTORY_V1_POSTGRES_READY_CMD:-}" ]; then
+      if bash -c "$FACTORY_V1_POSTGRES_READY_CMD"; then ready=true; fi
+    elif env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/pg_isready" -q -h "$postgres_socket" -p 5432 -d postgres; then
+      ready=true
+    fi
+    [ "$ready" = true ] && break
+    kill -0 "$main_pid" 2>/dev/null || factory_v1_die "postgres exited before accepting connections; inspect $log_dir/postgres.log"
+    [ "$SECONDS" -lt "$deadline" ] || factory_v1_die "postgres timed out waiting to accept connections; inspect $log_dir/postgres.log"
+    sleep 0.2
+  done
 }
 
 write_manifest() {
@@ -423,24 +439,47 @@ start_stack() {
 }
 
 run_stack() {
-	# Install signal handling before startup so a service manager can cancel a
-	# partially started stack without surfacing a false signal failure.
-	trap 'exit 0' TERM INT
-	if compgen -G "$run_dir/*.owner.json" >/dev/null; then
-		printf 'factory-v1 run mode reconciling existing ownership receipts\n'
-		stop_stack
-	fi
-	start_stack
-	trap 'run_rc=$?; trap - EXIT TERM INT; stop_stack >/dev/null 2>&1 || true; exit "$run_rc"' EXIT
-	local service interval=${FACTORY_V1_MONITOR_INTERVAL_SECONDS:-10}
-	while sleep "$interval"; do
-		for service in "${service_names[@]}"; do
-			assert_owner_record "$service" || {
-				printf 'factory-v1 run monitor detected unhealthy service: %s\n' "$service" >&2
-				return 1
-			}
-		done
-	done
+  local service interval=${FACTORY_V1_MONITOR_INTERVAL_SECONDS:-10}
+  [[ "$interval" =~ ^[1-9][0-9]*$ ]] || factory_v1_die "FACTORY_V1_MONITOR_INTERVAL_SECONDS must be a positive integer"
+  # Install signal handling before startup so a service manager can cancel a
+  # partially started stack without surfacing a false signal failure.
+  trap 'exit 0' TERM INT
+  if compgen -G "$run_dir/*.owner.json" >/dev/null; then
+    printf 'factory-v1 run mode reconciling existing ownership receipts\n'
+    discard_reused_pid_receipts
+    stop_stack
+  fi
+  start_stack
+  trap 'run_rc=$?; trap - EXIT TERM INT; stop_stack >/dev/null 2>&1 || true; exit "$run_rc"' EXIT
+  while true; do
+    sleep "$interval" || return 1
+    for service in "${service_names[@]}"; do
+      assert_owner_record "$service" || {
+        printf 'factory-v1 run monitor detected unhealthy service: %s\n' "$service" >&2
+        return 1
+      }
+    done
+  done
+}
+
+discard_reused_pid_receipts() {
+  local service record field pid mismatched
+  for service in "${service_names[@]}"; do
+    record=$(owner_file "$service")
+    [ -f "$record" ] || continue
+    mismatched=false
+    for field in main listener; do
+      pid=$(jq -r ".$field.pid // empty" "$record")
+      [ -n "$pid" ] && [ -r "/proc/$pid/stat" ] || continue
+      if ! assert_record_pid "$record" "$field"; then
+        mismatched=true
+      fi
+    done
+    if [ "$mismatched" = true ]; then
+      printf 'factory-v1 run mode discarded stale %s receipt after PID reuse; no process was signalled\n' "$service"
+      rm -f -- "$record"
+    fi
+  done
 }
 
 stop_stack() {

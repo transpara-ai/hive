@@ -50,9 +50,10 @@ func (n *FactoryV1IssueNormalizer) RunOnce(ctx context.Context) (int, error) {
 		if _, alreadyNormalized := normalizedRequestIDs[request.ID().Value()]; alreadyNormalized {
 			if !repairedAccepted {
 				if err := n.intake.ReplayAndRepair(ctx); err != nil {
-					return normalized, fmt.Errorf("repair accepted factory v1 request replay: %w", err)
+					normalizeErrors = append(normalizeErrors, fmt.Errorf("repair accepted factory v1 request replay: %w", err))
+				} else {
+					repairedAccepted = true
 				}
-				repairedAccepted = true
 			}
 			continue
 		}
@@ -90,12 +91,11 @@ func (n *FactoryV1IssueNormalizer) RunOnce(ctx context.Context) (int, error) {
 func factoryV1NormalizedRequestIDs(ctx context.Context, eventStore store.Store) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	cursor := types.None[types.Cursor]()
-	eventType := types.MustEventType(string(factoryv1.EventOrderAccepted))
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := eventStore.ByType(eventType, 200, cursor)
+		page, err := eventStore.ByType(EventTypeFactoryV1OrderAccepted, 200, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("list accepted factory v1 orders for request replay: %w", err)
 		}
