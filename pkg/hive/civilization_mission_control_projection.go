@@ -1416,7 +1416,8 @@ func missionFactoryEvidenceRollup(order factoryv1.OrderProjection, now time.Time
 	if order.PR != nil {
 		missionApplyPREvidence(&rollup, order.PR.Repository, order.PR.Number, order.PR.HeadSHA, order.PR.ReviewedHeadSHA, order.PR.Open, order.PR.Draft, order.LastEffectAt, now, nil)
 	}
-	rollup.PendingTier3HumanReview = order.TLCStage == factoryv1.StageHumanReview && !missionFactoryOrderTerminal(order)
+	classification := classifyMissionOrder(order, now)
+	rollup.PendingTier3HumanReview = order.TLCStage == factoryv1.StageHumanReview && !missionFactoryOrderTerminal(order) && classification.EffectiveHumanReviewTier == 3
 	rollup.FieldMarks["pending_tier_3_human_review"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", order.LastEffectAt, now, refs, "derived from validated exact Factory stage state")
 	refs = compactStrings(append(refs, order.DocumentSHA256))
 	rollup.Mark = missionEvidenceFieldAggregateMark(rollup.FieldMarks, order.LastEffectAt, now, refs)

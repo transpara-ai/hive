@@ -150,7 +150,11 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 	if options.missionControl != nil {
 		projector := options.missionControl
 		mux.HandleFunc("GET "+MissionControlProjectionPath, func(w http.ResponseWriter, r *http.Request) {
-			if !operatorBearerOK(apiKey, r) {
+			// Mission Control is never allowed to inherit the legacy empty-key
+			// development mode used by older projection routes. Its approved
+			// contract is bearer-protected, including when the server is
+			// accidentally started with an empty key.
+			if strings.TrimSpace(apiKey) == "" || !operatorBearerOK(apiKey, r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

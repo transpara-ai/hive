@@ -123,6 +123,18 @@ func TestHIVEMCT1ClassificationMatrixFailsUpwardWithoutExactBoundEvidence(t *tes
 			}
 		})
 	}
+
+	lowerTier := base
+	lowerTier.TLCStage = factoryv1.StageHumanReview
+	lowerTier.Stages = []factoryv1.StageLedgerProjection{{Stage: factoryv1.StageDesign, Evidence: []factoryv1.Evidence{exact("P-MECHANICAL", 1)}}}
+	if rollup := missionFactoryEvidenceRollup(lowerTier, now); rollup.PendingTier3HumanReview {
+		t.Fatalf("exact lower-tier evidence was mislabeled as pending Tier 3: %+v", rollup)
+	}
+	failUpTier := base
+	failUpTier.TLCStage = factoryv1.StageHumanReview
+	if rollup := missionFactoryEvidenceRollup(failUpTier, now); !rollup.PendingTier3HumanReview {
+		t.Fatalf("missing classification evidence did not fail upward to pending Tier 3: %+v", rollup)
+	}
 }
 
 type missionRuntimeFixture struct {
@@ -423,6 +435,12 @@ func TestHIVEMCT5CompleteWIPPaginationStaleExpiryAndEndpoint(t *testing.T) {
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, MissionControlProjectionPath, nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	missingServerKey := NewOperatorProjectionServer(s, "", 2, WithMissionControlProjection(projector))
+	missingServerKeyResponse := httptest.NewRecorder()
+	missingServerKey.ServeHTTP(missingServerKeyResponse, httptest.NewRequest(http.MethodGet, MissionControlProjectionPath, nil))
+	if missingServerKeyResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("missing server key status = %d", missingServerKeyResponse.Code)
 	}
 	authorizedRequest := httptest.NewRequest(http.MethodGet, MissionControlProjectionPath, nil)
 	authorizedRequest.Header.Set("Authorization", "Bearer secret")
