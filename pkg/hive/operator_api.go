@@ -14,14 +14,15 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// operatorProjectionSingleflightKeyOperatorProjection and
-// ...KeyCivilizationAssemblyProjection are the singleflight.Group keys for
-// the two read-only projection endpoints (D2). Each endpoint has its own key
+// operatorProjectionSingleflightKeyOperatorProjection and the other keys are
+// the singleflight.Group keys for the read-only projection endpoints. Each
+// endpoint has its own key
 // so a burst of requests to one endpoint never collapses into (or waits on)
 // the other's flight.
 const (
 	operatorProjectionSingleflightKeyOperatorProjection             = "operator-projection"
 	operatorProjectionSingleflightKeyCivilizationAssemblyProjection = "civilization-assembly-projection"
+	operatorProjectionSingleflightKeyMissionControlProjection       = "civilization-mission-control-projection"
 )
 
 // maxDecisionBodyBytes caps the POST /api/hive/operator-decision request body
@@ -37,6 +38,7 @@ type operatorServerOptions struct {
 	factoryV1         *FactoryV1OperatorService
 	projectionOptions []OperatorProjectionOption
 	modelSelection    OperatorModelSelectionSource
+	missionControl    *CivilizationMissionControlProjector
 }
 
 // OperatorServerOption configures NewOperatorProjectionServer.
@@ -80,6 +82,13 @@ func WithOperatorProjectionModelSelectionSource(source OperatorModelSelectionSou
 		o.projectionOptions = append(o.projectionOptions, WithOperatorModelSelectionSource(source))
 		o.modelSelection = source
 	}
+}
+
+// WithMissionControlProjection enables the authenticated, read-only live
+// Civilization Mission Control projection. The projector owns bounded source
+// retention; the HTTP layer only collapses simultaneous fresh computations.
+func WithMissionControlProjection(projector *CivilizationMissionControlProjector) OperatorServerOption {
+	return func(o *operatorServerOptions) { o.missionControl = projector }
 }
 
 // operatorDecisionRequest is the Site -> hive payload for recording the human's
@@ -138,6 +147,19 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 		})
 		writeOperatorProjectionJSON(w, result)
 	})
+	if options.missionControl != nil {
+		projector := options.missionControl
+		mux.HandleFunc("GET "+MissionControlProjectionPath, func(w http.ResponseWriter, r *http.Request) {
+			if !operatorBearerOK(apiKey, r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			result, _, _ := projectionFlight.Do(operatorProjectionSingleflightKeyMissionControlProjection, func() (any, error) {
+				return projector.Build(r.Context()), nil
+			})
+			writeOperatorProjectionJSON(w, result)
+		})
+	}
 	if options.writer != nil {
 		writer := options.writer
 		mux.HandleFunc("POST /api/hive/operator-decision", func(w http.ResponseWriter, r *http.Request) {

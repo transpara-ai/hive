@@ -382,6 +382,15 @@ func TestFactoryV1SchedulesThreeConcurrently(t *testing.T) {
 	if scheduler.ActiveWorkers() != 3 {
 		t.Fatalf("active scheduler workers = %d, want 3", scheduler.ActiveWorkers())
 	}
+	runtime := scheduler.RuntimeSnapshot()
+	if runtime.ConfiguredWorkers != 3 || runtime.ActiveWorkers != 3 || runtime.AvailableWorkers != 0 || runtime.QueuedOrders != 3 || runtime.SchedulableOrders != 3 || len(runtime.Assignments) != 3 {
+		t.Fatalf("HIVE-MC-T2 runtime snapshot = %+v", runtime)
+	}
+	for _, assignment := range runtime.Assignments {
+		if assignment.Stage != StageIngestWork || assignment.AttemptID == "" || assignment.ProviderID != runner.provider.ProviderID || assignment.ModelID != runner.provider.ModelID || len(assignment.DocumentSHA256) != 64 || assignment.AssignedAt.IsZero() {
+			t.Fatalf("HIVE-MC-T2 assignment is incomplete: %+v", assignment)
+		}
+	}
 	close(runner.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -391,6 +400,10 @@ func TestFactoryV1SchedulesThreeConcurrently(t *testing.T) {
 	}
 	if scheduler.ActiveWorkers() != 0 {
 		t.Fatal("blocked orders did not release worker slots")
+	}
+	released := scheduler.RuntimeSnapshot()
+	if released.ActiveWorkers != 0 || released.AvailableWorkers != 3 || len(released.Assignments) != 0 || released.Sequence <= runtime.Sequence {
+		t.Fatalf("HIVE-MC-T2 released runtime snapshot = %+v; prior sequence=%d", released, runtime.Sequence)
 	}
 }
 
