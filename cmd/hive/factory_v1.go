@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -42,6 +44,9 @@ func cmdFactoryV1Daemon(args []string) error {
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "Durable normalization/scheduler poll interval")
 	runnerTimeout := fs.Duration("runner-timeout", 15*time.Minute, "Per-stage external runner timeout")
 	runnerOutputLimit := fs.Int("runner-output-limit", 2*1024*1024, "Maximum strict JSON stdout/stderr bytes per runner invocation")
+	runtimeAddr := fs.String("runtime-addr", envOrDefault("FACTORY_V1_RUNTIME_ADDR", ""), "Optional loopback address for the authenticated read-only runtime snapshot")
+	runtimeInstanceID := fs.String("runtime-instance-id", envOrDefault("FACTORY_V1_RUNTIME_INSTANCE_ID", "factory-v1-daemon"), "Non-secret runtime instance identity")
+	runtimeRecoveryGeneration := fs.Int("runtime-recovery-generation", 0, "Boot recovery generation for runtime observation")
 
 	authorRunner := fs.String("author-runner", os.Getenv("FACTORY_V1_AUTHOR_RUNNER"), "Exact author runner executable (required)")
 	authorRunnerSHA := fs.String("author-runner-sha256", os.Getenv("FACTORY_V1_AUTHOR_RUNNER_SHA256"), "Pinned author runner executable SHA-256 (required)")
@@ -168,8 +173,47 @@ func cmdFactoryV1Daemon(args []string) error {
 	if err != nil {
 		return err
 	}
+	var runtimeMonitor *hive.FactoryRuntimeMonitor
+	var runtimeServer *http.Server
+	runtimeAPIKey := strings.TrimSpace(os.Getenv("FACTORY_V1_RUNTIME_API_KEY"))
+	if strings.TrimSpace(*runtimeAddr) != "" || runtimeAPIKey != "" {
+		if strings.TrimSpace(*runtimeAddr) == "" || runtimeAPIKey == "" {
+			return errors.New("FACTORY_V1_RUNTIME_ADDR and FACTORY_V1_RUNTIME_API_KEY must be configured together")
+		}
+		if err := hive.ValidateFactoryRuntimeListenAddress(*runtimeAddr); err != nil {
+			return err
+		}
+		runtimeMonitor, err = hive.NewFactoryRuntimeMonitor(scheduler, hive.FactoryRuntimeMonitorConfig{
+			InstanceID: *runtimeInstanceID, RecoveryGeneration: *runtimeRecoveryGeneration,
+		})
+		if err != nil {
+			return err
+		}
+		runtimeHandler, handlerErr := hive.NewFactoryRuntimeSnapshotHandler(runtimeMonitor, runtimeAPIKey)
+		if handlerErr != nil {
+			return handlerErr
+		}
+		listener, listenErr := net.Listen("tcp", *runtimeAddr)
+		if listenErr != nil {
+			return fmt.Errorf("listen for factory runtime snapshot: %w", listenErr)
+		}
+		runtimeServer = &http.Server{Handler: runtimeHandler, ReadHeaderTimeout: time.Second}
+		go func() {
+			if serveErr := runtimeServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				log.Printf("factory-v1 runtime snapshot server stopped: %v", serveErr)
+				stop()
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = runtimeServer.Shutdown(shutdownCtx)
+		}()
+	}
 	daemon, err := hive.NewFactoryV1Daemon(normalizer, scheduler, hive.FactoryV1DaemonConfig{
 		PollInterval: *pollInterval,
+		Runtime:      runtimeMonitor,
 		OnError: func(cycleErr error) {
 			log.Printf("factory-v1 recoverable cycle error: %v", cycleErr)
 		},
@@ -194,7 +238,11 @@ func cmdFactoryV1Daemon(args []string) error {
 		}
 		go runIssueScanScannerLoop(ctx, fc, scannerConfig, ghIssueLister{})
 	}
-	log.Printf("factory-v1 daemon started with %d workers; author=%s/%s reviewer=%s/%s", factoryv1.DefaultWorkerCount, authorBinding.ProviderID, authorBinding.ModelID, reviewerBinding.ProviderID, reviewerBinding.ModelID)
+	runtimeMode := "disabled"
+	if runtimeServer != nil {
+		runtimeMode = "loopback-authenticated"
+	}
+	log.Printf("factory-v1 daemon started with %d workers; author=%s/%s reviewer=%s/%s runtime=%s", factoryv1.DefaultWorkerCount, authorBinding.ProviderID, authorBinding.ModelID, reviewerBinding.ProviderID, reviewerBinding.ModelID, runtimeMode)
 	return daemon.Run(ctx)
 }
 

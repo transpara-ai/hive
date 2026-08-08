@@ -31,12 +31,16 @@ type OrderProjection struct {
 	Version              string                  `json:"version"`
 	Title                string                  `json:"title"`
 	Channel              Channel                 `json:"channel"`
+	TargetRepository     string                  `json:"target_repository"`
 	SourceRef            SourceReference         `json:"source_ref"`
 	DocumentSHA256       string                  `json:"document_sha256"`
+	EngineProtocol       string                  `json:"engine_protocol"`
 	Status               string                  `json:"status"`
 	TLCStage             Stage                   `json:"tlc_stage"`
 	TLCIndex             int                     `json:"tlc_index"`
 	ElapsedMS            int64                   `json:"elapsed_ms"`
+	StartedAt            time.Time               `json:"started_at"`
+	LastEffectAt         time.Time               `json:"last_effect_at"`
 	ActiveAttemptID      string                  `json:"active_attempt_id"`
 	ActivelyExecuting    bool                    `json:"actively_executing"`
 	Peers                []string                `json:"peers"`
@@ -170,10 +174,12 @@ func (p *Projector) projectOrders(ctx context.Context, events []Event, now time.
 		order := accepted.Document.Order
 		item := OrderProjection{
 			OrderID: order.DocID, Version: order.Version, Title: order.Title, Channel: order.Channel,
-			DocumentSHA256: accepted.Document.SHA256, Status: "accepted",
+			TargetRepository: order.TargetRepository, DocumentSHA256: accepted.Document.SHA256,
+			EngineProtocol: TLCVersion, Status: "accepted",
 			TLCStage: StageIngestWork, TLCIndex: 0,
 			ElapsedMS: max(int64(0), now.Sub(acceptedEvent.OccurredAt).Milliseconds()),
-			Peers:     PeersForStage(StageIngestWork), GateState: "unavailable",
+			StartedAt: acceptedEvent.OccurredAt, LastEffectAt: acceptedEvent.OccurredAt,
+			Peers: PeersForStage(StageIngestWork), GateState: "unavailable",
 			Evidence: []Evidence{}, NextAction: "start ingest_work",
 			HumanApprovalBasis:   accepted.HumanApprovalBasis,
 			HumanApprovalReceipt: accepted.HumanApprovalReceipt,
@@ -190,6 +196,9 @@ func (p *Projector) projectOrders(ctx context.Context, events []Event, now time.
 			return nil, err
 		}
 		item.Stages = ledger
+		if len(ledger) > 0 {
+			item.LastEffectAt = ledger[len(ledger)-1].OccurredAt
+		}
 		item.Budget = deriveBudget(order.Budget, transitions)
 		if transitionErr := validateProjectedTransitions(accepted.Document.SHA256, transitions); transitionErr != nil {
 			applyTransitions(&item, transitions)

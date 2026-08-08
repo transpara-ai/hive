@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 const DefaultWorkerCount = 3
@@ -62,8 +64,39 @@ type Scheduler struct {
 	clock  Clock
 	config SchedulerConfig
 
-	mu      sync.Mutex
-	working map[string]struct{}
+	mu              sync.Mutex
+	working         map[string]RuntimeAssignment
+	runtimeSequence uint64
+	queuedOrders    int
+	schedulable     int
+	lastProgressAt  time.Time
+}
+
+// RuntimeAssignment is an immutable, non-secret view of one scheduler slot.
+// Stage/attempt/provider/model are deliberately empty during the small window
+// after claim and before runOrder has computed the exact attempt.
+type RuntimeAssignment struct {
+	OrderID        string    `json:"order_id"`
+	OrderVersion   string    `json:"order_version"`
+	DocumentSHA256 string    `json:"document_sha256"`
+	Stage          Stage     `json:"stage,omitempty"`
+	AttemptID      string    `json:"attempt_id,omitempty"`
+	ProviderID     string    `json:"provider_id,omitempty"`
+	ModelID        string    `json:"model_id,omitempty"`
+	AssignedAt     time.Time `json:"assigned_at"`
+}
+
+// SchedulerRuntimeSnapshot is a lock-protected copy of the scheduler's live
+// worker state. It is operational observation only and is never persisted.
+type SchedulerRuntimeSnapshot struct {
+	Sequence          uint64              `json:"sequence"`
+	ConfiguredWorkers int                 `json:"configured_workers"`
+	ActiveWorkers     int                 `json:"active_workers"`
+	AvailableWorkers  int                 `json:"available_workers"`
+	QueuedOrders      int                 `json:"queued_orders"`
+	SchedulableOrders int                 `json:"schedulable_orders"`
+	LastProgressAt    time.Time           `json:"last_scheduler_progress_at"`
+	Assignments       []RuntimeAssignment `json:"assignments"`
 }
 
 func NewScheduler(store Store, work WorkStore, runner Runner, clock Clock, config SchedulerConfig) (*Scheduler, error) {
@@ -97,7 +130,7 @@ func NewScheduler(store Store, work WorkStore, runner Runner, clock Clock, confi
 			return nil, fmt.Errorf("stage %s reviewer family must differ from author family", stage)
 		}
 	}
-	return &Scheduler{store: store, work: work, runner: runner, clock: clock, config: config, working: make(map[string]struct{})}, nil
+	return &Scheduler{store: store, work: work, runner: runner, clock: clock, config: config, working: make(map[string]RuntimeAssignment)}, nil
 }
 
 // RunOnce admits up to WorkerCount non-waiting orders and waits for those
@@ -118,6 +151,17 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	queued, schedulable := 0, 0
+	for _, record := range records {
+		if orderAtHumanReview(events, record.Document.Order.DocID) {
+			continue
+		}
+		queued++
+		if s.scheduleable(events, record.Document.Order.DocID) {
+			schedulable++
+		}
+	}
+	s.setDemand(queued, schedulable)
 	sem := make(chan struct{}, s.config.WorkerCount)
 	var wg sync.WaitGroup
 	var errorsMu sync.Mutex
@@ -127,7 +171,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 		if launched >= s.config.WorkerCount {
 			break
 		}
-		if !s.scheduleable(events, record.Document.Order.DocID) || !s.claim(record.Document.Order.DocID) {
+		if !s.scheduleable(events, record.Document.Order.DocID) || !s.claim(record) {
 			continue
 		}
 		launched++
@@ -153,13 +197,19 @@ func (s *Scheduler) ActiveWorkers() int {
 	return len(s.working)
 }
 
-func (s *Scheduler) claim(orderID string) bool {
+func (s *Scheduler) claim(record acceptedRecord) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	orderID := record.Document.Order.DocID
 	if _, exists := s.working[orderID]; exists {
 		return false
 	}
-	s.working[orderID] = struct{}{}
+	s.working[orderID] = RuntimeAssignment{
+		OrderID: orderID, OrderVersion: record.Document.Order.Version,
+		DocumentSHA256: record.Document.SHA256, AssignedAt: s.clock.Now().UTC(),
+	}
+	s.runtimeSequence++
+	s.lastProgressAt = s.clock.Now().UTC()
 	return true
 }
 
@@ -167,6 +217,60 @@ func (s *Scheduler) release(orderID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.working, orderID)
+	s.runtimeSequence++
+	s.lastProgressAt = s.clock.Now().UTC()
+}
+
+func (s *Scheduler) setDemand(queued, schedulable int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.queuedOrders == queued && s.schedulable == schedulable {
+		return
+	}
+	s.queuedOrders = queued
+	s.schedulable = schedulable
+	s.runtimeSequence++
+	s.lastProgressAt = s.clock.Now().UTC()
+}
+
+func (s *Scheduler) updateAssignment(orderID string, stage Stage, attemptID string, provider ProviderBinding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assignment, exists := s.working[orderID]
+	if !exists {
+		return
+	}
+	assignment.Stage = stage
+	assignment.AttemptID = attemptID
+	assignment.ProviderID = provider.ProviderID
+	assignment.ModelID = provider.ModelID
+	s.working[orderID] = assignment
+	s.runtimeSequence++
+	s.lastProgressAt = s.clock.Now().UTC()
+}
+
+// RuntimeSnapshot returns a deterministic immutable copy. Assignment ordering
+// is stable so successive observations are diffable without inventing churn.
+func (s *Scheduler) RuntimeSnapshot() SchedulerRuntimeSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assignments := make([]RuntimeAssignment, 0, len(s.working))
+	for _, assignment := range s.working {
+		assignments = append(assignments, assignment)
+	}
+	sort.Slice(assignments, func(i, j int) bool {
+		if assignments[i].OrderID == assignments[j].OrderID {
+			return assignments[i].AttemptID < assignments[j].AttemptID
+		}
+		return assignments[i].OrderID < assignments[j].OrderID
+	})
+	active := len(assignments)
+	return SchedulerRuntimeSnapshot{
+		Sequence: s.runtimeSequence, ConfiguredWorkers: s.config.WorkerCount,
+		ActiveWorkers: active, AvailableWorkers: s.config.WorkerCount - active,
+		QueuedOrders: s.queuedOrders, SchedulableOrders: s.schedulable,
+		LastProgressAt: s.lastProgressAt, Assignments: assignments,
+	}
 }
 
 func (s *Scheduler) scheduleable(events []Event, orderID string) bool {
@@ -236,6 +340,7 @@ func (s *Scheduler) runOrder(ctx context.Context, record acceptedRecord) error {
 		}
 		latestRunning, interrupted := interruptedAttempt(transitions, stage)
 		if interrupted {
+			s.updateAssignment(record.Document.Order.DocID, latestRunning.Stage, latestRunning.AttemptID, latestRunning.Runner)
 			runningEvent, found := transitionEvent(transitionEvents, latestRunning.AttemptID, TransitionRunning)
 			if !found {
 				return errors.New("running transition payload has no durable event identity")
@@ -258,6 +363,7 @@ func (s *Scheduler) runOrder(ctx context.Context, record acceptedRecord) error {
 			return err
 		}
 		provider := s.config.StageProviders[stage]
+		s.updateAssignment(record.Document.Order.DocID, stage, attemptID, provider)
 		running := StageTransitionPayload{
 			TLCVersion: TLCVersion, Stage: stage, StageIndex: StageIndex(stage), State: TransitionRunning,
 			AttemptID: attemptID, Ordinal: ordinal, Peers: PeersForStage(stage), Runner: provider,

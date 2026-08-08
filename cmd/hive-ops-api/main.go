@@ -60,13 +60,32 @@ func main() {
 	}
 
 	opts, writeMode := opsWriterOptions()
-	if factoryV1Option, factoryV1Mode := factoryV1OpsOption(store); factoryV1Option != nil {
+	factoryV1Option, factoryV1Service, factoryV1Mode := factoryV1OpsOption(store)
+	if factoryV1Option != nil {
 		opts = append(opts, factoryV1Option)
 		writeMode += ",factory-v1:" + factoryV1Mode
 	} else {
 		writeMode += ",factory-v1:" + factoryV1Mode
 	}
 	opts = append(opts, hive.WithOperatorProjectionModelSelectionSource(modelSelectionManager.Snapshot))
+	var factoryProjection hive.FactoryProjectionBuilder
+	if factoryV1Service != nil {
+		factoryProjection = factoryV1Service.Projector.Build
+	}
+	runtimeSource := hive.FactoryRuntimeClient{
+		Endpoint: os.Getenv("HIVE_FACTORY_V1_RUNTIME_URL"),
+		APIKey:   os.Getenv("HIVE_FACTORY_V1_RUNTIME_API_KEY"),
+	}
+	missionControl, err := hive.NewCivilizationMissionControlProjector(store, hive.MissionControlProjectorConfig{
+		FactoryProjection: factoryProjection,
+		ModelSelection:    modelSelectionManager.Snapshot,
+		Runtime:           runtimeSource,
+		PageSize:          *limit,
+	})
+	if err != nil {
+		log.Fatalf("configure Civilization Mission Control: %v", err)
+	}
+	opts = append(opts, hive.WithMissionControlProjection(missionControl))
 	handler := hive.NewOperatorProjectionServer(store, *apiKey, *limit, opts...)
 	modelSelection := modelSelectionManager.Snapshot()
 
@@ -80,20 +99,20 @@ func main() {
 	}
 }
 
-func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, string) {
+func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, *hive.FactoryV1OperatorService, string) {
 	if os.Getenv("HIVE_FACTORY_V1_ENABLED") != "true" {
-		return nil, "disabled"
+		return nil, nil, "disabled"
 	}
 	humanValue := os.Getenv("HIVE_OPS_HUMAN_ACTOR")
 	credentialKeyID := os.Getenv("HIVE_FACTORY_V1_CREDENTIAL_KEY_ID")
 	if humanValue == "" || credentialKeyID == "" {
 		log.Printf("factory v1 routes disabled: HIVE_OPS_HUMAN_ACTOR and HIVE_FACTORY_V1_CREDENTIAL_KEY_ID are required")
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	humanID, err := types.NewActorID(humanValue)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: invalid Human actor: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	registry := event.DefaultRegistry()
 	hive.RegisterWithRegistry(registry)
@@ -108,22 +127,22 @@ func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, stri
 	graph, err := hive.NewFactoryV1EventGraphStore(eventStore, factory, signer, humanID, conversation)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: EventGraph adapter: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	workStore, err := hive.NewFactoryV1WorkStore(eventStore, factory, signer, humanID, conversation)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: Work adapter: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	clock := factoryv1.WallClock{}
 	intake, err := factoryv1.NewIntake(graph, workStore, clock)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: intake: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	if err := intake.ReplayAndRepair(context.Background()); err != nil {
 		log.Printf("factory v1 routes disabled: recovery: %v", err)
-		return nil, "recovery-failed"
+		return nil, nil, "recovery-failed"
 	}
 	recoveryGeneration, _ := strconv.Atoi(os.Getenv("HIVE_FACTORY_V1_RECOVERY_GENERATION"))
 	serviceProjection := factoryv1.ServiceProjection{
@@ -133,14 +152,14 @@ func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, stri
 	projector, err := factoryv1.NewProjector(graph, workStore, clock, serviceProjection)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: projector: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
 	service, err := hive.NewFactoryV1OperatorService(intake, projector, graph, clock, humanID.Value(), credentialKeyID)
 	if err != nil {
 		log.Printf("factory v1 routes disabled: operator service: %v", err)
-		return nil, "misconfigured"
+		return nil, nil, "misconfigured"
 	}
-	return hive.WithOperatorFactoryV1(service), "enabled"
+	return hive.WithOperatorFactoryV1(service), service, "enabled"
 }
 
 func registerOpsAPIEventTypes() {

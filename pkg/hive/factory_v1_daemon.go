@@ -179,6 +179,7 @@ type factoryV1IssueLoop interface {
 type FactoryV1DaemonConfig struct {
 	PollInterval time.Duration
 	OnError      func(error)
+	Runtime      *FactoryRuntimeMonitor
 }
 
 // FactoryV1Daemon continuously normalizes scanner events and advances the
@@ -205,18 +206,40 @@ func NewFactoryV1Daemon(normalizer factoryV1IssueLoop, scheduler factoryV1Schedu
 }
 
 func (d *FactoryV1Daemon) Run(ctx context.Context) error {
+	if d.config.Runtime != nil {
+		d.config.Runtime.SetState(FactoryRuntimePolling, nil)
+		go d.config.Runtime.RunHeartbeat(ctx)
+	}
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			if d.config.Runtime != nil {
+				d.config.Runtime.SetState(FactoryRuntimeStopping, nil)
+			}
 			return nil
 		case <-timer.C:
+			var cycleErrors []error
 			if _, err := d.normalizer.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				d.report(fmt.Errorf("factory v1 issue normalization cycle: %w", err))
+				cycleErr := fmt.Errorf("factory v1 issue normalization cycle: %w", err)
+				cycleErrors = append(cycleErrors, cycleErr)
+				d.report(cycleErr)
+			}
+			if d.config.Runtime != nil {
+				d.config.Runtime.SetState(FactoryRuntimeExecuting, nil)
 			}
 			if err := d.scheduler.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				d.report(fmt.Errorf("factory v1 scheduler cycle: %w", err))
+				cycleErr := fmt.Errorf("factory v1 scheduler cycle: %w", err)
+				cycleErrors = append(cycleErrors, cycleErr)
+				d.report(cycleErr)
+			}
+			if d.config.Runtime != nil {
+				if joined := errors.Join(cycleErrors...); joined != nil {
+					d.config.Runtime.SetState(FactoryRuntimeDegraded, joined)
+				} else {
+					d.config.Runtime.SetState(FactoryRuntimePolling, nil)
+				}
 			}
 			timer.Reset(d.config.PollInterval)
 		}
