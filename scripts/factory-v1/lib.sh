@@ -51,6 +51,10 @@ factory_v1_listener_pids() {
   { lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true; } | sort -nu
 }
 
+factory_v1_required_ports() {
+  printf '%s\n' 5432 8084 8083 8080 8088
+}
+
 factory_v1_pid_start_ticks() {
   awk '{print $22}' "/proc/$1/stat"
 }
