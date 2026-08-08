@@ -69,8 +69,12 @@ func TestFactoryV1DaemonIssueScanAdmission(t *testing.T) {
 		t.Fatalf("incomplete Work link = %+v", links[0])
 	}
 
-	if _, err := normalizer.RunOnce(context.Background()); err != nil {
+	count, err = normalizer.RunOnce(context.Background())
+	if err != nil {
 		t.Fatalf("idempotent replay: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("idempotent replay count = %d, want 0 already-normalized requests", count)
 	}
 	events, _ = graph.List(context.Background())
 	accepted = 0

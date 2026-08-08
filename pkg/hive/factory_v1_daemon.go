@@ -39,9 +39,16 @@ func (n *FactoryV1IssueNormalizer) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	normalizedRequestIDs, err := factoryV1NormalizedRequestIDs(ctx, n.store)
+	if err != nil {
+		return 0, err
+	}
 	normalized := 0
 	var normalizeErrors []error
 	for _, request := range requests {
+		if _, alreadyNormalized := normalizedRequestIDs[request.ID().Value()]; alreadyNormalized {
+			continue
+		}
 		content, ok := request.Content().(FactoryRunRequestedContent)
 		if !ok {
 			normalizeErrors = append(normalizeErrors, fmt.Errorf("factory.run.requested %s has content %T", request.ID().Value(), request.Content()))
@@ -67,6 +74,35 @@ func (n *FactoryV1IssueNormalizer) RunOnce(ctx context.Context) (int, error) {
 		normalized++
 	}
 	return normalized, errors.Join(normalizeErrors...)
+}
+
+// factoryV1NormalizedRequestIDs returns the immutable request events already
+// named as causes of an accepted v1 order. This keeps historical scanner
+// requests replay-safe even after their orders reach Human Review and even if
+// later Hive code would derive different non-source fields for the same tuple.
+func factoryV1NormalizedRequestIDs(ctx context.Context, eventStore store.Store) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	cursor := types.None[types.Cursor]()
+	eventType := types.MustEventType(string(factoryv1.EventOrderAccepted))
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		page, err := eventStore.ByType(eventType, 200, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("list accepted factory v1 orders for request replay: %w", err)
+		}
+		for _, accepted := range page.Items() {
+			for _, cause := range accepted.Causes() {
+				result[cause.Value()] = struct{}{}
+			}
+		}
+		if !page.HasMore() {
+			break
+		}
+		cursor = page.Cursor()
+	}
+	return result, nil
 }
 
 func factoryV1RequestedEvents(ctx context.Context, eventStore store.Store) ([]event.Event, error) {

@@ -19,6 +19,7 @@ scripts/factory-v1/supervisor.sh init
 FACTORY_V1_OPERATION86_PATHS_FILE=/absolute/path/to/protected-paths.txt \
   scripts/factory-v1/supervisor.sh preflight
 scripts/factory-v1/supervisor.sh start
+scripts/factory-v1/supervisor.sh run
 scripts/factory-v1/supervisor.sh status
 scripts/factory-v1/supervisor.sh restart
 scripts/factory-v1/supervisor.sh stop
@@ -42,3 +43,16 @@ Configuration, PID ownership, logs, manifests, hashes, and JSON receipts are
 created under the fresh runtime root with private permissions. `stop` verifies
 recorded PID start times and executable hashes before signalling a live PID; it
 refuses a reused or otherwise mismatched PID.
+
+`run` is the persistent service-manager entry point. It keeps the supervisor in
+the foreground, verifies exact process/listener ownership every ten seconds,
+and stops the complete stack on TERM. A component failure exits non-zero so a
+service manager configured with `Restart=on-failure` restarts the whole stack.
+The Hive daemon runtime snapshot is bound and preflighted on loopback port
+`8084`; fresh and pre-runtime-observation configurations receive the complete
+four-key observation wiring, while partial configurations fail closed.
+
+For a user-level systemd deployment, install and adapt
+`civilization-factory-v1.service.example`, then run `systemctl --user enable
+--now civilization-factory-v1.service`. User lingering must be enabled if the
+stack must start without an interactive login.

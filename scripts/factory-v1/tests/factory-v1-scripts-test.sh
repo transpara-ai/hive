@@ -17,7 +17,7 @@ cleanup() {
     FACTORY_V1_WORK_ROOT="$tmp_root/work" \
     FACTORY_V1_SITE_ROOT="$tmp_root/site" \
     FACTORY_V1_POSTGRES_CMD="$fixture 5432" \
-    FACTORY_V1_HIVE_DAEMON_CMD='sleep 300' \
+    FACTORY_V1_HIVE_DAEMON_CMD="$fixture 8084" \
     FACTORY_V1_HIVE_OPS_CMD="$fixture 8083" \
     FACTORY_V1_WORK_CMD="$fixture 8080" \
     FACTORY_V1_SITE_CMD="$fixture 8088" \
@@ -34,7 +34,7 @@ export FACTORY_V1_HIVE_ROOT="$tmp_root/hive"
 export FACTORY_V1_WORK_ROOT="$tmp_root/work"
 export FACTORY_V1_SITE_ROOT="$tmp_root/site"
 export FACTORY_V1_POSTGRES_CMD="$fixture 5432"
-export FACTORY_V1_HIVE_DAEMON_CMD='sleep 300'
+export FACTORY_V1_HIVE_DAEMON_CMD="$fixture 8084"
 export FACTORY_V1_HIVE_OPS_CMD="$fixture 8083"
 export FACTORY_V1_WORK_CMD="$fixture 8080"
 export FACTORY_V1_SITE_CMD="$fixture 8088"
@@ -43,6 +43,9 @@ export FACTORY_V1_STOP_TIMEOUT_SECONDS=5
 
 "$script_dir/supervisor.sh" init >/dev/null
 [ "$(stat -c '%a' "$tmp_root/runtime/config/runtime.env")" = 600 ]
+for key in FACTORY_V1_RUNTIME_ADDR FACTORY_V1_RUNTIME_API_KEY HIVE_FACTORY_V1_RUNTIME_URL HIVE_FACTORY_V1_RUNTIME_API_KEY; do
+  grep -q "^${key}=" "$tmp_root/runtime/config/runtime.env"
+done
 
 "$script_dir/preflight.sh" \
   --runtime-root "$tmp_root/runtime" \
@@ -94,7 +97,7 @@ if "$script_dir/supervisor.sh" start >"$tmp_root/partial-start.out" 2>"$tmp_root
   printf 'expected partial startup to fail\n' >&2
   exit 1
 fi
-for port in 5432 8080 8083 8088; do
+for port in 5432 8080 8083 8084 8088; do
   if lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     printf 'partial startup left listener on port %s\n' "$port" >&2
     exit 1
@@ -116,5 +119,27 @@ fi
 kill -TERM "$external_pid"
 wait "$external_pid" || true
 external_pid=''
+
+# Foreground run mode keeps ownership under an external service manager and
+# stops the whole stack when that manager sends TERM.
+"$script_dir/supervisor.sh" run >"$tmp_root/run-mode.out" 2>"$tmp_root/run-mode.err" &
+run_pid=$!
+for _ in $(seq 1 100); do
+  ready=true
+  for port in 5432 8080 8083 8084 8088; do
+    lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || ready=false
+  done
+  grep -q 'factory-v1 stack started' "$tmp_root/run-mode.out" || ready=false
+  "$ready" && break
+  sleep 0.1
+done
+kill -TERM "$run_pid"
+wait "$run_pid"
+for port in 5432 8080 8083 8084 8088; do
+  if lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    printf 'run mode left listener on port %s after TERM\n' "$port" >&2
+    exit 1
+  fi
+done
 
 printf 'factory-v1 shell tests: PASS\n'

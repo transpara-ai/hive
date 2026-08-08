@@ -47,7 +47,7 @@ site_cmd=${FACTORY_V1_SITE_CMD:-env PORT=8088 ./bin/site}
 declare -a service_names=(postgres hive-daemon hive-ops work site)
 declare -A service_ports=(
   [postgres]=5432
-  [hive-daemon]=0
+  [hive-daemon]=8084
   [hive-ops]=8083
   [work]=8080
   [site]=8088
@@ -113,6 +113,10 @@ initialize_config() {
       printf 'FACTORY_V1_RUNTIME_ROOT=%q\n' "$runtime_root"
       printf 'FACTORY_V1_CONFIG_PATH=%q\n' "$config_path"
       printf 'FACTORY_V1_OPERATOR_TOKEN=%q\n' "$token"
+	  printf 'FACTORY_V1_RUNTIME_ADDR=%q\n' '127.0.0.1:8084'
+	  printf '%s\n' 'FACTORY_V1_RUNTIME_API_KEY=${FACTORY_V1_OPERATOR_TOKEN}'
+	  printf 'HIVE_FACTORY_V1_RUNTIME_URL=%q\n' 'http://127.0.0.1:8084/api/hive/factory/v1/runtime-snapshot'
+	  printf '%s\n' 'HIVE_FACTORY_V1_RUNTIME_API_KEY=${FACTORY_V1_RUNTIME_API_KEY}'
 	  printf 'HIVE_OPS_API_KEY=%q\n' "$token"
 	  printf 'WORK_API_KEY=%q\n' "$token"
 	  printf 'WORK_API_TOKEN=%q\n' "$token"
@@ -126,6 +130,27 @@ initialize_config() {
   [ ! -L "$config_path" ] || factory_v1_die "config must not be a symlink"
   [ "$(stat -c '%u' -- "$config_path")" -eq "$(id -u)" ] || factory_v1_die "config owner mismatch"
   [ "$(factory_v1_mode "$config_path")" = 600 ] || factory_v1_die "config must have mode 0600"
+
+	local runtime_key_count=0 runtime_key
+	for runtime_key in FACTORY_V1_RUNTIME_ADDR FACTORY_V1_RUNTIME_API_KEY HIVE_FACTORY_V1_RUNTIME_URL HIVE_FACTORY_V1_RUNTIME_API_KEY; do
+		if grep -q "^${runtime_key}=" "$config_path"; then
+			runtime_key_count=$((runtime_key_count + 1))
+		fi
+	done
+	if [ "$runtime_key_count" -eq 0 ]; then
+		local migration_tmp="${config_path}.tmp.$$"
+		{
+			cat -- "$config_path"
+			printf 'FACTORY_V1_RUNTIME_ADDR=%q\n' '127.0.0.1:8084'
+			printf '%s\n' 'FACTORY_V1_RUNTIME_API_KEY=${FACTORY_V1_OPERATOR_TOKEN}'
+			printf 'HIVE_FACTORY_V1_RUNTIME_URL=%q\n' 'http://127.0.0.1:8084/api/hive/factory/v1/runtime-snapshot'
+			printf '%s\n' 'HIVE_FACTORY_V1_RUNTIME_API_KEY=${FACTORY_V1_RUNTIME_API_KEY}'
+		} >"$migration_tmp"
+		chmod 600 "$migration_tmp"
+		mv -f -- "$migration_tmp" "$config_path"
+	elif [ "$runtime_key_count" -ne 4 ]; then
+		factory_v1_die "runtime observation config is partial; all four runtime keys are required"
+	fi
 }
 
 load_fresh_config() {
@@ -136,6 +161,10 @@ load_fresh_config() {
   # shellcheck disable=SC1090
   source "$config_path"
   set +a
+	[ "${FACTORY_V1_RUNTIME_ADDR:-}" = '127.0.0.1:8084' ] || factory_v1_die "FACTORY_V1_RUNTIME_ADDR must be 127.0.0.1:8084"
+	[ "${HIVE_FACTORY_V1_RUNTIME_URL:-}" = 'http://127.0.0.1:8084/api/hive/factory/v1/runtime-snapshot' ] || factory_v1_die "HIVE_FACTORY_V1_RUNTIME_URL must name the loopback runtime snapshot"
+	[ -n "${FACTORY_V1_RUNTIME_API_KEY:-}" ] && [ "$FACTORY_V1_RUNTIME_API_KEY" = "${FACTORY_V1_OPERATOR_TOKEN:-}" ] || factory_v1_die "FACTORY_V1_RUNTIME_API_KEY must resolve to the operator token"
+	[ "${HIVE_FACTORY_V1_RUNTIME_API_KEY:-}" = "$FACTORY_V1_RUNTIME_API_KEY" ] || factory_v1_die "Hive Ops runtime API key must resolve to the runtime API key"
 }
 
 assert_service_inputs() {
@@ -197,7 +226,7 @@ assert_live_record_pids_owned() {
 
 preflight_ports() {
   local service port pids
-  for service in postgres hive-ops work site; do
+  for service in "${service_names[@]}"; do
     port=${service_ports[$service]}
     pids=$(factory_v1_listener_pids "$port")
     if [ -n "$pids" ]; then
@@ -322,6 +351,13 @@ start_postgres() {
   assert_loopback_listener postgres "$listener_pid" 5432
   write_owner_record postgres "$main_pid" "$listener_pid" "$command"
 
+	local deadline=$((SECONDS + ${FACTORY_V1_START_TIMEOUT_SECONDS:-45}))
+	while ! env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/pg_isready" -q -h "$postgres_socket" -p 5432 -d postgres; do
+		kill -0 "$main_pid" 2>/dev/null || factory_v1_die "postgres exited before accepting connections; inspect $log_dir/postgres.log"
+		[ "$SECONDS" -lt "$deadline" ] || factory_v1_die "postgres timed out waiting to accept connections; inspect $log_dir/postgres.log"
+		sleep 0.2
+	done
+
   if ! env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/psql" -h "$postgres_socket" -p 5432 -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='factory_v1'" | grep -qx 1; then
     env LD_LIBRARY_PATH="$postgres_ld_library_path" "$postgres_bin/createdb" -h "$postgres_socket" -p 5432 factory_v1
   fi
@@ -386,6 +422,27 @@ start_stack() {
   printf 'factory-v1 stack started; status receipt: %s\n' "$receipt_dir"
 }
 
+run_stack() {
+	# Install signal handling before startup so a service manager can cancel a
+	# partially started stack without surfacing a false signal failure.
+	trap 'exit 0' TERM INT
+	if compgen -G "$run_dir/*.owner.json" >/dev/null; then
+		printf 'factory-v1 run mode reconciling existing ownership receipts\n'
+		stop_stack
+	fi
+	start_stack
+	trap 'run_rc=$?; trap - EXIT TERM INT; stop_stack >/dev/null 2>&1 || true; exit "$run_rc"' EXIT
+	local service interval=${FACTORY_V1_MONITOR_INTERVAL_SECONDS:-10}
+	while sleep "$interval"; do
+		for service in "${service_names[@]}"; do
+			assert_owner_record "$service" || {
+				printf 'factory-v1 run monitor detected unhealthy service: %s\n' "$service" >&2
+				return 1
+			}
+		done
+	done
+}
+
 stop_stack() {
   load_fresh_config
   local service record pid listener_pid
@@ -417,7 +474,7 @@ preflight() {
 }
 
 usage() {
-  printf 'usage: %s {init|preflight|start|status|restart|stop}\n' "$0" >&2
+  printf 'usage: %s {init|preflight|start|run|status|restart|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -426,6 +483,7 @@ case "$action" in
   init) initialize_config; printf 'initialized fresh factory-v1 runtime at %s\n' "$runtime_root" ;;
   preflight) preflight ;;
   start) start_stack ;;
+  run) run_stack ;;
   status) load_fresh_config; emit_status ;;
   restart) stop_stack; start_stack ;;
   stop) stop_stack ;;
