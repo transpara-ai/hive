@@ -149,7 +149,12 @@ func factoryV1OpsOption(eventStore store.Store) (hive.OperatorServerOption, *hiv
 		ServiceID: "hive-factory-v1", InstanceID: envOrDefault("HIVE_FACTORY_V1_INSTANCE_ID", "hive-ops-api"),
 		RecoveryGeneration: recoveryGeneration, StartedAt: time.Now().UTC(), Healthy: true,
 	}
-	projector, err := factoryv1.NewProjector(graph, workStore, clock, serviceProjection)
+	prObserver, err := newGitHubPRObserver(envOrDefault("HIVE_FACTORY_V1_GITHUB_CLI", "gh"))
+	if err != nil {
+		log.Printf("factory v1 routes disabled: GitHub PR observer: %v", err)
+		return nil, nil, "misconfigured"
+	}
+	projector, err := factoryv1.NewProjector(graph, workStore, clock, serviceProjection, factoryv1.WithPRObserver(prObserver))
 	if err != nil {
 		log.Printf("factory v1 routes disabled: projector: %v", err)
 		return nil, nil, "misconfigured"

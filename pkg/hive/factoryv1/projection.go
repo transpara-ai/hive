@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -83,14 +84,42 @@ type BudgetProjection struct {
 }
 
 type PRProjection struct {
-	Repository      string `json:"repository"`
-	Number          int    `json:"number"`
-	URL             string `json:"url"`
-	HeadSHA         string `json:"head_sha"`
-	ReviewedHeadSHA string `json:"reviewed_head_sha"`
-	Open            bool   `json:"open"`
-	Draft           bool   `json:"draft"`
-	ChecksPassing   bool   `json:"checks_passing"`
+	Repository        string    `json:"repository"`
+	Number            int       `json:"number"`
+	URL               string    `json:"url"`
+	State             string    `json:"state"`
+	HeadSHA           string    `json:"head_sha"`
+	ReviewedHeadSHA   string    `json:"reviewed_head_sha"`
+	Open              bool      `json:"open"`
+	Draft             bool      `json:"draft"`
+	ChecksPassing     bool      `json:"checks_passing"`
+	MergeStateStatus  string    `json:"merge_state_status,omitempty"`
+	ObservedAt        time.Time `json:"observed_at,omitempty"`
+	ObservationSource string    `json:"observation_source"`
+	ObservationStatus string    `json:"observation_status"`
+	ObservationDetail string    `json:"observation_detail,omitempty"`
+}
+
+// PRObservation is a current read-only observation of a pull request. The
+// reviewed head deliberately remains ledger-owned so the projector can compare
+// the durable gate result with external GitHub truth without transferring
+// review credit.
+type PRObservation struct {
+	Repository       string
+	Number           int
+	URL              string
+	State            string
+	HeadSHA          string
+	Draft            bool
+	ChecksPassing    bool
+	MergeStateStatus string
+	ObservedAt       time.Time
+	Source           string
+	Detail           string
+}
+
+type PRObserver interface {
+	ObservePR(ctx context.Context, repository string, number int) (PRObservation, error)
 }
 
 type InterventionProjection struct {
@@ -113,13 +142,26 @@ type IdeaProjection struct {
 }
 
 type Projector struct {
-	store   Store
-	work    WorkStore
-	clock   Clock
-	service ServiceProjection
+	store      Store
+	work       WorkStore
+	clock      Clock
+	service    ServiceProjection
+	prObserver PRObserver
 }
 
-func NewProjector(store Store, work WorkStore, clock Clock, service ServiceProjection) (*Projector, error) {
+type ProjectorOption func(*Projector) error
+
+func WithPRObserver(observer PRObserver) ProjectorOption {
+	return func(projector *Projector) error {
+		if observer == nil {
+			return errors.New("factory v1 PR observer is nil")
+		}
+		projector.prObserver = observer
+		return nil
+	}
+}
+
+func NewProjector(store Store, work WorkStore, clock Clock, service ServiceProjection, options ...ProjectorOption) (*Projector, error) {
 	if store == nil || work == nil {
 		return nil, errors.New("factory v1 projector requires EventGraph and Work stores")
 	}
@@ -129,7 +171,16 @@ func NewProjector(store Store, work WorkStore, clock Clock, service ServiceProje
 	if service.ServiceID == "" {
 		service.ServiceID = "hive-factory-v1"
 	}
-	return &Projector{store: store, work: work, clock: clock, service: service}, nil
+	projector := &Projector{store: store, work: work, clock: clock, service: service}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("factory v1 projector option is nil")
+		}
+		if err := option(projector); err != nil {
+			return nil, err
+		}
+	}
+	return projector, nil
 }
 
 func (p *Projector) Build(ctx context.Context) (Projection, error) {
@@ -223,6 +274,9 @@ func (p *Projector) projectOrders(ctx context.Context, events []Event, now time.
 			item.Blocker = "Work linkage is missing, conflicting, or quarantined"
 			item.NextAction = "reconcile accepted EventGraph event to Work"
 		}
+		if item.PR != nil {
+			p.reconcilePR(ctx, &item)
+		}
 		if hasOpenIntervention(events, order.DocID) {
 			item.Status = "human_required"
 			item.ActivelyExecuting = false
@@ -234,6 +288,107 @@ func (p *Projector) projectOrders(ctx context.Context, events []Event, now time.
 		return workTuple(orders[i].OrderID, orders[i].Version) < workTuple(orders[j].OrderID, orders[j].Version)
 	})
 	return orders, nil
+}
+
+func (p *Projector) reconcilePR(ctx context.Context, item *OrderProjection) {
+	pr := item.PR
+	if p.prObserver == nil {
+		pr.State = stateFromLedger(pr.Open, pr.Draft)
+		pr.ObservationSource = "factory_v1_ledger"
+		pr.ObservationStatus = "ledger_only"
+		item.Status = "blocked"
+		item.ActivelyExecuting = false
+		item.ActiveAttemptID = ""
+		item.GateState = "unavailable"
+		item.Blocker = "current GitHub PR observation is not configured"
+		item.NextAction = "configure read-only GitHub observation and reconcile the exact PR head"
+		return
+	}
+	observation, err := p.prObserver.ObservePR(ctx, pr.Repository, pr.Number)
+	if err != nil {
+		pr.State = "unknown"
+		pr.HeadSHA = ""
+		pr.Open = false
+		pr.Draft = false
+		pr.ChecksPassing = false
+		pr.ObservedAt = p.clock.Now().UTC()
+		pr.ObservationSource = "github"
+		pr.ObservationStatus = "unavailable"
+		pr.ObservationDetail = "read-only PR observation failed"
+		item.Status = "blocked"
+		item.ActivelyExecuting = false
+		item.ActiveAttemptID = ""
+		item.GateState = "unavailable"
+		item.Blocker = "current GitHub PR state is unavailable"
+		item.NextAction = "restore read-only GitHub observation and reconcile the exact PR head"
+		return
+	}
+
+	state := strings.ToLower(strings.TrimSpace(observation.State))
+	pr.Repository = observation.Repository
+	pr.Number = observation.Number
+	pr.URL = observation.URL
+	pr.State = state
+	pr.HeadSHA = observation.HeadSHA
+	pr.Open = state == "open"
+	pr.Draft = observation.Draft
+	pr.ChecksPassing = observation.ChecksPassing
+	pr.MergeStateStatus = strings.ToLower(strings.TrimSpace(observation.MergeStateStatus))
+	pr.ObservedAt = observation.ObservedAt.UTC()
+	if pr.ObservedAt.IsZero() {
+		pr.ObservedAt = p.clock.Now().UTC()
+	}
+	pr.ObservationSource = strings.TrimSpace(observation.Source)
+	if pr.ObservationSource == "" {
+		pr.ObservationSource = "github"
+	}
+	pr.ObservationStatus = "current"
+	pr.ObservationDetail = observation.Detail
+
+	if state != "open" {
+		item.Status = "blocked"
+		item.ActivelyExecuting = false
+		item.ActiveAttemptID = ""
+		item.Blocker = fmt.Sprintf("output PR is no longer open (current state: %s)", state)
+		item.NextAction = "admit a current order for a new unmerged output PR; preserve the historical result"
+		return
+	}
+	if pr.Draft && item.Status == "human_review" {
+		item.Status = "blocked"
+		item.Blocker = "output PR is still a draft"
+		item.NextAction = "complete exact-head gates and mark the PR ready for Human Review"
+		return
+	}
+	if item.Status != "human_review" {
+		return
+	}
+	if pr.MergeStateStatus == "behind" || pr.MergeStateStatus == "dirty" {
+		item.Status = "blocked"
+		item.Blocker = "live PR branch is not synchronized with its base branch"
+		item.NextAction = "update the branch, then rerun exact-head IAR and CFAR"
+		return
+	}
+	if pr.HeadSHA == "" || pr.ReviewedHeadSHA == "" || pr.HeadSHA != pr.ReviewedHeadSHA {
+		item.Status = "blocked"
+		item.Blocker = "live PR head does not match the exact reviewed head"
+		item.NextAction = "run exact-head IAR and CFAR for the current PR head"
+		return
+	}
+	if !pr.ChecksPassing {
+		item.Status = "blocked"
+		item.Blocker = "required checks are not confirmed passing on the live PR head"
+		item.NextAction = "repair or complete required checks on the exact reviewed head"
+	}
+}
+
+func stateFromLedger(open, draft bool) string {
+	if !open {
+		return "closed"
+	}
+	if draft {
+		return "draft"
+	}
+	return "open"
 }
 
 func validateProjectedTransitions(documentSHA256 string, transitions []StageTransitionPayload) error {

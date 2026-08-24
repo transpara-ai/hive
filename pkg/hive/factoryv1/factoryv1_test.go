@@ -411,6 +411,15 @@ type lifecycleRunner struct {
 	provider ProviderBinding
 }
 
+type staticPRObserver struct {
+	observation PRObservation
+	err         error
+}
+
+func (o *staticPRObserver) ObservePR(context.Context, string, int) (PRObservation, error) {
+	return o.observation, o.err
+}
+
 func (r *lifecycleRunner) Execute(_ context.Context, request RunRequest) (RunResult, error) {
 	result := RunResult{Status: RunnerPassed, Provider: r.provider, Evidence: []Evidence{{Kind: "stage_receipt", Reference: "evidence:" + string(request.Stage) + ":" + request.AttemptID}}}
 	zero := 0
@@ -498,7 +507,12 @@ func TestFactoryV1TLCOrderAndEvidence(t *testing.T) {
 			t.Fatalf("stage %s terminal attempt differs from running attempt", stage)
 		}
 	}
-	projector, _ := NewProjector(events, work, clock, ServiceProjection{InstanceID: "test-instance", Healthy: true})
+	head := strings.Repeat("c", 40)
+	observer := &staticPRObserver{observation: PRObservation{
+		Repository: "transpara-ai/hive", Number: 999, URL: "https://github.com/transpara-ai/hive/pull/999",
+		State: "open", HeadSHA: head, ChecksPassing: true, ObservedAt: clock.Now(), Source: "github_test",
+	}}
+	projector, _ := NewProjector(events, work, clock, ServiceProjection{InstanceID: "test-instance", Healthy: true}, WithPRObserver(observer))
 	projection, err := projector.Build(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -507,8 +521,81 @@ func TestFactoryV1TLCOrderAndEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if order.Status != "human_review" || order.TLCStage != StageHumanReview || order.PR == nil || !order.PR.ChecksPassing {
+	if order.Status != "human_review" || order.TLCStage != StageHumanReview || order.PR == nil || !order.PR.ChecksPassing || order.PR.ObservationStatus != "current" || order.PR.ObservationSource != "github_test" {
 		t.Fatalf("terminal projection is not exact-head Human Review: %+v", order)
+	}
+
+	ledgerOnlyProjector, _ := NewProjector(events, work, clock, ServiceProjection{InstanceID: "test-instance", Healthy: true})
+	ledgerOnlyProjection, err := ledgerOnlyProjector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerOnlyOrder, _ := ledgerOnlyProjection.Order(receipt.OrderID)
+	if ledgerOnlyOrder.Status != "blocked" || ledgerOnlyOrder.PR.ObservationStatus != "ledger_only" || !strings.Contains(ledgerOnlyOrder.Blocker, "not configured") {
+		t.Fatalf("ledger-only terminal output did not fail closed: %+v", ledgerOnlyOrder)
+	}
+
+	observer.observation.Draft = true
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "still a draft") {
+		t.Fatalf("draft terminal output rendered ready: %+v", order)
+	}
+
+	observer.observation.Draft = false
+	observer.observation.ChecksPassing = false
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "not confirmed passing") {
+		t.Fatalf("unconfirmed required checks rendered ready: %+v", order)
+	}
+
+	observer.observation.ChecksPassing = true
+	observer.observation.MergeStateStatus = "BEHIND"
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "not synchronized") {
+		t.Fatalf("behind output branch rendered ready: %+v", order)
+	}
+
+	observer.observation.MergeStateStatus = "CLEAN"
+	observer.observation.HeadSHA = strings.Repeat("d", 40)
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "does not match") || order.PR.HeadSHA == order.PR.ReviewedHeadSHA {
+		t.Fatalf("stale reviewed head rendered ready: %+v", order)
+	}
+
+	observer.observation.State = "merged"
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || order.PR.State != "merged" || !strings.Contains(order.Blocker, "no longer open") {
+		t.Fatalf("merged historical output rendered ready: %+v", order)
+	}
+
+	observer.err = errors.New("unavailable")
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || order.GateState != "unavailable" || order.PR.ObservationStatus != "unavailable" || order.PR.State != "unknown" {
+		t.Fatalf("unavailable external truth did not fail closed: %+v", order)
 	}
 }
 

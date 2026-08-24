@@ -1407,14 +1407,21 @@ func missionFactoryEvidenceRollup(order factoryv1.OrderProjection, now time.Time
 				}
 			}
 			if item.PR != nil {
-				missionApplyPREvidence(&rollup, item.PR.Repository, item.PR.Number, item.PR.HeadSHA, item.PR.ReviewedHeadSHA, item.PR.Open, item.PR.Draft, observed, now, []string{item.Reference})
+				missionApplyPREvidence(&rollup, item.PR.Repository, item.PR.Number, item.PR.HeadSHA, item.PR.ReviewedHeadSHA, "", item.PR.Open, item.PR.Draft, observed, now, "factory_v1_ledger", []string{item.Reference})
 			}
 			rollup.Items = append(rollup.Items, projected)
 			refs = append(refs, item.Reference)
 		}
 	}
 	if order.PR != nil {
-		missionApplyPREvidence(&rollup, order.PR.Repository, order.PR.Number, order.PR.HeadSHA, order.PR.ReviewedHeadSHA, order.PR.Open, order.PR.Draft, order.LastEffectAt, now, nil)
+		observed, source := order.LastEffectAt, order.PR.ObservationSource
+		if !order.PR.ObservedAt.IsZero() {
+			observed = order.PR.ObservedAt
+		}
+		if strings.TrimSpace(source) == "" {
+			source = "factory_v1_ledger"
+		}
+		missionApplyPREvidence(&rollup, order.PR.Repository, order.PR.Number, order.PR.HeadSHA, order.PR.ReviewedHeadSHA, order.PR.State, order.PR.Open, order.PR.Draft, observed, now, source, nil)
 	}
 	classification := classifyMissionOrder(order, now)
 	rollup.PendingTier3HumanReview = order.TLCStage == factoryv1.StageHumanReview && !missionFactoryOrderTerminal(order) && classification.EffectiveHumanReviewTier == 3
@@ -1437,10 +1444,15 @@ func missionUnavailableEvidenceFieldMarks(source string, now time.Time, reason s
 	return marks
 }
 
-func missionApplyPREvidence(rollup *EvidenceRollup, repository string, number int, head, reviewed string, open, draft bool, observed, now time.Time, refs []string) {
+func missionApplyPREvidence(rollup *EvidenceRollup, repository string, number int, head, reviewed, state string, open, draft bool, observed, now time.Time, source string, refs []string) {
 	rollup.PRRepository, rollup.PRNumber = repository, number
 	rollup.PRHeadSHA, rollup.ReviewedHeadSHA = head, reviewed
-	if !open {
+	state = strings.ToLower(strings.TrimSpace(state))
+	if state == "unknown" {
+		rollup.PRState = "unknown"
+	} else if state == "merged" {
+		rollup.PRState = "merged"
+	} else if !open {
 		rollup.PRState = "closed"
 	} else if draft {
 		rollup.PRState = "draft"
@@ -1449,18 +1461,30 @@ func missionApplyPREvidence(rollup *EvidenceRollup, repository string, number in
 	}
 	exact := func(field string, valid bool, reason string, evidenceRefs ...string) {
 		if valid {
-			rollup.FieldMarks[field] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, compactStrings(append(refs, evidenceRefs...)), "")
+			rollup.FieldMarks[field] = NewEvidenceMark(FreshnessCurrent, BasisExact, source, observed, now, compactStrings(append(refs, evidenceRefs...)), "")
 		} else {
-			rollup.FieldMarks[field] = missionUnavailableMark("factory_v1_ledger", now, reason)
+			rollup.FieldMarks[field] = missionUnavailableMark(source, now, reason)
 		}
 	}
 	exact("pr_repository", strings.TrimSpace(repository) != "", "PR repository is unavailable", repository)
 	exact("pr_number", number > 0, "PR number is unavailable", strconv.Itoa(number))
-	exact("pr_state", rollup.PRState == "closed" || rollup.PRState == "draft" || rollup.PRState == "ready", "PR state is unavailable", rollup.PRState)
+	exact("pr_state", rollup.PRState == "closed" || rollup.PRState == "merged" || rollup.PRState == "draft" || rollup.PRState == "ready", "PR state is unavailable", rollup.PRState)
 	exact("pr_head_sha", isExactGitOrDocumentHash(head), "PR head is not an exact commit SHA", head)
-	exact("reviewed_head_sha", isExactGitOrDocumentHash(reviewed), "reviewed head is not an exact commit SHA", reviewed)
+	if isExactGitOrDocumentHash(reviewed) {
+		rollup.FieldMarks["reviewed_head_sha"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, compactStrings(append(refs, reviewed)), "durable exact-head gate result")
+	} else {
+		rollup.FieldMarks["reviewed_head_sha"] = missionUnavailableMark("factory_v1_ledger", now, "reviewed head is not an exact commit SHA")
+	}
 	rollup.ReadyHeadMatches = isExactGitOrDocumentHash(head) && isExactGitOrDocumentHash(reviewed) && head == reviewed
-	exact("ready_head_matches", isExactGitOrDocumentHash(head) && isExactGitOrDocumentHash(reviewed), "exact-head equality is unavailable until both exact SHAs exist", head, reviewed)
+	comparisonSource := source
+	if source != "factory_v1_ledger" {
+		comparisonSource += "+factory_v1_ledger"
+	}
+	if isExactGitOrDocumentHash(head) && isExactGitOrDocumentHash(reviewed) {
+		rollup.FieldMarks["ready_head_matches"] = NewEvidenceMark(FreshnessCurrent, BasisExact, comparisonSource, observed, now, compactStrings(append(refs, head, reviewed)), "live PR head compared with durable exact-head gate result")
+	} else {
+		rollup.FieldMarks["ready_head_matches"] = missionUnavailableMark(comparisonSource, now, "exact-head equality is unavailable until both exact SHAs exist")
+	}
 }
 
 func missionEvidenceFieldAggregateMark(fields map[string]EvidenceMark, observed, now time.Time, refs []string) EvidenceMark {
