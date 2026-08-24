@@ -19,12 +19,14 @@ type githubCommandRunner func(ctx context.Context, executable string, args ...st
 type githubPRObserver struct {
 	executable string
 	ttl        time.Duration
+	failureTTL time.Duration
 	timeout    time.Duration
 	now        func() time.Time
 	run        githubCommandRunner
 
-	mu    sync.Mutex
-	cache map[string]githubPRCacheEntry
+	mu           sync.Mutex
+	cache        map[string]githubPRCacheEntry
+	failureUntil time.Time
 }
 
 type githubPRCacheEntry struct {
@@ -52,9 +54,10 @@ func newGitHubPRObserver(executable string) (*githubPRObserver, error) {
 		executable: resolved,
 		// One minute keeps the operator view current while bounding authenticated
 		// GitHub reads as the durable order history grows.
-		ttl:     time.Minute,
-		timeout: 10 * time.Second,
-		now:     time.Now,
+		ttl:        time.Minute,
+		failureTTL: 15 * time.Second,
+		timeout:    5 * time.Second,
+		now:        time.Now,
 		run: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, executable, args...).CombinedOutput()
 		},
@@ -74,20 +77,27 @@ func (o *githubPRObserver) ObservePR(ctx context.Context, repository string, num
 		o.mu.Unlock()
 		return cached.observation, nil
 	}
+	if now.Before(o.failureUntil) {
+		o.mu.Unlock()
+		return factoryv1.PRObservation{}, errors.New("GitHub PR observation is temporarily unavailable")
+	}
 	o.mu.Unlock()
 
 	observeContext, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 	output, err := o.run(observeContext, o.executable, "pr", "view", strconv.Itoa(number), "-R", repository, "--json", "state,isDraft,headRefOid,mergeStateStatus,url")
 	if err != nil {
+		o.recordFailure(now)
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query failed")
 	}
 	var view githubPRView
 	if err := json.Unmarshal(output, &view); err != nil {
+		o.recordFailure(now)
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query returned invalid JSON")
 	}
 	state := strings.ToLower(strings.TrimSpace(view.State))
 	if state != "open" && state != "closed" && state != "merged" {
+		o.recordFailure(now)
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query returned an unknown state")
 	}
 
@@ -106,4 +116,10 @@ func (o *githubPRObserver) ObservePR(ctx context.Context, repository string, num
 	o.cache[key] = githubPRCacheEntry{observation: observation, expiresAt: now.Add(o.ttl)}
 	o.mu.Unlock()
 	return observation, nil
+}
+
+func (o *githubPRObserver) recordFailure(now time.Time) {
+	o.mu.Lock()
+	o.failureUntil = now.Add(o.failureTTL)
+	o.mu.Unlock()
 }

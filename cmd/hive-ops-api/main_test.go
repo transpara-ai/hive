@@ -53,7 +53,7 @@ func TestGitHubPRObserverReturnsCurrentRequiredCheckStateAndCaches(t *testing.T)
 
 func TestGitHubPRObserverFailsClosed(t *testing.T) {
 	observer := &githubPRObserver{
-		executable: "/test/gh", ttl: time.Second, timeout: time.Second, now: time.Now,
+		executable: "/test/gh", ttl: time.Second, failureTTL: time.Minute, timeout: time.Second, now: time.Now,
 		run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 			if len(args) > 1 && args[1] == "view" {
 				return nil, errors.New("network unavailable")
@@ -64,6 +64,9 @@ func TestGitHubPRObserverFailsClosed(t *testing.T) {
 	}
 	if _, err := observer.ObservePR(context.Background(), "transpara-ai/hive", 42); err == nil || strings.Contains(err.Error(), "network unavailable") {
 		t.Fatalf("observer error must be fail-closed and sanitized: %v", err)
+	}
+	if _, err := observer.ObservePR(context.Background(), "transpara-ai/work", 98); err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
+		t.Fatalf("failure circuit did not bound follow-on GitHub reads: %v", err)
 	}
 	if _, err := observer.ObservePR(context.Background(), "invalid repository", 0); err == nil {
 		t.Fatal("invalid PR identity was accepted")
