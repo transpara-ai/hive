@@ -376,7 +376,7 @@ func (p *Projector) reconcilePR(ctx context.Context, item *OrderProjection) {
 	}
 	if !pr.ChecksPassing {
 		item.Status = "blocked"
-		item.Blocker = "required checks are not passing on the live PR head"
+		item.Blocker = "required checks are not confirmed passing on the live PR head"
 		item.NextAction = "repair or complete required checks on the exact reviewed head"
 	}
 }

@@ -525,6 +525,38 @@ func TestFactoryV1TLCOrderAndEvidence(t *testing.T) {
 		t.Fatalf("terminal projection is not exact-head Human Review: %+v", order)
 	}
 
+	ledgerOnlyProjector, _ := NewProjector(events, work, clock, ServiceProjection{InstanceID: "test-instance", Healthy: true})
+	ledgerOnlyProjection, err := ledgerOnlyProjector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerOnlyOrder, _ := ledgerOnlyProjection.Order(receipt.OrderID)
+	if ledgerOnlyOrder.Status != "blocked" || ledgerOnlyOrder.PR.ObservationStatus != "ledger_only" || !strings.Contains(ledgerOnlyOrder.Blocker, "not configured") {
+		t.Fatalf("ledger-only terminal output did not fail closed: %+v", ledgerOnlyOrder)
+	}
+
+	observer.observation.Draft = true
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "still a draft") {
+		t.Fatalf("draft terminal output rendered ready: %+v", order)
+	}
+
+	observer.observation.Draft = false
+	observer.observation.ChecksPassing = false
+	projection, err = projector.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ = projection.Order(receipt.OrderID)
+	if order.Status != "blocked" || !strings.Contains(order.Blocker, "not confirmed passing") {
+		t.Fatalf("unconfirmed required checks rendered ready: %+v", order)
+	}
+
+	observer.observation.ChecksPassing = true
 	observer.observation.MergeStateStatus = "BEHIND"
 	projection, err = projector.Build(ctx)
 	if err != nil {

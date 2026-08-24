@@ -59,7 +59,7 @@ func newGitHubPRObserver(executable string) (*githubPRObserver, error) {
 		timeout:    5 * time.Second,
 		now:        time.Now,
 		run: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, executable, args...).CombinedOutput()
+			return exec.CommandContext(ctx, executable, args...).Output()
 		},
 		cache: make(map[string]githubPRCacheEntry),
 	}, nil
@@ -83,27 +83,30 @@ func (o *githubPRObserver) ObservePR(ctx context.Context, repository string, num
 	}
 	o.mu.Unlock()
 
-	observeContext, cancel := context.WithTimeout(ctx, o.timeout)
-	defer cancel()
-	output, err := o.run(observeContext, o.executable, "pr", "view", strconv.Itoa(number), "-R", repository, "--json", "state,isDraft,headRefOid,mergeStateStatus,url")
+	viewContext, cancelView := context.WithTimeout(ctx, o.timeout)
+	output, err := o.run(viewContext, o.executable, "pr", "view", strconv.Itoa(number), "-R", repository, "--json", "state,isDraft,headRefOid,mergeStateStatus,url")
+	cancelView()
 	if err != nil {
-		o.recordFailure(now)
+		o.recordFailure(o.now().UTC())
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query failed")
 	}
 	var view githubPRView
 	if err := json.Unmarshal(output, &view); err != nil {
-		o.recordFailure(now)
+		o.recordFailure(o.now().UTC())
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query returned invalid JSON")
 	}
 	state := strings.ToLower(strings.TrimSpace(view.State))
 	if state != "open" && state != "closed" && state != "merged" {
-		o.recordFailure(now)
+		o.recordFailure(o.now().UTC())
 		return factoryv1.PRObservation{}, errors.New("GitHub PR query returned an unknown state")
 	}
 
 	checksPassing := false
 	detail := "required GitHub checks are not passing or unavailable"
-	if _, checksErr := o.run(observeContext, o.executable, "pr", "checks", strconv.Itoa(number), "-R", repository, "--required"); checksErr == nil {
+	checksContext, cancelChecks := context.WithTimeout(ctx, o.timeout)
+	_, checksErr := o.run(checksContext, o.executable, "pr", "checks", strconv.Itoa(number), "-R", repository, "--required")
+	cancelChecks()
+	if checksErr == nil {
 		checksPassing = true
 		detail = "required GitHub checks pass"
 	}
