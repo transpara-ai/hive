@@ -76,6 +76,7 @@ func cmdFactoryV1Daemon(args []string) error {
 	issueScanMaxNewRuns := fs.Int("issue-scan-max-new-runs", 3, "Maximum issue requests queued by this daemon; 0 is unlimited")
 	issueScanMaxIterations := fs.Int("issue-scan-max-iterations", 30, "Per-order attempt budget recorded by the scanner")
 	issueScanMaxCostUSD := fs.Float64("issue-scan-max-cost-usd", 25, "Per-order cost budget recorded by the scanner")
+	issueScanReviewQueueThreshold := fs.Int("issue-scan-review-queue-threshold", issueScanDefaultReviewQueueThreshold, "Maximum open PRs counted as unproven exact-head review load before issue scanning refuses new work-start")
 	issueScanRepos := repeatedStringFlag{}
 	issueScanLabels := repeatedStringFlag{}
 	fs.Var(&issueScanRepos, "issue-scan-repo", "Exact transpara-ai/REPO scanned by the legacy interval scanner (repeatable)")
@@ -89,6 +90,9 @@ func cmdFactoryV1Daemon(args []string) error {
 	}
 	if strings.TrimSpace(*repositoryWorkspace) == "" {
 		return errors.New("--repo-workspace-root is required")
+	}
+	if *issueScanInterval > 0 && (*issueScanReviewQueueThreshold <= 0 || *issueScanReviewQueueThreshold > issueScanReviewQueueReadLimit) {
+		return fmt.Errorf("--issue-scan-review-queue-threshold must be between 1 and %d", issueScanReviewQueueReadLimit)
 	}
 	workspace, err := filepath.Abs(*repositoryWorkspace)
 	if err != nil {
@@ -233,7 +237,7 @@ func cmdFactoryV1Daemon(args []string) error {
 		scannerConfig := issueScanScannerConfig{
 			OperatorID: fc.humanID.Value(), Repos: repositories, Labels: append([]string(nil), issueScanLabels...),
 			Limit: *issueScanLimit, MaxIterations: *issueScanMaxIterations, MaxCostUSD: *issueScanMaxCostUSD,
-			MaxNewRuns: *issueScanMaxNewRuns, Interval: *issueScanInterval,
+			MaxNewRuns: *issueScanMaxNewRuns, Interval: *issueScanInterval, ReviewQueueThreshold: *issueScanReviewQueueThreshold,
 			AuthorityScope: "factory v1 issue scan to exact-head ready-for-Human PR; no merge or deploy",
 		}
 		go runIssueScanScannerLoop(ctx, fc, scannerConfig, ghIssueLister{})

@@ -17,3 +17,15 @@ func TestFactoryV1RouteExposesDaemonHelp(t *testing.T) {
 		t.Fatalf("factory-v1 help: %v", err)
 	}
 }
+
+func TestFactoryV1DaemonIssueScanRequiresBoundedReviewQueueThreshold(t *testing.T) {
+	for _, threshold := range []string{"0", "101"} {
+		err := cmdFactoryV1([]string{
+			"daemon", "--human", "Michael", "--repo-workspace-root", ".",
+			"--issue-scan-interval", "1s", "--issue-scan-review-queue-threshold", threshold,
+		})
+		if err == nil || !strings.Contains(err.Error(), "--issue-scan-review-queue-threshold") {
+			t.Fatalf("threshold %s error = %v, want bounded threshold requirement", threshold, err)
+		}
+	}
+}
