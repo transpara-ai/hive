@@ -471,7 +471,10 @@ func (scheduler *TLC51Scheduler) providerFor(plan TLC51GatePlan, obligation TLC5
 	if !ok || errBinding(provider) != nil {
 		return ProviderBinding{}, fmt.Errorf("obligation %s has no explicit provider binding", obligation.ID)
 	}
-	if !contains(obligation.AdmittedActorFamilies, provider.Family) {
+	// An empty admission list means TLC left provider selection to the trusted
+	// per-obligation adapter configuration. A non-empty list is an additional
+	// closed allow-list and is enforced exactly.
+	if len(obligation.AdmittedActorFamilies) > 0 && !contains(obligation.AdmittedActorFamilies, provider.Family) {
 		return ProviderBinding{}, fmt.Errorf("provider family %q is not admitted for %s", provider.Family, obligation.ID)
 	}
 	if obligation.Kind == "cfada" || obligation.Kind == "cfar" || obligation.Kind == "domain-specialist-review" {

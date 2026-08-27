@@ -64,6 +64,8 @@ type TLC51GatePlan struct {
 	InformationState TLC51InformationState `json:"information_state"`
 	Track            *string               `json:"track"`
 	RetainedFloor    *string               `json:"retained_floor"`
+	DerivedEffects   []string              `json:"derived_effects"`
+	RequestedEffects []string              `json:"requested_effects"`
 	Obligations      []TLC51Obligation     `json:"obligations"`
 	AuthorLineages   []string              `json:"author_lineages"`
 	PlanDigest       string                `json:"plan_digest"`
@@ -228,11 +230,44 @@ func ParseTLC51GatePlan(raw []byte) (TLC51GatePlan, error) {
 	if err := json.Unmarshal(authorBytes, &authors); err != nil || len(authors) == 0 {
 		return TLC51GatePlan{}, errors.New("plan author_lineages must be non-empty")
 	}
+	readStrings := func(field string) ([]string, error) {
+		raw, err := encoded(field)
+		if err != nil {
+			return nil, err
+		}
+		var values []string
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return nil, fmt.Errorf("%s must be a string array", field)
+		}
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" {
+				return nil, fmt.Errorf("%s contains an empty identity", field)
+			}
+			if _, duplicate := seen[value]; duplicate {
+				return nil, fmt.Errorf("%s contains duplicate %q", field, value)
+			}
+			seen[value] = struct{}{}
+		}
+		return values, nil
+	}
+	derivedEffects, err := readStrings("derived_effects")
+	if err != nil {
+		return TLC51GatePlan{}, err
+	}
+	requestedEffects, err := readStrings("requested_effects")
+	if err != nil {
+		return TLC51GatePlan{}, err
+	}
 	subject, err := tlc51RawField(value, "subject")
 	if err != nil {
 		return TLC51GatePlan{}, err
 	}
-	plan := TLC51GatePlan{Raw: append(json.RawMessage(nil), raw...), Subject: subject, Obligations: obligations, AuthorLineages: append([]string(nil), authors...)}
+	plan := TLC51GatePlan{
+		Raw: append(json.RawMessage(nil), raw...), Subject: subject, Obligations: obligations,
+		AuthorLineages: append([]string(nil), authors...), DerivedEffects: derivedEffects,
+		RequestedEffects: requestedEffects,
+	}
 	readString := func(field string, target *string) error {
 		got, ok := value[field].(string)
 		if !ok || strings.TrimSpace(got) == "" {
@@ -281,8 +316,25 @@ func ParseTLC51GatePlan(raw []byte) (TLC51GatePlan, error) {
 	}
 	seen := make(map[string]struct{}, len(plan.Obligations))
 	for _, obligation := range plan.Obligations {
-		if !strings.HasPrefix(obligation.ID, "O") || obligation.Kind == "" || obligation.ExactSubjectDigest != plan.SubjectDigest || len(obligation.AdmittedActorFamilies) == 0 || obligation.RetryPolicy != "same-subject-new-attempt-after-observation" {
+		if !strings.HasPrefix(obligation.ID, "O") || obligation.Kind == "" || obligation.ExactSubjectDigest != plan.SubjectDigest || obligation.RetryPolicy != "same-subject-new-attempt-after-observation" {
 			return TLC51GatePlan{}, fmt.Errorf("obligation %q has invalid TLC 5.1 identity", obligation.ID)
+		}
+		families := make(map[string]struct{}, len(obligation.AdmittedActorFamilies))
+		for _, family := range obligation.AdmittedActorFamilies {
+			if strings.TrimSpace(family) == "" {
+				return TLC51GatePlan{}, fmt.Errorf("obligation %q has an empty actor family", obligation.ID)
+			}
+			if _, duplicate := families[family]; duplicate {
+				return TLC51GatePlan{}, fmt.Errorf("obligation %q has duplicate actor family %q", obligation.ID, family)
+			}
+			families[family] = struct{}{}
+		}
+		if obligation.Kind == "cfada" || obligation.Kind == "cfar" || obligation.Kind == "domain-specialist-review" {
+			for _, author := range plan.AuthorLineages {
+				if _, admitted := families[author]; admitted {
+					return TLC51GatePlan{}, fmt.Errorf("independent obligation %q admits author family %q", obligation.ID, author)
+				}
+			}
 		}
 		if _, duplicate := seen[obligation.ID]; duplicate {
 			return TLC51GatePlan{}, fmt.Errorf("duplicate obligation %q", obligation.ID)

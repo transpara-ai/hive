@@ -36,8 +36,8 @@ func testTLC51Plan(t *testing.T, state TLC51InformationState, track, retained *s
 		"retained_floor":          retained,
 		"impact_floor":            "high_consequence",
 		"required_tests":          []string{"repository-unit-tests"},
-		"derived_effects":         []string{},
-		"requested_effects":       []string{},
+		"derived_effects":         []string{"ready"},
+		"requested_effects":       []string{"ready"},
 		"authority_requirements":  []any{},
 		"obligations":             obligations,
 		"evidence_rules":          map[string]any{"record_schema": TLC51RecordSchema},
@@ -69,6 +69,16 @@ func testTLC51Obligation(id, kind string, prerequisites []string, family string)
 		ExactSubjectDigest:    strings.Repeat("0", 64), // replaced by test plan helper below
 		AdmittedActorFamilies: []string{family}, EvidenceContract: json.RawMessage(`{}`),
 		RetryPolicy: "same-subject-new-attempt-after-observation", ParallelSafe: true,
+	}
+}
+
+func TestParseTLC51GatePlanAllowsAdapterSelectedActorFamily(t *testing.T) {
+	track := "H"
+	obligation := bindTLC51ObligationSubjects(t, []TLC51Obligation{testTLC51Obligation("O001-unit", "repository-unit-tests", nil, "worker-family")})
+	obligation[0].AdmittedActorFamilies = nil
+	plan := testTLC51Plan(t, TLC51Classified, &track, &track, obligation)
+	if len(plan.Obligations[0].AdmittedActorFamilies) != 0 {
+		t.Fatalf("actor admissions = %v, want adapter-selected empty set", plan.Obligations[0].AdmittedActorFamilies)
 	}
 }
 
@@ -377,7 +387,8 @@ func TestTLC51UnclassifiedPlanNeverSchedules(t *testing.T) {
 }
 
 type testTLC51EffectBoundary struct {
-	calls int
+	calls         int
+	subjectDigest string
 }
 
 func (boundary *testTLC51EffectBoundary) CheckEffect(_ context.Context, request json.RawMessage) (json.RawMessage, error) {
@@ -399,7 +410,7 @@ func (boundary *testTLC51EffectBoundary) CheckEffect(_ context.Context, request 
 	}
 	tuple := map[string]string{
 		"receipt_digest": input.Receipt.ReceiptDigest, "effect": input.Effect,
-		"subject_digest": strings.Repeat("b", 64), "operation_id": input.OperationID, "idempotency_key": input.IdempotencyKey,
+		"subject_digest": boundary.subjectDigest, "operation_id": input.OperationID, "idempotency_key": input.IdempotencyKey,
 	}
 	tupleRaw, _ := canonicalTLC51JSON(tuple)
 	value := map[string]any{
@@ -463,12 +474,58 @@ func (driver *testTLC51EffectDriver) ExecuteEffect(context.Context, TLC51EffectO
 	return driver.receipt, nil
 }
 
-func testTLC51EffectReceipt() TLC51ExactJSON {
-	raw, _ := canonicalTLC51JSON(map[string]any{"schema_version": TLC51EffectReceiptSchema, "effect_receipt_id": "effect-receipt-1"})
+func testTLC51GateReceipt(t *testing.T, plan TLC51GatePlan, effect string) TLC51GateReceipt {
+	t.Helper()
+	var planValue map[string]any
+	if err := json.Unmarshal(plan.Raw, &planValue); err != nil {
+		t.Fatal(err)
+	}
+	value := map[string]any{
+		"schema_version": TLC51ReceiptSchema, "release_identity": planValue["release_identity"],
+		"adapter_identity": planValue["adapter_identity"], "repository": plan.Repository,
+		"change_series_id": plan.ChangeSeriesID, "plan_digest": plan.PlanDigest,
+		"subject": planValue["subject"], "subject_digest": plan.SubjectDigest,
+		"information_state": string(plan.InformationState), "retained_floor": plan.RetainedFloor,
+		"predicate_results":       []any{map[string]any{"id": "P001-test", "status": "true", "reason": "exact test receipt", "record_digests": []any{}}},
+		"admitted_record_digests": []any{}, "reviewers": []any{},
+		"authority_references": []any{map[string]any{"effect": effect, "provider_record_id": "authority-1", "record_digest": strings.Repeat("c", 64)}},
+		"evaluation_clock":     map[string]any{"record_id": "clock-1", "record_digest": strings.Repeat("d", 64), "provider_time": "2026-08-27T12:00:00Z", "observed_time": "2026-08-27T12:00:00Z", "freshness_seconds": 300, "expires_at": "2026-08-27T12:05:00Z"},
+		"decision":             "pass", "reasons": []any{},
+		"enforcer_provenance": map[string]any{"test": true}, "authority_granted": []any{},
+		"mutation_effects_invoked": []any{}, "receipt_digest": "",
+	}
+	digest, err := tlc51ObjectDigest(value, "receipt_digest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value["receipt_digest"] = digest
+	raw, err := canonicalTLC51JSON(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ParseTLC51GateReceipt(raw, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return receipt
+}
+
+func testTLC51EffectReceipt(plan TLC51GatePlan, operation TLC51EffectOperation) TLC51ExactJSON {
+	value := map[string]any{
+		"schema_version": TLC51EffectReceiptSchema, "effect": operation.Effect,
+		"subject_digest": plan.SubjectDigest, "gate_receipt_digest": operation.ReceiptDigest,
+		"operation_id": operation.OperationID, "idempotency_key": operation.IdempotencyKey,
+		"attempt_ordinal": operation.AttemptOrdinal, "provider_effect_id": "provider-effect-1",
+		"provider_record_url": "https://provider.example/effects/1", "invoked_at": "2026-08-27T12:00:00Z",
+		"outcome": "succeeded", "receipt_digest": "",
+	}
+	digest, _ := tlc51ObjectDigest(value, "receipt_digest")
+	value["receipt_digest"] = digest
+	raw, _ := canonicalTLC51JSON(value)
 	return TLC51ExactJSON{SchemaVersion: TLC51EffectReceiptSchema, CanonicalJSON: string(raw), SHA256: fmt.Sprintf("%x", sha256.Sum256(raw))}
 }
 
-func testTLC51EffectScheduler(t *testing.T) (*TLC51Scheduler, TLC51OrderBinding, TLC51GatePlan, *InMemoryTLC51Journal) {
+func testTLC51EffectScheduler(t *testing.T) (*TLC51Scheduler, TLC51OrderBinding, TLC51GatePlan, *InMemoryTLC51Journal, TLC51GateReceipt) {
 	t.Helper()
 	track := "H"
 	obligation := bindTLC51ObligationSubjects(t, []TLC51Obligation{testTLC51Obligation("O001-unit", "repository-unit-tests", nil, "worker-family")})
@@ -482,14 +539,18 @@ func testTLC51EffectScheduler(t *testing.T) (*TLC51Scheduler, TLC51OrderBinding,
 	if _, err := scheduler.RecordPlan(context.Background(), binding, plan); err != nil {
 		t.Fatal(err)
 	}
-	return scheduler, binding, plan, journal
+	receipt := testTLC51GateReceipt(t, plan, "ready")
+	if _, err := scheduler.RecordDecision(context.Background(), binding, plan, receipt); err != nil {
+		t.Fatal(err)
+	}
+	return scheduler, binding, plan, journal, receipt
 }
 
 func TestTLC51ProtectedEffectFreshBoundaryAndPostObservation(t *testing.T) {
-	scheduler, binding, plan, journal := testTLC51EffectScheduler(t)
-	operation := TLC51EffectOperation{Effect: "draft_pr_create", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: strings.Repeat("a", 64), AttemptOrdinal: 1}
-	boundary := &testTLC51EffectBoundary{}
-	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent, TLC51ExternalExact}, receipt: testTLC51EffectReceipt()}
+	scheduler, binding, plan, journal, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	boundary := &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent, TLC51ExternalExact}, receipt: testTLC51EffectReceipt(plan, operation)}
 	receipt, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, boundary, driver)
 	if err != nil {
 		t.Fatalf("ExecuteProtectedEffect: %v", err)
@@ -511,14 +572,14 @@ func TestTLC51ProtectedEffectFreshBoundaryAndPostObservation(t *testing.T) {
 }
 
 func TestTLC51ProtectedEffectCrashRecoversExactWithoutDuplicate(t *testing.T) {
-	scheduler, binding, plan, _ := testTLC51EffectScheduler(t)
-	operation := TLC51EffectOperation{Effect: "draft_pr_create", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: strings.Repeat("a", 64), AttemptOrdinal: 1}
-	boundary := &testTLC51EffectBoundary{}
-	crashed := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(), failExecute: true}
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	boundary := &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}
+	crashed := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, operation), failExecute: true}
 	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, boundary, crashed); err == nil || !strings.Contains(err.Error(), "durable proposal") {
 		t.Fatalf("crash = %v", err)
 	}
-	recovered := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalExact}, receipt: testTLC51EffectReceipt()}
+	recovered := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalExact}, receipt: testTLC51EffectReceipt(plan, operation)}
 	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, boundary, recovered); err != nil {
 		t.Fatalf("recovery: %v", err)
 	}
@@ -528,13 +589,79 @@ func TestTLC51ProtectedEffectCrashRecoversExactWithoutDuplicate(t *testing.T) {
 }
 
 func TestTLC51ProtectedEffectRejectsCrossOperationObservationReuse(t *testing.T) {
-	scheduler, binding, plan, _ := testTLC51EffectScheduler(t)
-	operation := TLC51EffectOperation{Effect: "draft_pr_create", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: strings.Repeat("a", 64), AttemptOrdinal: 1}
-	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(), wrongOperation: true}
-	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{}, driver); err == nil || !strings.Contains(err.Error(), "reused") {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, operation), wrongOperation: true}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "reused") {
 		t.Fatalf("cross-operation observation accepted: %v", err)
 	}
 	if driver.executeCalls != 0 {
 		t.Fatalf("effect invoked after cross-operation observation: %d", driver.executeCalls)
+	}
+}
+
+func TestTLC51ProtectedEffectRejectsUnplannedEffect(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "deployment", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, operation)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "not derived or requested") {
+		t.Fatalf("unplanned effect accepted: %v", err)
+	}
+	if driver.observeCalls != 0 || driver.executeCalls != 0 {
+		t.Fatalf("provider called for unplanned effect: observe=%d execute=%d", driver.observeCalls, driver.executeCalls)
+	}
+}
+
+func TestTLC51ProtectedEffectRequiresRecordedExactPassingDecision(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: strings.Repeat("b", 64), AttemptOrdinal: 1}
+	if operation.ReceiptDigest == gateReceipt.ReceiptDigest {
+		t.Fatal("test receipt digest unexpectedly collided")
+	}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, operation)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "exact passing TLC decision receipt is not recorded") {
+		t.Fatalf("unrecorded decision receipt accepted: %v", err)
+	}
+	if driver.executeCalls != 0 {
+		t.Fatalf("effect invoked with unrecorded decision receipt: %d", driver.executeCalls)
+	}
+}
+
+func TestTLC51ProtectedEffectRejectsReceiptForDifferentOperationTuple(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	other := operation
+	other.IdempotencyKey = "different-key"
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, other)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "exact plan and operation tuple") {
+		t.Fatalf("cross-operation effect receipt accepted: %v", err)
+	}
+}
+
+func TestTLC51ProtectedEffectTerminalCannotReplayAcrossTuple(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent, TLC51ExternalExact}, receipt: testTLC51EffectReceipt(plan, operation)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err != nil {
+		t.Fatal(err)
+	}
+	replayed := operation
+	replayed.IdempotencyKey = "key-2"
+	replayed.ReceiptDigest = strings.Repeat("b", 64)
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, replayed, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "tuple conflicts") {
+		t.Fatalf("terminal effect replayed across tuple: %v", err)
+	}
+}
+
+func TestTLC51ProtectedEffectRejectsBoundaryDecisionForDifferentSubject(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, operation)}
+	boundary := &testTLC51EffectBoundary{subjectDigest: strings.Repeat("f", 64)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, boundary, driver); err == nil || !strings.Contains(err.Error(), "subject_digest") {
+		t.Fatalf("cross-subject boundary decision accepted: %v", err)
+	}
+	if driver.executeCalls != 0 {
+		t.Fatalf("effect invoked after cross-subject boundary decision: %d", driver.executeCalls)
 	}
 }
