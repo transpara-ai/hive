@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -604,6 +605,53 @@ func TestTLC51ProtectedEffectReceiptCannotReserveDifferentOperation(t *testing.T
 	}
 	if driver.observeCalls != 0 || driver.executeCalls != 0 {
 		t.Fatalf("provider reached after cross-operation receipt reuse: observe=%d execute=%d", driver.observeCalls, driver.executeCalls)
+	}
+}
+
+func TestTLC51ProtectedEffectHumanBlocksReturnErrorAfterDurableRequest(t *testing.T) {
+	tests := []struct {
+		name          string
+		states        []TLC51ExternalState
+		wantReason    string
+		wantBoundary  int
+		wantExecution int
+	}{
+		{name: "preexisting exact effect", states: []TLC51ExternalState{TLC51ExternalExact}, wantReason: "external effect exists without matching durable proposal"},
+		{name: "conflicting external effect", states: []TLC51ExternalState{TLC51ExternalConflict}, wantReason: "external effect state is conflict"},
+		{name: "unknown external effect", states: []TLC51ExternalState{TLC51ExternalUnknown}, wantReason: "external effect state is unknown"},
+		{name: "post-effect conflict", states: []TLC51ExternalState{TLC51ExternalAbsent, TLC51ExternalConflict}, wantReason: "post-effect state is not exact", wantBoundary: 1, wantExecution: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler, binding, plan, journal, gateReceipt := testTLC51EffectScheduler(t)
+			operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+			boundary := &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}
+			driver := &testTLC51EffectDriver{states: test.states, receipt: testTLC51EffectReceipt(plan, operation)}
+
+			receipt, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, operation, boundary, driver)
+			if !errors.Is(err, ErrTLC51ProtectedEffectHumanRequired) || !strings.Contains(err.Error(), test.wantReason) {
+				t.Fatalf("Human block error = %v, want sentinel and reason %q", err, test.wantReason)
+			}
+			if receipt != (TLC51ExactJSON{}) {
+				t.Fatalf("Human block returned receipt: %+v", receipt)
+			}
+			if boundary.calls != test.wantBoundary || driver.executeCalls != test.wantExecution {
+				t.Fatalf("effect calls boundary=%d execute=%d, want %d/%d", boundary.calls, driver.executeCalls, test.wantBoundary, test.wantExecution)
+			}
+			history, historyErr := journal.TLC51History(context.Background(), binding.FactoryOrderID, plan.ChangeSeriesID)
+			if historyErr != nil {
+				t.Fatal(historyErr)
+			}
+			if len(history) == 0 || history[len(history)-1].Type != TLC51HumanRequested {
+				t.Fatalf("Human block was not durably recorded: %+v", history)
+			}
+			var payload struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(history[len(history)-1].Payload, &payload); err != nil || payload.Reason != test.wantReason {
+				t.Fatalf("Human request payload = %+v, err=%v", payload, err)
+			}
+		})
 	}
 }
 

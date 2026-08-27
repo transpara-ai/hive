@@ -16,6 +16,8 @@ const (
 	TLC51EffectReceiptSchema  = "factory-tlc51-effect-receipt/v1"
 )
 
+var ErrTLC51ProtectedEffectHumanRequired = errors.New("factory-tlc51/v1 protected effect requires Human intervention")
+
 type TLC51EffectOperation struct {
 	Effect         string `json:"effect"`
 	OperationID    string `json:"operation_id"`
@@ -505,7 +507,10 @@ func (scheduler *TLC51Scheduler) blockEffectForHuman(ctx context.Context, bindin
 		return err
 	}
 	_, err = scheduler.append(ctx, TLC51Append{Type: TLC51HumanRequested, Identity: identity, Payload: payload, OccurredAt: scheduler.clock.Now().UTC()})
-	return err
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %s", ErrTLC51ProtectedEffectHumanRequired, reason)
 }
 
 func tlc51EffectWasProposed(history []TLC51HistoryEntry, operation TLC51EffectOperation) bool {
