@@ -32,13 +32,14 @@ const maxDecisionBodyBytes = 64 * 1024
 // operatorServerOptions collects optional dependencies for the operator API.
 // The zero value yields a strictly read-only server (today's behavior).
 type operatorServerOptions struct {
-	writer            *operatorDecisionWriter
-	runWriter         *operatorRunLaunchWriter
-	modelPolicyWriter *operatorModelRolePolicyWriter
-	factoryV1         *FactoryV1OperatorService
-	projectionOptions []OperatorProjectionOption
-	modelSelection    OperatorModelSelectionSource
-	missionControl    *CivilizationMissionControlProjector
+	writer              *operatorDecisionWriter
+	runWriter           *operatorRunLaunchWriter
+	modelPolicyWriter   *operatorModelRolePolicyWriter
+	factoryV1           *FactoryV1OperatorService
+	projectionOptions   []OperatorProjectionOption
+	modelSelection      OperatorModelSelectionSource
+	missionControl      *CivilizationMissionControlProjector
+	tlc51MissionControl FactoryTLC51MissionControlSource
 }
 
 // OperatorServerOption configures NewOperatorProjectionServer.
@@ -89,6 +90,12 @@ func WithOperatorProjectionModelSelectionSource(source OperatorModelSelectionSou
 // retention; the HTTP layer only collapses simultaneous fresh computations.
 func WithMissionControlProjection(projector *CivilizationMissionControlProjector) OperatorServerOption {
 	return func(o *operatorServerOptions) { o.missionControl = projector }
+}
+
+// WithFactoryTLC51MissionControl enables the authenticated, read-only TLC 5.1
+// projection. It is opt-in and does not change the legacy projection routes.
+func WithFactoryTLC51MissionControl(source FactoryTLC51MissionControlSource) OperatorServerOption {
+	return func(o *operatorServerOptions) { o.tlc51MissionControl = source }
 }
 
 // operatorDecisionRequest is the Site -> hive payload for recording the human's
@@ -162,6 +169,16 @@ func NewOperatorProjectionServer(s store.Store, apiKey string, limit int, opts .
 				return projector.Build(r.Context()), nil
 			})
 			writeOperatorProjectionJSON(w, result)
+		})
+	}
+	if options.tlc51MissionControl != nil {
+		source := options.tlc51MissionControl
+		mux.HandleFunc("GET "+FactoryTLC51MissionControlPath, func(w http.ResponseWriter, r *http.Request) {
+			if strings.TrimSpace(apiKey) == "" || !operatorBearerOK(apiKey, r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			writeOperatorProjectionJSON(w, source.BuildFactoryTLC51MissionControl(r.Context()))
 		})
 	}
 	if options.writer != nil {
