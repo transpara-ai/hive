@@ -1,0 +1,70 @@
+{
+  "gate": "IAR",
+  "repo": "transpara-ai/hive",
+  "pr_number": 306,
+  "head_sha": "dfb337af0ad7601ffe39ccddbe8a8fd4fca00c26",
+  "author_family": "Codex/OpenAI",
+  "result": "pass",
+  "blocker_count": 0,
+  "validation": [
+    {
+      "command": "make verify",
+      "outcome": "pass",
+      "evidence": "Full build, test and vet suite passed."
+    },
+    {
+      "command": "go test -race ./pkg/hive/factoryv1 ./pkg/hive -run 'TLC51|FactoryTLC51'",
+      "outcome": "pass",
+      "evidence": "TLC 5.1 runtime seams passed targeted race tests."
+    }
+  ],
+  "findings": [
+    {
+      "id": "IAR-HIVE-TLC51-001",
+      "severity": "blocker",
+      "finding": "Hive rejected real TLC plans with empty adapter-selected actor-admission lists, while independent plans previously carried the author family.",
+      "disposition": "accepted_fixed",
+      "evidence": "The parser now admits an empty adapter-selected set, enforces non-empty allow-lists when present and always excludes author families for independent work."
+    },
+    {
+      "id": "IAR-HIVE-TLC51-002",
+      "severity": "blocker",
+      "finding": "Effect execution did not require the effect to be planned and terminal/provider receipts were not bound to the complete operation tuple.",
+      "disposition": "accepted_fixed",
+      "evidence": "Effect, subject, gate receipt, operation, idempotency key, attempt, provider identity, UTC time and digest are now closed and verified, including crash recovery."
+    },
+    {
+      "id": "IAR-HIVE-TLC51-003",
+      "severity": "blocker",
+      "finding": "An effect driver could present a receipt digest that had not been durably recorded as a passing TLC decision.",
+      "disposition": "accepted_fixed",
+      "evidence": "Hive now requires an exact, non-invalidated, all-predicate-pass decision event carrying authority evidence for the exact effect before invocation."
+    }
+  ],
+  "residual_risks": [
+    "TLC51-RR-ORG-CONTROLS",
+    "TLC51-RR-MUTABLE-PROVIDER-RECORDS",
+    "TLC51-RR-APP-ENVIRONMENT-CAPABILITY",
+    "TLC51-RR-DUAL-PROTOCOL-RUNTIME",
+    "TLC51-RR-FACTORY-BINARY-SOURCE",
+    "TLC51-RR-NONATOMIC-MULTIREPO-CUTOVER",
+    "TLC51-RR-NONATOMIC-SETTINGS-API",
+    "TLC51-RR-UNTRUSTED-GITHUB-CONTROLLER",
+    "TLC51-RR-TLC-REPOSITORY-CONTROLS"
+  ],
+  "pr_visible_evidence_url": "https://github.com/transpara-ai/hive/pull/306",
+  "non_authorizations": [
+    "PR readiness",
+    "merge",
+    "release or tag",
+    "installation or distribution",
+    "pilot or adoption",
+    "workflow activation or settings enforcement",
+    "runtime or deployment",
+    "canary or rollout",
+    "rollback or retirement",
+    "deletion, archival, or issue closure",
+    "any other protected effect"
+  ]
+}
+
