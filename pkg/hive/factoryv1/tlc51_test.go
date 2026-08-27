@@ -588,6 +588,42 @@ func TestTLC51ProtectedEffectCrashRecoversExactWithoutDuplicate(t *testing.T) {
 	}
 }
 
+func TestTLC51ProtectedEffectReceiptCannotReserveDifferentOperation(t *testing.T) {
+	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
+	first := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	crashed := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, first), failExecute: true}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, first, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, crashed); err == nil || !strings.Contains(err.Error(), "durable proposal") {
+		t.Fatalf("first operation did not leave a reservation: %v", err)
+	}
+	second := first
+	second.OperationID = "operation-2"
+	second.IdempotencyKey = "key-2"
+	driver := &testTLC51EffectDriver{states: []TLC51ExternalState{TLC51ExternalAbsent}, receipt: testTLC51EffectReceipt(plan, second)}
+	if _, err := scheduler.ExecuteProtectedEffect(context.Background(), binding, plan, second, &testTLC51EffectBoundary{subjectDigest: plan.SubjectDigest}, driver); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("receipt reserved a second operation: %v", err)
+	}
+	if driver.observeCalls != 0 || driver.executeCalls != 0 {
+		t.Fatalf("provider reached after cross-operation receipt reuse: observe=%d execute=%d", driver.observeCalls, driver.executeCalls)
+	}
+}
+
+func TestTLC51MissionControlProposalUsesUnknownExternalState(t *testing.T) {
+	scheduler, binding, plan, journal, gateReceipt := testTLC51EffectScheduler(t)
+	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}
+	if err := scheduler.recordEffectProposal(context.Background(), binding, plan, operation); err != nil {
+		t.Fatal(err)
+	}
+	history, _ := journal.TLC51History(context.Background(), binding.FactoryOrderID, plan.ChangeSeriesID)
+	work, _ := scheduler.work.TLC51WorkArtifacts(context.Background(), binding.FactoryOrderID, plan.ChangeSeriesID)
+	row, err := ProjectTLC51MissionControl(binding, plan, history, work, time.Date(2026, 8, 27, 12, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(row.Effects) != 1 || row.Effects[0].ExternalState != TLC51ExternalUnknown {
+		t.Fatalf("proposal external state = %+v, want explicit unknown", row.Effects)
+	}
+}
+
 func TestTLC51ProtectedEffectRejectsCrossOperationObservationReuse(t *testing.T) {
 	scheduler, binding, plan, _, gateReceipt := testTLC51EffectScheduler(t)
 	operation := TLC51EffectOperation{Effect: "ready", OperationID: "operation-1", IdempotencyKey: "key-1", ReceiptDigest: gateReceipt.ReceiptDigest, AttemptOrdinal: 1}

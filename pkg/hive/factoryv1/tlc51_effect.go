@@ -291,6 +291,9 @@ func (scheduler *TLC51Scheduler) ExecuteProtectedEffect(
 	if !tlc51PlanIsLatest(history, plan.PlanDigest) {
 		return TLC51ExactJSON{}, errors.New("protected effect plan is not the latest recorded plan")
 	}
+	if err := validateTLC51EffectReservationHistory(history, plan, operation); err != nil {
+		return TLC51ExactJSON{}, err
+	}
 	if terminal, found, err := tlc51EffectTerminal(history, plan, operation); err != nil {
 		return TLC51ExactJSON{}, err
 	} else if found {
@@ -521,6 +524,57 @@ func tlc51EffectWasProposed(history []TLC51HistoryEntry, operation TLC51EffectOp
 		}
 	}
 	return false
+}
+
+// validateTLC51EffectReservationHistory enforces the durable reservation tuple
+// before any provider observation or effect invocation. Receipt, operation,
+// and idempotency identities are each single-use within a change series unless
+// all five reservation fields identify the same retry.
+func validateTLC51EffectReservationHistory(history []TLC51HistoryEntry, plan TLC51GatePlan, operation TLC51EffectOperation) error {
+	type reservation struct {
+		effect         string
+		subjectDigest  string
+		operationID    string
+		idempotencyKey string
+		receiptDigest  string
+	}
+	wanted := reservation{
+		effect: operation.Effect, subjectDigest: plan.SubjectDigest,
+		operationID: operation.OperationID, idempotencyKey: operation.IdempotencyKey,
+		receiptDigest: operation.ReceiptDigest,
+	}
+	for _, entry := range history {
+		if entry.Type != TLC51EffectProposed && entry.Type != TLC51EffectTerminal {
+			continue
+		}
+		var payload struct {
+			Effect            string `json:"effect"`
+			OperationID       string `json:"operation_id"`
+			IdempotencyKey    string `json:"idempotency_key"`
+			ReceiptDigest     string `json:"receipt_digest"`
+			GateReceiptDigest string `json:"gate_receipt_digest"`
+		}
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			return fmt.Errorf("decode protected-effect reservation history: %w", err)
+		}
+		receiptDigest := payload.ReceiptDigest
+		if entry.Type == TLC51EffectTerminal {
+			receiptDigest = payload.GateReceiptDigest
+		}
+		observed := reservation{
+			effect: payload.Effect, subjectDigest: entry.Identity.SubjectDigest,
+			operationID: payload.OperationID, idempotencyKey: payload.IdempotencyKey,
+			receiptDigest: receiptDigest,
+		}
+		same := observed == wanted
+		identityCollision := observed.receiptDigest == wanted.receiptDigest ||
+			observed.operationID == wanted.operationID ||
+			observed.idempotencyKey == wanted.idempotencyKey
+		if identityCollision && !same {
+			return errors.New("protected-effect reservation identity is already bound; tuple conflicts with a different operation")
+		}
+	}
+	return nil
 }
 
 func tlc51EffectTerminal(history []TLC51HistoryEntry, plan TLC51GatePlan, operation TLC51EffectOperation) (TLC51ExactJSON, bool, error) {

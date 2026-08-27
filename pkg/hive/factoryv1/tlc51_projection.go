@@ -160,6 +160,9 @@ func ProjectTLC51MissionControl(binding TLC51OrderBinding, plan TLC51GatePlan, h
 			key := payload.Effect + "\x00" + payload.OperationID
 			effect := effects[key]
 			effect.Effect, effect.OperationID = payload.Effect, payload.OperationID
+			if effect.ExternalState == "" {
+				effect.ExternalState = TLC51ExternalUnknown
+			}
 			if payload.IdempotencyKey != "" {
 				effect.IdempotencyKey = payload.IdempotencyKey
 			}
