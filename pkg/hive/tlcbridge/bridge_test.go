@@ -70,6 +70,9 @@ func TestBindingIsDeterministicAndSourceSpecificForSafeRetry(t *testing.T) {
 	if first.IdempotencyKey != again.IdempotencyKey {
 		t.Fatalf("same source and brief produced %q then %q", first.IdempotencyKey, again.IdempotencyKey)
 	}
+	if !strings.HasPrefix(first.IdempotencyKey, "tlc-brief-v1-") {
+		t.Fatalf("idempotency key %q does not identify canonicalization algorithm v1", first.IdempotencyKey)
+	}
 	other := issueSource()
 	other.Identity = "https://github.com/transpara-ai/repo-x/issues/43"
 	changed, err := Bind(other, routineBrief())

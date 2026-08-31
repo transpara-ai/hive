@@ -7,7 +7,7 @@ import (
 	"github.com/transpara-ai/hive/pkg/hive/tlcbridge"
 )
 
-func TestRepositoryAcceptanceConformsToHiveIntake(t *testing.T) {
+func TestRepositoryAcceptanceAndOutputConformToHiveIntake(t *testing.T) {
 	brief := []byte(`{
 		"schema_version":"tlc-change-brief/v1",
 		"route":"Routine",
@@ -21,30 +21,40 @@ func TestRepositoryAcceptanceConformsToHiveIntake(t *testing.T) {
 			"next_action":"implement the typo fix"
 		}
 	}`)
-	repositories := []string{
-		"transpara-ai/hive",
-		"transpara-ai/repo_x.2",
-		"transpara-ai/répôt",
-		"attacker/hive",
-		"transpara-ai/.git",
-		"transpara-ai/re..po",
-		"transpara-ai/repo.",
-		"transpara-ai/repo two",
-		"transpara-ai/repo/control\n",
-		"transpara-ai/one/two",
+	tests := []struct {
+		repository string
+		want       bool
+	}{
+		{repository: "transpara-ai/hive", want: true},
+		{repository: "transpara-ai/repo_x.2", want: true},
+		{repository: "transpara-ai/répôt", want: true},
+		{repository: "  transpara-ai/hive  ", want: true},
+		{repository: "transpara-ai/cafe\u0301", want: true},
+		{repository: "attacker/hive"},
+		{repository: "transpara-ai/.git"},
+		{repository: "transpara-ai/re..po"},
+		{repository: "transpara-ai/repo."},
+		{repository: "transpara-ai/repo two"},
+		{repository: "transpara-ai/repo/control\n"},
+		{repository: "transpara-ai/one/two"},
 	}
-	for _, repository := range repositories {
-		t.Run(repository, func(t *testing.T) {
-			_, err := tlcbridge.Bind(
+	for _, test := range tests {
+		t.Run(test.repository, func(t *testing.T) {
+			bound, err := tlcbridge.Bind(
 				tlcbridge.Source{
 					Kind:       tlcbridge.SourceIssue,
 					Identity:   "issue:1",
-					Repository: repository,
+					Repository: test.repository,
 				},
 				brief,
 			)
-			if got, want := err == nil, hive.ValidTransparaAIRepo(repository); got != want {
-				t.Fatalf("bridge acceptance = %t, Hive intake acceptance = %t (error: %v)", got, want, err)
+			if got := err == nil; got != test.want {
+				t.Fatalf("bridge acceptance = %t, want %t (error: %v)", got, test.want, err)
+			}
+			if err == nil && (!hive.ValidTransparaAIRepo(bound.Source.Repository) ||
+				!hive.ValidTransparaAIRepo(bound.Effects.WorktreeRepository) ||
+				!hive.ValidTransparaAIRepo(bound.Effects.PullRequestRepository)) {
+				t.Fatalf("accepted repository escaped Hive invariants: %+v", bound)
 			}
 		})
 	}

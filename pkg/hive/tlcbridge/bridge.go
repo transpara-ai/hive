@@ -21,7 +21,10 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const BriefSchemaVersion = "tlc-change-brief/v1"
+const (
+	BriefSchemaVersion   = "tlc-change-brief/v1"
+	idempotencyKeyPrefix = "tlc-brief-v1-"
+)
 
 type Route string
 
@@ -161,7 +164,7 @@ func Bind(source Source, raw []byte) (BoundRequest, error) {
 			WorktreeRepository:    source.Repository,
 			PullRequestRepository: source.Repository,
 		},
-		IdempotencyKey: "tlc-brief-" + hex.EncodeToString(digest[:]),
+		IdempotencyKey: idempotencyKeyPrefix + hex.EncodeToString(digest[:]),
 	}, nil
 }
 
@@ -347,13 +350,13 @@ func requireJSONEnd(decoder *json.Decoder) error {
 
 func rejectDuplicateJSONObjectKeys(raw []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if err := scanJSONValue(decoder, "$"); err != nil {
+	if err := scanJSONValue(decoder); err != nil {
 		return fmt.Errorf("decode TLC change brief: %w", err)
 	}
 	return requireJSONEnd(decoder)
 }
 
-func scanJSONValue(decoder *json.Decoder, path string) error {
+func scanJSONValue(decoder *json.Decoder) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -375,10 +378,10 @@ func scanJSONValue(decoder *json.Decoder, path string) error {
 				return errors.New("object key is not a string")
 			}
 			if _, duplicate := seen[key]; duplicate {
-				return fmt.Errorf("duplicate JSON object key %q at %s", key, path)
+				return fmt.Errorf("duplicate JSON object key %q", key)
 			}
 			seen[key] = struct{}{}
-			if err := scanJSONValue(decoder, path+"."+key); err != nil {
+			if err := scanJSONValue(decoder); err != nil {
 				return err
 			}
 		}
@@ -391,7 +394,7 @@ func scanJSONValue(decoder *json.Decoder, path string) error {
 		}
 	case '[':
 		for decoder.More() {
-			if err := scanJSONValue(decoder, path+"[]"); err != nil {
+			if err := scanJSONValue(decoder); err != nil {
 				return err
 			}
 		}
