@@ -1179,7 +1179,7 @@ func TestIssueScanDraftPRBaseRefValidation(t *testing.T) {
 	}
 }
 
-func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
+func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBaseWithPrune(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
@@ -1198,6 +1198,7 @@ func TestIssueScanDraftPRGitBaseCommitSHAFetchesRemoteBase(t *testing.T) {
 	runGitForTest(t, source, "push", "origin", "main")
 	runGitForTest(t, remote, "symbolic-ref", "HEAD", "refs/heads/main")
 	runGitForTest(t, "", "clone", remote, clone)
+	runGitForTest(t, clone, "config", "fetch.prune", "true")
 
 	want := strings.TrimSpace(runGitOutputForTest(t, source, "rev-parse", "HEAD"))
 	got, err := gitBaseCommitSHA(ctx, clone, "refs/heads/main")

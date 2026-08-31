@@ -1259,7 +1259,8 @@ func gitFetchBaseRef(ctx context.Context, repoPath, baseRef string) error {
 	if err := validateGitBaseBranchRef(base); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", base+":refs/remotes/origin/"+base)
+	refspec := "+refs/heads/" + base + ":refs/remotes/origin/" + base
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", refspec)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
