@@ -81,6 +81,61 @@ func TestBindingIsDeterministicAndSourceSpecificForSafeRetry(t *testing.T) {
 	}
 }
 
+func TestBindingNormalizesTextBeforeCanonicalIdempotency(t *testing.T) {
+	canonical := bytes.Replace(routineBrief(), []byte("Fix the displayed typo"), []byte("Fix café"), 1)
+	variant := bytes.Replace(routineBrief(), []byte("Fix the displayed typo"), []byte("  Fix cafe\u0301  "), 1)
+	first, err := Bind(issueSource(), canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Bind(issueSource(), variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.IdempotencyKey != second.IdempotencyKey {
+		t.Fatalf("equivalent normalized briefs produced %q and %q", first.IdempotencyKey, second.IdempotencyKey)
+	}
+	if second.Change.Brief.Outcome != "Fix café" {
+		t.Fatalf("normalized outcome = %q, want NFC-trimmed text", second.Change.Brief.Outcome)
+	}
+}
+
+func TestBindingRejectsDuplicatesAfterTextNormalization(t *testing.T) {
+	variant := bytes.Replace(
+		routineBrief(),
+		[]byte(`"scope":["settings copy"]`),
+		[]byte(`"scope":["café","  cafe\u0301  "]`),
+		1,
+	)
+	if _, err := Bind(issueSource(), variant); err == nil || !strings.Contains(err.Error(), "duplicate item") {
+		t.Fatalf("Bind error = %v, want normalized duplicate refusal", err)
+	}
+}
+
+func TestDuplicateJSONObjectKeysAreRejectedBeforeBinding(t *testing.T) {
+	tests := map[string][]byte{
+		"route": bytes.Replace(
+			routineBrief(),
+			[]byte(`"route":"Routine",`),
+			[]byte(`"route":"Critical","route":"Routine",`),
+			1,
+		),
+		"nested brief field": bytes.Replace(
+			routineBrief(),
+			[]byte(`"outcome":"Fix the displayed typo",`),
+			[]byte(`"outcome":"Revoke credentials","outcome":"Fix the displayed typo",`),
+			1,
+		),
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Bind(issueSource(), raw); err == nil || !strings.Contains(err.Error(), "duplicate JSON object key") {
+				t.Fatalf("Bind error = %v, want duplicate-key refusal", err)
+			}
+		})
+	}
+}
+
 func TestSourceIdentityAndRepositoryAreNormalizedBeforeBinding(t *testing.T) {
 	source := issueSource()
 	source.Identity = "  " + source.Identity + "  "
@@ -94,6 +149,31 @@ func TestSourceIdentityAndRepositoryAreNormalizedBeforeBinding(t *testing.T) {
 	}
 	if bound.Effects.WorktreeRepository != issueSource().Repository || bound.Effects.PullRequestRepository != issueSource().Repository {
 		t.Fatalf("effects use unnormalized repository: %+v", bound.Effects)
+	}
+}
+
+func TestSourceIdentityUnicodeNormalizationStabilizesIdempotency(t *testing.T) {
+	canonicalSource := issueSource()
+	canonicalSource.Identity = "issue:café"
+	variantSource := issueSource()
+	variantSource.Identity = "  issue:cafe\u0301  "
+	canonical, err := Bind(canonicalSource, routineBrief())
+	if err != nil {
+		t.Fatal(err)
+	}
+	variant, err := Bind(variantSource, routineBrief())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical.IdempotencyKey != variant.IdempotencyKey {
+		t.Fatalf("equivalent source identities produced %q and %q", canonical.IdempotencyKey, variant.IdempotencyKey)
+	}
+}
+
+func TestInvalidUTF8IsRejectedBeforeBinding(t *testing.T) {
+	raw := append(append([]byte(nil), routineBrief()...), 0xff)
+	if _, err := Bind(issueSource(), raw); err == nil || !strings.Contains(err.Error(), "valid UTF-8") {
+		t.Fatalf("Bind error = %v, want UTF-8 refusal", err)
 	}
 }
 
@@ -154,6 +234,9 @@ func TestMalformedOrUnsafeSourceFailsBeforeBinding(t *testing.T) {
 		{Kind: SourceIssue, Identity: "", Repository: "transpara-ai/repo-x"},
 		{Kind: SourceIssue, Identity: "issue:1", Repository: "../repo-x"},
 		{Kind: SourceIssue, Identity: "issue:1", Repository: "transpara-ai/.git"},
+		{Kind: SourceIssue, Identity: "issue:1", Repository: "attacker/evil-repo"},
+		{Kind: SourceIssue, Identity: "issue:1", Repository: "transpara-ai/re..po"},
+		{Kind: SourceIssue, Identity: "issue:1", Repository: "transpara-ai/repo."},
 	} {
 		if _, err := Bind(source, routineBrief()); err == nil {
 			t.Fatalf("unsafe source accepted: %+v", source)

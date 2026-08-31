@@ -14,8 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 const BriefSchemaVersion = "tlc-change-brief/v1"
@@ -101,8 +104,7 @@ type BoundRequest struct {
 }
 
 var (
-	repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
-	criticalTriggers  = map[string]struct{}{
+	criticalTriggers = map[string]struct{}{
 		"credentials_auth_crypto_secrets":           {},
 		"destructive_irreversible":                  {},
 		"safety_financial_legal_regulatory_privacy": {},
@@ -116,13 +118,19 @@ var (
 // Bind validates TLC's complete public object, then adds only Hive-owned
 // source and effect-routing state. It performs no persistence or effects.
 func Bind(source Source, raw []byte) (BoundRequest, error) {
-	source.Identity = strings.TrimSpace(source.Identity)
-	source.Repository = strings.TrimSpace(source.Repository)
+	source.Identity = canonicalText(source.Identity)
+	source.Repository = canonicalText(source.Repository)
 	if err := validateSource(source); err != nil {
 		return BoundRequest{}, err
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return BoundRequest{}, errors.New("TLC change brief is empty")
+	}
+	if !utf8.Valid(raw) {
+		return BoundRequest{}, errors.New("TLC change brief is not valid UTF-8")
+	}
+	if err := rejectDuplicateJSONObjectKeys(raw); err != nil {
+		return BoundRequest{}, err
 	}
 	var change ChangeBrief
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -133,6 +141,7 @@ func Bind(source Source, raw []byte) (BoundRequest, error) {
 	if err := requireJSONEnd(decoder); err != nil {
 		return BoundRequest{}, err
 	}
+	normalizeChange(&change)
 	if err := validateChange(change); err != nil {
 		return BoundRequest{}, err
 	}
@@ -163,16 +172,60 @@ func validateSource(source Source) error {
 	if strings.TrimSpace(source.Identity) == "" {
 		return errors.New("source identity is required")
 	}
-	if !repositoryPattern.MatchString(source.Repository) {
-		return fmt.Errorf("source repository %q must be owner/repo", source.Repository)
-	}
-	parts := strings.Split(source.Repository, "/")
-	for _, part := range parts {
-		if part == "." || part == ".." || strings.EqualFold(part, ".git") {
-			return fmt.Errorf("source repository %q is unsafe", source.Repository)
-		}
+	if !validTransparaAIRepository(source.Repository) {
+		return fmt.Errorf("source repository %q is not a valid Transpara-AI repository", source.Repository)
 	}
 	return nil
+}
+
+func validTransparaAIRepository(repository string) bool {
+	if strings.Count(repository, "/") != 1 {
+		return false
+	}
+	owner, name, found := strings.Cut(repository, "/")
+	return found && owner == "transpara-ai" && validRepositoryComponent(owner) && validRepositoryComponent(name)
+}
+
+func validRepositoryComponent(component string) bool {
+	if component == "" || strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".") || strings.Contains(component, "..") {
+		return false
+	}
+	for _, r := range component {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func canonicalText(value string) string {
+	return norm.NFC.String(strings.TrimSpace(value))
+}
+
+func normalizeStrings(values []string) {
+	for index := range values {
+		values[index] = canonicalText(values[index])
+	}
+}
+
+func normalizeChange(change *ChangeBrief) {
+	change.Brief.Outcome = canonicalText(change.Brief.Outcome)
+	change.Brief.NextAction = canonicalText(change.Brief.NextAction)
+	normalizeStrings(change.Brief.Scope)
+	normalizeStrings(change.Brief.NonGoals)
+	normalizeStrings(change.Brief.Assumptions)
+	normalizeStrings(change.Brief.Constraints)
+	normalizeStrings(change.Brief.Tests)
+	if change.Clarification != nil {
+		normalizeStrings(change.Clarification.Questions)
+	}
+	if change.Critical != nil {
+		for index := range change.Critical.Observations {
+			change.Critical.Observations[index].Trigger = canonicalText(change.Critical.Observations[index].Trigger)
+			change.Critical.Observations[index].Evidence = canonicalText(change.Critical.Observations[index].Evidence)
+		}
+	}
 }
 
 func validateChange(change ChangeBrief) error {
@@ -288,6 +341,69 @@ func requireJSONEnd(decoder *json.Decoder) error {
 			return errors.New("TLC change brief contains multiple JSON values")
 		}
 		return fmt.Errorf("decode TLC change brief trailer: %w", err)
+	}
+	return nil
+}
+
+func rejectDuplicateJSONObjectKeys(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := scanJSONValue(decoder, "$"); err != nil {
+		return fmt.Errorf("decode TLC change brief: %w", err)
+	}
+	return requireJSONEnd(decoder)
+}
+
+func scanJSONValue(decoder *json.Decoder, path string) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("object key is not a string")
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("duplicate JSON object key %q at %s", key, path)
+			}
+			seen[key] = struct{}{}
+			if err := scanJSONValue(decoder, path+"."+key); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if closing != json.Delim('}') {
+			return errors.New("object has no closing delimiter")
+		}
+	case '[':
+		for decoder.More() {
+			if err := scanJSONValue(decoder, path+"[]"); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if closing != json.Delim(']') {
+			return errors.New("array has no closing delimiter")
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
 	}
 	return nil
 }
