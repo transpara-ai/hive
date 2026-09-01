@@ -1,9 +1,9 @@
 // Package tlcbridge validates the thin TLC change brief at Hive's ingress.
 //
 // TLC owns route selection and the short brief. Hive adds source identity,
-// repository-effect containment, and an idempotency key used by its existing
-// durable EventGraph/Work dispatch. This package deliberately owns no second
-// workflow state machine and enables no runtime route by itself.
+// repository-effect containment, and an idempotency key for a caller to record.
+// This package deliberately owns no dispatcher integration or second workflow
+// state machine and performs no persistence or effects.
 package tlcbridge
 
 import (
@@ -97,8 +97,9 @@ type RepositoryEffects struct {
 	PullRequestRepository string
 }
 
-// BoundRequest is ready for Hive's existing durable dispatcher. The TLC brief
-// contains no source chain, retry, worktree, provider, or effect state.
+// BoundRequest is the validated library result returned to a caller. It is not
+// an input type for any existing durable dispatcher. The TLC brief contains no
+// source chain, retry, worktree, provider, or effect state.
 type BoundRequest struct {
 	Source         Source
 	Change         ChangeBrief
