@@ -14,7 +14,15 @@ type exerciseRecord struct {
 	PullRequestRepository string
 }
 
-func bindExerciseRecord() (exerciseRecord, error) {
+func exerciseSource(identity string) tlcbridge.Source {
+	return tlcbridge.Source{
+		Kind:       tlcbridge.SourceIssue,
+		Identity:   identity,
+		Repository: "transpara-ai/repo-x",
+	}
+}
+
+func bindExerciseRecord(source tlcbridge.Source) (exerciseRecord, error) {
 	raw := []byte(`{
 		"schema_version":"tlc-change-brief/v1",
 		"route":"Routine",
@@ -28,14 +36,7 @@ func bindExerciseRecord() (exerciseRecord, error) {
 			"next_action":"implement the typo fix"
 		}
 	}`)
-	bound, err := tlcbridge.Bind(
-		tlcbridge.Source{
-			Kind:       tlcbridge.SourceIssue,
-			Identity:   "https://github.com/transpara-ai/repo-x/issues/42",
-			Repository: "transpara-ai/repo-x",
-		},
-		raw,
-	)
+	bound, err := tlcbridge.Bind(source, raw)
 	if err != nil {
 		return exerciseRecord{}, err
 	}
@@ -47,12 +48,29 @@ func bindExerciseRecord() (exerciseRecord, error) {
 }
 
 func TestExerciseRecord(t *testing.T) {
-	record, err := bindExerciseRecord()
+	source := exerciseSource("https://github.com/transpara-ai/repo-x/issues/42")
+	record, err := bindExerciseRecord(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := bindExerciseRecord(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	differentSource, err := bindExerciseRecord(
+		exerciseSource("https://github.com/transpara-ai/repo-x/issues/43"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(record.IdempotencyKey, "tlc-brief-v1-") {
 		t.Fatalf("idempotency key = %q, want versioned prefix", record.IdempotencyKey)
+	}
+	if replay.IdempotencyKey != record.IdempotencyKey {
+		t.Fatalf("replay key = %q, want %q", replay.IdempotencyKey, record.IdempotencyKey)
+	}
+	if differentSource.IdempotencyKey == record.IdempotencyKey {
+		t.Fatal("different source identity produced the replay idempotency key")
 	}
 	if record.WorktreeRepository != "transpara-ai/repo-x" ||
 		record.PullRequestRepository != "transpara-ai/repo-x" {
@@ -60,8 +78,10 @@ func TestExerciseRecord(t *testing.T) {
 	}
 }
 
-func ExampleBind() {
-	record, err := bindExerciseRecord()
+func ExampleBind_forExerciseRecord() {
+	record, err := bindExerciseRecord(
+		exerciseSource("https://github.com/transpara-ai/repo-x/issues/42"),
+	)
 	if err != nil {
 		panic(err)
 	}

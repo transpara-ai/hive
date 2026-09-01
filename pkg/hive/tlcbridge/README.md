@@ -7,7 +7,7 @@ repository-confined effects. It performs no persistence or external action.
 Run the executable example:
 
 ```bash
-go test ./pkg/hive/tlcbridge -run '^(TestExerciseRecord|ExampleBind)$' -v
+go test ./pkg/hive/tlcbridge -run '^(TestExerciseRecord|TestBriefCannotInjectHiveExecutionOrRepositoryState|ExampleBind_forExerciseRecord)$' -v
 ```
 
 The example captures an Issue in `transpara-ai/repo-x`, calls
