@@ -24,10 +24,10 @@ func TestREADMEStaysWithinLibraryBoundary(t *testing.T) {
 		}
 	}
 	for _, prohibited := range []string{
-		"adopt this repository",
-		"enable runtime",
-		"enable enforcement",
-		"deploy to production",
+		"adopt",
+		"runtime",
+		"enforc",
+		"deploy",
 		"durable-dispatch input",
 	} {
 		if strings.Contains(strings.ToLower(text), prohibited) {
