@@ -1259,7 +1259,11 @@ func gitFetchBaseRef(ctx context.Context, repoPath, baseRef string) error {
 	if err := validateGitBaseBranchRef(base); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", base+":refs/remotes/origin/"+base)
+	// Use a fully qualified, forced refspec. Short source names combined with a
+	// global fetch.prune setting can remove the destination tracking ref on
+	// newer Git versions, leaving the caller to resolve stale or missing state.
+	refspec := "+refs/heads/" + base + ":refs/remotes/origin/" + base
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "--no-tags", "origin", refspec)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
