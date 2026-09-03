@@ -24,7 +24,8 @@ func eligibleCandidate(t *testing.T) MergeCandidate {
 		BoundRequest: bound, Repository: "transpara-ai/hive", PullRequestNumber: 42,
 		CreatedByCivilization: true, Open: true, HeadSHA: head, ReviewedHeadSHA: head,
 		ValidatedHeadSHA: head, RequiredChecksPassing: true, OrdinaryReviewPassing: true,
-		ChangedFiles: []string{"docs/README.md"},
+		ChangedFiles: []string{"docs/README.md"}, ExpectedChangedFiles: []string{"docs/README.md"},
+		ChangedFilesComplete: true,
 	}
 }
 
@@ -60,6 +61,11 @@ func TestEvaluateAutoMergeFailsClosed(t *testing.T) {
 		{"review", func(_ *AutoMergePolicy, c *MergeCandidate) { c.OrdinaryReviewPassing = false }},
 		{"blocker", func(_ *AutoMergePolicy, c *MergeCandidate) { c.UnresolvedBlockers = 1 }},
 		{"intervention", func(_ *AutoMergePolicy, c *MergeCandidate) { c.OpenInterventions = 1 }},
+		{"empty changed files", func(_ *AutoMergePolicy, c *MergeCandidate) { c.ChangedFiles = nil }},
+		{"incomplete changed files", func(_ *AutoMergePolicy, c *MergeCandidate) { c.ChangedFilesComplete = false }},
+		{"mismatched changed files", func(_ *AutoMergePolicy, c *MergeCandidate) {
+			c.ExpectedChangedFiles = []string{"docs/OTHER.md"}
+		}},
 		{"protected workflow", func(_ *AutoMergePolicy, c *MergeCandidate) { c.ChangedFiles = []string{".github/workflows/ci.yml"} }},
 		{"protected auth", func(_ *AutoMergePolicy, c *MergeCandidate) { c.ChangedFiles = []string{"internal/auth/session.go"} }},
 		{"deep protected auth", func(_ *AutoMergePolicy, c *MergeCandidate) {

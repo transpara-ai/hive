@@ -40,6 +40,8 @@ type MergeCandidate struct {
 	UnresolvedBlockers    int
 	OpenInterventions     int
 	ChangedFiles          []string
+	ExpectedChangedFiles  []string
+	ChangedFilesComplete  bool
 }
 
 type MergeDecision struct {
@@ -92,6 +94,18 @@ func EvaluateAutoMerge(policy AutoMergePolicy, candidate MergeCandidate) MergeDe
 	}
 	if candidate.OpenInterventions != 0 {
 		deny("Human intervention remains open")
+	}
+	observedFiles := normalizedFiles(candidate.ChangedFiles)
+	expectedFiles := normalizedFiles(candidate.ExpectedChangedFiles)
+	if len(candidate.ChangedFiles) == 0 || len(observedFiles) != len(candidate.ChangedFiles) {
+		deny("pull request changed-file observation is empty or invalid")
+	}
+	if !candidate.ChangedFilesComplete {
+		deny("pull request changed-file observation is incomplete")
+	}
+	if len(candidate.ExpectedChangedFiles) == 0 || len(expectedFiles) != len(candidate.ExpectedChangedFiles) ||
+		!equalStrings(observedFiles, expectedFiles) {
+		deny("pull request changed files do not match the reviewed implementation")
 	}
 	for _, changed := range candidate.ChangedFiles {
 		if protectedPath(changed, policy.ProtectedPaths) {

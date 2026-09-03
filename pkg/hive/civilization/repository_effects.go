@@ -529,19 +529,20 @@ type observedPullRequest struct {
 }
 
 type ghPRJSON struct {
-	Number     int    `json:"number"`
-	URL        string `json:"url"`
-	State      string `json:"state"`
-	IsDraft    bool   `json:"isDraft"`
-	HeadRefOID string `json:"headRefOid"`
-	Body       string `json:"body"`
-	Files      []struct {
+	Number            int    `json:"number"`
+	URL               string `json:"url"`
+	State             string `json:"state"`
+	IsDraft           bool   `json:"isDraft"`
+	HeadRefOID        string `json:"headRefOid"`
+	Body              string `json:"body"`
+	ChangedFilesCount int    `json:"changedFiles"`
+	Files             []struct {
 		Path string `json:"path"`
 	} `json:"files"`
 }
 
 func (e *GitHubEffects) findPullRequest(ctx context.Context, repository, branch string) (observedPullRequest, bool, error) {
-	raw, err := e.ghRun(ctx, "", "pr", "list", "--repo", repository, "--head", branch, "--state", "all", "--limit", "2", "--json", "number,url,state,isDraft,headRefOid,body,files")
+	raw, err := e.ghRun(ctx, "", "pr", "list", "--repo", repository, "--head", branch, "--state", "all", "--limit", "2", "--json", "number,url,state,isDraft,headRefOid,body,changedFiles,files")
 	if err != nil {
 		return observedPullRequest{}, false, fmt.Errorf("list pull requests: %w", err)
 	}
@@ -560,7 +561,7 @@ func (e *GitHubEffects) findPullRequest(ctx context.Context, repository, branch 
 }
 
 func (e *GitHubEffects) viewPullRequest(ctx context.Context, repository string, number int) (observedPullRequest, error) {
-	raw, err := e.ghRun(ctx, "", "pr", "view", fmt.Sprintf("%d", number), "--repo", repository, "--json", "number,url,state,isDraft,headRefOid,body,files")
+	raw, err := e.ghRun(ctx, "", "pr", "view", fmt.Sprintf("%d", number), "--repo", repository, "--json", "number,url,state,isDraft,headRefOid,body,changedFiles,files")
 	if err != nil {
 		return observedPullRequest{}, fmt.Errorf("view pull request: %w", err)
 	}
@@ -577,6 +578,7 @@ func (e *GitHubEffects) observedFromJSON(ctx context.Context, repository string,
 		files = append(files, file.Path)
 	}
 	files = normalizedFiles(files)
+	filesComplete := candidate.ChangedFilesCount > 0 && candidate.ChangedFilesCount == len(candidate.Files) && len(files) == len(candidate.Files)
 	checksPassing := false
 	checksState := "pending"
 	if strings.EqualFold(candidate.State, "OPEN") {
@@ -619,7 +621,8 @@ func (e *GitHubEffects) observedFromJSON(ctx context.Context, repository string,
 	return observedPullRequest{PullRequest: PullRequest{
 		Repository: repository, Number: candidate.Number, URL: candidate.URL, HeadSHA: candidate.HeadRefOID,
 		Open: strings.EqualFold(candidate.State, "OPEN"), Merged: strings.EqualFold(candidate.State, "MERGED"), Draft: candidate.IsDraft,
-		ChecksPassing: checksPassing, ChecksState: checksState, ChangedFiles: files, CreatedByCivilization: strings.Contains(candidate.Body, "civilization:v1"),
+		ChecksPassing: checksPassing, ChecksState: checksState, ChangedFiles: files, ChangedFilesComplete: filesComplete,
+		CreatedByCivilization: strings.Contains(candidate.Body, "civilization:v1"),
 	}, marker: candidate.Body}, nil
 }
 

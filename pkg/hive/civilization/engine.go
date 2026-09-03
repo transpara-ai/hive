@@ -69,6 +69,7 @@ type PullRequest struct {
 	ChecksPassing         bool     `json:"checks_passing"`
 	ChecksState           string   `json:"checks_state"`
 	ChangedFiles          []string `json:"changed_files"`
+	ChangedFilesComplete  bool     `json:"changed_files_complete"`
 	CreatedByCivilization bool     `json:"created_by_civilization"`
 }
 
@@ -455,9 +456,23 @@ func (e *Engine) considerAutoMerge(ctx context.Context, projection WorkProjectio
 		}
 	}
 	reviewPassing := false
+	reviewObserved := false
+	var implementationFiles []string
+	implementationObserved := false
 	for i := len(projection.ProviderRuns) - 1; i >= 0; i-- {
-		if projection.ProviderRuns[i].Operation == OperationReview {
-			reviewPassing = validateReview(projection.ProviderRuns[i].Result) == nil
+		switch projection.ProviderRuns[i].Operation {
+		case OperationReview:
+			if !reviewObserved {
+				reviewObserved = true
+				reviewPassing = validateReview(projection.ProviderRuns[i].Result) == nil
+			}
+		case OperationImplement:
+			if !implementationObserved {
+				implementationObserved = true
+				implementationFiles, _ = normalizedProviderFiles(projection.ProviderRuns[i].Result.ChangedFiles)
+			}
+		}
+		if reviewObserved && implementationObserved {
 			break
 		}
 	}
@@ -467,6 +482,7 @@ func (e *Engine) considerAutoMerge(ctx context.Context, projection WorkProjectio
 		HeadSHA: pr.HeadSHA, ReviewedHeadSHA: pr.ReviewedHeadSHA, ValidatedHeadSHA: pr.ValidatedHeadSHA,
 		RequiredChecksPassing: pr.ChecksPassing, OrdinaryReviewPassing: reviewPassing,
 		OpenInterventions: openInterventions, ChangedFiles: append([]string(nil), pr.ChangedFiles...),
+		ExpectedChangedFiles: append([]string(nil), implementationFiles...), ChangedFilesComplete: pr.ChangedFilesComplete,
 	})
 	var decisionEvent Event
 	if projection.MergeDecision != nil && sameMergeDecision(*projection.MergeDecision, decision) {
@@ -891,7 +907,8 @@ func validateReview(result ProviderResult) error {
 func pullRequestReady(pr PullRequest) bool {
 	return pr.Repository != "" && pr.Number > 0 && pr.URL != "" && pr.Open && !pr.Draft &&
 		!pr.Merged && pr.ChecksPassing && (pr.ChecksState == "" || pr.ChecksState == "passed") && gitHeadPattern.MatchString(pr.HeadSHA) &&
-		pr.HeadSHA == pr.ReviewedHeadSHA && pr.HeadSHA == pr.ValidatedHeadSHA && pr.CreatedByCivilization
+		pr.HeadSHA == pr.ReviewedHeadSHA && pr.HeadSHA == pr.ValidatedHeadSHA && pr.CreatedByCivilization &&
+		pr.ChangedFilesComplete && len(pr.ChangedFiles) > 0
 }
 
 func samePullRequest(left, right PullRequest) bool {

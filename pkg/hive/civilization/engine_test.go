@@ -126,7 +126,7 @@ func (e *fakeEffects) Publish(_ context.Context, workID string, bound tlcbridge.
 		Repository: bound.Source.Repository, Number: len(e.publishByID), URL: "https://github.com/" + bound.Source.Repository + "/pull/1",
 		HeadSHA: head, ReviewedHeadSHA: head, ValidatedHeadSHA: head,
 		Open: !e.merged, Merged: e.merged, Draft: false, ChecksPassing: checksState == "passed", ChecksState: checksState,
-		ChangedFiles: append([]string(nil), implementation.ChangedFiles...), CreatedByCivilization: true,
+		ChangedFiles: append([]string(nil), implementation.ChangedFiles...), ChangedFilesComplete: true, CreatedByCivilization: true,
 	}, nil
 }
 

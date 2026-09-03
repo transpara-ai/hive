@@ -150,7 +150,7 @@ func TestGitHubEffectsAutoMergeUsesExactHeadWithoutAdmin(t *testing.T) {
 	pr := PullRequest{
 		Repository: "transpara-ai/hive", Number: 42, URL: "https://github.com/transpara-ai/hive/pull/42",
 		HeadSHA: head, ReviewedHeadSHA: head, ValidatedHeadSHA: head, Open: true, ChecksPassing: true, ChecksState: "passed",
-		ChangedFiles: []string{"README.md"}, CreatedByCivilization: true,
+		ChangedFiles: []string{"README.md"}, ChangedFilesComplete: true, CreatedByCivilization: true,
 	}
 	if err := effects.EnableAutoMerge(context.Background(), pr, head); err != nil {
 		t.Fatal(err)
@@ -192,6 +192,16 @@ func TestGitHubEffectsDistinguishesPendingAndFailedRequiredChecks(t *testing.T) 
 	if failed.ChecksState != "failed" || failed.ChecksPassing {
 		t.Fatalf("failed = %+v", failed)
 	}
+
+	t.Setenv("FAKE_CHECK_BUCKET", "pass")
+	t.Setenv("FAKE_CHANGED_FILES_COUNT", "2")
+	truncated, err := effects.ObservePullRequest(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated.ChangedFilesComplete || pullRequestReady(truncated) {
+		t.Fatalf("truncated file observation was accepted: %+v", truncated)
+	}
 }
 
 func TestVerificationSandboxDropsAmbientCredentials(t *testing.T) {
@@ -225,10 +235,11 @@ set -eu
 for arg in "$@"; do printf '%s\n' "$arg" >> "$FAKE_GH_LOG"; done
 if [ "$1" = pr ] && [ "$2" = list ]; then
   head=${FAKE_HEAD:-$(git -C "$FAKE_WORKTREE" rev-parse HEAD)}
-  printf '[{"number":42,"url":"https://github.com/transpara-ai/hive/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","body":"<!-- civilization:v1 work_id=work-bbbbbbbbbbbbbbbbbbbbbbbb -->","files":[{"path":"change.txt"}]}]' "$head"
+  printf '[{"number":42,"url":"https://github.com/transpara-ai/hive/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","body":"<!-- civilization:v1 work_id=work-bbbbbbbbbbbbbbbbbbbbbbbb -->","changedFiles":1,"files":[{"path":"change.txt"}]}]' "$head"
 elif [ "$1" = pr ] && [ "$2" = view ]; then
   head=${FAKE_HEAD:-$(git -C "$FAKE_WORKTREE" rev-parse HEAD)}
-  printf '{"number":42,"url":"https://github.com/transpara-ai/hive/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","body":"<!-- civilization:v1 -->","files":[{"path":"README.md"}]}' "$head"
+  count=${FAKE_CHANGED_FILES_COUNT:-1}
+  printf '{"number":42,"url":"https://github.com/transpara-ai/hive/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","body":"<!-- civilization:v1 -->","changedFiles":%s,"files":[{"path":"README.md"}]}' "$head" "$count"
 elif [ "$1" = pr ] && [ "$2" = checks ]; then
   bucket=${FAKE_CHECK_BUCKET:-pass}
   printf '[{"bucket":"%s","name":"CI","state":"STATUS"}]' "$bucket"
@@ -283,7 +294,7 @@ exec "$@"
 			},
 		},
 		WorktreeRoot: filepath.Join(t.TempDir(), "worktrees"), GitExecutable: gitPath, GitSHA256: gitDigest,
-		GitHubExecutable: ghPath, GitHubSHA256: ghDigest, EnvironmentKeys: []string{"PATH", "HOME", "FAKE_GH_LOG", "FAKE_WORKTREE", "FAKE_HEAD", "FAKE_CHECK_BUCKET"},
+		GitHubExecutable: ghPath, GitHubSHA256: ghDigest, EnvironmentKeys: []string{"PATH", "HOME", "FAKE_GH_LOG", "FAKE_WORKTREE", "FAKE_HEAD", "FAKE_CHECK_BUCKET", "FAKE_CHANGED_FILES_COUNT"},
 		VerificationSandboxExecutable: sandboxPath, VerificationSandboxSHA256: sandboxDigest,
 		VerificationSandboxProfile: verificationSandboxProfile, VerificationCodexHome: verificationHome,
 		VerificationConfigSHA256: verificationConfigDigest, VerificationScratchRoot: filepath.Join(t.TempDir(), "scratch"),
