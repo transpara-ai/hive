@@ -11,6 +11,7 @@ Hive runtime and orchestration layer: a trust-gated civilisation of agents built
 - Local Postgres: `docker compose up -d postgres`
 
 ## Rules
+- Use the installed canonical `transpara-tlc` skill for software changes; do not copy its policy or implementation into this repository.
 - Preserve human approval requirements for significant decisions and self-modification.
 - Guardian or integrity-watch behavior must remain outside normal hierarchy suppression paths.
 - Agents coordinate through events and tasks; avoid hidden side channels.
