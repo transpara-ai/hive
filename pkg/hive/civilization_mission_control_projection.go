@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +12,11 @@ import (
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
 	"github.com/transpara-ai/eventgraph/go/pkg/types"
-	"github.com/transpara-ai/hive/pkg/hive/factoryv1"
 	"github.com/transpara-ai/work"
 )
 
 const (
-	MissionControlSchemaVersion   = "civilization-mission-control/v1"
+	MissionControlSchemaVersion   = "civilization-mission-control/v2"
 	MissionControlProjectionPath  = "/api/hive/civilization/mission-control-projection"
 	missionControlRetention       = 15 * time.Minute
 	missionControlDefaultPageSize = 50
@@ -130,18 +128,6 @@ type ServiceHealth struct {
 	Mark              EvidenceMark `json:"mark"`
 }
 
-type MissionClassification struct {
-	EngineProtocol              string       `json:"engine_protocol"`
-	DeclaredGovernanceProtocol  string       `json:"declared_governance_protocol"`
-	DeclaredPacketProfile       string       `json:"declared_packet_profile"`
-	DeclaredHumanReviewTier     *int         `json:"declared_human_review_tier"`
-	EffectiveGovernanceProtocol string       `json:"effective_governance_protocol"`
-	EffectivePacketProfile      string       `json:"effective_packet_profile"`
-	EffectiveHumanReviewTier    int          `json:"effective_human_review_tier"`
-	Mark                        EvidenceMark `json:"mark"`
-	EvidenceRefs                []string     `json:"evidence_refs"`
-}
-
 type MissionEvidenceItem struct {
 	Kind            string       `json:"kind"`
 	Stage           string       `json:"stage,omitempty"`
@@ -158,45 +144,38 @@ type MissionEvidenceItem struct {
 }
 
 type EvidenceRollup struct {
-	FactoryOrderRef         string                  `json:"factory_order_ref"`
-	DesignBlobSHA           string                  `json:"design_blob_sha"`
-	HumanDesignReviewRef    string                  `json:"human_design_review_ref"`
-	PRRepository            string                  `json:"pr_repository"`
-	PRNumber                int                     `json:"pr_number"`
-	PRState                 string                  `json:"pr_state"`
-	PRHeadSHA               string                  `json:"pr_head_sha"`
-	ReviewedHeadSHA         string                  `json:"reviewed_head_sha"`
-	ReadyHeadMatches        bool                    `json:"ready_head_matches"`
-	PendingTier3HumanReview bool                    `json:"pending_tier_3_human_review"`
-	Items                   []MissionEvidenceItem   `json:"items"`
-	FieldMarks              map[string]EvidenceMark `json:"field_marks"`
-	Mark                    EvidenceMark            `json:"mark"`
+	PRRepository     string                  `json:"pr_repository"`
+	PRNumber         int                     `json:"pr_number"`
+	PRState          string                  `json:"pr_state"`
+	PRHeadSHA        string                  `json:"pr_head_sha"`
+	ReviewedHeadSHA  string                  `json:"reviewed_head_sha"`
+	ReadyHeadMatches bool                    `json:"ready_head_matches"`
+	Items            []MissionEvidenceItem   `json:"items"`
+	FieldMarks       map[string]EvidenceMark `json:"field_marks"`
+	Mark             EvidenceMark            `json:"mark"`
 }
 
 type WIPItem struct {
-	Kind                string                `json:"kind"`
-	StableID            string                `json:"stable_id"`
-	FactoryOrderID      string                `json:"factory_order_id"`
-	FactoryOrderVersion string                `json:"factory_order_version"`
-	DocumentSHA256      string                `json:"document_sha256"`
-	WorkTaskID          string                `json:"work_task_id"`
-	Title               string                `json:"title"`
-	TargetRepository    MarkedValue           `json:"target_repository"`
-	Assignment          MarkedValue           `json:"assignment"`
-	LifecycleStatus     MarkedValue           `json:"lifecycle_status"`
-	EngineProtocol      MarkedValue           `json:"engine_protocol"`
-	TLCStage            MarkedValue           `json:"tlc_stage"`
-	TLCStageIndex       MarkedValue           `json:"tlc_stage_index"`
-	ItemStartedAt       MarkedValue           `json:"item_started_at"`
-	LastEffectAt        MarkedValue           `json:"last_effect_at"`
-	ElapsedMS           MarkedValue           `json:"elapsed_ms"`
-	NextHandoff         MarkedValue           `json:"next_handoff"`
-	Completeness        MarkedValue           `json:"completeness"`
-	Classification      MissionClassification `json:"classification"`
-	BlockerRefs         []string              `json:"blocker_refs"`
-	InterventionRefs    []string              `json:"intervention_refs"`
-	EvidenceRollup      EvidenceRollup        `json:"evidence_rollup"`
-	Mark                EvidenceMark          `json:"mark"`
+	Kind                string         `json:"kind"`
+	StableID            string         `json:"stable_id"`
+	FactoryOrderID      string         `json:"factory_order_id"`
+	FactoryOrderVersion string         `json:"factory_order_version"`
+	DocumentSHA256      string         `json:"document_sha256"`
+	WorkTaskID          string         `json:"work_task_id"`
+	Title               string         `json:"title"`
+	TargetRepository    MarkedValue    `json:"target_repository"`
+	Assignment          MarkedValue    `json:"assignment"`
+	LifecycleStatus     MarkedValue    `json:"lifecycle_status"`
+	EngineProtocol      MarkedValue    `json:"engine_protocol"`
+	ItemStartedAt       MarkedValue    `json:"item_started_at"`
+	LastEffectAt        MarkedValue    `json:"last_effect_at"`
+	ElapsedMS           MarkedValue    `json:"elapsed_ms"`
+	NextHandoff         MarkedValue    `json:"next_handoff"`
+	Completeness        MarkedValue    `json:"completeness"`
+	BlockerRefs         []string       `json:"blocker_refs"`
+	InterventionRefs    []string       `json:"intervention_refs"`
+	EvidenceRollup      EvidenceRollup `json:"evidence_rollup"`
+	Mark                EvidenceMark   `json:"mark"`
 }
 
 type RoleAgentRow struct {
@@ -214,17 +193,6 @@ type RoleAgentRow struct {
 	Status       MarkedValue  `json:"status"`
 	Assignment   MarkedValue  `json:"assignment"`
 	Mark         EvidenceMark `json:"mark"`
-}
-
-type WorkerPool struct {
-	ConfiguredWorkers  MarkedValue                   `json:"configured_workers"`
-	ActiveWorkers      MarkedValue                   `json:"active_workers"`
-	AvailableWorkers   MarkedValue                   `json:"available_workers"`
-	QueuedOrders       MarkedValue                   `json:"queued_orders"`
-	SchedulableOrders  MarkedValue                   `json:"schedulable_orders"`
-	Assignments        []factoryv1.RuntimeAssignment `json:"assignments"`
-	UtilizationPercent MarkedValue                   `json:"utilization_percent"`
-	Mark               EvidenceMark                  `json:"mark"`
 }
 
 type HumanAction struct {
@@ -274,7 +242,6 @@ type MissionControlProjection struct {
 	Services          []ServiceHealth       `json:"services"`
 	WIP               []WIPItem             `json:"wip"`
 	Roles             []RoleAgentRow        `json:"roles"`
-	WorkerPool        WorkerPool            `json:"worker_pool"`
 	HumanActions      []HumanAction         `json:"human_actions"`
 	Interventions     []MissionIntervention `json:"interventions"`
 	Handoffs          []Handoff             `json:"handoffs"`
@@ -290,92 +257,19 @@ func missionMarked(value any, mark EvidenceMark) MarkedValue {
 	return MarkedValue{Value: value, Mark: mark}
 }
 
-func missionProfileRank(profile string) int {
-	switch profile {
-	case "P-MECHANICAL":
-		return 0
-	case "P-IMPLEMENTATION":
-		return 1
-	case "P-DESIGN-DELTA":
-		return 2
-	case "P-ENVELOPE":
-		return 3
-	default:
-		return -1
-	}
+type MissionClock interface {
+	Now() time.Time
 }
 
-func classifyMissionOrder(order factoryv1.OrderProjection, now time.Time) MissionClassification {
-	mark := NewEvidenceMark(FreshnessCurrent, BasisInferred, "factory_v1_ledger", order.LastEffectAt, now, nil, "missing or unsupported exact TLC 4.5.0 classification evidence; fail upward")
-	result := MissionClassification{
-		EngineProtocol: order.EngineProtocol, EffectiveGovernanceProtocol: "4.5.0",
-		EffectivePacketProfile: "P-ENVELOPE", EffectiveHumanReviewTier: 3,
-		Mark: mark, EvidenceRefs: []string{},
-	}
-	var candidates []factoryv1.Evidence
-	for _, stage := range order.Stages {
-		for _, evidence := range stage.Evidence {
-			if evidence.Kind == "tlc_change_classification" {
-				candidates = append(candidates, evidence)
-			}
-		}
-	}
-	if len(candidates) == 0 {
-		return result
-	}
-	metadata := candidates[0].Metadata
-	result.DeclaredGovernanceProtocol = metadata["protocol"]
-	result.DeclaredPacketProfile = metadata["profile"]
-	if tier, err := strconv.Atoi(metadata["tier"]); err == nil {
-		result.DeclaredHumanReviewTier = &tier
-	}
-	valid := true
-	var reason string
-	for _, evidence := range candidates {
-		m := evidence.Metadata
-		tier, tierErr := strconv.Atoi(m["tier"])
-		profileRank := missionProfileRank(m["profile"])
-		if !isExactGitOrDocumentHash(evidence.Reference) || m["protocol"] != "4.5.0" || profileRank < 0 || tierErr != nil || tier < 0 || tier > 3 || m["order_id"] != order.OrderID || m["order_version"] != order.Version || m["document_sha256"] != order.DocumentSHA256 {
-			valid, reason = false, "classification evidence is malformed or bound to another subject"
-			break
-		}
-		if profileRank < missionProfileRank("P-ENVELOPE") && (!isExactGitOrDocumentHash(m["classification_result_blob"]) || !isExactGitOrDocumentHash(m["inventory_blob"])) {
-			valid, reason = false, "reduced-profile evidence lacks exact classifier or inventory blobs"
-			break
-		}
-		if m["protocol"] != metadata["protocol"] || m["profile"] != metadata["profile"] || m["tier"] != metadata["tier"] {
-			valid, reason = false, "classification evidence conflicts for the exact subject"
-			break
-		}
-		result.EvidenceRefs = append(result.EvidenceRefs, evidence.Reference)
-	}
-	if !valid {
-		result.Mark.Reason = reason
-		result.EvidenceRefs = compactStrings(result.EvidenceRefs)
-		return result
-	}
-	tier, _ := strconv.Atoi(metadata["tier"])
-	result.EffectiveGovernanceProtocol = metadata["protocol"]
-	result.EffectivePacketProfile = metadata["profile"]
-	result.EffectiveHumanReviewTier = tier
-	result.Mark = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", order.LastEffectAt, now, result.EvidenceRefs, "")
-	result.EvidenceRefs = compactStrings(result.EvidenceRefs)
-	return result
-}
+type missionWallClock struct{}
 
-type FactoryProjectionBuilder func(context.Context) (factoryv1.Projection, error)
-
-type MissionRuntimeSource interface {
-	Fetch(context.Context, time.Time, *FactoryRuntimeSnapshot) (FactoryRuntimeSnapshot, error)
-}
+func (missionWallClock) Now() time.Time { return time.Now().UTC() }
 
 type MissionControlProjectorConfig struct {
-	FactoryProjection FactoryProjectionBuilder
-	ModelSelection    OperatorModelSelectionSource
-	Runtime           MissionRuntimeSource
-	Clock             factoryv1.Clock
-	PageSize          int
-	Retention         time.Duration
+	ModelSelection OperatorModelSelectionSource
+	Clock          MissionClock
+	PageSize       int
+	Retention      time.Duration
 }
 
 type cachedMissionSource[T any] struct {
@@ -385,13 +279,12 @@ type cachedMissionSource[T any] struct {
 }
 
 type missionWIPSource struct {
-	GeneratedAt    time.Time
-	Rows           []WIPItem
-	Interventions  []MissionIntervention
-	Handoffs       []Handoff
-	HumanActions   []HumanAction
-	FactoryService factoryv1.ServiceProjection
-	Completeness   MissionCompleteness
+	GeneratedAt   time.Time
+	Rows          []WIPItem
+	Interventions []MissionIntervention
+	Handoffs      []Handoff
+	HumanActions  []HumanAction
+	Completeness  MissionCompleteness
 }
 
 type missionRosterSource struct {
@@ -408,10 +301,8 @@ type missionAuthoritySource struct {
 
 type CivilizationMissionControlProjector struct {
 	store          store.Store
-	factory        FactoryProjectionBuilder
 	modelSelection OperatorModelSelectionSource
-	runtime        MissionRuntimeSource
-	clock          factoryv1.Clock
+	clock          MissionClock
 	pageSize       int
 	retention      time.Duration
 
@@ -419,7 +310,6 @@ type CivilizationMissionControlProjector struct {
 	wipCache       cachedMissionSource[missionWIPSource]
 	rosterCache    cachedMissionSource[missionRosterSource]
 	authorityCache cachedMissionSource[missionAuthoritySource]
-	runtimeCache   cachedMissionSource[FactoryRuntimeSnapshot]
 }
 
 func NewCivilizationMissionControlProjector(s store.Store, config MissionControlProjectorConfig) (*CivilizationMissionControlProjector, error) {
@@ -427,7 +317,7 @@ func NewCivilizationMissionControlProjector(s store.Store, config MissionControl
 		return nil, errors.New("mission control projector requires EventGraph store")
 	}
 	if config.Clock == nil {
-		config.Clock = factoryv1.WallClock{}
+		config.Clock = missionWallClock{}
 	}
 	if config.PageSize <= 0 {
 		config.PageSize = missionControlDefaultPageSize
@@ -442,8 +332,8 @@ func NewCivilizationMissionControlProjector(s store.Store, config MissionControl
 		return nil, errors.New("mission control retention must be between 1s and 15m")
 	}
 	return &CivilizationMissionControlProjector{
-		store: s, factory: config.FactoryProjection, modelSelection: config.ModelSelection,
-		runtime: config.Runtime, clock: config.Clock, pageSize: config.PageSize, retention: config.Retention,
+		store: s, modelSelection: config.ModelSelection,
+		clock: config.Clock, pageSize: config.PageSize, retention: config.Retention,
 	}, nil
 }
 
@@ -452,11 +342,8 @@ func (p *CivilizationMissionControlProjector) Build(ctx context.Context) Mission
 	wip, wipMark := p.acquireWIP(ctx, now)
 	roster, rosterMark := p.acquireRoster(ctx, now)
 	authority, authorityMark := p.acquireAuthority(ctx, now)
-	runtimeSnapshot, runtimeMark := p.acquireRuntime(ctx, now)
 
-	workerPool := missionWorkerPool(runtimeSnapshot, runtimeMark)
 	roles := append([]RoleAgentRow(nil), roster.Rows...)
-	roles = append(roles, runtimeRoleRows(runtimeSnapshot, runtimeMark)...)
 	sort.Slice(roles, func(i, j int) bool { return roles[i].StableID < roles[j].StableID })
 	actions := append([]HumanAction(nil), wip.HumanActions...)
 	actions = append(actions, authority.HumanActions...)
@@ -471,9 +358,8 @@ func (p *CivilizationMissionControlProjector) Build(ctx context.Context) Mission
 		{SourceID: "eventgraph_wip_evidence", Required: true, Completeness: wip.Completeness, Mark: wipMark},
 		{SourceID: "roster_routing", Required: true, Completeness: roster.Completeness, Mark: rosterMark},
 		{SourceID: "authority_actions", Required: true, Completeness: authority.Completeness, Mark: authorityMark},
-		{SourceID: "factory_runtime", Required: true, Completeness: missionRuntimeCompleteness(runtimeSnapshot, runtimeMark), Mark: runtimeMark},
 	}
-	services := missionServiceHealth(now, wip, wipMark, rosterMark, authorityMark, runtimeSnapshot, runtimeMark)
+	services := missionServiceHealth(now, wip, wipMark, rosterMark, authorityMark)
 	complete, reasons := true, []string{}
 	for _, source := range sources {
 		if !source.Completeness.Complete || source.Mark.Freshness == FreshnessUnavailable {
@@ -504,19 +390,18 @@ func (p *CivilizationMissionControlProjector) Build(ctx context.Context) Mission
 			DomainCounts: cloneMissionIntMap(wip.Completeness.DomainCounts), PageCounts: cloneMissionIntMap(wip.Completeness.PageCounts),
 		},
 		Sources: sources, Services: services, WIP: append([]WIPItem(nil), wip.Rows...),
-		Roles: roles, WorkerPool: workerPool, HumanActions: actions,
+		Roles: roles, HumanActions: actions,
 		Interventions: append([]MissionIntervention(nil), wip.Interventions...), Handoffs: append([]Handoff(nil), wip.Handoffs...),
 		ResidualRisks: []string{
-			"daemon loopback runtime observation is unavailable unless separately configured and running",
+			"worker capacity is not part of the stable Mission Control evidence contract",
 			"head changes during exhaustive reads make the affected source projected-only or stale",
 			"process-local stale retention is lost on restart and never exceeds 15 minutes from original observation",
-			"historical or unbound classification evidence fails upward to TLC 4.5.0 P-ENVELOPE Tier 3",
 			"spawn/stop events prove event-active state, not general Agent process liveness",
 			"Work HTTP reachability is a separate Site-owned observation and does not prove EventGraph head equality",
 		},
 		NonAuthorizations: []string{
 			"Mission Control is read-only and grants no approval, gate, merge, deploy, runtime, configuration, authority, or production action.",
-			"Cached or projected-only data cannot satisfy a TLC gate or authorize a transition.",
+			"Cached or projected-only data cannot authorize a transition.",
 			"No EventGraph or Work mutation endpoint is part of this projection.",
 		},
 	}
@@ -697,39 +582,6 @@ func (p *CivilizationMissionControlProjector) acquireAuthority(ctx context.Conte
 	return value, missionUnavailableMark("authority_actions", now, reason)
 }
 
-func (p *CivilizationMissionControlProjector) acquireRuntime(ctx context.Context, now time.Time) (FactoryRuntimeSnapshot, EvidenceMark) {
-	p.mu.Lock()
-	cache := p.runtimeCache
-	p.mu.Unlock()
-	var previous *FactoryRuntimeSnapshot
-	if cache.valid {
-		copy := cache.value
-		previous = &copy
-	}
-	var snapshot FactoryRuntimeSnapshot
-	var err error
-	if p.runtime == nil {
-		err = errors.New("factory runtime source is not configured")
-	} else {
-		snapshot, err = p.runtime.Fetch(ctx, now, previous)
-		if err == nil && !FactoryRuntimeSnapshotCurrentHealthy(snapshot, now) {
-			err = errors.New("factory runtime snapshot is not current and healthy")
-		}
-	}
-	if err == nil {
-		mark := NewEvidenceMark(FreshnessCurrent, BasisProjectedOnly, "factory_runtime", snapshot.LastHeartbeatAt, now, []string{snapshot.BootID, strconv.FormatUint(snapshot.Sequence, 10)}, "ephemeral daemon observation; not durable TLC evidence")
-		p.mu.Lock()
-		p.runtimeCache = cachedMissionSource[FactoryRuntimeSnapshot]{value: snapshot, observedAt: snapshot.LastHeartbeatAt, valid: true}
-		p.mu.Unlock()
-		return snapshot, mark
-	}
-	reason := "factory runtime unavailable: " + err.Error()
-	if cache.valid && !now.Before(cache.observedAt) && now.Sub(cache.observedAt) <= p.retention {
-		return cache.value, NewEvidenceMark(FreshnessStale, BasisProjectedOnly, "factory_runtime", cache.observedAt, now, []string{cache.value.BootID, strconv.FormatUint(cache.value.Sequence, 10)}, reason)
-	}
-	return FactoryRuntimeSnapshot{SchemaVersion: FactoryRuntimeSnapshotSchemaVersion, Assignments: []factoryv1.RuntimeAssignment{}}, missionUnavailableMark("factory_runtime", now, reason)
-}
-
 func emptyMissionWIPSource(now time.Time, reason string) missionWIPSource {
 	return missionWIPSource{GeneratedAt: now, Rows: []WIPItem{}, Interventions: []MissionIntervention{}, Handoffs: []Handoff{}, HumanActions: []HumanAction{}, Completeness: MissionCompleteness{Complete: false, Reasons: []string{reason}, DomainCounts: map[string]int{}, PageCounts: map[string]int{}}}
 }
@@ -761,14 +613,11 @@ func staleMissionWIPSource(value missionWIPSource, now time.Time, reason string)
 		row.Assignment = staleMarkedValue(row.Assignment, now, reason)
 		row.LifecycleStatus = staleMarkedValue(row.LifecycleStatus, now, reason)
 		row.EngineProtocol = staleMarkedValue(row.EngineProtocol, now, reason)
-		row.TLCStage = staleMarkedValue(row.TLCStage, now, reason)
-		row.TLCStageIndex = staleMarkedValue(row.TLCStageIndex, now, reason)
 		row.ItemStartedAt = staleMarkedValue(row.ItemStartedAt, now, reason)
 		row.LastEffectAt = staleMarkedValue(row.LastEffectAt, now, reason)
 		row.ElapsedMS = staleMarkedValue(row.ElapsedMS, now, reason)
 		row.NextHandoff = staleMarkedValue(row.NextHandoff, now, reason)
 		row.Completeness = staleMarkedValue(row.Completeness, now, reason)
-		row.Classification.Mark = staleMissionMark(row.Classification.Mark, now, reason)
 		row.EvidenceRollup.Mark = staleMissionMark(row.EvidenceRollup.Mark, now, reason)
 		for key, mark := range row.EvidenceRollup.FieldMarks {
 			row.EvidenceRollup.FieldMarks[key] = staleMissionMark(mark, now, reason)
@@ -874,20 +723,6 @@ func (p *CivilizationMissionControlProjector) buildWIPSource(ctx context.Context
 			result.Completeness.Reasons = append(result.Completeness.Reasons, fmt.Sprintf("read %s: %v", key, readErr))
 		}
 	}
-
-	var factoryProjection factoryv1.Projection
-	if p.factory == nil {
-		result.Completeness.Reasons = append(result.Completeness.Reasons, "Factory v1 projection source is not configured")
-	} else {
-		factoryProjection, err = p.factory(ctx)
-		if err != nil {
-			result.Completeness.Reasons = append(result.Completeness.Reasons, "Factory v1 projection: "+err.Error())
-		}
-	}
-	result.Completeness.DomainCounts["factory_v1_orders"] = len(factoryProjection.Orders)
-	result.Completeness.DomainCounts["factory_v1_interventions"] = len(factoryProjection.Interventions)
-	result.Completeness.PageCounts["factory_v1_projection"] = 1
-	result.FactoryService = factoryProjection.Service
 
 	folds := make(map[string]*missionWorkTaskFold)
 	for _, ev := range allEvents[work.EventTypeTaskCreated] {
@@ -1039,90 +874,14 @@ func (p *CivilizationMissionControlProjector) buildWIPSource(ctx context.Context
 		})
 	}
 
-	ordersByID := make(map[string][]int)
-	activeVersions := make(map[string]int)
-	tupleCounts := make(map[string]int)
-	for i, order := range factoryProjection.Orders {
-		ordersByID[order.OrderID] = append(ordersByID[order.OrderID], i)
-		if !missionFactoryOrderTerminal(order) {
-			activeVersions[order.OrderID]++
-			tupleCounts[missionFactoryTuple(order)]++
-		}
-	}
-	tasksByOrder := make(map[string][]*missionWorkTaskFold)
 	for _, fold := range folds {
-		if len(fold.linkedOrderIDs) == 1 {
-			for orderID := range fold.linkedOrderIDs {
-				if len(ordersByID[orderID]) == 1 {
-					tasksByOrder[orderID] = append(tasksByOrder[orderID], fold)
-				}
-			}
-		}
-	}
-	usedTasks := map[string]struct{}{}
-	tupleOrdinals := make(map[string]int)
-	for _, order := range factoryProjection.Orders {
-		if missionFactoryOrderTerminal(order) {
-			continue
-		}
-		tuple := missionFactoryTuple(order)
-		tupleOrdinals[tuple]++
-		var linked *missionWorkTaskFold
-		conflictReason := ""
-		if tupleCounts[tuple] > 1 {
-			conflictReason = "duplicate Factory order tuple"
-		} else if activeVersions[order.OrderID] > 1 {
-			conflictReason = "multiple active Factory order versions"
-		}
-		if len(tasksByOrder[order.OrderID]) == 1 && conflictReason == "" {
-			linked = tasksByOrder[order.OrderID][0]
-			usedTasks[linked.created.ID().Value()] = struct{}{}
-		} else if len(tasksByOrder[order.OrderID]) > 1 {
-			conflictReason = "multiple Work tasks link to this Factory order"
-		}
-		if linked != nil {
-			if len(linked.targetRepositories) > 1 {
-				conflictReason = "linked Work task contains conflicting exact target repositories"
-			} else {
-				for repository := range linked.targetRepositories {
-					if repository != order.TargetRepository {
-						conflictReason = "linked Work target repository conflicts with canonical FactoryOrder"
-					}
-				}
-			}
-		}
-		row, actions, handoff := missionFactoryWIPRow(order, linked, now, conflictReason)
-		if tupleCounts[tuple] > 1 {
-			row.StableID += ":duplicate:" + strconv.Itoa(tupleOrdinals[tuple])
-		}
-		result.Rows = append(result.Rows, row)
-		result.HumanActions = append(result.HumanActions, actions...)
-		result.Handoffs = append(result.Handoffs, handoff)
-	}
-	for _, fold := range folds {
-		if _, used := usedTasks[fold.created.ID().Value()]; used {
-			continue
-		}
 		status, terminal, statusMark := missionWorkStatus(fold, now)
 		if terminal {
 			continue
 		}
 		conflictReason := ""
 		if len(fold.linkedOrderIDs) > 1 {
-			conflictReason = "Work task contains conflicting FactoryOrderID links"
-		}
-		if len(fold.linkedOrderIDs) == 1 {
-			for orderID := range fold.linkedOrderIDs {
-				if len(ordersByID[orderID]) == 0 {
-					conflictReason = "Work task references unavailable Factory order " + orderID
-				}
-				if len(ordersByID[orderID]) > 1 {
-					conflictReason = "Work task references ambiguous Factory order " + orderID
-				}
-				if len(tasksByOrder[orderID]) > 1 {
-					conflictReason = "multiple Work tasks link to Factory order " + orderID
-				}
-			}
+			conflictReason = "Work task contains conflicting historical FactoryOrderID links"
 		}
 		if len(fold.targetRepositories) > 1 {
 			if conflictReason != "" {
@@ -1130,33 +889,15 @@ func (p *CivilizationMissionControlProjector) buildWIPSource(ctx context.Context
 			}
 			conflictReason += "Work task contains conflicting exact target repositories"
 		}
-		result.Rows = append(result.Rows, missionIndependentWorkWIPRow(fold, status, statusMark, now, conflictReason))
+		row := missionIndependentWorkWIPRow(fold, status, statusMark, now, conflictReason)
+		if len(fold.linkedOrderIDs) == 1 {
+			for orderID := range fold.linkedOrderIDs {
+				row.FactoryOrderID = orderID
+			}
+		}
+		result.Rows = append(result.Rows, row)
 	}
 
-	for _, intervention := range factoryProjection.Interventions {
-		mark := NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", intervention.RequestedAt, now, []string{intervention.EventID}, "")
-		result.Interventions = append(result.Interventions, MissionIntervention{InterventionID: intervention.InterventionID, OrderID: intervention.OrderID, Kind: intervention.Kind, Status: string(intervention.Status), Prompt: boundedMissionReason(intervention.Prompt), RequestedAt: intervention.RequestedAt, EvidenceRefs: []string{intervention.EventID}, Mark: mark})
-		for i := range result.Rows {
-			if result.Rows[i].FactoryOrderID != intervention.OrderID {
-				continue
-			}
-			result.Rows[i].InterventionRefs = compactStrings(append(result.Rows[i].InterventionRefs, intervention.InterventionID, intervention.EventID))
-			if intervention.Status == factoryv1.InterventionOpen {
-				result.Rows[i].BlockerRefs = compactStrings(append(result.Rows[i].BlockerRefs, intervention.EventID))
-				result.Rows[i].Completeness = missionMarked(false, NewEvidenceMark(FreshnessCurrent, BasisProjectedOnly, "factory_v1_ledger", intervention.RequestedAt, now, []string{intervention.EventID}, "open Factory intervention blocks a complete normal handoff"))
-			}
-		}
-		if intervention.Status == factoryv1.InterventionOpen {
-			for i := range result.Handoffs {
-				if result.Handoffs[i].SubjectID == intervention.OrderID {
-					result.Handoffs[i].Blocked = true
-					result.Handoffs[i].ToStage = "intervention_resolution"
-					result.Handoffs[i].EvidenceRefs = compactStrings(append(result.Handoffs[i].EvidenceRefs, intervention.EventID))
-				}
-			}
-			result.HumanActions = append(result.HumanActions, HumanAction{ActionID: "intervention:" + intervention.InterventionID, Kind: "factory_intervention", Severity: "high", SubjectID: intervention.OrderID, Summary: boundedMissionReason(intervention.Prompt), RequiredAction: "Resolve the open Factory intervention through its governed authority path.", SourceTime: intervention.RequestedAt, EvidenceRefs: []string{intervention.EventID}, Mark: mark})
-		}
-	}
 	endHead, headErr := missionHeadIdentity(p.store)
 	if headErr != nil {
 		result.Completeness.Reasons = append(result.Completeness.Reasons, "read WIP end head: "+headErr.Error())
@@ -1186,18 +927,6 @@ func (p *CivilizationMissionControlProjector) buildWIPSource(ctx context.Context
 	sort.Slice(result.Handoffs, func(i, j int) bool { return result.Handoffs[i].HandoffID < result.Handoffs[j].HandoffID })
 	sort.Slice(result.HumanActions, func(i, j int) bool { return result.HumanActions[i].ActionID < result.HumanActions[j].ActionID })
 	return result, nil
-}
-
-func missionFactoryTuple(order factoryv1.OrderProjection) string {
-	return order.OrderID + "\x00" + order.Version + "\x00" + order.DocumentSHA256
-}
-
-func missionFactoryOrderTerminal(order factoryv1.OrderProjection) bool {
-	if len(order.Stages) == 0 {
-		return false
-	}
-	latest := order.Stages[len(order.Stages)-1]
-	return latest.Stage == factoryv1.StageHumanReview && latest.State == factoryv1.TransitionPassed
 }
 
 func missionWorkStatus(fold *missionWorkTaskFold, now time.Time) (string, bool, EvidenceMark) {
@@ -1251,71 +980,6 @@ func missionElapsed(start, now time.Time, source string, refs []string) MarkedVa
 	return missionMarked(now.Sub(start).Milliseconds(), NewEvidenceMark(FreshnessCurrent, BasisExact, source, start, now, refs, "computed from exact source time and projection clock"))
 }
 
-func missionFactoryWIPRow(order factoryv1.OrderProjection, linked *missionWorkTaskFold, now time.Time, conflictReason string) (WIPItem, []HumanAction, Handoff) {
-	refs := []string{order.DocumentSHA256}
-	mark := NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", order.LastEffectAt, now, refs, conflictReason)
-	assignment := ""
-	assignmentMark := missionUnavailableMark("factory_v1_ledger", now, "no active Factory runner or exact Work assignment")
-	workID := ""
-	status := order.Status
-	statusMark := mark
-	if linked != nil {
-		workID = linked.created.ID().Value()
-		if linked.assignedTo != "" {
-			assignment = linked.assignedTo
-			assignmentMark = NewEvidenceMark(FreshnessCurrent, BasisExact, "work_eventgraph", linked.assignment.Timestamp().Value(), now, []string{linked.assignment.ID().Value()}, "")
-		}
-		workStatus, _, workMark := missionWorkStatus(linked, now)
-		status = order.Status + " / work:" + workStatus
-		statusMark = workMark
-	}
-	if order.ActivelyExecuting && order.ActiveAttemptID != "" {
-		assignment = order.ActiveAttemptID
-		assignmentMark = mark
-	}
-	blockers := []string{}
-	if order.Blocker != "" {
-		blockers = append(blockers, order.Blocker)
-	}
-	if conflictReason != "" {
-		blockers = append(blockers, conflictReason)
-	}
-	rowComplete := len(blockers) == 0
-	completenessMark := mark
-	if !rowComplete {
-		completenessMark = NewEvidenceMark(FreshnessCurrent, BasisProjectedOnly, "factory_v1_ledger", order.LastEffectAt, now, refs, strings.Join(blockers, "; "))
-	}
-	rollup := missionFactoryEvidenceRollup(order, now)
-	next := order.NextAction
-	if conflictReason != "" {
-		next = "repair conflicting evidence before any normal handoff"
-	}
-	handoffMark := mark
-	if next == "" {
-		handoffMark = missionUnavailableMark("factory_v1_ledger", now, "no validated next handoff")
-	}
-	row := WIPItem{
-		Kind: "factory_order", StableID: "factory:" + order.OrderID + "@" + order.Version + ":" + order.DocumentSHA256,
-		FactoryOrderID: order.OrderID, FactoryOrderVersion: order.Version, DocumentSHA256: order.DocumentSHA256, WorkTaskID: workID, Title: order.Title,
-		TargetRepository: missionMarked(order.TargetRepository, mark), Assignment: missionMarked(assignment, assignmentMark), LifecycleStatus: missionMarked(status, statusMark),
-		EngineProtocol: missionMarked(order.EngineProtocol, mark), TLCStage: missionMarked(string(order.TLCStage), mark), TLCStageIndex: missionMarked(order.TLCIndex, mark),
-		ItemStartedAt: missionMarked(order.StartedAt, mark), LastEffectAt: missionMarked(order.LastEffectAt, mark), ElapsedMS: missionElapsed(order.StartedAt, now, "factory_v1_ledger", refs),
-		NextHandoff: missionMarked(next, handoffMark), Completeness: missionMarked(rowComplete, completenessMark),
-		Classification: classifyMissionOrder(order, now), BlockerRefs: compactStrings(blockers), EvidenceRollup: rollup, Mark: mark,
-	}
-	actions := []HumanAction{}
-	if order.Status == "human_review" || order.TLCStage == factoryv1.StageHumanReview {
-		actions = append(actions, HumanAction{ActionID: "human-review:" + order.OrderID + "@" + order.Version, Kind: "human_review", Severity: "high", OwningStage: string(factoryv1.StageHumanReview), SubjectID: order.OrderID, Summary: "Exact-head PR is waiting for Tier 3 Human Review.", RequiredAction: "Review the merge-ready PR and explicitly approve, reject, or request changes; this view grants no merge authority.", SourceTime: order.LastEffectAt, EvidenceRefs: rollup.Mark.EvidenceRefs, Mark: mark})
-	} else if order.TLCStage == factoryv1.StageHumanDesignReview && (order.Status == "human_required" || order.Status == "blocked") {
-		actions = append(actions, HumanAction{ActionID: "human-design-review:" + order.OrderID + "@" + order.Version, Kind: "human_design_review", Severity: "high", OwningStage: string(factoryv1.StageHumanDesignReview), SubjectID: order.OrderID, Summary: "Design is waiting for scoped Human approval.", RequiredAction: "Approve or reject the exact design blob; approval authorizes implementation only.", SourceTime: order.LastEffectAt, EvidenceRefs: rollup.Mark.EvidenceRefs, Mark: mark})
-	}
-	handoff := Handoff{HandoffID: "handoff:" + order.OrderID + "@" + order.Version, SubjectID: order.OrderID, FromStage: string(order.TLCStage), ToStage: missionNextStage(order), ExpectedRoles: append([]string(nil), order.Peers...), CompletionPredicate: missionCompletionPredicate(order.TLCStage), Blocked: len(blockers) > 0 || order.Status == "blocked", EvidenceRefs: rollup.Mark.EvidenceRefs, Mark: handoffMark}
-	if handoff.Blocked {
-		handoff.ToStage = "evidence_repair"
-	}
-	return row, actions, handoff
-}
-
 func missionIndependentWorkWIPRow(fold *missionWorkTaskFold, status string, statusMark EvidenceMark, now time.Time, conflictReason string) WIPItem {
 	id := fold.created.ID().Value()
 	mark := NewEvidenceMark(FreshnessCurrent, BasisExact, "work_eventgraph", fold.latestAt, now, fold.evidenceRefs, conflictReason)
@@ -1356,84 +1020,20 @@ func missionIndependentWorkWIPRow(fold *missionWorkTaskFold, status string, stat
 		Kind: "independent_work_task", StableID: "work:" + id, WorkTaskID: id, Title: fold.content.Title,
 		TargetRepository: missionMarked(targetRepository, targetRepositoryMark),
 		Assignment:       missionMarked(assignment, assignmentMark), LifecycleStatus: missionMarked(status, statusMark),
-		EngineProtocol: missionMarked("work-v3.9", NewEvidenceMark(FreshnessCurrent, BasisInferred, "work_eventgraph", fold.created.Timestamp().Value(), now, []string{id}, "Work event vocabulary identifies the lifecycle family; this is not a TLC ledger")),
-		TLCStage:       missionMarked(nil, missionUnavailableMark("work_eventgraph", now, "independent Work task has no exact TLC ledger")), TLCStageIndex: missionMarked(nil, missionUnavailableMark("work_eventgraph", now, "independent Work task has no exact TLC ledger")),
-		ItemStartedAt: missionMarked(fold.created.Timestamp().Value(), NewEvidenceMark(FreshnessCurrent, BasisExact, "work_eventgraph", fold.created.Timestamp().Value(), now, []string{id}, "")),
-		LastEffectAt:  missionMarked(fold.latestAt, mark), ElapsedMS: missionElapsed(fold.created.Timestamp().Value(), now, "work_eventgraph", fold.evidenceRefs),
-		NextHandoff:    missionMarked(nil, missionUnavailableMark("work_eventgraph", now, "no validated TLC handoff for independent Work task")),
-		Completeness:   missionMarked(rowComplete, completenessMark),
-		Classification: MissionClassification{EngineProtocol: "work-v3.9", EffectiveGovernanceProtocol: "4.5.0", EffectivePacketProfile: "P-ENVELOPE", EffectiveHumanReviewTier: 3, Mark: NewEvidenceMark(FreshnessCurrent, BasisInferred, "work_eventgraph", fold.latestAt, now, fold.evidenceRefs, "independent Work task has no exact TLC 4.5.0 classification evidence")},
-		BlockerRefs:    blockers, InterventionRefs: []string{}, EvidenceRollup: EvidenceRollup{
-			Items: []MissionEvidenceItem{}, FieldMarks: missionUnavailableEvidenceFieldMarks("work_eventgraph", now, "independent Work task has no exact Factory/TLC evidence rollup"),
-			Mark: missionUnavailableMark("work_eventgraph", now, "independent Work task has no exact Factory/TLC evidence rollup"),
+		EngineProtocol: missionMarked("work-v3.9", NewEvidenceMark(FreshnessCurrent, BasisInferred, "work_eventgraph", fold.created.Timestamp().Value(), now, []string{id}, "Work event vocabulary identifies the lifecycle family; TLC routing remains external")),
+		ItemStartedAt:  missionMarked(fold.created.Timestamp().Value(), NewEvidenceMark(FreshnessCurrent, BasisExact, "work_eventgraph", fold.created.Timestamp().Value(), now, []string{id}, "")),
+		LastEffectAt:   missionMarked(fold.latestAt, mark), ElapsedMS: missionElapsed(fold.created.Timestamp().Value(), now, "work_eventgraph", fold.evidenceRefs),
+		NextHandoff:  missionMarked(nil, missionUnavailableMark("work_eventgraph", now, "no exact external workflow handoff is present in this Work projection")),
+		Completeness: missionMarked(rowComplete, completenessMark),
+		BlockerRefs:  blockers, InterventionRefs: []string{}, EvidenceRollup: EvidenceRollup{
+			Items: []MissionEvidenceItem{}, FieldMarks: missionUnavailableEvidenceFieldMarks("work_eventgraph", now, "external workflow evidence is not present in this Work projection"),
+			Mark: missionUnavailableMark("work_eventgraph", now, "external workflow evidence is not present in this Work projection"),
 		}, Mark: mark,
 	}
 }
 
-func missionFactoryEvidenceRollup(order factoryv1.OrderProjection, now time.Time) EvidenceRollup {
-	fieldMarks := missionUnavailableEvidenceFieldMarks("factory_v1_ledger", now, "exact evidence field has not been observed")
-	factoryOrderMark := missionUnavailableMark("factory_v1_ledger", now, "accepted FactoryOrder document SHA-256 is missing or invalid")
-	if isExactGitOrDocumentHash(order.DocumentSHA256) {
-		factoryOrderMark = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", order.StartedAt, now, []string{order.DocumentSHA256}, "accepted canonical FactoryOrder document SHA-256")
-	}
-	fieldMarks["factory_order_ref"] = factoryOrderMark
-	rollup := EvidenceRollup{FactoryOrderRef: order.DocumentSHA256, FieldMarks: fieldMarks, Items: []MissionEvidenceItem{{Kind: "factory_order_document", Stage: string(factoryv1.StageCraftFactoryOrder), State: "accepted", Reference: order.DocumentSHA256, Mark: factoryOrderMark}}}
-	refs := []string{order.DocumentSHA256}
-	for _, stage := range order.Stages {
-		for _, item := range stage.Evidence {
-			observed := stage.OccurredAt
-			mark := NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, []string{item.Reference}, "")
-			projected := MissionEvidenceItem{Kind: item.Kind, Stage: string(stage.Stage), State: string(stage.State), Reference: item.Reference, BlobSHA: item.DesignBlobSHA, PRHeadSHA: item.PRHeadSHA, ReviewedHeadSHA: item.ReviewedHeadSHA, BlockerCount: item.BlockerCount, AuthorFamily: item.AuthorFamily, ReviewerFamily: item.ReviewerFamily, Mark: mark}
-			if item.Provider != nil {
-				projected.ProviderID = item.Provider.ProviderID
-			}
-			if item.Kind == "factory_order" || item.Kind == "factory_order_document" {
-				rollup.FactoryOrderRef = item.Reference
-			}
-			if item.DesignBlobSHA != "" {
-				rollup.DesignBlobSHA = item.DesignBlobSHA
-				if isExactGitOrDocumentHash(item.DesignBlobSHA) {
-					rollup.FieldMarks["design_blob_sha"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, []string{item.DesignBlobSHA, item.Reference}, "")
-				} else {
-					rollup.FieldMarks["design_blob_sha"] = missionUnavailableMark("factory_v1_ledger", now, "design evidence is not an exact blob SHA")
-				}
-			}
-			if item.Approval != nil && stage.Stage == factoryv1.StageHumanDesignReview {
-				rollup.HumanDesignReviewRef = item.Reference
-				if strings.TrimSpace(item.Reference) != "" && isExactGitOrDocumentHash(item.DesignBlobSHA) {
-					rollup.FieldMarks["human_design_review_ref"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, []string{item.Reference, item.DesignBlobSHA}, "exact scoped Human Design Review receipt")
-				} else {
-					rollup.FieldMarks["human_design_review_ref"] = missionUnavailableMark("factory_v1_ledger", now, "Human Design Review receipt is missing an exact approved design blob")
-				}
-			}
-			if item.PR != nil {
-				missionApplyPREvidence(&rollup, item.PR.Repository, item.PR.Number, item.PR.HeadSHA, item.PR.ReviewedHeadSHA, "", item.PR.Open, item.PR.Draft, observed, now, "factory_v1_ledger", []string{item.Reference})
-			}
-			rollup.Items = append(rollup.Items, projected)
-			refs = append(refs, item.Reference)
-		}
-	}
-	if order.PR != nil {
-		observed, source := order.LastEffectAt, order.PR.ObservationSource
-		if !order.PR.ObservedAt.IsZero() {
-			observed = order.PR.ObservedAt
-		}
-		if strings.TrimSpace(source) == "" {
-			source = "factory_v1_ledger"
-		}
-		missionApplyPREvidence(&rollup, order.PR.Repository, order.PR.Number, order.PR.HeadSHA, order.PR.ReviewedHeadSHA, order.PR.State, order.PR.Open, order.PR.Draft, observed, now, source, nil)
-	}
-	classification := classifyMissionOrder(order, now)
-	rollup.PendingTier3HumanReview = order.TLCStage == factoryv1.StageHumanReview && !missionFactoryOrderTerminal(order) && classification.EffectiveHumanReviewTier == 3
-	rollup.FieldMarks["pending_tier_3_human_review"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", order.LastEffectAt, now, refs, "derived from validated exact Factory stage state")
-	refs = compactStrings(append(refs, order.DocumentSHA256))
-	rollup.Mark = missionEvidenceFieldAggregateMark(rollup.FieldMarks, order.LastEffectAt, now, refs)
-	return rollup
-}
-
 var missionEvidenceFieldNames = []string{
-	"factory_order_ref", "design_blob_sha", "human_design_review_ref", "pr_repository", "pr_number",
-	"pr_state", "pr_head_sha", "reviewed_head_sha", "ready_head_matches", "pending_tier_3_human_review",
+	"pr_repository", "pr_number", "pr_state", "pr_head_sha", "reviewed_head_sha", "ready_head_matches",
 }
 
 func missionUnavailableEvidenceFieldMarks(source string, now time.Time, reason string) map[string]EvidenceMark {
@@ -1442,102 +1042,6 @@ func missionUnavailableEvidenceFieldMarks(source string, now time.Time, reason s
 		marks[field] = missionUnavailableMark(source, now, field+": "+reason)
 	}
 	return marks
-}
-
-func missionApplyPREvidence(rollup *EvidenceRollup, repository string, number int, head, reviewed, state string, open, draft bool, observed, now time.Time, source string, refs []string) {
-	rollup.PRRepository, rollup.PRNumber = repository, number
-	rollup.PRHeadSHA, rollup.ReviewedHeadSHA = head, reviewed
-	state = strings.ToLower(strings.TrimSpace(state))
-	if state == "unknown" {
-		rollup.PRState = "unknown"
-	} else if state == "merged" {
-		rollup.PRState = "merged"
-	} else if !open {
-		rollup.PRState = "closed"
-	} else if draft {
-		rollup.PRState = "draft"
-	} else {
-		rollup.PRState = "ready"
-	}
-	exact := func(field string, valid bool, reason string, evidenceRefs ...string) {
-		if valid {
-			rollup.FieldMarks[field] = NewEvidenceMark(FreshnessCurrent, BasisExact, source, observed, now, compactStrings(append(refs, evidenceRefs...)), "")
-		} else {
-			rollup.FieldMarks[field] = missionUnavailableMark(source, now, reason)
-		}
-	}
-	exact("pr_repository", strings.TrimSpace(repository) != "", "PR repository is unavailable", repository)
-	exact("pr_number", number > 0, "PR number is unavailable", strconv.Itoa(number))
-	exact("pr_state", rollup.PRState == "closed" || rollup.PRState == "merged" || rollup.PRState == "draft" || rollup.PRState == "ready", "PR state is unavailable", rollup.PRState)
-	exact("pr_head_sha", isExactGitOrDocumentHash(head), "PR head is not an exact commit SHA", head)
-	if isExactGitOrDocumentHash(reviewed) {
-		rollup.FieldMarks["reviewed_head_sha"] = NewEvidenceMark(FreshnessCurrent, BasisExact, "factory_v1_ledger", observed, now, compactStrings(append(refs, reviewed)), "durable exact-head gate result")
-	} else {
-		rollup.FieldMarks["reviewed_head_sha"] = missionUnavailableMark("factory_v1_ledger", now, "reviewed head is not an exact commit SHA")
-	}
-	rollup.ReadyHeadMatches = isExactGitOrDocumentHash(head) && isExactGitOrDocumentHash(reviewed) && head == reviewed
-	comparisonSource := source
-	if source != "factory_v1_ledger" {
-		comparisonSource += "+factory_v1_ledger"
-	}
-	if isExactGitOrDocumentHash(head) && isExactGitOrDocumentHash(reviewed) {
-		rollup.FieldMarks["ready_head_matches"] = NewEvidenceMark(FreshnessCurrent, BasisExact, comparisonSource, observed, now, compactStrings(append(refs, head, reviewed)), "live PR head compared with durable exact-head gate result")
-	} else {
-		rollup.FieldMarks["ready_head_matches"] = missionUnavailableMark(comparisonSource, now, "exact-head equality is unavailable until both exact SHAs exist")
-	}
-}
-
-func missionEvidenceFieldAggregateMark(fields map[string]EvidenceMark, observed, now time.Time, refs []string) EvidenceMark {
-	freshness, basis := FreshnessCurrent, BasisExact
-	reasons := []string{}
-	for _, field := range missionEvidenceFieldNames {
-		mark, exists := fields[field]
-		if !exists || mark.Freshness == FreshnessUnavailable {
-			freshness, basis = FreshnessUnavailable, BasisUnavailable
-			if exists {
-				reasons = append(reasons, mark.Reason)
-			} else {
-				reasons = append(reasons, field+": evidence mark missing")
-			}
-		}
-	}
-	return NewEvidenceMark(freshness, basis, "factory_v1_ledger", observed, now, refs, strings.Join(compactStrings(reasons), "; "))
-}
-
-func missionNextStage(order factoryv1.OrderProjection) string {
-	if order.NextAction == "" {
-		return ""
-	}
-	index := factoryv1.StageIndex(order.TLCStage)
-	if index >= 0 && index+1 < len(factoryv1.TLCStages) {
-		return string(factoryv1.TLCStages[index+1])
-	}
-	return ""
-}
-
-func missionCompletionPredicate(stage factoryv1.Stage) string {
-	switch stage {
-	case factoryv1.StageDesign:
-		return "exact design blob is present"
-	case factoryv1.StageIADA:
-		return "exact design blob matches and IADA blocker count is zero"
-	case factoryv1.StageCFADA:
-		return "exact design blob matches, CFADA blocker count is zero, and reviewer family is independent"
-	case factoryv1.StageWriteCode:
-		return "exact branch/head and named passing validation are present"
-	case factoryv1.StageCreateDraftPR:
-		return "open draft PR binds the exact head"
-	case factoryv1.StageIAR:
-		return "IAR reviewed head equals PR head and blocker count is zero"
-	case factoryv1.StageCFAR:
-		return "CFAR reviewed head equals PR head, blocker count is zero, and reviewer family is independent"
-	case factoryv1.StageMarkPRReady:
-		return "PR is open, non-draft, checks pass, and ready head equals reviewed head"
-	case factoryv1.StageHumanDesignReview, factoryv1.StageHumanReview:
-		return "exact scoped Human approval or review receipt is present"
-	default:
-		return "existing ordered-stage validator accepts exact stage evidence"
-	}
 }
 
 func projectedOnlyWIPRow(row WIPItem, now time.Time, reason string) WIPItem {
@@ -1552,14 +1056,11 @@ func projectedOnlyWIPRow(row WIPItem, now time.Time, reason string) WIPItem {
 	row.Assignment = convert(row.Assignment)
 	row.LifecycleStatus = convert(row.LifecycleStatus)
 	row.EngineProtocol = convert(row.EngineProtocol)
-	row.TLCStage = convert(row.TLCStage)
-	row.TLCStageIndex = convert(row.TLCStageIndex)
 	row.ItemStartedAt = convert(row.ItemStartedAt)
 	row.LastEffectAt = convert(row.LastEffectAt)
 	row.ElapsedMS = convert(row.ElapsedMS)
 	row.NextHandoff = convert(row.NextHandoff)
 	row.Completeness = convert(row.Completeness)
-	row.Classification.Mark = projectedOnlyMissionMark(row.Classification.Mark, now, reason)
 	row.EvidenceRollup.Mark = projectedOnlyMissionMark(row.EvidenceRollup.Mark, now, reason)
 	for key, mark := range row.EvidenceRollup.FieldMarks {
 		row.EvidenceRollup.FieldMarks[key] = projectedOnlyMissionMark(mark, now, reason)
@@ -2010,118 +1511,32 @@ func missionRiskSeverity(risk string) string {
 	}
 }
 
-func missionWorkerPool(snapshot FactoryRuntimeSnapshot, mark EvidenceMark) WorkerPool {
-	unavailable := func(reason string) MarkedValue {
-		return missionMarked(nil, missionUnavailableMark("factory_runtime", mark.GeneratedAt, reason))
-	}
-	if mark.Freshness == FreshnessUnavailable {
-		return WorkerPool{
-			ConfiguredWorkers: unavailable("worker capacity is unavailable"), ActiveWorkers: unavailable("worker utilization is unavailable"),
-			AvailableWorkers: unavailable("worker availability is unavailable"), QueuedOrders: unavailable("runtime demand is unavailable"),
-			SchedulableOrders: unavailable("schedulable demand is unavailable"), Assignments: []factoryv1.RuntimeAssignment{},
-			UtilizationPercent: unavailable("worker utilization is unavailable"), Mark: mark,
-		}
-	}
-	utilization := float64(0)
-	if snapshot.ConfiguredWorkers > 0 {
-		utilization = float64(snapshot.ActiveWorkers) * 100 / float64(snapshot.ConfiguredWorkers)
-	}
-	derived := NewEvidenceMark(mark.Freshness, mark.Basis, "factory_runtime", mark.ObservedAt, mark.GeneratedAt, mark.EvidenceRefs, "derived from validated ephemeral daemon worker arithmetic")
-	return WorkerPool{
-		ConfiguredWorkers: missionMarked(snapshot.ConfiguredWorkers, mark), ActiveWorkers: missionMarked(snapshot.ActiveWorkers, mark), AvailableWorkers: missionMarked(snapshot.AvailableWorkers, mark),
-		QueuedOrders: missionMarked(snapshot.QueuedOrders, mark), SchedulableOrders: missionMarked(snapshot.SchedulableOrders, mark), Assignments: append([]factoryv1.RuntimeAssignment(nil), snapshot.Assignments...),
-		UtilizationPercent: missionMarked(utilization, derived), Mark: mark,
-	}
-}
-
-func runtimeRoleRows(snapshot FactoryRuntimeSnapshot, mark EvidenceMark) []RoleAgentRow {
-	if mark.Freshness == FreshnessUnavailable {
-		return []RoleAgentRow{}
-	}
-	rows := make([]RoleAgentRow, 0, len(snapshot.Assignments))
-	for _, assignment := range snapshot.Assignments {
-		assignmentRefs := compactStrings([]string{snapshot.BootID, assignment.OrderID, assignment.AttemptID, assignment.DocumentSHA256})
-		projected := NewEvidenceMark(mark.Freshness, BasisProjectedOnly, "factory_runtime", mark.ObservedAt, mark.GeneratedAt, assignmentRefs, "boot-scoped daemon assignment; not durable TLC or Agent-identity evidence")
-		providerMark, modelMark := projected, projected
-		if assignment.ProviderID == "" {
-			providerMark = missionUnavailableMark("factory_runtime", mark.GeneratedAt, "runtime assignment has no provider binding")
-		}
-		if assignment.ModelID == "" {
-			modelMark = missionUnavailableMark("factory_runtime", mark.GeneratedAt, "runtime assignment has no model binding")
-		}
-		rows = append(rows, RoleAgentRow{
-			StableID: "runtime:" + snapshot.BootID + ":" + assignment.OrderID, Role: "factory_runner",
-			Configured: missionMarked(true, projected), Instantiated: missionMarked(nil, missionUnavailableMark("factory_runtime", mark.GeneratedAt, "runtime assignment has no durable actor identity")),
-			EventActive: missionMarked(nil, missionUnavailableMark("factory_runtime", mark.GeneratedAt, "runtime assignment is not a spawn/stop Agent observation")), Running: missionMarked(true, projected),
-			Provider: missionMarked(assignment.ProviderID, providerMark), Model: missionMarked(assignment.ModelID, modelMark),
-			Authority: missionMarked(nil, missionUnavailableMark("factory_runtime", mark.GeneratedAt, "runtime assignment snapshot does not grant or project authority")), Capacity: missionMarked(1, projected),
-			Status: missionMarked(string(snapshot.SchedulerState), projected), Assignment: missionMarked(assignment, projected), Mark: projected,
-		})
-	}
-	return rows
-}
-
-func missionRuntimeCompleteness(snapshot FactoryRuntimeSnapshot, mark EvidenceMark) MissionCompleteness {
-	reasons := []string{}
-	complete := mark.Freshness != FreshnessUnavailable
-	if !complete {
-		reasons = append(reasons, mark.Reason)
-	}
-	return MissionCompleteness{
-		Complete: complete, Reasons: compactStrings(reasons), SourceEventGraphHead: "not_applicable_ephemeral_runtime",
-		StartHead: snapshot.BootID, EndHead: snapshot.BootID,
-		DomainCounts: map[string]int{"assignments": len(snapshot.Assignments)}, PageCounts: map[string]int{"runtime_snapshot": func() int {
-			if complete {
-				return 1
-			}
-			return 0
-		}()},
-	}
-}
-
-func missionServiceHealth(now time.Time, wip missionWIPSource, wipMark, rosterMark, authorityMark EvidenceMark, runtime FactoryRuntimeSnapshot, runtimeMark EvidenceMark) []ServiceHealth {
-	health := []ServiceHealth{}
-	eventGraphStatus := "healthy"
+func missionServiceHealth(now time.Time, wip missionWIPSource, wipMark, rosterMark, authorityMark EvidenceMark) []ServiceHealth {
 	eventGraphMark := missionAggregateMark(now, []SourceEnvelope{
 		{SourceID: "eventgraph_wip_evidence", Required: true, Completeness: wip.Completeness, Mark: wipMark},
-		{SourceID: "roster_routing", Required: true, Mark: rosterMark}, {SourceID: "authority_actions", Required: true, Mark: authorityMark},
+		{SourceID: "roster_routing", Required: true, Mark: rosterMark},
+		{SourceID: "authority_actions", Required: true, Mark: authorityMark},
 	})
+	eventGraphStatus := "healthy"
 	if eventGraphMark.Freshness == FreshnessUnavailable {
 		eventGraphStatus = "unavailable"
 	} else if eventGraphMark.State != StateCurrent || !wip.Completeness.Complete {
 		eventGraphStatus = "degraded"
 	}
-	health = append(health, ServiceHealth{ServiceID: "eventgraph", Label: "EventGraph evidence", OperationalStatus: eventGraphStatus, Detail: "Head-bracketed WIP, roster, routing, and authority evidence.", Mark: eventGraphMark})
 	workStatus := "healthy"
 	if wipMark.Freshness == FreshnessUnavailable {
 		workStatus = "unavailable"
 	} else if wipMark.Freshness != FreshnessCurrent || !wip.Completeness.Complete {
 		workStatus = "degraded"
 	}
-	health = append(health, ServiceHealth{ServiceID: "work_projection", Label: "Work projection", OperationalStatus: workStatus, Detail: "Exhaustive EventGraph Work fold; separate from Work HTTP liveness.", Mark: wipMark})
-	factoryStatus, factoryDetail := "healthy", wip.FactoryService.Detail
-	factoryMark := projectedOnlyMissionMark(wipMark, now, "same-process Hive ops API projection receipt; Factory process liveness comes only from daemon runtime evidence")
-	if strings.TrimSpace(wip.FactoryService.ServiceID) == "" || wipMark.Freshness == FreshnessUnavailable {
-		factoryStatus = "unavailable"
-		factoryDetail = "Factory v1 projection is unavailable."
-	} else if !wip.FactoryService.Healthy || wipMark.Freshness != FreshnessCurrent {
-		factoryStatus = "degraded"
+	opsStatus := eventGraphStatus
+	opsMark := projectedOnlyMissionMark(eventGraphMark, now, "projection response proves this handler path, not independent process liveness")
+	health := []ServiceHealth{
+		{ServiceID: "eventgraph", Label: "EventGraph evidence", OperationalStatus: eventGraphStatus, Detail: "Head-bracketed WIP, roster, routing, and authority evidence.", Mark: eventGraphMark},
+		{ServiceID: "work_projection", Label: "Work projection", OperationalStatus: workStatus, Detail: "Exhaustive EventGraph Work fold; separate from Work HTTP liveness.", Mark: wipMark},
+		{ServiceID: "hive_ops_api", Label: "Hive ops API", OperationalStatus: opsStatus, Detail: "Current Mission Control projection handler; no embedded TLC runtime.", Mark: opsMark},
 	}
-	health = append(health, ServiceHealth{ServiceID: "hive_ops_api", Label: "Hive ops API", OperationalStatus: factoryStatus, Detail: factoryDetail, Mark: factoryMark})
-	runtimeStatus := "healthy"
-	if runtimeMark.Freshness == FreshnessUnavailable {
-		runtimeStatus = "unavailable"
-	} else if runtimeMark.Freshness != FreshnessCurrent || runtime.SchedulerState == FactoryRuntimeDegraded || runtime.SchedulerState == FactoryRuntimeStopping {
-		runtimeStatus = "degraded"
-	}
-	health = append(health, ServiceHealth{ServiceID: "factory_runtime", Label: "Factory worker runtime", OperationalStatus: runtimeStatus, Detail: func() string {
-		if runtimeMark.Reason != "" {
-			return runtimeMark.Reason
-		}
-		return string(runtime.SchedulerState)
-	}(), Mark: runtimeMark})
 	aggregateStatus := "healthy"
-	aggregateMark := missionAggregateMark(now, []SourceEnvelope{{SourceID: "eventgraph", Required: true, Mark: eventGraphMark}, {SourceID: "factory", Required: true, Mark: factoryMark}, {SourceID: "runtime", Required: true, Mark: runtimeMark}})
 	for _, service := range health {
 		if service.OperationalStatus == "unavailable" {
 			aggregateStatus = "unavailable"
@@ -2131,8 +1546,14 @@ func missionServiceHealth(now time.Time, wip missionWIPSource, wipMark, rosterMa
 			aggregateStatus = "degraded"
 		}
 	}
-	health = append([]ServiceHealth{{ServiceID: "civilization", Label: "Civilization", OperationalStatus: aggregateStatus, Detail: "Read-only aggregate; health grants no control authority.", Mark: aggregateMark}}, health...)
-	return health
+	aggregateMark := missionAggregateMark(now, []SourceEnvelope{
+		{SourceID: "eventgraph", Required: true, Mark: eventGraphMark},
+		{SourceID: "ops_api", Required: true, Mark: opsMark},
+	})
+	return append([]ServiceHealth{{
+		ServiceID: "civilization", Label: "Civilization", OperationalStatus: aggregateStatus,
+		Detail: "Read-only aggregate; health grants no control authority.", Mark: aggregateMark,
+	}}, health...)
 }
 
 func missionAggregateMark(now time.Time, sources []SourceEnvelope) EvidenceMark {
