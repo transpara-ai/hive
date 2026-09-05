@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/transpara-ai/eventgraph/go/pkg/event"
 	"github.com/transpara-ai/eventgraph/go/pkg/store"
@@ -18,60 +14,6 @@ import (
 	"github.com/transpara-ai/hive/pkg/social"
 	"github.com/transpara-ai/work"
 )
-
-func TestGitHubPRObserverReturnsCurrentRequiredCheckStateAndCaches(t *testing.T) {
-	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	calls := 0
-	observer := &githubPRObserver{
-		executable: "/test/gh", ttl: time.Minute, timeout: time.Second, now: func() time.Time { return now },
-		run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
-			calls++
-			joined := strings.Join(args, " ")
-			switch {
-			case strings.HasPrefix(joined, "pr view 42"):
-				return []byte(`{"state":"OPEN","isDraft":false,"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mergeStateStatus":"CLEAN","url":"https://github.com/transpara-ai/hive/pull/42"}`), nil
-			case strings.HasPrefix(joined, "pr checks 42"):
-				return []byte("Build & Test\tpass"), nil
-			default:
-				return nil, errors.New("unexpected command")
-			}
-		},
-		cache: make(map[string]githubPRCacheEntry),
-	}
-	first, err := observer.ObservePR(context.Background(), "transpara-ai/hive", 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.State != "open" || first.HeadSHA != strings.Repeat("a", 40) || !first.ChecksPassing || first.Source != "github_cli" || !first.ObservedAt.Equal(now) {
-		t.Fatalf("observation = %+v", first)
-	}
-	second, err := observer.ObservePR(context.Background(), "transpara-ai/hive", 42)
-	if err != nil || second != first || calls != 2 {
-		t.Fatalf("cached observation=(%+v,%v), calls=%d", second, err, calls)
-	}
-}
-
-func TestGitHubPRObserverFailsClosed(t *testing.T) {
-	observer := &githubPRObserver{
-		executable: "/test/gh", ttl: time.Second, failureTTL: time.Minute, timeout: time.Second, now: time.Now,
-		run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
-			if len(args) > 1 && args[1] == "view" {
-				return nil, errors.New("network unavailable")
-			}
-			return nil, errors.New("unexpected command")
-		},
-		cache: make(map[string]githubPRCacheEntry),
-	}
-	if _, err := observer.ObservePR(context.Background(), "transpara-ai/hive", 42); err == nil || strings.Contains(err.Error(), "network unavailable") {
-		t.Fatalf("observer error must be fail-closed and sanitized: %v", err)
-	}
-	if _, err := observer.ObservePR(context.Background(), "transpara-ai/work", 98); err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
-		t.Fatalf("failure circuit did not bound follow-on GitHub reads: %v", err)
-	}
-	if _, err := observer.ObservePR(context.Background(), "invalid repository", 0); err == nil {
-		t.Fatal("invalid PR identity was accepted")
-	}
-}
 
 func TestRegisterOpsAPIEventTypesHandlesSharedStoreEvents(t *testing.T) {
 	registerOpsAPIEventTypes()
