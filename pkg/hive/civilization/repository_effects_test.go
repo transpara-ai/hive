@@ -343,7 +343,7 @@ func testBoundRequest(t *testing.T, repository string) tlcbridge.BoundRequest {
 	t.Helper()
 	bound, err := tlcbridge.Bind(tlcbridge.Source{Kind: tlcbridge.SourceHuman, Identity: "human:test", Repository: repository}, []byte(`{
   "schema_version":"tlc-envelope/v1",
-  "workflow":{"name":"transpara-tlc","version":"0.1.1"},
+  "workflow":{"name":"transpara-tlc","version":"0.1.2"},
   "route":"Routine",
   "brief":{"outcome":"Make the bounded change","scope":["change.txt"],"non_goals":[],"assumptions":[],"constraints":[],"tests":["true"],"next_action":"Implement"},
   "route_owned_data":{"preserved":true}

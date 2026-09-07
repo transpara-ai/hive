@@ -12,7 +12,7 @@ func eligibleCandidate(t *testing.T) MergeCandidate {
 		Kind: tlcbridge.SourceIssue, Identity: "issue:1", Repository: "transpara-ai/hive",
 	}, []byte(`{
   "schema_version":"tlc-envelope/v1",
-  "workflow":{"name":"transpara-tlc","version":"0.1.1"},
+  "workflow":{"name":"transpara-tlc","version":"0.1.2"},
   "route":"Routine",
   "brief":{"outcome":"Repair typo","scope":[],"non_goals":[],"assumptions":[],"constraints":[],"tests":["go test ./..."],"next_action":"Implement"}
 }`))

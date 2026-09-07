@@ -44,7 +44,7 @@ func (p *fakeProvider) Run(_ context.Context, request ProviderRequest) (Provider
 			ChangedFiles: []string{}, Checks: []CheckResult{},
 			TLCEnvelope: []byte(fmt.Sprintf(`{
   "schema_version":"tlc-envelope/v1",
-  "workflow":{"name":"transpara-tlc","version":"0.1.1"},
+  "workflow":{"name":"transpara-tlc","version":"0.1.2"},
   "route":%q,
   "brief":{"outcome":"Produce a useful change","scope":["README.md"],"non_goals":[],"assumptions":[],"constraints":[],"tests":["go test ./..."],"next_action":"Implement"},
   "route_owned_data":{"preserved":true}
@@ -182,7 +182,7 @@ func TestEngineNaturalLanguageToHumanReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queued.State != StateQueued || queued.Bound == nil || queued.Bound.Envelope.Workflow.Version != "0.1.1" {
+	if queued.State != StateQueued || queued.Bound == nil || queued.Bound.Envelope.Workflow.Version != "0.1.2" {
 		t.Fatalf("queued = %+v", queued)
 	}
 	ready, err := engine.Run(context.Background(), queued.WorkID)
