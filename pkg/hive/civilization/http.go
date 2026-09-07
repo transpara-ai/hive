@@ -42,6 +42,8 @@ func NewHTTPHandler(config HTTPConfig) (*HTTPHandler, error) {
 	handler.mux.HandleFunc("GET /api/civilization/v1/work/{workID}", handler.get)
 	handler.mux.HandleFunc("POST /api/civilization/v1/intake", handler.intake)
 	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/run", handler.run)
+	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/confirm", handler.confirm)
+	handler.mux.HandleFunc("GET /api/civilization/v1/work/{workID}/artifact", handler.artifact)
 	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/interventions/{interventionID}/resolve", handler.resolve)
 	return handler, nil
 }
@@ -84,6 +86,9 @@ func (h *HTTPHandler) list(response http.ResponseWriter, request *http.Request) 
 		writeAPIError(response, http.StatusInternalServerError, "list work failed")
 		return
 	}
+	for i := range items {
+		items[i].Artifact = nil
+	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
 
@@ -97,6 +102,7 @@ func (h *HTTPHandler) get(response http.ResponseWriter, request *http.Request) {
 }
 
 type intakeRequest struct {
+	Selection      ExecutionSelection   `json:"selection,omitempty"`
 	SourceKind     tlcbridge.SourceKind `json:"source_kind"`
 	SourceIdentity string               `json:"source_identity"`
 	Repository     string               `json:"repository"`
@@ -108,9 +114,9 @@ func (h *HTTPHandler) intake(response http.ResponseWriter, request *http.Request
 	if err := h.decode(response, request, &input); err != nil {
 		return
 	}
-	item, err := h.engine.AcceptText(request.Context(), tlcbridge.Source{
+	item, err := h.engine.AcceptSelectedText(request.Context(), tlcbridge.Source{
 		Kind: input.SourceKind, Identity: strings.TrimSpace(input.SourceIdentity), Repository: strings.TrimSpace(input.Repository),
-	}, input.Text)
+	}, input.Text, input.Selection, true)
 	if err != nil {
 		writeAPIError(response, statusForEngineError(err), err.Error())
 		return
@@ -125,6 +131,30 @@ func (h *HTTPHandler) run(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, item)
+}
+
+func (h *HTTPHandler) confirm(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		BriefID string `json:"brief_id"`
+	}
+	if err := h.decode(response, request, &input); err != nil {
+		return
+	}
+	item, err := h.engine.Confirm(request.Context(), request.PathValue("workID"), input.BriefID)
+	if err != nil {
+		writeAPIError(response, statusForEngineError(err), err.Error())
+		return
+	}
+	writeJSON(response, http.StatusAccepted, item)
+}
+
+func (h *HTTPHandler) artifact(response http.ResponseWriter, request *http.Request) {
+	artifact, err := h.engine.Artifact(request.Context(), request.PathValue("workID"))
+	if err != nil {
+		writeAPIError(response, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, artifact)
 }
 
 func (h *HTTPHandler) resolve(response http.ResponseWriter, request *http.Request) {

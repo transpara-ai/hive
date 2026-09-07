@@ -50,8 +50,17 @@ func TestHTTPHandlerNaturalLanguageJourneyAndAuth(t *testing.T) {
 	if err := json.Unmarshal(run.Body.Bytes(), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.State != StateReady {
+	if ready.State != StateAwaitingConfirmation {
 		t.Fatalf("ready = %+v", ready)
+	}
+	confirmation, _ := json.Marshal(map[string]string{"brief_id": ready.Bound.IdempotencyKey})
+	confirmed := apiRequest(t, handler, http.MethodPost, "/api/civilization/v1/work/"+accepted.WorkID+"/confirm", confirmation)
+	if confirmed.Code != http.StatusAccepted {
+		t.Fatalf("confirm: %s", confirmed.Body.String())
+	}
+	run = apiRequest(t, handler, http.MethodPost, "/api/civilization/v1/work/"+accepted.WorkID+"/run", nil)
+	if err := json.Unmarshal(run.Body.Bytes(), &ready); err != nil || ready.State != StateReady {
+		t.Fatalf("run after confirmation: %s", run.Body.String())
 	}
 
 	list := apiRequest(t, handler, http.MethodGet, "/api/civilization/v1/work", nil)
