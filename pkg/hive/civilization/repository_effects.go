@@ -743,6 +743,11 @@ func (e *GitHubEffects) implementationSnapshot(ctx context.Context, root, baseSH
 		if statErr != nil {
 			return implementationSnapshot{}, fmt.Errorf("inspect changed file %q: %w", file, statErr)
 		}
+		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(fullPath))
+		parentRelative, relativeErr := filepath.Rel(root, parent)
+		if parentErr != nil || relativeErr != nil || parentRelative == ".." || strings.HasPrefix(parentRelative, ".."+string(filepath.Separator)) {
+			return implementationSnapshot{}, fmt.Errorf("changed file has an escaping parent directory: %q", file)
+		}
 		switch {
 		case info.Mode().IsRegular():
 			if info.Mode().Perm()&0o111 != 0 {

@@ -24,6 +24,60 @@ func TestGitHubEffectsRequiresSeparateAuthorityForEnabledEffects(t *testing.T) {
 	}
 }
 
+func TestPreparedArtifactVerifiesAndRejectsEscapingParents(t *testing.T) {
+	config, _ := testGitHubEffectsConfig(t)
+	repo := config.Repositories["transpara-ai/hive"].Root
+	if err := os.Mkdir(filepath.Join(repo, "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "nested", "file.txt"), []byte("base"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, repo, "add", "nested/file.txt")
+	gitTestRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "nested fixture")
+	gitTestRun(t, repo, "push", "origin", "main")
+	effects, err := NewGitHubEffects(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := testBoundRequest(t, "transpara-ai/hive")
+	workID := "work-cccccccccccccccccccccccc"
+	workspace, err := effects.Prepare(context.Background(), workID, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace.Root, "change.txt"), []byte("bounded\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := effects.CaptureImplementation(context.Background(), workID, bound, workspace, passingImplementation("change.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := effects.PreparedArtifact(context.Background(), workID, bound, workspace, passingImplementation("change.txt"), digest)
+	if err != nil || !strings.Contains(artifact.Patch, "New file: change.txt\nbounded") {
+		t.Fatalf("artifact=%+v %v", artifact, err)
+	}
+	spec := effects.config.Repositories["transpara-ai/hive"]
+	spec.VerificationCommands = []VerificationCommand{{Name: "failing check", Args: []string{"/bin/false"}}}
+	effects.config.Repositories["transpara-ai/hive"] = spec
+	if _, err := effects.PreparedArtifact(context.Background(), workID, bound, workspace, passingImplementation("change.txt"), digest); err == nil || !strings.Contains(err.Error(), "failing check") {
+		t.Fatalf("failed verification accepted: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "file.txt"), []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(workspace.Root, "nested")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace.Root, "nested")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := effects.implementationSnapshot(context.Background(), workspace.Root, workspace.BaseSHA); err == nil || !strings.Contains(err.Error(), "escaping parent") {
+		t.Fatalf("escaping parent accepted: %v", err)
+	}
+}
+
 func TestGitHubEffectsRejectsRepositoryRootMappedToAnotherName(t *testing.T) {
 	config, _ := testGitHubEffectsConfig(t)
 	spec := config.Repositories["transpara-ai/hive"]

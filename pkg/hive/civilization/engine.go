@@ -18,31 +18,36 @@ import (
 type State string
 
 const (
-	StateQueued        State = "queued"
-	StateRouting       State = "routing"
-	StateImplementing  State = "implementing"
-	StateValidating    State = "validating"
-	StateReviewing     State = "reviewing"
-	StatePublishing    State = "publishing"
-	StateReady         State = "ready"
-	StateMergeQueued   State = "merge_queued"
-	StateBlocked       State = "blocked"
-	StateHumanRequired State = "human_required"
-	StateCompleted     State = "completed"
+	StateAwaitingConfirmation State = "awaiting_confirmation"
+	StatePrepared             State = "prepared"
+	StateQueued               State = "queued"
+	StateRouting              State = "routing"
+	StateImplementing         State = "implementing"
+	StateValidating           State = "validating"
+	StateReviewing            State = "reviewing"
+	StatePublishing           State = "publishing"
+	StateReady                State = "ready"
+	StateMergeQueued          State = "merge_queued"
+	StateBlocked              State = "blocked"
+	StateHumanRequired        State = "human_required"
+	StateCompleted            State = "completed"
 )
 
 type StateChange struct {
-	From       State  `json:"from,omitempty"`
-	To         State  `json:"to"`
-	Summary    string `json:"summary"`
-	Blocker    string `json:"blocker,omitempty"`
-	NextAction string `json:"next_action"`
+	Artifact   *Artifact `json:"artifact,omitempty"`
+	From       State     `json:"from,omitempty"`
+	To         State     `json:"to"`
+	Summary    string    `json:"summary"`
+	Blocker    string    `json:"blocker,omitempty"`
+	NextAction string    `json:"next_action"`
 }
 
 type Intake struct {
-	Source     tlcbridge.Source `json:"source"`
-	Text       string           `json:"text"`
-	TextSHA256 string           `json:"text_sha256"`
+	Selection           ExecutionSelection `json:"selection,omitempty"`
+	RequireConfirmation bool               `json:"require_confirmation,omitempty"`
+	Source              tlcbridge.Source   `json:"source"`
+	Text                string             `json:"text"`
+	TextSHA256          string             `json:"text_sha256"`
 }
 
 type AcceptedWork struct {
@@ -81,21 +86,24 @@ type Intervention struct {
 }
 
 type WorkProjection struct {
-	WorkID        string                  `json:"work_id"`
-	Source        tlcbridge.Source        `json:"source"`
-	IntakeText    string                  `json:"intake_text"`
-	Bound         *tlcbridge.BoundRequest `json:"bound,omitempty"`
-	State         State                   `json:"state"`
-	ResumeState   State                   `json:"resume_state,omitempty"`
-	Summary       string                  `json:"summary"`
-	Blocker       string                  `json:"blocker,omitempty"`
-	NextAction    string                  `json:"next_action"`
-	ProviderRuns  []ProviderRecord        `json:"provider_runs"`
-	PullRequest   *PullRequest            `json:"pull_request,omitempty"`
-	Interventions []Intervention          `json:"interventions"`
-	MergeDecision *MergeDecision          `json:"merge_decision,omitempty"`
-	UpdatedAt     time.Time               `json:"updated_at"`
-	LatestEventID string                  `json:"latest_event_id"`
+	Artifact            *Artifact               `json:"artifact,omitempty"`
+	Selection           ExecutionSelection      `json:"selection,omitempty"`
+	RequireConfirmation bool                    `json:"require_confirmation,omitempty"`
+	WorkID              string                  `json:"work_id"`
+	Source              tlcbridge.Source        `json:"source"`
+	IntakeText          string                  `json:"intake_text"`
+	Bound               *tlcbridge.BoundRequest `json:"bound,omitempty"`
+	State               State                   `json:"state"`
+	ResumeState         State                   `json:"resume_state,omitempty"`
+	Summary             string                  `json:"summary"`
+	Blocker             string                  `json:"blocker,omitempty"`
+	NextAction          string                  `json:"next_action"`
+	ProviderRuns        []ProviderRecord        `json:"provider_runs"`
+	PullRequest         *PullRequest            `json:"pull_request,omitempty"`
+	Interventions       []Intervention          `json:"interventions"`
+	MergeDecision       *MergeDecision          `json:"merge_decision,omitempty"`
+	UpdatedAt           time.Time               `json:"updated_at"`
+	LatestEventID       string                  `json:"latest_event_id"`
 }
 
 type Workspace struct {
@@ -118,6 +126,7 @@ type Effects interface {
 }
 
 type EngineConfig struct {
+	RoutingContext  string
 	Store           Store
 	Provider        Provider
 	Effects         Effects
@@ -125,19 +134,20 @@ type EngineConfig struct {
 }
 
 type Engine struct {
-	store    Store
-	provider Provider
-	effects  Effects
-	merge    AutoMergePolicy
-	locksMu  sync.Mutex
-	locks    map[string]*sync.Mutex
+	routingContext string
+	store          Store
+	provider       Provider
+	effects        Effects
+	merge          AutoMergePolicy
+	locksMu        sync.Mutex
+	locks          map[string]*sync.Mutex
 }
 
 func NewEngine(config EngineConfig) (*Engine, error) {
 	if config.Store == nil || config.Provider == nil || config.Effects == nil {
 		return nil, errors.New("Civilization engine requires store, provider, and effects")
 	}
-	return &Engine{store: config.Store, provider: config.Provider, effects: config.Effects, merge: config.AutoMergePolicy, locks: map[string]*sync.Mutex{}}, nil
+	return &Engine{store: config.Store, provider: config.Provider, effects: config.Effects, merge: config.AutoMergePolicy, locks: map[string]*sync.Mutex{}, routingContext: config.RoutingContext}, nil
 }
 
 // SubmitText is the synchronous compatibility entry point used by callers and
@@ -154,12 +164,22 @@ func (e *Engine) SubmitText(ctx context.Context, source tlcbridge.Source, text s
 // AcceptText durably records plain-language intake and returns immediately.
 // Repeating an exact source/text pair is idempotent.
 func (e *Engine) AcceptText(ctx context.Context, source tlcbridge.Source, text string) (WorkProjection, error) {
+	return e.AcceptSelectedText(ctx, source, text, ExecutionSelection{}, false)
+}
+
+func (e *Engine) AcceptSelectedText(ctx context.Context, source tlcbridge.Source, text string, selection ExecutionSelection, confirm bool) (WorkProjection, error) {
+	if err := validateSelection(selection); err != nil {
+		return WorkProjection{}, err
+	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return WorkProjection{}, errors.New("intake text is required")
 	}
 	source.Identity = strings.TrimSpace(source.Identity)
 	source.Repository = strings.TrimSpace(source.Repository)
+	if source.Identity == "" || !repositoryNamePattern.MatchString(source.Repository) || (source.Kind != tlcbridge.SourceHuman && source.Kind != tlcbridge.SourceIssue && source.Kind != tlcbridge.SourceOrder) {
+		return WorkProjection{}, errors.New("invalid source: kind, identity and Transpara repository are required")
+	}
 	workID := workIdentity(source)
 	unlock := e.lockWork(workID)
 	defer unlock()
@@ -170,14 +190,24 @@ func (e *Engine) AcceptText(ctx context.Context, source tlcbridge.Source, text s
 	hash := sha256.Sum256([]byte(text))
 	textHash := hex.EncodeToString(hash[:])
 	if found {
-		if projection.Source != source || projection.IntakeText != text {
+		if projection.Source != source || projection.IntakeText != text || projection.Selection != selection || projection.RequireConfirmation != confirm {
 			return WorkProjection{}, fmt.Errorf("%w: source identity already names different intake", ErrIdempotencyConflict)
 		}
 		return projection, nil
 	}
+	if resolver, ok := e.provider.(interface {
+		Resolve(ExecutionSelection) (ExecutionEvidence, error)
+	}); ok {
+		if _, err := resolver.Resolve(selection); err != nil {
+			return WorkProjection{}, err
+		}
+	}
+	if _, err := e.effects.RepositoryRoot(ctx, source.Repository); err != nil {
+		return WorkProjection{}, fmt.Errorf("invalid repository: %w", err)
+	}
 
 	intakeEvent, err := appendEvent(ctx, e.store, EventIntakeAccepted, workID,
-		"intake:"+workID, nil, Intake{Source: source, Text: text, TextSHA256: textHash})
+		"intake:"+workID, nil, Intake{Source: source, Text: text, TextSHA256: textHash, Selection: selection, RequireConfirmation: confirm})
 	if err != nil {
 		return WorkProjection{}, err
 	}
@@ -214,11 +244,12 @@ func (e *Engine) Route(ctx context.Context, workID string) (WorkProjection, erro
 	}
 	attempt := e.nextProviderAttempt(ctx, workID, OperationRoute)
 	result, err := e.provider.Run(ctx, ProviderRequest{
+		Selection: projection.Selection,
 		Operation: OperationRoute, AttemptID: attempt, RepositoryRoot: root,
-		Prompt: routePrompt(projection.Source, projection.IntakeText, resolvedHumanGuidance(projection)),
+		Prompt: e.routingContext + "\n" + routePrompt(projection.Source, projection.IntakeText, resolvedHumanGuidance(projection)),
 	})
 	if err != nil {
-		return e.block(ctx, workID, "TLC routing failed: "+err.Error(), "Retry routing after repairing the provider.")
+		return e.recordProviderFailure(ctx, workID, OperationRoute, attempt, result, err)
 	}
 	providerEvent, err := appendEvent(ctx, e.store, EventProviderResult, workID,
 		"provider:"+attempt, []string{projection.LatestEventID}, ProviderRecord{
@@ -244,10 +275,14 @@ func (e *Engine) Route(ctx context.Context, workID string) (WorkProjection, erro
 	if err != nil {
 		return WorkProjection{}, err
 	}
+	nextState, nextAction := StateQueued, "Run the accepted work."
+	if projection.RequireConfirmation {
+		nextState, nextAction = StateAwaitingConfirmation, "Review the brief and confirm implementation."
+	}
 	if _, err := appendEvent(ctx, e.store, EventStateChanged, workID,
 		"state:queued:"+bound.IdempotencyKey, []string{acceptedEvent.ID}, StateChange{
-			From: StateRouting, To: StateQueued, Summary: bound.Envelope.Brief.Outcome,
-			NextAction: "Run the accepted work.",
+			From: StateRouting, To: nextState, Summary: bound.Envelope.Brief.Outcome,
+			NextAction: nextAction,
 		}); err != nil {
 		return WorkProjection{}, err
 	}
@@ -288,7 +323,7 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 	if projection.State == StateMergeQueued {
 		return e.observeQueuedMerge(ctx, projection)
 	}
-	if projection.State == StateCompleted {
+	if projection.State == StateCompleted || projection.State == StatePrepared {
 		return projection, nil
 	}
 	if hasOpenIntervention(projection) {
@@ -315,17 +350,18 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 	}
 	if projection.State == StateQueued || projection.State == StateImplementing || !hasImplementation {
 		if projection.State != StateImplementing {
-			if _, err := e.transition(ctx, projection, StateImplementing, "Codex is implementing the accepted brief.", "Wait for implementation."); err != nil {
+			if _, err := e.transition(ctx, projection, StateImplementing, "The selected host is implementing the accepted brief.", "Wait for implementation."); err != nil {
 				return WorkProjection{}, err
 			}
 		}
 		attempt := e.nextProviderAttempt(ctx, workID, OperationImplement)
 		implementation, err = e.provider.Run(ctx, ProviderRequest{
+			Selection: projection.Selection,
 			Operation: OperationImplement, AttemptID: attempt, RepositoryRoot: workspace.Root,
 			Prompt: implementationPrompt(bound, implementationGuidance(projection)),
 		})
 		if err != nil {
-			return e.block(ctx, workID, "Codex implementation failed: "+err.Error(), "Repair the provider or worktree and retry.")
+			return e.recordProviderFailure(ctx, workID, OperationImplement, attempt, implementation, err)
 		}
 		if implementation.Status != "passed" {
 			implementationEvent, recordErr := e.recordProviderAttempt(ctx, workID, OperationImplement, attempt, implementation, "")
@@ -365,17 +401,18 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 	review, hasReview := latestPassingProviderResult(projection, OperationReview)
 	if projection.State != StatePublishing || !hasReview {
 		if projection.State != StateReviewing {
-			if _, err := e.transition(ctx, projection, StateReviewing, "Codex is performing ordinary review.", "Wait for review."); err != nil {
+			if _, err := e.transition(ctx, projection, StateReviewing, "The selected host is performing ordinary review.", "Wait for review."); err != nil {
 				return WorkProjection{}, err
 			}
 		}
 		attempt := e.nextProviderAttempt(ctx, workID, OperationReview)
 		review, err = e.provider.Run(ctx, ProviderRequest{
+			Selection: projection.Selection,
 			Operation: OperationReview, AttemptID: attempt, RepositoryRoot: workspace.Root,
 			Prompt: reviewPrompt(bound, resolvedHumanGuidance(projection)),
 		})
 		if err != nil {
-			return e.block(ctx, workID, "Ordinary review failed: "+err.Error(), "Repair the review provider and retry.")
+			return e.recordProviderFailure(ctx, workID, OperationReview, attempt, review, err)
 		}
 		_, recordErr := e.recordProviderAttempt(ctx, workID, OperationReview, attempt, review, "")
 		if recordErr != nil {
@@ -394,6 +431,20 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 			return e.blockAfter(ctx, workID, transitionEvent.ID, reviewFailureSummary(review, err), "Answer the review question; Civilization will rerun implementation and review.")
 		}
 		projection, _ = e.mustFind(ctx, workID)
+	}
+	if preparer, ok := e.effects.(PreparedEffects); ok && !preparer.PublicationEnabled() {
+		artifact, err := preparer.PreparedArtifact(ctx, workID, bound, workspace, implementation, implementationDigest)
+		if err != nil {
+			return e.block(ctx, workID, "Independent verification failed: "+err.Error(), "Repair the failed checks or worktree, then retry.")
+		}
+		projection, err = e.mustFind(ctx, workID)
+		if err != nil {
+			return WorkProjection{}, err
+		}
+		if _, err := appendEvent(ctx, e.store, EventStateChanged, workID, "state:prepared:"+workID+":"+projection.LatestEventID, []string{projection.LatestEventID}, StateChange{From: projection.State, To: StatePrepared, Summary: "Implementation, independent checks and ordinary review passed.", NextAction: "Inspect the prepared diff. Publication requires separate authority.", Artifact: &artifact}); err != nil {
+			return WorkProjection{}, err
+		}
+		return e.mustFind(ctx, workID)
 	}
 	if projection.State != StatePublishing {
 		if _, err := e.transition(ctx, projection, StatePublishing, "Hive is preparing the exact-head pull request.", "Wait for pull-request observation."); err != nil {
@@ -740,6 +791,8 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 				return WorkProjection{}, err
 			}
 			item.Source, item.IntakeText = payload.Source, payload.Text
+			item.Selection, item.RequireConfirmation = payload.Selection, payload.RequireConfirmation
+			item.State, item.Summary, item.NextAction = StateRouting, "Preparing the short brief.", "Wait for routing."
 		case EventWorkAccepted:
 			payload, err := decodePayload[AcceptedWork](event)
 			if err != nil {
@@ -747,12 +800,19 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 			}
 			bound := payload.Bound
 			item.Bound = &bound
+			item.State = StateQueued
+			if item.RequireConfirmation {
+				item.State = StateAwaitingConfirmation
+			}
 		case EventStateChanged:
 			payload, err := decodePayload[StateChange](event)
 			if err != nil {
 				return WorkProjection{}, err
 			}
 			item.State, item.Summary, item.Blocker, item.NextAction = payload.To, payload.Summary, payload.Blocker, payload.NextAction
+			if payload.Artifact != nil {
+				item.Artifact = payload.Artifact
+			}
 			if payload.To == StateBlocked || payload.To == StateHumanRequired {
 				item.ResumeState = payload.From
 			} else if payload.From == StateBlocked || payload.From == StateHumanRequired {

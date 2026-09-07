@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +27,7 @@ const (
 )
 
 type ProviderRequest struct {
+	Selection      ExecutionSelection
 	Operation      ProviderOperation
 	AttemptID      string
 	RepositoryRoot string
@@ -47,14 +49,15 @@ type ReviewResult struct {
 // ProviderResult is the small machine result returned by every provider. A
 // route operation carries the complete TLC transport document in TLCEnvelope.
 type ProviderResult struct {
-	Status       string          `json:"status"`
-	Summary      string          `json:"summary"`
-	TLCEnvelope  json.RawMessage `json:"tlc_envelope,omitempty"`
-	ChangedFiles []string        `json:"changed_files"`
-	Checks       []CheckResult   `json:"checks"`
-	Review       *ReviewResult   `json:"review,omitempty"`
-	Blocker      string          `json:"blocker,omitempty"`
-	NextAction   string          `json:"next_action"`
+	Execution    *ExecutionEvidence `json:"execution,omitempty"`
+	Status       string             `json:"status"`
+	Summary      string             `json:"summary"`
+	TLCEnvelope  json.RawMessage    `json:"tlc_envelope,omitempty"`
+	ChangedFiles []string           `json:"changed_files"`
+	Checks       []CheckResult      `json:"checks"`
+	Review       *ReviewResult      `json:"review,omitempty"`
+	Blocker      string             `json:"blocker,omitempty"`
+	NextAction   string             `json:"next_action"`
 }
 
 type Provider interface {
@@ -98,8 +101,8 @@ func NewCodexCLI(config CodexCLIConfig) (*CodexCLI, error) {
 	if strings.TrimSpace(config.Executable) == "" || strings.TrimSpace(config.ExecutableSHA256) == "" {
 		return nil, errors.New("Codex executable and SHA-256 are required")
 	}
-	if strings.TrimSpace(config.Model) == "" {
-		return nil, errors.New("Codex model is required")
+	if err := validateSelection(ExecutionSelection{Provider: "codex", Model: config.Model}); err != nil {
+		return nil, err
 	}
 	if !filepath.IsAbs(config.ManagedRequirementsFile) || !providerAttemptPattern.MatchString(config.ManagedRequirementsSHA256) {
 		return nil, errors.New("absolute Codex managed requirements file and SHA-256 are required")
@@ -153,6 +156,25 @@ func NewCodexCLI(config CodexCLIConfig) (*CodexCLI, error) {
 }
 
 func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderResult, error) {
+	requested := request.Selection
+	if requested.Provider != "" && requested.Provider != "codex" {
+		return ProviderResult{}, errors.New("Codex cannot execute another provider selection")
+	}
+	if err := validateSelection(requested); err != nil {
+		return ProviderResult{}, err
+	}
+	request.Selection.Provider = "codex"
+	modelSource := "invocation"
+	if request.Selection.Model == "" {
+		request.Selection.Model = c.config.Model
+		modelSource = "configured_provider_default"
+	}
+	if request.Selection.Model == "" {
+		modelSource = "provider_default"
+	}
+	if request.Selection.ReasoningEffort == "max" {
+		return ProviderResult{}, errors.New("invalid Codex reasoning effort max; use a supported Codex effort")
+	}
 	if request.Operation != OperationRoute && request.Operation != OperationImplement && request.Operation != OperationReview {
 		return ProviderResult{}, fmt.Errorf("unsupported provider operation %q", request.Operation)
 	}
@@ -176,7 +198,7 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 	if digest, digestErr := digestFile(c.requirementsPath); digestErr != nil || digest != c.requirementsSHA {
 		return ProviderResult{}, errors.New("Codex managed requirements changed after provider initialization")
 	}
-	requestDigest := providerRequestDigest(request, root)
+	requestDigest := providerRequestDigest(request, root+"\x00"+c.executableSHA256+"\x00"+c.requirementsSHA+"\x00"+c.config.Profile)
 	if c.config.ReceiptDirectory != "" {
 		if result, found, err := c.loadReceipt(request.AttemptID, requestDigest); err != nil {
 			return ProviderResult{}, err
@@ -201,10 +223,15 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 
 	args := []string{
 		"exec", "--ephemeral", "--strict-config", "--color", "never",
-		"--model", c.config.Model,
 		"--cd", root,
 		"--output-schema", schemaPath,
 		"--output-last-message", resultPath,
+	}
+	if request.Selection.Model != "" {
+		args = append(args, "--model", request.Selection.Model)
+	}
+	if request.Selection.ReasoningEffort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(request.Selection.ReasoningEffort))
 	}
 	if c.config.Profile != "" {
 		args = append(args, "--profile", c.config.Profile)
@@ -252,6 +279,7 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 	if request.Operation != OperationRoute && len(bytes.TrimSpace(result.TLCEnvelope)) != 0 {
 		return ProviderResult{}, errors.New("non-route Codex result unexpectedly returned a TLC envelope")
 	}
+	result.Execution = &ExecutionEvidence{Requested: requested, Effective: request.Selection, ModelSource: modelSource}
 	if c.config.ReceiptDirectory != "" {
 		if err := c.storeReceipt(providerReceipt{Schema: "civilization-provider-receipt/v1", AttemptID: request.AttemptID, RequestSHA256: requestDigest, Result: result}); err != nil {
 			return ProviderResult{}, err
@@ -262,7 +290,7 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 
 func providerRequestDigest(request ProviderRequest, root string) string {
 	hash := sha256.New()
-	for _, value := range []string{string(request.Operation), request.AttemptID, root, request.Prompt} {
+	for _, value := range []string{string(request.Operation), request.AttemptID, root, request.Prompt, request.Selection.Provider, request.Selection.Model, request.Selection.ReasoningEffort} {
 		_, _ = hash.Write([]byte(value))
 		_, _ = hash.Write([]byte{0})
 	}

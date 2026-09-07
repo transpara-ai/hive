@@ -129,18 +129,13 @@ func run() error {
 
 	codexPath, _ := requiredEnv("CIVILIZATION_CODEX_PATH")
 	codexDigest, _ := requiredEnv("CIVILIZATION_CODEX_SHA256")
-	codexModel, _ := requiredEnv("CIVILIZATION_CODEX_MODEL")
-	provider, err := civilization.NewCodexCLI(civilization.CodexCLIConfig{
-		Executable: codexPath, ExecutableSHA256: codexDigest, Model: codexModel,
-		ManagedRequirementsFile:   requiredEnvValue("CIVILIZATION_CODEX_REQUIREMENTS_FILE"),
-		ManagedRequirementsSHA256: requiredEnvValue("CIVILIZATION_CODEX_REQUIREMENTS_SHA256"),
-		Profile:                   os.Getenv("CIVILIZATION_CODEX_PROFILE"), Timeout: durationEnv("CIVILIZATION_CODEX_TIMEOUT", 30*time.Minute),
-		OutputLimitBytes: intEnv("CIVILIZATION_COMMAND_OUTPUT_LIMIT", 2*1024*1024),
-		EnvironmentKeys:  []string{"PATH", "HOME", "CODEX_HOME", "OPENAI_API_KEY", "SSL_CERT_FILE", "SSL_CERT_DIR"},
-		ReceiptDirectory: requiredEnvValue("CIVILIZATION_RECEIPT_DIR"),
-	})
+	provider, err := configuredProviders(codexPath, codexDigest)
 	if err != nil {
-		return fmt.Errorf("configure Codex provider: %w", err)
+		return err
+	}
+	routingContext, err := loadRoutingContext(envOr("CIVILIZATION_TLC_LOCK_FILE", "/etc/civilization/tlc.lock.json"), envOr("CIVILIZATION_TLC_SKILL_FILE", "/var/lib/civilization/codex/skills/tlc/SKILL.md"))
+	if err != nil {
+		return err
 	}
 	effects, err := civilization.NewGitHubEffects(civilization.GitHubEffectsConfig{
 		Repositories: repositories, WorktreeRoot: requiredEnvValue("CIVILIZATION_WORKTREE_DIR"),
@@ -165,7 +160,8 @@ func run() error {
 		repositoryAllowlist[repository] = struct{}{}
 	}
 	engine, err := civilization.NewEngine(civilization.EngineConfig{
-		Store: eventStore, Provider: provider, Effects: effects,
+		RoutingContext: routingContext,
+		Store:          eventStore, Provider: provider, Effects: effects,
 		AutoMergePolicy: civilization.AutoMergePolicy{
 			Enabled: autoMergeEnabled, AuthorityRef: os.Getenv("CIVILIZATION_AUTO_MERGE_AUTHORITY_REF"),
 			Repositories: repositoryAllowlist, ProtectedPaths: civilization.DefaultProtectedPaths(),
