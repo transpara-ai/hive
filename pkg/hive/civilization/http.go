@@ -43,6 +43,7 @@ func NewHTTPHandler(config HTTPConfig) (*HTTPHandler, error) {
 	handler.mux.HandleFunc("POST /api/civilization/v1/intake", handler.intake)
 	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/run", handler.run)
 	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/confirm", handler.confirm)
+	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/human-owner", handler.assignHumanOwner)
 	handler.mux.HandleFunc("GET /api/civilization/v1/work/{workID}/artifact", handler.artifact)
 	handler.mux.HandleFunc("POST /api/civilization/v1/work/{workID}/interventions/{interventionID}/resolve", handler.resolve)
 	return handler, nil
@@ -157,6 +158,19 @@ func (h *HTTPHandler) artifact(response http.ResponseWriter, request *http.Reque
 	writeJSON(response, http.StatusOK, artifact)
 }
 
+func (h *HTTPHandler) assignHumanOwner(response http.ResponseWriter, request *http.Request) {
+	var input HumanOwnerAssignment
+	if err := h.decode(response, request, &input); err != nil {
+		return
+	}
+	item, err := h.engine.AssignHumanOwner(request.Context(), request.PathValue("workID"), input)
+	if err != nil {
+		writeAPIError(response, statusForEngineError(err), err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
 func (h *HTTPHandler) resolve(response http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Resolution string `json:"resolution"`
@@ -190,7 +204,7 @@ func (h *HTTPHandler) decode(response http.ResponseWriter, request *http.Request
 
 func statusForEngineError(err error) int {
 	message := err.Error()
-	if errors.Is(err, ErrIdempotencyConflict) || strings.Contains(message, "requires Human resolution") || strings.Contains(message, "not runnable") {
+	if errors.Is(err, ErrHumanOwnerConflict) || errors.Is(err, ErrIdempotencyConflict) || strings.Contains(message, "requires Human resolution") || strings.Contains(message, "not runnable") {
 		return http.StatusConflict
 	}
 	if strings.Contains(message, "required") || strings.Contains(message, "invalid") || strings.Contains(message, "not found") {
