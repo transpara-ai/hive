@@ -412,7 +412,7 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 		review, err = e.provider.Run(ctx, ProviderRequest{
 			Selection: projection.Selection,
 			Operation: OperationReview, AttemptID: attempt, RepositoryRoot: workspace.Root,
-			Prompt: reviewPrompt(bound, resolvedHumanGuidance(projection)),
+			Prompt: reviewPrompt(bound, implementation, resolvedHumanGuidance(projection)),
 		})
 		if err != nil {
 			return e.recordProviderFailure(ctx, workID, OperationReview, attempt, review, err)
@@ -1014,8 +1014,13 @@ func implementationPrompt(bound tlcbridge.BoundRequest, guidance string) string 
 	return fmt.Sprintf("Implement this accepted TLC brief in the current repository. Do not commit, push, open or modify a pull request, merge, change settings, use dangerous sandbox bypass, or deploy. Run relevant tests and report the exact changed files and results in the required structured response. TLC transport:\n%s%s", bound.CanonicalJSON, promptGuidance(guidance))
 }
 
-func reviewPrompt(bound tlcbridge.BoundRequest, guidance string) string {
-	return fmt.Sprintf("Perform an ordinary final review of the current uncommitted implementation against this TLC brief. Do not edit files or perform external effects. Return passed only with no unresolved findings. TLC transport:\n%s%s", bound.CanonicalJSON, promptGuidance(guidance))
+func reviewPrompt(bound tlcbridge.BoundRequest, implementation ProviderResult, guidance string) string {
+	reported, _ := json.Marshal(struct {
+		Summary      string        `json:"summary"`
+		ChangedFiles []string      `json:"changed_files"`
+		Checks       []CheckResult `json:"checks"`
+	}{implementation.Summary, implementation.ChangedFiles, implementation.Checks})
+	return fmt.Sprintf("Perform an ordinary final review of the current uncommitted implementation against this TLC brief. This invocation is read-only: inspect the diff and relevant source; do not edit files, perform external effects, or rerun commands that require temporary files or caches. Implementation-reported checks below are evidence to assess, not independent verification. Hive separately runs native verification against the same implementation in its verification sandbox before preparing or publishing a result. Report review-environment limitations honestly without treating the intentional read-only sandbox as an implementation defect. Return passed only with no unresolved implementation findings. TLC transport:\n%s\nImplementation-reported evidence:\n%s%s", bound.CanonicalJSON, reported, promptGuidance(guidance))
 }
 
 func resolvedHumanGuidance(projection WorkProjection) string {

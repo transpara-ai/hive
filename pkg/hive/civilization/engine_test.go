@@ -195,6 +195,12 @@ func TestEngineNaturalLanguageToHumanReady(t *testing.T) {
 	if provider.runs[OperationRoute] != 1 || provider.runs[OperationImplement] != 1 || provider.runs[OperationReview] != 1 {
 		t.Fatalf("provider runs = %+v", provider.runs)
 	}
+	reviewEvidence := provider.prompts[OperationReview][0]
+	for _, evidence := range []string{`"changed_files":["README.md"]`, `"name":"go test ./...","status":"passed","summary":"all packages passed"`} {
+		if !strings.Contains(reviewEvidence, evidence) {
+			t.Fatalf("review did not receive the recorded implementation evidence %q", evidence)
+		}
+	}
 	if len(effects.mergeHeads) != 0 {
 		t.Fatalf("unexpected merge effects: %v", effects.mergeHeads)
 	}
