@@ -20,6 +20,9 @@ type State string
 const (
 	StateAwaitingConfirmation State = "awaiting_confirmation"
 	StatePrepared             State = "prepared"
+	StateApproved             State = "approved"
+	StateRejected             State = "rejected"
+	StateChangesRequested     State = "changes_requested"
 	StateQueued               State = "queued"
 	StateRouting              State = "routing"
 	StateImplementing         State = "implementing"
@@ -43,6 +46,7 @@ type StateChange struct {
 }
 
 type Intake struct {
+	RevisionOf          *ResultReference   `json:"revision_of,omitempty"`
 	Selection           ExecutionSelection `json:"selection,omitempty"`
 	RequireConfirmation bool               `json:"require_confirmation,omitempty"`
 	Source              tlcbridge.Source   `json:"source"`
@@ -86,6 +90,10 @@ type Intervention struct {
 }
 
 type WorkProjection struct {
+	PreparedResultID       string                  `json:"prepared_result_id,omitempty"`
+	PreparedResultDigest   string                  `json:"prepared_result_digest,omitempty"`
+	ResultReview           *ResultReview           `json:"result_review,omitempty"`
+	RevisionOf             *ResultReference        `json:"revision_of,omitempty"`
 	HumanOwnerID           string                  `json:"human_owner_id,omitempty"`
 	HumanOwnerAssignedBy   string                  `json:"human_owner_assigned_by,omitempty"`
 	HumanOwnerAssignmentID string                  `json:"human_owner_assignment_id,omitempty"`
@@ -171,6 +179,10 @@ func (e *Engine) AcceptText(ctx context.Context, source tlcbridge.Source, text s
 }
 
 func (e *Engine) AcceptSelectedText(ctx context.Context, source tlcbridge.Source, text string, selection ExecutionSelection, confirm bool) (WorkProjection, error) {
+	return e.acceptSelectedText(ctx, source, text, selection, confirm, nil)
+}
+
+func (e *Engine) acceptSelectedText(ctx context.Context, source tlcbridge.Source, text string, selection ExecutionSelection, confirm bool, revision *ResultReference) (WorkProjection, error) {
 	if err := validateSelection(selection); err != nil {
 		return WorkProjection{}, err
 	}
@@ -193,7 +205,7 @@ func (e *Engine) AcceptSelectedText(ctx context.Context, source tlcbridge.Source
 	hash := sha256.Sum256([]byte(text))
 	textHash := hex.EncodeToString(hash[:])
 	if found {
-		if projection.Source != source || projection.IntakeText != text || projection.Selection != selection || projection.RequireConfirmation != confirm {
+		if projection.Source != source || projection.IntakeText != text || projection.Selection != selection || projection.RequireConfirmation != confirm || (projection.RevisionOf == nil) != (revision == nil) || (revision != nil && *projection.RevisionOf != *revision) {
 			return WorkProjection{}, fmt.Errorf("%w: source identity already names different intake", ErrIdempotencyConflict)
 		}
 		return projection, nil
@@ -210,7 +222,7 @@ func (e *Engine) AcceptSelectedText(ctx context.Context, source tlcbridge.Source
 	}
 
 	intakeEvent, err := appendEvent(ctx, e.store, EventIntakeAccepted, workID,
-		"intake:"+workID, nil, Intake{Source: source, Text: text, TextSHA256: textHash, Selection: selection, RequireConfirmation: confirm})
+		"intake:"+workID, nil, Intake{Source: source, Text: text, TextSHA256: textHash, Selection: selection, RequireConfirmation: confirm, RevisionOf: revision})
 	if err != nil {
 		return WorkProjection{}, err
 	}
@@ -298,6 +310,9 @@ func (e *Engine) Advance(ctx context.Context, workID string) (WorkProjection, er
 	if err != nil {
 		return WorkProjection{}, err
 	}
+	if projection.State == StateChangesRequested {
+		return e.ensureResultRevision(ctx, projection)
+	}
 	if projection.State == StateRouting {
 		routed, routeErr := e.Route(ctx, workID)
 		if routeErr != nil || routed.State != StateQueued {
@@ -326,7 +341,7 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 	if projection.State == StateMergeQueued {
 		return e.observeQueuedMerge(ctx, projection)
 	}
-	if projection.State == StateCompleted || projection.State == StatePrepared {
+	if projection.State == StateCompleted || projection.State == StatePrepared || projection.State == StateApproved || projection.State == StateRejected || projection.State == StateChangesRequested {
 		return projection, nil
 	}
 	if hasOpenIntervention(projection) {
@@ -337,6 +352,10 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 	}
 
 	bound := *projection.Bound
+	revisionContext, err := e.revisionGuidance(ctx, projection)
+	if err != nil {
+		return e.block(ctx, workID, "Revision reference is unavailable: "+err.Error(), "Restore the original result before retrying.")
+	}
 	workspace, err := e.effects.Prepare(ctx, workID, bound)
 	if err != nil {
 		return e.block(ctx, workID, "Worktree preparation failed: "+err.Error(), "Repair repository state and retry.")
@@ -361,7 +380,7 @@ func (e *Engine) Run(ctx context.Context, workID string) (WorkProjection, error)
 		implementation, err = e.provider.Run(ctx, ProviderRequest{
 			Selection: projection.Selection,
 			Operation: OperationImplement, AttemptID: attempt, RepositoryRoot: workspace.Root,
-			Prompt: implementationPrompt(bound, implementationGuidance(projection)),
+			Prompt: implementationPrompt(bound, implementationGuidance(projection)+"\n"+revisionContext),
 		})
 		if err != nil {
 			return e.recordProviderFailure(ctx, workID, OperationImplement, attempt, implementation, err)
@@ -788,6 +807,32 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 		item.UpdatedAt = event.OccurredAt
 		item.LatestEventID = event.ID
 		switch event.Type {
+		case EventResultReviewed:
+			payload, err := decodePayload[ResultReview](event)
+			if err != nil {
+				return WorkProjection{}, err
+			}
+			if item.Artifact == nil || item.PreparedResultID != payload.ResultID || item.Artifact.WorkspaceDigest != payload.WorkspaceDigest || item.ResultReview != nil {
+				return WorkProjection{}, errors.New("invalid prepared result review history")
+			}
+			payload.RecordedAt = event.OccurredAt
+			item.ResultReview = &payload
+			switch payload.Decision {
+			case "approve":
+				item.State = StateApproved
+				item.Summary = "Delivered result approved."
+				item.NextAction = "Publication and merge remain separate actions."
+			case "reject":
+				item.State = StateRejected
+				item.Summary = "Delivered result rejected."
+				item.NextAction = "The original result remains available for inspection."
+			case "request_changes":
+				item.State = StateChangesRequested
+				item.Summary = "Changes requested; a linked revision is being prepared."
+				item.NextAction = "Open the revision and confirm its brief before implementation."
+			default:
+				return WorkProjection{}, errors.New("invalid prepared result decision")
+			}
 		case EventHumanOwnerAssigned:
 			payload, err := decodePayload[HumanOwnerAssignment](event)
 			if err != nil {
@@ -801,6 +846,7 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 			}
 			item.Source, item.IntakeText = payload.Source, payload.Text
 			item.Selection, item.RequireConfirmation = payload.Selection, payload.RequireConfirmation
+			item.RevisionOf = payload.RevisionOf
 			item.State, item.Summary, item.NextAction = StateRouting, "Preparing the short brief.", "Wait for routing."
 		case EventWorkAccepted:
 			payload, err := decodePayload[AcceptedWork](event)
@@ -821,6 +867,10 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 			item.State, item.Summary, item.Blocker, item.NextAction = payload.To, payload.Summary, payload.Blocker, payload.NextAction
 			if payload.Artifact != nil {
 				item.Artifact = payload.Artifact
+				if payload.To == StatePrepared {
+					item.PreparedResultID = event.ID
+					item.PreparedResultDigest = payload.Artifact.WorkspaceDigest
+				}
 			}
 			if payload.To == StateBlocked || payload.To == StateHumanRequired {
 				item.ResumeState = payload.From
