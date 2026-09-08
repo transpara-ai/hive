@@ -442,6 +442,25 @@ func decodeProviderResult(raw []byte) (ProviderResult, error) {
 	if result.Status == "blocked" && strings.TrimSpace(result.Blocker) == "" {
 		return ProviderResult{}, errors.New("blocked Codex result must name a blocker")
 	}
+	// Strict structured output cannot carry an open-ended object. The provider
+	// transports the TLC document as JSON text; durable results still contain
+	// the original object, including fields owned by future workflow versions.
+	envelope := bytes.TrimSpace(result.TLCEnvelope)
+	if bytes.Equal(envelope, []byte("null")) {
+		result.TLCEnvelope = nil
+	} else if len(envelope) > 0 {
+		if envelope[0] == '"' {
+			var document string
+			if err := json.Unmarshal(envelope, &document); err != nil {
+				return ProviderResult{}, fmt.Errorf("decode TLC envelope text: %w", err)
+			}
+			envelope = bytes.TrimSpace([]byte(document))
+		}
+		if len(envelope) == 0 || envelope[0] != '{' || !json.Valid(envelope) {
+			return ProviderResult{}, errors.New("TLC envelope must contain one JSON object")
+		}
+		result.TLCEnvelope = envelope
+	}
 	return result, nil
 }
 
@@ -479,14 +498,14 @@ var providerResultSchema = []byte(`{
   "$schema":"https://json-schema.org/draft/2020-12/schema",
   "type":"object",
   "additionalProperties":false,
-  "required":["status","summary","changed_files","checks","next_action"],
+  "required":["status","summary","tlc_envelope","changed_files","checks","review","blocker","next_action"],
   "properties":{
     "status":{"enum":["passed","blocked"]},
     "summary":{"type":"string","minLength":1},
-    "tlc_envelope":{"type":"object"},
+    "tlc_envelope":{"type":["string","null"],"description":"For route only: JSON text encoding the complete tlc-envelope/v1 object with schema_version, workflow (name and version), route, and brief (outcome, scope, non_goals, assumptions, constraints, tests, next_action). Preserve additional workflow fields. For other operations return null."},
     "changed_files":{"type":"array","items":{"type":"string"}},
     "checks":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","status","summary"],"properties":{"name":{"type":"string"},"status":{"type":"string"},"summary":{"type":"string"}}}},
-    "review":{"type":"object","additionalProperties":false,"required":["status","summary","findings"],"properties":{"status":{"type":"string"},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}}}},
+    "review":{"type":["object","null"],"additionalProperties":false,"required":["status","summary","findings"],"properties":{"status":{"type":"string"},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}}}},
     "blocker":{"type":"string"},
     "next_action":{"type":"string","minLength":1}
   }
