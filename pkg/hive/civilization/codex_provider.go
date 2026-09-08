@@ -237,7 +237,7 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 		args = append(args, "--profile", c.config.Profile)
 	}
 	if request.Operation == OperationImplement {
-		args = append(args, "--sandbox", "workspace-write", "--approve-for-me")
+		args = append(args, "--sandbox", "workspace-write")
 	} else {
 		args = append(args, "--sandbox", "read-only")
 	}

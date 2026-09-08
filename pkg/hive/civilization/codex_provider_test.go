@@ -129,11 +129,11 @@ func TestCodexCLIImplementUsesWorkspaceSandbox(t *testing.T) {
 	}
 	args, _ := os.ReadFile(argsPath)
 	joined := string(args)
-	if !strings.Contains(joined, "--sandbox\nworkspace-write\n") || !strings.Contains(joined, "--approve-for-me\n") {
+	if !strings.Contains(joined, "--sandbox\nworkspace-write\n") {
 		t.Fatalf("implement args lack bounded write posture:\n%s", joined)
 	}
-	if strings.Contains(joined, "dangerously-bypass") {
-		t.Fatalf("implement args contained dangerous bypass:\n%s", joined)
+	if strings.Contains(joined, "dangerously-bypass") || strings.Contains(joined, "--approve-for-me") {
+		t.Fatalf("implement args contained a sandbox bypass or conflicting automatic-approval flag:\n%s", joined)
 	}
 }
 
