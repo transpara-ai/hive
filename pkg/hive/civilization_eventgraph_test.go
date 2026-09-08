@@ -2,6 +2,7 @@ package hive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -83,5 +84,30 @@ func TestCivilizationEventGraphRetriesConcurrentHeadRace(t *testing.T) {
 	}
 	if appended.ID == "" || !wrapper.failed {
 		t.Fatalf("retry result = %#v failed=%t", appended, wrapper.failed)
+	}
+}
+
+func TestCivilizationHumanOwnerEventSurvivesSignedStoreRestart(t *testing.T) {
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	first, err := NewCivilizationEventGraphStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment := civ.HumanOwnerAssignment{OwnerID: "alice", AssignedBy: "bob"}
+	written, err := first.Append(context.Background(), civ.NewEvent{Type: civ.EventHumanOwnerAssigned, WorkID: "work-assignment", IdempotencyKey: "owner:initial", Payload: assignment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewCivilizationEventGraphStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := restarted.List(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != written.ID || items[0].Type != civ.EventHumanOwnerAssigned {
+		t.Fatalf("events=%+v error=%v", items, err)
+	}
+	var read civ.HumanOwnerAssignment
+	if err := json.Unmarshal(items[0].Payload, &read); err != nil || read != assignment {
+		t.Fatalf("assignment=%+v error=%v", read, err)
 	}
 }

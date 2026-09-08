@@ -86,24 +86,27 @@ type Intervention struct {
 }
 
 type WorkProjection struct {
-	Artifact            *Artifact               `json:"artifact,omitempty"`
-	Selection           ExecutionSelection      `json:"selection,omitempty"`
-	RequireConfirmation bool                    `json:"require_confirmation,omitempty"`
-	WorkID              string                  `json:"work_id"`
-	Source              tlcbridge.Source        `json:"source"`
-	IntakeText          string                  `json:"intake_text"`
-	Bound               *tlcbridge.BoundRequest `json:"bound,omitempty"`
-	State               State                   `json:"state"`
-	ResumeState         State                   `json:"resume_state,omitempty"`
-	Summary             string                  `json:"summary"`
-	Blocker             string                  `json:"blocker,omitempty"`
-	NextAction          string                  `json:"next_action"`
-	ProviderRuns        []ProviderRecord        `json:"provider_runs"`
-	PullRequest         *PullRequest            `json:"pull_request,omitempty"`
-	Interventions       []Intervention          `json:"interventions"`
-	MergeDecision       *MergeDecision          `json:"merge_decision,omitempty"`
-	UpdatedAt           time.Time               `json:"updated_at"`
-	LatestEventID       string                  `json:"latest_event_id"`
+	HumanOwnerID           string                  `json:"human_owner_id,omitempty"`
+	HumanOwnerAssignedBy   string                  `json:"human_owner_assigned_by,omitempty"`
+	HumanOwnerAssignmentID string                  `json:"human_owner_assignment_id,omitempty"`
+	Artifact               *Artifact               `json:"artifact,omitempty"`
+	Selection              ExecutionSelection      `json:"selection,omitempty"`
+	RequireConfirmation    bool                    `json:"require_confirmation,omitempty"`
+	WorkID                 string                  `json:"work_id"`
+	Source                 tlcbridge.Source        `json:"source"`
+	IntakeText             string                  `json:"intake_text"`
+	Bound                  *tlcbridge.BoundRequest `json:"bound,omitempty"`
+	State                  State                   `json:"state"`
+	ResumeState            State                   `json:"resume_state,omitempty"`
+	Summary                string                  `json:"summary"`
+	Blocker                string                  `json:"blocker,omitempty"`
+	NextAction             string                  `json:"next_action"`
+	ProviderRuns           []ProviderRecord        `json:"provider_runs"`
+	PullRequest            *PullRequest            `json:"pull_request,omitempty"`
+	Interventions          []Intervention          `json:"interventions"`
+	MergeDecision          *MergeDecision          `json:"merge_decision,omitempty"`
+	UpdatedAt              time.Time               `json:"updated_at"`
+	LatestEventID          string                  `json:"latest_event_id"`
 }
 
 type Workspace struct {
@@ -785,6 +788,12 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 		item.UpdatedAt = event.OccurredAt
 		item.LatestEventID = event.ID
 		switch event.Type {
+		case EventHumanOwnerAssigned:
+			payload, err := decodePayload[HumanOwnerAssignment](event)
+			if err != nil {
+				return WorkProjection{}, err
+			}
+			item.HumanOwnerID, item.HumanOwnerAssignedBy, item.HumanOwnerAssignmentID = payload.OwnerID, payload.AssignedBy, event.ID
 		case EventIntakeAccepted:
 			payload, err := decodePayload[Intake](event)
 			if err != nil {

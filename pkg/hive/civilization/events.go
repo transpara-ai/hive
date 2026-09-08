@@ -23,6 +23,7 @@ const (
 	EventPullRequestObserved   EventType = "civilization.pr.observed"
 	EventInterventionRequested EventType = "civilization.intervention.requested"
 	EventInterventionResolved  EventType = "civilization.intervention.resolved"
+	EventHumanOwnerAssigned    EventType = "civilization.human.owner.assigned"
 	EventMergeDecision         EventType = "civilization.merge.decision.recorded"
 	EventMergeQueued           EventType = "civilization.merge.queued"
 )
@@ -31,7 +32,7 @@ func (t EventType) valid() bool {
 	switch t {
 	case EventIntakeAccepted, EventTLCRouted, EventWorkAccepted, EventStateChanged,
 		EventProviderResult, EventPullRequestObserved, EventInterventionRequested,
-		EventInterventionResolved, EventMergeDecision, EventMergeQueued:
+		EventInterventionResolved, EventHumanOwnerAssigned, EventMergeDecision, EventMergeQueued:
 		return true
 	default:
 		return false
