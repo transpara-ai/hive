@@ -669,3 +669,40 @@ func TestNew_DoesNotSeedBudgetOnColdStart(t *testing.T) {
 		t.Errorf("Iterations = %d, want 1 (cold start should not overwrite)", snap.Iterations)
 	}
 }
+
+func TestRuntimeObservationFollowsIdleAndCancellation(t *testing.T) {
+	provider := newMockProvider(`/signal {"signal":"IDLE"}`)
+	agent := testAgent(t, provider)
+	states := make(chan RuntimeState, 32)
+	l, err := New(Config{Agent: agent, HumanID: humanID(), Budget: resources.BudgetConfig{MaxIterations: 10}, Bus: testGraph(t).Bus(), Keepalive: true, OnRuntimeState: func(state RuntimeState) { states <- state }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- l.Run(ctx) }()
+	for {
+		select {
+		case state := <-states:
+			if state == RuntimeWaiting {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("loop did not stop")
+				}
+				last := state
+				for len(states) > 0 {
+					last = <-states
+				}
+				if last != RuntimeStopped {
+					t.Fatalf("final state = %s", last)
+				}
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("idle state was never observed")
+		}
+	}
+}

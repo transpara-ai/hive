@@ -231,3 +231,26 @@ func TestCodexCLIReplaysExactAttemptFromDurableReceipt(t *testing.T) {
 		t.Fatalf("provider executed despite receipt, stat error = %v", err)
 	}
 }
+
+func TestCodexCurrentModelSupportsMaximumEffort(t *testing.T) {
+	provider, argsPath := testCodexProvider(t)
+	t.Setenv("FAKE_RESULT", `{"status":"passed","summary":"reviewed","changed_files":[],"checks":[],"next_action":"done"}`)
+	_, err := provider.Run(context.Background(), ProviderRequest{
+		Operation: OperationReview, RepositoryRoot: testRepository(t), Prompt: "Review the prepared change.",
+		Selection: ExecutionSelection{Model: "gpt-5.6-sol", ReasoningEffort: "max"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), `model_reasoning_effort="max"`) {
+		t.Fatalf("effort dropped: %s", args)
+	}
+	_, err = provider.Run(context.Background(), ProviderRequest{Selection: ExecutionSelection{Model: "gpt-5.5", ReasoningEffort: "max"}})
+	if err == nil {
+		t.Fatal("unsupported effort accepted for older model")
+	}
+}

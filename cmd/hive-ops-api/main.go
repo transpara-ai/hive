@@ -59,8 +59,9 @@ func main() {
 	opts, writeMode := opsWriterOptions()
 	opts = append(opts, hive.WithOperatorProjectionModelSelectionSource(modelSelectionManager.Snapshot))
 	missionControl, err := hive.NewCivilizationMissionControlProjector(store, hive.MissionControlProjectorConfig{
-		ModelSelection: modelSelectionManager.Snapshot,
-		PageSize:       *limit,
+		ModelSelection:      modelSelectionManager.Snapshot,
+		RuntimeSnapshotFile: os.Getenv("HIVE_OPS_RUNTIME_SNAPSHOT_FILE"),
+		PageSize:            *limit,
 	})
 	if err != nil {
 		log.Fatalf("configure Civilization Mission Control: %v", err)

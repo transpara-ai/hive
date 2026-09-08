@@ -338,6 +338,7 @@ func (r *Runtime) spawnDynamicAgent(ctx context.Context, proposal event.RoleProp
 	}
 
 	cfg := loop.Config{
+		OnRuntimeState: r.observeAgentRuntime(agent.ID().Value(), def.Role),
 		Agent:          agent,
 		HumanID:        r.humanID,
 		Budget:         budgetCfg,
