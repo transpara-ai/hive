@@ -266,6 +266,8 @@ type missionWallClock struct{}
 func (missionWallClock) Now() time.Time { return time.Now().UTC() }
 
 type MissionControlProjectorConfig struct {
+	RuntimeSnapshotFile string
+
 	ModelSelection OperatorModelSelectionSource
 	Clock          MissionClock
 	PageSize       int
@@ -300,6 +302,8 @@ type missionAuthoritySource struct {
 }
 
 type CivilizationMissionControlProjector struct {
+	runtimeSnapshotFile string
+
 	store          store.Store
 	modelSelection OperatorModelSelectionSource
 	clock          MissionClock
@@ -332,7 +336,7 @@ func NewCivilizationMissionControlProjector(s store.Store, config MissionControl
 		return nil, errors.New("mission control retention must be between 1s and 15m")
 	}
 	return &CivilizationMissionControlProjector{
-		store: s, modelSelection: config.ModelSelection,
+		store: s, modelSelection: config.ModelSelection, runtimeSnapshotFile: config.RuntimeSnapshotFile,
 		clock: config.Clock, pageSize: config.PageSize, retention: config.Retention,
 	}, nil
 }
@@ -360,6 +364,9 @@ func (p *CivilizationMissionControlProjector) Build(ctx context.Context) Mission
 		{SourceID: "authority_actions", Required: true, Completeness: authority.Completeness, Mark: authorityMark},
 	}
 	services := missionServiceHealth(now, wip, wipMark, rosterMark, authorityMark)
+	if p.runtimeSnapshotFile != "" {
+		services = append(services, applyRuntimeObservations(roles, p.runtimeSnapshotFile, now))
+	}
 	complete, reasons := true, []string{}
 	for _, source := range sources {
 		if !source.Completeness.Complete || source.Mark.Freshness == FreshnessUnavailable {

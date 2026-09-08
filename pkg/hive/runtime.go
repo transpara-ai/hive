@@ -43,6 +43,9 @@ import (
 // Runtime is the hive runtime. It manages agents, the shared graph,
 // the event bus, and the task store.
 type Runtime struct {
+	runtimeObservationMu sync.Mutex
+	runtimeObservations  map[string]RuntimeAgentObservation
+
 	store        store.Store
 	actors       actor.IActorStore
 	graph        *graph.Graph
@@ -365,6 +368,8 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 	}
 
 	start := time.Now()
+	stopRuntimeObservations := r.startRuntimeObservationWriter()
+	defer stopRuntimeObservations()
 
 	// Resolve the model catalog and validate daemon recovery before emitting the
 	// new run-start event. Organic recovery ambiguity is a startup failure, not
@@ -623,6 +628,7 @@ func (r *Runtime) Run(ctx context.Context, seedIdea string) error {
 
 		loopResolver := r.currentResolver()
 		cfg := loop.Config{
+			OnRuntimeState:                    r.observeAgentRuntime(agent.ID().Value(), def.Role),
 			Agent:                             agent,
 			HumanID:                           r.humanID,
 			Budget:                            budgetCfg,

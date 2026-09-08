@@ -355,3 +355,32 @@ Site must never directly mutate authority state. It sends a resolution request t
 - Every self-modification path uses Required authority.
 - Guardian/HALT state is projected immediately.
 - Budget state is visible before and during execution.
+
+
+## Daemon runtime observations (2026-09-08)
+
+For a local daemon and ops API, set `HIVE_RUNTIME_SNAPSHOT_FILE` on the daemon
+and `HIVE_OPS_RUNTIME_SNAPSHOT_FILE` on the ops API to the same file in a shared
+directory. Only the daemon may write that directory; mount it read-only in the
+ops API. The daemon atomically refreshes the typed `hive-runtime-observation/v1`
+report every three seconds. No credentials or task contents are included.
+
+Mission Control joins the report by immutable actor ID and matching role. It
+shows live loop state (`working`, `idle`, `waiting for budget`, `stopped`) and
+per-role running counts. Idle and budget-waiting loops remain running. Historical
+actors absent from this daemon are explicitly outside its current runtime.
+A missing, malformed, duplicated, future-dated or more-than-15-second-old report
+cannot grant liveness. Observations remain projected-only; they do not replace
+EventGraph lifecycle history or grant assignment, approval, or execution authority.
+One-shot runs do not publish into the daemon's observation file.
+
+The optional `hive_runtime` service observation extends Mission Control v2 when
+configured. Deploy Site support before enabling the new observation on Hive;
+older Site versions reject unknown service IDs. Unconfigured deployments retain
+the existing unavailable process-liveness display.
+
+The shared model catalog lives in EventGraph's Go `modelconfig` package. Model
+choices and verification dates flow through Hive to Site; listing a model does
+not establish authentication or account entitlement. Existing explicit role pins
+remain stable. Current Codex models accept maximum reasoning, while older model
+pins retain their supported effort validation.

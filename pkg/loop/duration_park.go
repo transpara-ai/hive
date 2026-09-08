@@ -39,6 +39,8 @@ import (
 // path. Returning re-enters the park branch, which raises afresh and
 // acknowledges the new limit — one raise per change, no tick storm.
 func (l *Loop) waitForBudgetRenewal(ctx context.Context) bool {
+	l.observeRuntime(RuntimeBudgetWait)
+	defer l.observeRuntime(RuntimeWorking)
 	interval := l.config.RecheckInterval
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -77,6 +79,7 @@ func formatBudgetPark(agentName string, err error) string {
 //   - a NEW agent parks → signature changes → fire;
 //   - renew-then-repark of the same agent → the empty set observed between
 //     episodes resets the signature → fire.
+//
 // Only called from the Run() goroutine.
 func (l *Loop) hasParkedRenewables() bool {
 	reg := l.config.BudgetRegistry

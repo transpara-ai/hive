@@ -172,8 +172,8 @@ func (c *CodexCLI) Run(ctx context.Context, request ProviderRequest) (ProviderRe
 	if request.Selection.Model == "" {
 		modelSource = "provider_default"
 	}
-	if request.Selection.ReasoningEffort == "max" {
-		return ProviderResult{}, errors.New("invalid Codex reasoning effort max; use a supported Codex effort")
+	if request.Selection.ReasoningEffort == "max" && !codexSupportsMaxEffort(request.Selection.Model) {
+		return ProviderResult{}, errors.New("Codex max reasoning requires GPT-6 Astra or a GPT-5.6 model; choose a current model or a lower effort")
 	}
 	if request.Operation != OperationRoute && request.Operation != OperationImplement && request.Operation != OperationReview {
 		return ProviderResult{}, fmt.Errorf("unsupported provider operation %q", request.Operation)
@@ -510,3 +510,12 @@ var providerResultSchema = []byte(`{
     "next_action":{"type":"string","minLength":1}
   }
 }`)
+
+func codexSupportsMaxEffort(model string) bool {
+	switch model {
+	case "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return true
+	default:
+		return false
+	}
+}

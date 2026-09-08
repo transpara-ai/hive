@@ -684,6 +684,7 @@ func (r *Runtime) startOrganicCandidate(ctx context.Context, candidate organicGr
 
 	resolver := r.currentResolver()
 	cfg := loop.Config{
+		OnRuntimeState:                    r.observeAgentRuntime(agent.ID().Value(), def.Role),
 		Agent:                             agent,
 		HumanID:                           r.humanID,
 		Budget:                            budgetCfg,

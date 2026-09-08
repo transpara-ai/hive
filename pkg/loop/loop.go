@@ -86,8 +86,21 @@ type TaskWorkspaceProviderResult struct {
 // call. Errors fail closed before any filesystem-capable subprocess launches.
 type TaskWorkspaceProviderFunc func(ctx context.Context, task work.Task, role string) (TaskWorkspaceProviderResult, error)
 
+// RuntimeState is an in-process observation, never an authority receipt.
+type RuntimeState string
+
+const (
+	RuntimeWorking    RuntimeState = "working"
+	RuntimeWaiting    RuntimeState = "idle"
+	RuntimeBudgetWait RuntimeState = "waiting for budget"
+	RuntimeStopped    RuntimeState = "stopped"
+)
+
 // Config configures an agentic loop.
 type Config struct {
+	// OnRuntimeState observes this loop's lifecycle without changing its decisions.
+	OnRuntimeState func(RuntimeState)
+
 	// Agent is the unified hive agent to run. Required.
 	// Provides state machine, causality tracking, and trust hooks.
 	Agent *hiveagent.Agent
@@ -482,6 +495,8 @@ func New(cfg Config) (*Loop, error) {
 
 // Run executes the agentic loop until a stopping condition is met.
 func (l *Loop) Run(ctx context.Context) Result {
+	l.observeRuntime(RuntimeWorking)
+	defer l.observeRuntime(RuntimeStopped)
 	// Subscribe to bus events if available.
 	var subID bus.SubscriptionID
 	if l.config.Bus != nil {
@@ -1489,6 +1504,8 @@ func (l *Loop) onEvent(ev event.Event) {
 // restart — cannot park them forever; every other keepalive agent blocks on
 // the wake channel indefinitely, consuming zero CPU until a bus event arrives.
 func (l *Loop) waitForEvents(ctx context.Context) bool {
+	l.observeRuntime(RuntimeWaiting)
+	defer l.observeRuntime(RuntimeWorking)
 	if l.config.Keepalive {
 		// Re-check eligibility is an ALLOWLIST of exactly three duties, each
 		// with its own "work exists" gate so an idle agent stays parked — no
@@ -2403,4 +2420,10 @@ func RunConcurrent(ctx context.Context, configs []Config) []AgentResult {
 
 	wg.Wait()
 	return results
+}
+
+func (l *Loop) observeRuntime(state RuntimeState) {
+	if l.config.OnRuntimeState != nil {
+		l.config.OnRuntimeState(state)
+	}
 }
