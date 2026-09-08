@@ -1007,7 +1007,7 @@ func providerAttemptID(workID string, operation ProviderOperation, ordinal int) 
 }
 
 func routePrompt(source tlcbridge.Source, text, guidance string) string {
-	return fmt.Sprintf("Use the installed $tlc skill to route this source and return only the required structured result. Put the complete tlc-envelope/v1 object in tlc_envelope. Source kind: %s. Source identity: %s. Repository: %s. Request:\n%s%s", source.Kind, source.Identity, source.Repository, text, promptGuidance(guidance))
+	return fmt.Sprintf("Use the installed $tlc skill to route this source and prepare its short brief. This invocation is ONLY the routing phase: do not implement the request, write files, or run its verification commands. The read-only sandbox is intentional; Hive starts implementation in a separate writable worktree after brief confirmation. Return passed when the brief is ready. Return only the required structured result, with the complete tlc-envelope/v1 object encoded as a JSON string in tlc_envelope. Source kind: %s. Source identity: %s. Repository: %s. Outcome to describe in the brief (not execute now):\n%s%s", source.Kind, source.Identity, source.Repository, text, promptGuidance(guidance))
 }
 
 func implementationPrompt(bound tlcbridge.BoundRequest, guidance string) string {
