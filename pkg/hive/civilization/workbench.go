@@ -66,7 +66,7 @@ func (e *Engine) Artifact(ctx context.Context, workID string) (Artifact, error) 
 	if err != nil {
 		return Artifact{}, err
 	}
-	if item.State != StatePrepared || item.Bound == nil {
+	if (item.State != StatePrepared && item.State != StateApproved && item.State != StateRejected && item.State != StateChangesRequested) || item.Bound == nil {
 		return Artifact{}, errors.New("artifact is not prepared; wait for independent verification")
 	}
 	if item.Artifact == nil {

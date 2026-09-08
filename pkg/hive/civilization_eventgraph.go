@@ -25,6 +25,7 @@ var civilizationEventTypeByCore = map[civ.EventType]types.EventType{
 	civ.EventPullRequestObserved:   types.MustEventType(string(civ.EventPullRequestObserved)),
 	civ.EventInterventionRequested: types.MustEventType(string(civ.EventInterventionRequested)),
 	civ.EventInterventionResolved:  types.MustEventType(string(civ.EventInterventionResolved)),
+	civ.EventResultReviewed:        types.MustEventType(string(civ.EventResultReviewed)),
 	civ.EventHumanOwnerAssigned:    types.MustEventType(string(civ.EventHumanOwnerAssigned)),
 	civ.EventMergeDecision:         types.MustEventType(string(civ.EventMergeDecision)),
 	civ.EventMergeQueued:           types.MustEventType(string(civ.EventMergeQueued)),

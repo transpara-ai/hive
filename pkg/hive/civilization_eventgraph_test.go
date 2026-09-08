@@ -111,3 +111,28 @@ func TestCivilizationHumanOwnerEventSurvivesSignedStoreRestart(t *testing.T) {
 		t.Fatalf("assignment=%+v error=%v", read, err)
 	}
 }
+
+func TestCivilizationResultReviewSurvivesSignedStoreRestart(t *testing.T) {
+	eventStore, factory, signer, actor, conversation := newDecisionTestStore(t)
+	first, err := NewCivilizationEventGraphStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := civ.ResultReview{ResultReviewRequest: civ.ResultReviewRequest{ResultID: "prepared-event", WorkspaceDigest: "exact-digest", Decision: "approve", ReviewedBy: "alice"}}
+	written, err := first.Append(context.Background(), civ.NewEvent{Type: civ.EventResultReviewed, WorkID: "work-reviewed", IdempotencyKey: "review:exact-result", Payload: review})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewCivilizationEventGraphStore(eventStore, factory, signer, actor, conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := restarted.List(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != written.ID || items[0].Type != civ.EventResultReviewed {
+		t.Fatalf("events=%+v %v", items, err)
+	}
+	var read civ.ResultReview
+	if err = json.Unmarshal(items[0].Payload, &read); err != nil || read != review {
+		t.Fatalf("review=%+v %v", read, err)
+	}
+}

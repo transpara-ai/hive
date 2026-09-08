@@ -384,3 +384,13 @@ choices and verification dates flow through Hive to Site; listing a model does
 not establish authentication or account entitlement. Existing explicit role pins
 remain stable. Current Codex models accept maximum reasoning, while older model
 pins retain their supported effort validation.
+
+### Prepared result review (2026-09-08)
+
+`GET /api/civilization/v1/work` includes `prepared_result_id` (the immutable preparation event), `prepared_result_digest`, and optional `result_review` / `revision_of`. Existing saved prepared results acquire these identity fields during replay; no data rewrite is needed.
+
+`POST /api/civilization/v1/work/{workID}/result-review` takes `result_id`, `workspace_digest`, `decision` (`approve`, `reject`, or `request_changes`), `feedback`, and `reviewed_by`. Site asserts the reviewer from its existing authenticated viewer, as with human ownership. Feedback is required for rejection or changes. The action accepts only the exact prepared artifact and records one signed `civilization.result.reviewed` event. Conflicting decisions or stale identities return 409; exact retries are idempotent. Approval and rejection are recorded result dispositions, not repository publication, merge, deployment, or elevated authorization. Both retain the original artifact and provider evidence.
+
+Requested changes records `changes_requested` and a deterministic linked revision. The new work retains the original request, feedback, model selection and a typed reference to the earlier immutable artifact; it uses its own normal isolated worktree. The implementation receives that prior artifact as reference data and must verify the complete revised result. A new TLC brief requires confirmation before implementation. Creation interrupted after recording the decision is retried by the reconciler or by the same request. Original work and evidence remain unchanged. Current publication and merge configuration remains enforced.
+
+Design (TLC Designed): keep each delivered result immutable and create a linked revision, instead of changing accepted evidence in place. Bind each decision to the preparation event and digest, with a shared store idempotency key serializing competing callers. Deploy Hive before Site so actions only appear when the backend supplies a result identity. Tests cover replay, conflicting callers, stale results, interrupted revision creation, confirmation, original-artifact preservation, and no execution/publication effects from approval or rejection.

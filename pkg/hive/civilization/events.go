@@ -15,6 +15,7 @@ import (
 type EventType string
 
 const (
+	EventResultReviewed        EventType = "civilization.result.reviewed"
 	EventIntakeAccepted        EventType = "civilization.intake.accepted"
 	EventTLCRouted             EventType = "civilization.tlc.routed"
 	EventWorkAccepted          EventType = "civilization.work.accepted"
@@ -30,7 +31,7 @@ const (
 
 func (t EventType) valid() bool {
 	switch t {
-	case EventIntakeAccepted, EventTLCRouted, EventWorkAccepted, EventStateChanged,
+	case EventResultReviewed, EventIntakeAccepted, EventTLCRouted, EventWorkAccepted, EventStateChanged,
 		EventProviderResult, EventPullRequestObserved, EventInterventionRequested,
 		EventInterventionResolved, EventHumanOwnerAssigned, EventMergeDecision, EventMergeQueued:
 		return true

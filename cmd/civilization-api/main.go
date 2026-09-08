@@ -217,8 +217,13 @@ func reconcileOnce(ctx context.Context, engine *civilization.Engine, autoMerge b
 	}
 	limit := make(chan struct{}, concurrency)
 	var wait sync.WaitGroup
+	known := map[string]bool{}
 	for _, item := range items {
-		if item.State != civilization.StateRouting && item.State != civilization.StateQueued && item.State != civilization.StateImplementing &&
+		known[item.WorkID] = true
+	}
+	for _, item := range items {
+		pendingRevision := item.State == civilization.StateChangesRequested && item.ResultReview != nil && !known[item.ResultReview.RevisionWorkID]
+		if !pendingRevision && item.State != civilization.StateRouting && item.State != civilization.StateQueued && item.State != civilization.StateImplementing &&
 			item.State != civilization.StateValidating && item.State != civilization.StateReviewing && item.State != civilization.StatePublishing &&
 			item.State != civilization.StateMergeQueued && !(autoMerge && item.State == civilization.StateReady) {
 			continue
