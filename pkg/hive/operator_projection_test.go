@@ -3494,8 +3494,8 @@ func TestBuildOperatorProjectionRuntimeEvidenceKeepsRunAnchorWithAgentChurnLimit
 	if runtimeEvidence.LastRun == nil || runtimeEvidence.LastRun.StartedEventID != started.ID().Value() {
 		t.Fatalf("last run = %+v, want anchored start %s", runtimeEvidence.LastRun, started.ID().Value())
 	}
-	if runtimeEvidence.AgentEvents.Spawned != 1 || runtimeEvidence.AgentEvents.ObservedActive != 1 {
-		t.Fatalf("agent events = %+v, want bounded latest agent evidence without evicting run anchor", runtimeEvidence.AgentEvents)
+	if runtimeEvidence.AgentEvents.Spawned != 5 || runtimeEvidence.AgentEvents.ObservedActive != 1 {
+		t.Fatalf("agent events = %+v, want complete lifecycle evidence without evicting run anchor", runtimeEvidence.AgentEvents)
 	}
 }
 

@@ -777,12 +777,25 @@ func buildRuntimeEvidenceProjection(p *OperatorProjection, s store.Store, limit 
 	evidence.RunEvents = buildRuntimeEventEvidence(p, runEvents)
 	evidence.Artifacts = buildRuntimeArtifactEvidence(runEvents)
 	evidence.CausalGraph = buildRuntimeCausalGraph(runEvents, latestRunConversationID, limit, conversationTruncated)
+	// The displayed event window may no longer contain any spawn events in a
+	// long-running daemon. Reconstruct lifecycle state through the actual run
+	// start so presentation limits cannot silently erase active agents.
+	lifecycleEvents := runEvents
+	if conversationTruncated {
+		var complete bool
+		lifecycleEvents, complete = readRuntimeLifecycleEvents(p, s, startEvent, limit)
+		if !complete {
+			evidence.Status = "unavailable"
+			evidence.AgentEvents.Scope = "unavailable"
+			return evidence
+		}
+	}
 
 	activeAgents := map[string]OperatorRuntimeAgentEvidence{}
 	activeAgentKeysByNameRole := map[string][]string{}
 	observedAgents := map[string]OperatorRuntimeAgentEvidence{}
 	runClosed := false
-	for _, pe := range runEvents {
+	for _, pe := range lifecycleEvents {
 		eventID := pe.event.ID().Value()
 		timestamp := pe.event.Timestamp().Value()
 		switch content := pe.event.Content().(type) {
@@ -1432,6 +1445,32 @@ func readProjectionEventsByConversation(p *OperatorProjection, s store.Store, co
 		events = append(events, projectionEvent{event: item})
 	}
 	return events, page.HasMore()
+}
+
+func readRuntimeLifecycleEvents(p *OperatorProjection, s store.Store, startEvent projectionEvent, pageSize int) ([]projectionEvent, bool) {
+	cursor := types.None[types.Cursor]()
+	var events []projectionEvent
+	for {
+		page, err := s.ByConversation(startEvent.event.ConversationID(), pageSize, cursor)
+		if err != nil {
+			p.Errors = append(p.Errors, fmt.Sprintf("read runtime lifecycle: %v", err))
+			return nil, false
+		}
+		for _, item := range page.Items() {
+			if item.ID() == startEvent.event.ID() {
+				return runtimeRunEvents(startEvent, events), true
+			}
+			switch item.Content().(type) {
+			case AgentSpawnedContent, AgentStoppedContent, RunCompletedContent:
+				events = append(events, projectionEvent{event: item})
+			}
+		}
+		if !page.HasMore() {
+			p.Errors = append(p.Errors, "runtime lifecycle start missing from conversation")
+			return nil, false
+		}
+		cursor = page.Cursor()
+	}
 }
 
 func runtimeRunEvents(startEvent projectionEvent, conversationEvents []projectionEvent) []projectionEvent {
