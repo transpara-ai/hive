@@ -27,7 +27,7 @@ func (e *Engine) Confirm(ctx context.Context, workID, briefID string) (WorkProje
 		}
 		return item, errors.New("work is not awaiting confirmation")
 	}
-	if _, err := e.transition(ctx, item, StateQueued, "Implementation confirmed by the operator.", "Hive will start the selected host."); err != nil {
+	if _, err := appendEvent(ctx, e.store, EventStateChanged, item.WorkID, "confirmation:"+briefID, []string{item.LatestEventID}, StateChange{ChangedBy: humanActor(ctx), From: item.State, To: StateQueued, Summary: "Implementation confirmed by the operator.", NextAction: "Hive will start the selected host."}); err != nil {
 		return item, err
 	}
 	return e.mustFind(ctx, workID)

@@ -37,6 +37,7 @@ const (
 )
 
 type StateChange struct {
+	ChangedBy  string    `json:"changed_by,omitempty"`
 	Artifact   *Artifact `json:"artifact,omitempty"`
 	From       State     `json:"from,omitempty"`
 	To         State     `json:"to"`
@@ -46,6 +47,7 @@ type StateChange struct {
 }
 
 type Intake struct {
+	RequestedBy         string             `json:"requested_by,omitempty"`
 	RevisionOf          *ResultReference   `json:"revision_of,omitempty"`
 	Selection           ExecutionSelection `json:"selection,omitempty"`
 	RequireConfirmation bool               `json:"require_confirmation,omitempty"`
@@ -83,13 +85,18 @@ type PullRequest struct {
 }
 
 type Intervention struct {
-	ID         string `json:"id"`
-	Prompt     string `json:"prompt"`
-	Status     string `json:"status"`
-	Resolution string `json:"resolution,omitempty"`
+	ResolvedBy string    `json:"resolved_by,omitempty"`
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
+	ID         string    `json:"id"`
+	Prompt     string    `json:"prompt"`
+	Status     string    `json:"status"`
+	Resolution string    `json:"resolution,omitempty"`
 }
 
 type WorkProjection struct {
+	RequestedBy            string                  `json:"requested_by,omitempty"`
+	ConfirmedBy            string                  `json:"confirmed_by,omitempty"`
+	ConfirmedAt            time.Time               `json:"confirmed_at,omitempty"`
 	PreparedResultID       string                  `json:"prepared_result_id,omitempty"`
 	PreparedResultDigest   string                  `json:"prepared_result_digest,omitempty"`
 	ResultReview           *ResultReview           `json:"result_review,omitempty"`
@@ -222,7 +229,7 @@ func (e *Engine) acceptSelectedText(ctx context.Context, source tlcbridge.Source
 	}
 
 	intakeEvent, err := appendEvent(ctx, e.store, EventIntakeAccepted, workID,
-		"intake:"+workID, nil, Intake{Source: source, Text: text, TextSHA256: textHash, Selection: selection, RequireConfirmation: confirm, RevisionOf: revision})
+		"intake:"+workID, nil, Intake{RequestedBy: humanActor(ctx), Source: source, Text: text, TextSHA256: textHash, Selection: selection, RequireConfirmation: confirm, RevisionOf: revision})
 	if err != nil {
 		return WorkProjection{}, err
 	}
@@ -666,7 +673,7 @@ func (e *Engine) ResolveIntervention(ctx context.Context, workID, interventionID
 	}
 	var target *Intervention
 	for i := range projection.Interventions {
-		if projection.Interventions[i].ID == interventionID && projection.Interventions[i].Status == "open" {
+		if projection.Interventions[i].ID == interventionID {
 			target = &projection.Interventions[i]
 			break
 		}
@@ -674,9 +681,17 @@ func (e *Engine) ResolveIntervention(ctx context.Context, workID, interventionID
 	if target == nil {
 		return projection, errors.New("open intervention not found")
 	}
+	if target.Status == "resolved" {
+		if target.Resolution != resolution {
+			return projection, fmt.Errorf("%w: intervention already answered", ErrIdempotencyConflict)
+		}
+		// Preserve the first responder and timestamp after a lost response.
+		return projection, nil
+	}
 	resolved := *target
 	resolved.Status = "resolved"
 	resolved.Resolution = resolution
+	resolved.ResolvedBy = humanActor(ctx)
 	resolvedEvent, err := appendEvent(ctx, e.store, EventInterventionResolved, workID,
 		"intervention:resolved:"+interventionID, []string{projection.LatestEventID}, resolved)
 	if err != nil {
@@ -845,6 +860,7 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 				return WorkProjection{}, err
 			}
 			item.Source, item.IntakeText = payload.Source, payload.Text
+			item.RequestedBy = payload.RequestedBy
 			item.Selection, item.RequireConfirmation = payload.Selection, payload.RequireConfirmation
 			item.RevisionOf = payload.RevisionOf
 			item.State, item.Summary, item.NextAction = StateRouting, "Preparing the short brief.", "Wait for routing."
@@ -865,6 +881,9 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 				return WorkProjection{}, err
 			}
 			item.State, item.Summary, item.Blocker, item.NextAction = payload.To, payload.Summary, payload.Blocker, payload.NextAction
+			if payload.From == StateAwaitingConfirmation && payload.To == StateQueued {
+				item.ConfirmedBy, item.ConfirmedAt = payload.ChangedBy, event.OccurredAt
+			}
 			if payload.Artifact != nil {
 				item.Artifact = payload.Artifact
 				if payload.To == StatePrepared {
@@ -900,10 +919,21 @@ func projectWork(workID string, events []Event) (WorkProjection, error) {
 			if err != nil {
 				return WorkProjection{}, err
 			}
+			payload.ResolvedAt = event.OccurredAt
 			for i := range item.Interventions {
 				if item.Interventions[i].ID == payload.ID {
 					item.Interventions[i] = payload
 				}
+			}
+			// The durable answer itself resumes the blocked phase. A crash
+			// before the following state event must not strand answered work.
+			if !hasOpenIntervention(item) && (item.State == StateBlocked || item.State == StateHumanRequired) {
+				resume := item.ResumeState
+				if resume == "" || resume == StateBlocked || resume == StateHumanRequired {
+					resume = StateQueued
+				}
+				item.State, item.ResumeState, item.Blocker = resume, "", ""
+				item.Summary, item.NextAction = "Human guidance recorded.", "Retry the interrupted phase."
 			}
 		case EventMergeDecision:
 			payload, err := decodePayload[MergeDecision](event)

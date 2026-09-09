@@ -171,7 +171,7 @@ func TestRevisionCreationRecoversAfterRecordedDecision(t *testing.T) {
 	}
 	restarted, _ := NewEngine(EngineConfig{Store: e.store, Provider: p, Effects: effects})
 	child, err := restarted.Advance(ctx, item.WorkID)
-	if err != nil || child.RevisionOf == nil || child.State != StateRouting {
+	if err != nil || child.RevisionOf == nil || child.State != StateRouting || child.RequestedBy != saved.ResultReview.ReviewedBy {
 		t.Fatalf("recovery=%+v %v", child, err)
 	}
 }

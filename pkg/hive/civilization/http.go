@@ -1,6 +1,7 @@
 package civilization
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -13,16 +14,18 @@ import (
 )
 
 type HTTPConfig struct {
-	Engine       *Engine
-	APIKey       string
-	MaxBodyBytes int64
+	RequireHumanIdentity bool
+	Engine               *Engine
+	APIKey               string
+	MaxBodyBytes         int64
 }
 
 type HTTPHandler struct {
-	engine       *Engine
-	apiKey       string
-	maxBodyBytes int64
-	mux          *http.ServeMux
+	requireHumanIdentity bool
+	engine               *Engine
+	apiKey               string
+	maxBodyBytes         int64
+	mux                  *http.ServeMux
 }
 
 func NewHTTPHandler(config HTTPConfig) (*HTTPHandler, error) {
@@ -36,6 +39,7 @@ func NewHTTPHandler(config HTTPConfig) (*HTTPHandler, error) {
 		config.MaxBodyBytes = 256 * 1024
 	}
 	handler := &HTTPHandler{engine: config.Engine, apiKey: config.APIKey, maxBodyBytes: config.MaxBodyBytes, mux: http.NewServeMux()}
+	handler.requireHumanIdentity = config.RequireHumanIdentity
 	handler.mux.HandleFunc("GET /healthz", handler.health)
 	handler.mux.HandleFunc("GET /readyz", handler.ready)
 	handler.mux.HandleFunc("GET /api/civilization/v1/work", handler.list)
@@ -58,6 +62,14 @@ func (h *HTTPHandler) ServeHTTP(response http.ResponseWriter, request *http.Requ
 		response.Header().Set("WWW-Authenticate", `Bearer realm="civilization"`)
 		writeAPIError(response, http.StatusUnauthorized, "unauthorized")
 		return
+	}
+	if h.requireHumanIdentity && request.Method != http.MethodGet && request.Method != http.MethodHead {
+		actor, role := request.Header.Get("X-Civilization-Actor"), request.Header.Get("X-Civilization-Role")
+		if !humanActionAllowed(actor, role, request.Method, request.URL.Path) {
+			writeAPIError(response, http.StatusForbidden, "a named operator with permission for this action is required")
+			return
+		}
+		request = request.WithContext(context.WithValue(request.Context(), humanIdentityKey{}, actor))
 	}
 	h.mux.ServeHTTP(response, request)
 }
@@ -116,6 +128,10 @@ func (h *HTTPHandler) intake(response http.ResponseWriter, request *http.Request
 	if err := h.decode(response, request, &input); err != nil {
 		return
 	}
+	if actor := humanActor(request.Context()); actor != "" && (input.SourceKind != tlcbridge.SourceHuman || !strings.HasPrefix(input.SourceIdentity, "human:"+actor+":")) {
+		writeAPIError(response, http.StatusForbidden, "intake identity must belong to the authenticated operator")
+		return
+	}
 	item, err := h.engine.AcceptSelectedText(request.Context(), tlcbridge.Source{
 		Kind: input.SourceKind, Identity: strings.TrimSpace(input.SourceIdentity), Repository: strings.TrimSpace(input.Repository),
 	}, input.Text, input.Selection, true)
@@ -155,6 +171,13 @@ func (h *HTTPHandler) reviewResult(response http.ResponseWriter, request *http.R
 	if err := h.decode(response, request, &input); err != nil {
 		return
 	}
+	if actor := humanActor(request.Context()); actor != "" {
+		if input.ReviewedBy != "" && input.ReviewedBy != actor {
+			writeAPIError(response, http.StatusForbidden, "review actor does not match authenticated operator")
+			return
+		}
+		input.ReviewedBy = actor
+	}
 	item, err := h.engine.ReviewResult(request.Context(), request.PathValue("workID"), input)
 	if err != nil {
 		writeAPIError(response, statusForEngineError(err), err.Error())
@@ -177,6 +200,13 @@ func (h *HTTPHandler) assignHumanOwner(response http.ResponseWriter, request *ht
 	var input HumanOwnerAssignment
 	if err := h.decode(response, request, &input); err != nil {
 		return
+	}
+	if actor := humanActor(request.Context()); actor != "" {
+		if input.AssignedBy != "" && input.AssignedBy != actor {
+			writeAPIError(response, http.StatusForbidden, "assignment actor does not match authenticated operator")
+			return
+		}
+		input.AssignedBy = actor
 	}
 	item, err := h.engine.AssignHumanOwner(request.Context(), request.PathValue("workID"), input)
 	if err != nil {
