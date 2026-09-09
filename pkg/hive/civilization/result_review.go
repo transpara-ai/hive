@@ -103,6 +103,9 @@ func (e *Engine) ensureResultRevision(ctx context.Context, item WorkProjection) 
 	review := item.ResultReview
 	text := "Revise the previously delivered work.\n\nOriginal request:\n" + item.IntakeText + "\n\nRequested changes:\n" + review.Feedback
 	reference := &ResultReference{WorkID: item.WorkID, ResultID: review.ResultID, WorkspaceDigest: review.WorkspaceDigest}
+	// Recovery may run without an HTTP session. Attribute the revision to
+	// the persisted change requester, never the retrying process or operator.
+	ctx = context.WithValue(ctx, humanIdentityKey{}, review.ReviewedBy)
 	return e.acceptSelectedText(ctx, revisionSource(item, review.ResultReviewRequest), text, item.Selection, true, reference)
 }
 

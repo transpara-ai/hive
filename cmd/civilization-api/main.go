@@ -170,7 +170,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	handler, err := civilization.NewHTTPHandler(civilization.HTTPConfig{Engine: engine, APIKey: apiKey, MaxBodyBytes: int64(intEnv("CIVILIZATION_MAX_BODY_BYTES", 256*1024))})
+	requireHumanIdentity, err := boolEnv("CIVILIZATION_REQUIRE_HUMAN_IDENTITY", false)
+	if err != nil {
+		return err
+	}
+	handler, err := civilization.NewHTTPHandler(civilization.HTTPConfig{RequireHumanIdentity: requireHumanIdentity, Engine: engine, APIKey: apiKey, MaxBodyBytes: int64(intEnv("CIVILIZATION_MAX_BODY_BYTES", 256*1024))})
 	if err != nil {
 		return err
 	}
